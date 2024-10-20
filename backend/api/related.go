@@ -94,9 +94,9 @@ func parseMusicMultiRowItemRenderer(itemRender _youtube.MusicMultiRowListItemRen
 	}
 
 	/*playlistId := itemRender.TrackingParams[0]..WatchEndpoint.PlaylistId
-	if playlistId == "" {
-		playlistId = itemRender.ThumbnailOverlay.MusicItemThumbnailOverlayRenderer.Content.MusicPlayButtonRenderer.PlayNavigationEndpoint.WatchPlaylistEndpoint.PlaylistId
-	}*/
+	  if playlistId == "" {
+	  	playlistId = itemRender.ThumbnailOverlay.MusicItemThumbnailOverlayRenderer.Content.MusicPlayButtonRenderer.PlayNavigationEndpoint.WatchPlaylistEndpoint.PlaylistId
+	  }*/
 
 	item.Title = itemRender.Title.Runs[0].Text
 	item.Thumbnails = itemThumbnails
@@ -131,16 +131,7 @@ func parseMusicMultiRowItemRenderer(itemRender _youtube.MusicMultiRowListItemRen
 
 func parseMusicTwoRowItemRenderer(itemRender _youtube.MusicTwoRowItemRenderer) IListItemRenderer {
 	item := IListItemRenderer{}
-	thumbnails := itemRender.ThumbnailRenderer.MusicThumbnailRenderer.Thumbnail.Thumbnails
-	itemThumbnails := make([]Thumbnail, 0, len(thumbnails))
-	for _, thumbnail := range thumbnails {
-		itemThumbnails = append(itemThumbnails, Thumbnail{
-			URL:    thumbnail.Url,
-			Width:  thumbnail.Width,
-			Height: thumbnail.Height,
-			//Placeholder: thumbnail.Placeholder,
-		})
-	}
+	itemThumbnails := parseThumbnails(itemRender)
 
 	playlistId := itemRender.NavigationEndpoint.WatchEndpoint.PlaylistId
 	if playlistId == "" {
@@ -177,4 +168,18 @@ func parseMusicTwoRowItemRenderer(itemRender _youtube.MusicTwoRowItemRenderer) I
 
 	return item
 
+}
+
+func parseThumbnails(itemRender _youtube.MusicTwoRowItemRenderer) []Thumbnail {
+	thumbnails := itemRender.ThumbnailRenderer.MusicThumbnailRenderer.Thumbnail.Thumbnails
+	itemThumbnails := make([]Thumbnail, 0, len(thumbnails))
+	for _, thumbnail := range thumbnails {
+		itemThumbnails = append(itemThumbnails, Thumbnail{
+			URL:    thumbnail.Url,
+			Width:  thumbnail.Width,
+			Height: thumbnail.Height,
+			//Placeholder: thumbnail.Placeholder,
+		})
+	}
+	return itemThumbnails
 }

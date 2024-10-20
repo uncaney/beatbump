@@ -1,11 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { ArtistPageParser } from "$lib/parsers/artist";
 import { error } from "@sveltejs/kit";
-import { buildAPIRequest } from "../../api/_lib/request";
 import type { PageServerLoad } from "./$types";
+import {SERVER_DOMAIN} from "../../../../env";
 
 export const load: PageServerLoad = async ({ params }) => {
-	const response = await buildAPIRequest("artist", {
+/*	const response = await buildAPIRequest("artist", {
 		context: {
 			client: { clientName: "WEB_REMIX", clientVersion: "1.20230501.01.00" },
 		},
@@ -18,7 +17,10 @@ export const load: PageServerLoad = async ({ params }) => {
 				},
 			},
 		},
-	});
+	});*/
+    const response = await fetch(
+        `${SERVER_DOMAIN}/api/v1/artist/`+ params?.slug,
+    );
 	if (!response) throw error(500, "Failed to fetch");
 	const data = await response.json();
 	if (!response.ok) throw error(500, response.statusText);
@@ -37,14 +39,22 @@ function parseResponse(data: {
 	};
 	responseContext: { visitorData: string };
 }) {
-	const header = data?.header;
+	/*const header = data?.header;
 	const contents =
 		data?.contents?.singleColumnBrowseResultsRenderer?.tabs[0]?.tabRenderer
-			?.content?.sectionListRenderer?.contents;
-	const visitorData = data?.responseContext?.visitorData ?? "";
-	return ArtistPageParser({
+			?.content?.sectionListRenderer?.contents;*/
+	const visitorData = data?.visitorData ?? "";
+    return {
+        header: data?.header,
+        body: {
+            carousels: data?.carousels,
+            songs: data?.songs,
+        },
+        visitorData,
+    };
+	/*return ArtistPageParser({
 		header,
 		items: contents,
 		visitorData: visitorData ?? "",
-	});
+	});*/
 }

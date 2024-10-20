@@ -23,7 +23,7 @@
 		willChange = false;
 	}, 1000);
 
-	let opacity = 0;
+	let opacity = 1;
 	let img: HTMLImageElement;
 
 	let calc: number;
@@ -35,7 +35,6 @@
 				opacity = 1;
 			});
 		}
-
 		return () => {
 			if (timestamp) cancelAnimationFrame(timestamp);
 		};
@@ -176,7 +175,7 @@
 					/>
 				{/if}
 				<div class="btn-wrpr">
-					{#if header?.buttons.radio !== null}
+					{#if header?.buttons?.radio !== null}
 						<Button
 							icon={{ name: "radio" }}
 							on:click={() =>
@@ -186,7 +185,7 @@
 								})}><span class="button-text"> Play Radio</span></Button
 						>
 					{/if}
-					{#if header?.buttons.shuffle !== false}
+					{#if header?.buttons?.shuffle !== false}
 						<Button
 							class="outlined"
 							icon={{ name: "shuffle" }}

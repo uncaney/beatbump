@@ -60,7 +60,7 @@ const config = {
             assets: "static",
             lib: "src/lib",
             routes: "src/routes",
-            serviceWorker: "src/service-worker",
+          //  serviceWorker: "src/service-worker",
             appTemplate: "src/app.html",
             hooks: {server: "src/hooks.server"},
         },

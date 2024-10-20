@@ -1,5 +1,11 @@
 package _youtube
 
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
 type PlaylistResponse struct {
 	ResponseContext struct {
 		VisitorData           string `json:"visitorData"`
@@ -15,9 +21,7 @@ type PlaylistResponse struct {
 		TwoColumnBrowseResultsRenderer struct {
 			SecondaryContents struct {
 				SectionListRenderer struct {
-					Contents []struct {
-						MusicPlaylistShelfRenderer MusicPlaylistShelfRenderer `json:"musicPlaylistShelfRenderer"`
-					} `json:"contents"`
+					Contents      []PlaylistContents `json:"contents"`
 					Continuations []struct {
 						NextContinuationData struct {
 							Continuation        string `json:"continuation"`
@@ -356,9 +360,7 @@ type PlaylistResponse struct {
 				TabRenderer struct {
 					Content struct {
 						SectionListRenderer struct {
-							Contents []struct {
-								MusicPlaylistShelfRenderer MusicPlaylistShelfRenderer `json:"musicPlaylistShelfRenderer"`
-							} `json:"contents"`
+							Contents      []PlaylistContents `json:"contents"`
 							Continuations []struct {
 								NextContinuationData struct {
 									Continuation        string `json:"continuation"`
@@ -717,6 +719,14 @@ type PlaylistResponse struct {
 		} `json:"sectionListContinuation"`
 	} `json:"continuationContents"`
 	Header struct {
+		MusicHeaderRenderer struct {
+			Title struct {
+				Runs []struct {
+					Text string `json:"text"`
+				} `json:"runs"`
+			} `json:"title"`
+			TrackingParams string `json:"trackingParams"`
+		} `json:"musicHeaderRenderer"`
 		MusicDetailHeaderRenderer struct {
 			Title struct {
 				Runs []struct {
@@ -1006,4 +1016,34 @@ type MusicPlaylistShelfRenderer struct {
 	CollapsedItemCount      int    `json:"collapsedItemCount"`
 	TrackingParams          string `json:"trackingParams"`
 	ContentsMultiSelectable bool   `json:"contentsMultiSelectable"`
+}
+
+type PlaylistContents struct {
+	MusicPlaylistShelfRenderer *MusicPlaylistShelfRenderer `json:"musicPlaylistShelfRenderer,omitempty"`
+	GridRenderer               *GridRenderer               `json:"gridRenderer,omitempty"`
+}
+
+func (c *PlaylistContents) UnmarshalJSON(data []byte) error {
+
+	if strings.Contains(string(data[0:80]), "musicPlaylistShelfRenderer") {
+		musicResponsiveListRenderer := map[string]MusicPlaylistShelfRenderer{}
+		err := json.Unmarshal(data, &musicResponsiveListRenderer)
+		if err != nil {
+			return err
+		}
+		renderer := musicResponsiveListRenderer["musicPlaylistShelfRenderer"]
+		c.MusicPlaylistShelfRenderer = &renderer
+		return nil
+	} else if strings.Contains(string(data[0:80]), "gridRenderer") {
+		musicTwoRowRenderer := map[string]GridRenderer{}
+		err := json.Unmarshal(data, &musicTwoRowRenderer)
+		if err != nil {
+			return err
+		}
+		renderer := musicTwoRowRenderer["gridRenderer"]
+		c.GridRenderer = &renderer
+		return nil
+	} else {
+		return fmt.Errorf("unknown type: %v", string(data[0:50]))
+	}
 }

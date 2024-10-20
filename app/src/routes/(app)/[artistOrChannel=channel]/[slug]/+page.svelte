@@ -14,10 +14,10 @@
 	import type { PageData } from "./$types";
 
 	export let data: PageData;
-	const { body, header, visitorData } = data;
+	const { body,header, visitorData } = data;
 
 	let carousels: ArtistPageBody["carousels"] = body["carousels"] ?? [];
-	let songs = body["songs"] ?? {};
+    let songs: ArtistPageBody["songs"] = body["songs"] ?? [];
 
 	const id = $page.params.slug;
 
@@ -25,7 +25,7 @@
 
 	CTX_ListItem.set({ page: "artist", innerWidth });
 
-	$: console.log(data);
+	//$: console.log(songs);
 </script>
 
 <Header
@@ -47,11 +47,13 @@
 				<section class="song-list resp-content-width">
 					<div class="header">
 						<span class="h2">Songs</span>
-						<a
-							style="white-space:pre; display: inline-block;"
-							href={`/playlist/${songs?.header?.browseId}`}
-							><small>See All</small></a
-						>
+                        {#if songs?.header?.browseId }
+                            <a
+                                style="white-space:pre; display: inline-block;"
+                                href={`/playlist/${songs?.header?.browseId}?params=${songs?.header?.params}`}
+                            ><small>See All</small></a>
+                        {/if}
+
 					</div>
 					<section class="songs">
 						{#each songs?.items as item, idx}
@@ -66,11 +68,11 @@
 					</section>
 				</section>
 			{/if}
-			{#each carousels as { contents, header }, i}
+			{#each carousels as { items, header }, i}
 				{#if i === carousels.length - 1}
 					<Carousel
 						{visitorData}
-						items={contents}
+						items={items}
 						type="artist"
 						kind={header?.type}
 						isBrowseEndpoint={true}
@@ -79,7 +81,7 @@
 					/>
 				{:else}
 					<Carousel
-						items={contents}
+						items={items}
 						{visitorData}
 						type="artist"
 						kind={header?.type}

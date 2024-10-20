@@ -12,7 +12,7 @@
     import { settings, type Theme } from "$stores/settings";
     import {onMount} from "svelte";
     import {SERVER_DOMAIN} from "../../../env";
-    import {invalidateAll} from "$app/navigation";
+    import {invalidate, invalidateAll} from "$app/navigation";
     const themes: Theme[] = ["Dark", "Dim", "Midnight", "YTM"];
 
     let oauthInfo = {}
@@ -43,7 +43,7 @@
             if (!response.ok) {
                 throw new Error('Failed to fetch data');
             }
-            invalidateAll()
+            await invalidate(`${SERVER_DOMAIN}/api/v1/deviceOauth`)
         } catch (err) {
             console.log(err)
         }

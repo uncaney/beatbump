@@ -25,8 +25,8 @@ func Browse(token *oauth2.Token, browseId string, pageType PageType, params stri
 	}
 
 	innertubeContext := prepareInnertubeContext(client, visitorData)
-	playlistUrl := "https://music.youtube.com/playlist?list=" + ""
-	innertubeContext.Client.OriginalUrl = &playlistUrl
+	//playlistUrl := "https://music.youtube.com/playlist?list=" + ""
+	//innertubeContext.Client.OriginalUrl = &playlistUrl
 
 	data := innertubeRequest{
 		//RequestAttributes: additionalRequestAttributes,
@@ -212,9 +212,9 @@ func Player(token *oauth2.Token, videoId string, playlistId string, client Clien
 				HTML5Preference: "HTML5_PREF_WANTS",
 			},
 		},
-		ServiceIntegrityDimensions: &ServiceIntegrityDimensions{
+		/*ServiceIntegrityDimensions: &ServiceIntegrityDimensions{
 			PoToken: "51217476",
-		},
+		},*/
 	}
 
 	resp, err := callAPI(url, data, client.userAgent, token)
@@ -233,6 +233,9 @@ func callAPI(url string, requestPayload innertubeRequest, userAgent string, toke
 	}
 
 	//log.Debug().Msg("Request Body:" + string(payload))
+	if requestPayload.Params == "" {
+		requestPayload.Params = "CgIQBg"
+	}
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {

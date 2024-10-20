@@ -64,7 +64,7 @@ func PlaylistEndpointHandler(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
 	}
 
-	var playlistResponse _youtube.PlaylistResponse
+	playlistResponse := _youtube.PlaylistResponse{}
 	err = json.Unmarshal(responseBytes, &playlistResponse)
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
@@ -83,7 +83,7 @@ func parsePlaylist(playlistResponse _youtube.PlaylistResponse) PlaylistAPIRespon
 	var musicPlaylistShelfRenderer *_youtube.MusicPlaylistShelfRenderer = nil
 	if len(playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs) != 0 {
 		if len(playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents) != 0 {
-			musicPlaylistShelfRenderer = &playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents[0].MusicPlaylistShelfRenderer
+			musicPlaylistShelfRenderer = playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents[0].MusicPlaylistShelfRenderer
 		}
 		_carouselContinuation := playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Continuations
 		if len(_carouselContinuation) != 0 {
@@ -92,7 +92,7 @@ func parsePlaylist(playlistResponse _youtube.PlaylistResponse) PlaylistAPIRespon
 			response.Continuations = _carouselContinuation[0].NextContinuationData
 		}
 	} else if len(playlistResponse.Contents.TwoColumnBrowseResultsRenderer.SecondaryContents.SectionListRenderer.Contents) != 0 {
-		musicPlaylistShelfRenderer = &playlistResponse.Contents.TwoColumnBrowseResultsRenderer.SecondaryContents.SectionListRenderer.Contents[0].MusicPlaylistShelfRenderer
+		musicPlaylistShelfRenderer = playlistResponse.Contents.TwoColumnBrowseResultsRenderer.SecondaryContents.SectionListRenderer.Contents[0].MusicPlaylistShelfRenderer
 		_carouselContinuation := playlistResponse.Contents.TwoColumnBrowseResultsRenderer.SecondaryContents.SectionListRenderer.Continuations
 		if len(_carouselContinuation) != 0 {
 			//continuationData := _carouselContinuation[0].NextContinuationData
@@ -117,6 +117,19 @@ func parsePlaylist(playlistResponse _youtube.PlaylistResponse) PlaylistAPIRespon
 		}
 		response.Tracks = tracks
 		header["playlistId"] = musicPlaylistShelfRenderer.PlaylistId
+	} else {
+		if len(playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents) != 0 {
+			gridRenderer := playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents[0].GridRenderer
+			if gridRenderer != nil {
+				tracks := []IListItemRenderer{}
+				for _, musicResponsiveListItemRenderer := range gridRenderer.Items {
+					item := parseMusicTwoRowItemRenderer(*musicResponsiveListItemRenderer.MusicTwoRowItemRenderer)
+					tracks = append(tracks, item)
+				}
+				response.Tracks = tracks
+				header["playlistId"] = gridRenderer.TrackingParams
+			}
+		}
 	}
 
 	values := []string{}
@@ -151,6 +164,10 @@ func parsePlaylist(playlistResponse _youtube.PlaylistResponse) PlaylistAPIRespon
 		}
 	} else if playlistResponse.Contents.TwoColumnBrowseResultsRenderer.Tabs != nil && len(playlistResponse.Contents.TwoColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents) != 0 {
 		for _, el := range playlistResponse.Contents.TwoColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents[0].MusicResponsiveHeaderRenderer.Title.Runs {
+			values = append(values, el.Text)
+		}
+	} else if len(playlistResponse.Header.MusicHeaderRenderer.Title.Runs) != 0 {
+		for _, el := range playlistResponse.Header.MusicHeaderRenderer.Title.Runs {
 			values = append(values, el.Text)
 		}
 	}

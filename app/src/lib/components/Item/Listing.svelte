@@ -241,7 +241,7 @@
             if (data.endpoint?.pageType.includes("ARTIST")){
                 link = `/artist/${data.artistInfo?.artist?.[0].browseId}`
             }else if (data.endpoint?.pageType.includes("ALBUM")){
-                link = `/release?id=${data.artistInfo?.artist?.[0].browseId}`
+                link = `/release?id=${data.artistInfo?.artist?.[0].browseId ? data.artistInfo?.artist?.[0].browseId : data.endpoint?.browseId}`
             }
 			goto(link);
 			return;

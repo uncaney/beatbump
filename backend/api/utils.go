@@ -15,6 +15,7 @@ type Carousel struct {
 		Title      string  `json:"title"`
 		Subheading *string `json:"subheading,omitempty"`
 		BrowseId   *string `json:"browseId,omitempty"`
+		Params     *string `json:"params"`
 	} `json:"header,omitempty"`
 	Contents   []IListItemRenderer `json:"items"`
 	Categories *[]ExploreCategory  `json:"categories"`
@@ -104,11 +105,17 @@ func parseMusicResponsiveListItemRenderer(itemRender _youtube.MusicResponsiveLis
 		})
 	}
 
+	params := itemRender.Overlay.MusicItemThumbnailOverlayRenderer.Content.MusicPlayButtonRenderer.PlayNavigationEndpoint.WatchPlaylistEndpoint.Params
+
+	if params == "" {
+		params = itemRender.Overlay.MusicItemThumbnailOverlayRenderer.Content.MusicPlayButtonRenderer.PlayNavigationEndpoint.WatchPlaylistEndpoint.PlaylistId
+	}
+
 	item := IListItemRenderer{
 		Thumbnails: ItemThumbnails,
 		BrowseId:   itemRender.NavigationEndpoint.BrowseEndpoint.BrowseId,
 		Params:     itemRender.Overlay.MusicItemThumbnailOverlayRenderer.Content.MusicPlayButtonRenderer.PlayNavigationEndpoint.WatchPlaylistEndpoint.Params,
-
+		//VideoId:             &itemRender.NavigationEndpoint.WatchEndpoint.VideoId,
 		ClickTrackingParams: itemRender.Overlay.MusicItemThumbnailOverlayRenderer.Content.MusicPlayButtonRenderer.PlayNavigationEndpoint.ClickTrackingParams,
 		//LoggingContext:      itemRender.Overlay.MusicItemThumbnailOverlayRenderer.Content.MusicPlayButtonRenderer.PlayNavigationEndpoint.WatchEndpoint.LoggingContext,
 		//	Endpoint:endpoint

@@ -116,11 +116,11 @@
         trending2: `/trending/${header?.browseId}${
             header?.params ? `?params=${header.params}` : ""
         }${header?.itct ? `&itct=${encodeURIComponent(header?.itct)}` : ""}`,
-		artist: `${header.browseId}/releases?visitorData=${visitorData}&params=${header?.params}&itct=${header?.itct}`,
+		artist: `/artist/${header.browseId}?visitorData=${visitorData}&params=${header?.params}`,
 	};
 
 	let href =
-		header?.browseId && isArtistPage
+            header?.browseId && isArtistPage
 			? urls.artist
 			: header.browseId?.includes("VLP") || header.title?.includes("Trending")
 			? urls.playlist
@@ -138,7 +138,7 @@
 	</span>
 
 	{#if !header.title.includes("Videos") && header.browseId}
-		<a {href}>
+		<a href={href}>
 			<small>See All</small>
 		</a>
 	{:else if isArtistPage && header.title.includes("Videos")}

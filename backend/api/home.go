@@ -61,11 +61,11 @@ func parseHome(homeResponse _youtube.HomeResponse) interface{} {
 
 				//section.MusicTastebuilderShelfRenderer.PrimaryText.Runs[0].Text
 				/*if len(section.MusicDescriptionShelfRenderer.Header.Runs) != 0 {
-					description.Header = section.MusicDescriptionShelfRenderer.Header.Runs[0].Text
-				}
-				if len(section.MusicDescriptionShelfRenderer.Description.Runs) != 0 {
-					description.Description = section.MusicDescriptionShelfRenderer.Description.Runs[0].Text
-				}*/
+				  	description.Header = section.MusicDescriptionShelfRenderer.Header.Runs[0].Text
+				  }
+				  if len(section.MusicDescriptionShelfRenderer.Description.Runs) != 0 {
+				  	description.Description = section.MusicDescriptionShelfRenderer.Description.Runs[0].Text
+				  }*/
 				header := section.MusicCarouselShelfRenderer.Header
 
 				if len(header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs) != 0 {
@@ -76,10 +76,10 @@ func parseHome(homeResponse _youtube.HomeResponse) interface{} {
 				}
 
 				if header.MusicCarouselShelfBasicHeaderRenderer.MoreContentButton.ButtonRenderer.NavigationEndpoint.BrowseEndpoint.Params != "" {
-					musicShelf.Header.BrowseId = stringPtr(header.MusicCarouselShelfBasicHeaderRenderer.MoreContentButton.ButtonRenderer.NavigationEndpoint.BrowseEndpoint.Params)
-				} else {
-					musicShelf.Header.BrowseId = stringPtr(header.MusicCarouselShelfBasicHeaderRenderer.MoreContentButton.ButtonRenderer.NavigationEndpoint.BrowseEndpoint.BrowseID)
+					musicShelf.Header.Params = stringPtr(header.MusicCarouselShelfBasicHeaderRenderer.MoreContentButton.ButtonRenderer.NavigationEndpoint.BrowseEndpoint.Params)
 				}
+
+				musicShelf.Header.BrowseId = stringPtr(header.MusicCarouselShelfBasicHeaderRenderer.MoreContentButton.ButtonRenderer.NavigationEndpoint.BrowseEndpoint.BrowseID)
 
 				if strings.Contains(musicShelf.Header.Title, "episodes") {
 					continue
@@ -157,8 +157,8 @@ func parseHome(homeResponse _youtube.HomeResponse) interface{} {
 			browseEndpoint := chip.ChipCloudChipRenderer.NavigationEndpoint.BrowseEndpoint
 			ctoken := chip.ChipCloudChipRenderer.TrackingParams
 			/*chipsMap["text"] = text
-			chipsMap["browseEndpoint"] = browseEndpoint
-			chipsMap["ctoken"] = ctoken*/
+			  chipsMap["browseEndpoint"] = browseEndpoint
+			  chipsMap["ctoken"] = ctoken*/
 			chipsResponse = append(chipsResponse, map[string]interface{}{
 				"text":           text,
 				"browseEndpoint": browseEndpoint,
@@ -179,11 +179,11 @@ func parseHome(homeResponse _youtube.HomeResponse) interface{} {
 
 			//section.MusicTastebuilderShelfRenderer.PrimaryText.Runs[0].Text
 			/*if len(section.MusicDescriptionShelfRenderer.Header.Runs) != 0 {
-				description.Header = section.MusicDescriptionShelfRenderer.Header.Runs[0].Text
-			}
-			if len(section.MusicDescriptionShelfRenderer.Description.Runs) != 0 {
-				description.Description = section.MusicDescriptionShelfRenderer.Description.Runs[0].Text
-			}*/
+			  	description.Header = section.MusicDescriptionShelfRenderer.Header.Runs[0].Text
+			  }
+			  if len(section.MusicDescriptionShelfRenderer.Description.Runs) != 0 {
+			  	description.Description = section.MusicDescriptionShelfRenderer.Description.Runs[0].Text
+			  }*/
 			header := section.MusicCarouselShelfRenderer.Header
 			if len(header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs) != 0 {
 				musicShelf.Header.Title = header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs[0].Text

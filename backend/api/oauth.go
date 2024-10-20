@@ -1,6 +1,7 @@
 package api
 
 import (
+	"beatbump-server/backend/_youtube"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -11,15 +12,15 @@ import (
 	"github.com/labstack/echo/v4"
 	"golang.org/x/oauth2"
 	"io/ioutil"
-	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
 const (
 	clientID            = "861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com"
 	clientSecret        = "SboVhoG9s0rNafixCSGGKXAT"
-	scopes              = "http://gdata.youtube.com https://www.googleapis.com/auth/youtube"
+	scopes              = "https://www.googleapis.com/auth/youtube"
 	TokenURL            = "https://www.youtube.com/o/oauth2/token"
 	oauth2DeviceCodeURL = "https://www.youtube.com/o/oauth2/device/code"
 )
@@ -74,44 +75,79 @@ func RefreshToken(refreshToken string) (oauth2.Token, error) {
 }
 
 func DeviceOauth(c echo.Context) error {
+
+	tokenObj := extractToken(c)
+
+	if tokenObj != nil {
+		/*url := "https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true"
+
+		  // Create a Bearer string by appending string access token
+		  var bearer = tokenObj.TokenType + " " + tokenObj.AccessToken
+
+		  // Create a new request using http
+		  req, err := http.NewRequest("GET", url, nil)
+
+		  // add authorization header to the req
+		  req.Header.Add("Authorization", bearer)
+
+		  // Send req using http Client
+		  client := &http.Client{}
+		  resp, err := client.Do(req)
+		  if err != nil {
+		  	log.Println("Error on response.\n[ERROR] -", err)
+		  }
+		  defer resp.Body.Close()*/
+		responseBytes, err := _youtube.Browse(tokenObj, "FEmusic_home", _youtube.PageType_MusicPageTypePlaylist, "", nil, nil, nil, _youtube.WebMusic)
+		if err != nil {
+			fmt.Println("Error on response.\n[ERROR] -", err)
+			return beginOauthflow(c)
+		}
+
+		var homeResponse _youtube.HomeResponse
+		err = json.Unmarshal(responseBytes, &homeResponse)
+		if err != nil {
+			fmt.Println("Error on response.\n[ERROR] -", err)
+			return beginOauthflow(c)
+		}
+
+		r := parseHome(homeResponse)
+		responseMap, ok := r.(map[string]interface{})
+		if !ok {
+			return beginOauthflow(c)
+		}
+
+		carosuel := responseMap["carousels"]
+		carosuelArray, ok := carosuel.([]Carousel)
+		if !ok {
+			return beginOauthflow(c)
+		}
+
+		if len(carosuelArray) == 0 {
+			return beginOauthflow(c)
+		}
+
+		title := carosuelArray[0].Header.Title
+		if strings.Contains(title, "Welcome") {
+			output := map[string]string{}
+			output["loggedIn"] = "true"
+			output["name"] = strings.Replace(title, "Welcome ", "", 1)
+			return c.JSON(http.StatusOK, output)
+		}
+	}
+
+	return beginOauthflow(c)
+}
+
+func beginOauthflow(c echo.Context) error {
+	//delete old token
+	deleteTokenInCookie(c)
+
 	data := map[string]string{
 		"client_id":    clientID,
 		"scope":        scopes,
 		"device_id":    uuid.New().String(),
 		"device_model": "ytlr::",
 	}
-
-	tokenObj := extractToken(c)
-
-	if tokenObj != nil {
-		url := "https://www.googleapis.com/youtube/v3/channels?part=id&mine=true"
-
-		// Create a Bearer string by appending string access token
-		var bearer = tokenObj.TokenType + " " + tokenObj.AccessToken
-
-		// Create a new request using http
-		req, err := http.NewRequest("GET", url, nil)
-
-		// add authorization header to the req
-		req.Header.Add("Authorization", bearer)
-
-		// Send req using http Client
-		client := &http.Client{}
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Println("Error on response.\n[ERROR] -", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode == 200 {
-			output := map[string]string{}
-			output["loggedIn"] = "true"
-			return c.JSON(http.StatusOK, output)
-		}
-	}
-
-	deleteTokenInCookie(c)
-
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return c.String(http.StatusInternalServerError, err.Error())
@@ -122,6 +158,10 @@ func DeviceOauth(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, err.Error())
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return c.String(http.StatusInternalServerError, "failed to initiate oauth "+resp.Status)
+	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
@@ -164,7 +204,7 @@ func storeTokenInCookie(c echo.Context, token oauth2.Token) {
 	cookie.Value = base64.StdEncoding.EncodeToString(tokenJson)
 	cookie.Secure = false
 	cookie.HttpOnly = true
-	cookie.Path = "/api"
+	cookie.Path = "/"
 	cookie.Expires = time.Now().Add(time.Hour * 24 * 30)
 	cookie.SameSite = http.SameSiteStrictMode
 	//cookie.Expires = time.Now().Add(24 * time.Hour)
