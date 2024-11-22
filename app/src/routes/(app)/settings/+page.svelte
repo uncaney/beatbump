@@ -13,12 +13,13 @@
     import {onMount} from "svelte";
     import {SERVER_DOMAIN} from "../../../env";
     import {invalidate, invalidateAll} from "$app/navigation";
+    import {APIClient} from "$lib/api";
     const themes: Theme[] = ["Dark", "Dim", "Midnight", "YTM"];
 
     let oauthInfo = {}
     onMount(async () => {
         try {
-            const response = await fetch(`${SERVER_DOMAIN}/api/v1/deviceOauth`);
+            const response = await APIClient.fetch(`/api/v1/deviceOauth`);
             if (!response.ok) {
                 throw new Error('Failed to fetch data');
             }
@@ -39,7 +40,7 @@
             if (oauthInfo == undefined || oauthInfo.deviceCode == ""){
                 return
             }
-            const response = await fetch(`${SERVER_DOMAIN}/api/v1/deviceOauth/${oauthInfo.deviceCode}`);
+            const response = await APIClient.fetch(`/api/v1/deviceOauth/${oauthInfo.deviceCode}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch data');
             }
@@ -147,6 +148,26 @@
                     on:click={handleOauthComplete}>Complete</button
                 >
                 {/if}
+            </div>
+            <div class="setting">
+                <label for="cookieHeader"
+                >Cookie header
+                    <span class="">
+                        Copy the Cookie header value and paste here.
+                    </span>
+                </label>
+                <div class="input-container">
+                    <div class="input no-btn mb-1">
+                        <input
+                            type="text"
+                            on:input={(e) => {
+								let value = e.currentTarget.value;
+                                localStorage.setItem('x-google-cookie',value);
+							}}
+                            value={localStorage.getItem("x-google-cookie")}
+                        />
+                    </div>
+                </div>
             </div>
             <div class="setting">
                 <label>Remember Last Track</label>

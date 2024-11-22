@@ -20,7 +20,7 @@ func AlbumEndpointHandler(c echo.Context) error {
 	var responseBytes []byte
 	var err error
 
-	responseBytes, err = _youtube.Browse(nil, browseID, _youtube.PageType_MusicPageTypeAlbum, "", nil, nil, nil, _youtube.WebMusic)
+	responseBytes, err = _youtube.Browse(browseID, _youtube.PageType_MusicPageTypeAlbum, "", nil, nil, nil, _youtube.WebMusic, nil)
 
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
@@ -47,21 +47,21 @@ func parseAlbum(playlistResponse _youtube.AlbumResponse) map[string]interface{} 
 	section := playlistResponse.Contents.TwoColumnBrowseResultsRenderer.SecondaryContents.SectionListRenderer.Contents
 	/*musicShelf := Carousel{}
 
-	//section.MusicTastebuilderShelfRenderer.PrimaryText.Runs[0].Text
-	/*if len(section.MusicDescriptionShelfRenderer.Header.Runs) != 0 {
-		description.Header = section.MusicDescriptionShelfRenderer.Header.Runs[0].Text
-	}
-	if len(section.MusicDescriptionShelfRenderer.Description.Runs) != 0 {
-		description.Description = section.MusicDescriptionShelfRenderer.Description.Runs[0].Text
-	}
-	header := section.MusicCarouselShelfRenderer.Header
+	  //section.MusicTastebuilderShelfRenderer.PrimaryText.Runs[0].Text
+	  /*if len(section.MusicDescriptionShelfRenderer.Header.Runs) != 0 {
+	  	description.Header = section.MusicDescriptionShelfRenderer.Header.Runs[0].Text
+	  }
+	  if len(section.MusicDescriptionShelfRenderer.Description.Runs) != 0 {
+	  	description.Description = section.MusicDescriptionShelfRenderer.Description.Runs[0].Text
+	  }
+	  header := section.MusicCarouselShelfRenderer.Header
 
-	if len(header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs) != 0 {
-		musicShelf.Header.Title = header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs[0].Text
-	}
-	if len(section.MusicCarouselShelfRenderer.Header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs) != 0 {
-		musicShelf.Header.Subheading = stringPtr(header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs[0].Text)
-	}*/
+	  if len(header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs) != 0 {
+	  	musicShelf.Header.Title = header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs[0].Text
+	  }
+	  if len(section.MusicCarouselShelfRenderer.Header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs) != 0 {
+	  	musicShelf.Header.Subheading = stringPtr(header.MusicCarouselShelfBasicHeaderRenderer.Title.Runs[0].Text)
+	  }*/
 
 	//musicShelf.Header.BrowseId = stringPtr(section.MusicCarouselShelfRenderer.Header.MusicCarouselShelfBasicHeaderRenderer.MoreContentButton.ButtonRenderer.NavigationEndpoint.WatchPlaylistEndpoint.PlaylistID)
 
@@ -126,10 +126,10 @@ func parseAlbum(playlistResponse _youtube.AlbumResponse) map[string]interface{} 
 	}
 
 	/*return {
-	items: promise,
-		id: browseId,
-			path,
-	};*/
+	  items: promise,
+	  	id: browseId,
+	  		path,
+	  };*/
 }
 
 /*import (

@@ -18,6 +18,7 @@
 	import { writable } from "svelte/store";
 	import type { PageData } from "./$types";
   import { SERVER_DOMAIN } from "../../../../env";
+    import {APIClient} from "$lib/api";
 
 	export let data: PageData;
 
@@ -70,8 +71,8 @@
 	$: !import.meta.env.SSR && console.log(data);
 	const getCarousel = async () => {
 		if (!carouselContinuations) return;
-		const response = await fetch(
-			"/api/v1/playlist.json" +
+		const response = await APIClient.fetch(
+            `/api/v1/playlist.json` +
 				"?ref=" +
 				id +
 				`${
@@ -100,7 +101,7 @@
 
 		try {
 			isLoading = true;
-			const response = await fetch(`${SERVER_DOMAIN}/api/v1/playlist.json` +
+			const response = await APIClient.fetch(`/api/v1/playlist.json` +
 					"?ref=" +
 					id +
 					"&visitorData=" +
@@ -315,8 +316,8 @@
 				notify(`${pageTitle} added to queue!`, "success");
 			}}
 			on:playlistAdd={async () => {
-				const response = await fetch(
-					`${SERVER_DOMAIN}/api/v1/get_queue.json?playlistId=` + header?.playlistId,
+				const response = await APIClient.fetch(
+					`/api/v1/get_queue.json?playlistId=` + header?.playlistId,
 				);
 				const data = await response.json();
 				const items = data;

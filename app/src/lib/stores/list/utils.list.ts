@@ -3,7 +3,7 @@ import type { Item } from "$lib/types";
 import { queryParams } from "$lib/utils";
 import type { NextEndpointResponse } from "../../../routes/(app)/api/v1/next.json/+server";
 import { settings } from "../settings";
-import { SERVER_DOMAIN } from "../../../env";
+import {APIClient} from "$lib/api";
 
 export const d = "";
 let restricted = false;
@@ -47,7 +47,7 @@ export function fetchNext(
 ): Promise<NextEndpointResponse | void> {
 	const _params = queryParams({ ...obj, restricted });
 	// console.log(options, _params)
-	return fetch<NextEndpointResponse>(`${SERVER_DOMAIN}/api/v1/next.json?` + _params, {
+	return APIClient.fetch<NextEndpointResponse>(`/api/v1/next.json?` + _params, {
 		headers: { accept: "application/json" },
 	})
 		.then((json) => json.json())

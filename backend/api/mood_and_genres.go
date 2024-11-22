@@ -18,7 +18,7 @@ func ExploreEndpointHandler(c echo.Context) error {
 	var responseBytes []byte
 	var err error
 
-	responseBytes, err = _youtube.Browse(nil, browseID, _youtube.PageType_MusicPageTypePlaylist, category, nil, nil, nil, _youtube.WebMusic)
+	responseBytes, err = _youtube.Browse(browseID, _youtube.PageType_MusicPageTypePlaylist, category, nil, nil, nil, _youtube.WebMusic, nil)
 
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
@@ -41,7 +41,7 @@ func ExploreEndpointHandler(c echo.Context) error {
 			return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
 		}
 
-		r := parseHome(homeResponse)
+		r := ParseHome(homeResponse)
 
 		return c.JSON(http.StatusOK, r)
 	}

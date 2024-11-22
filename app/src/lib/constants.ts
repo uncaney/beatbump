@@ -14,23 +14,4 @@ export const APIParams = {
 	lt100: "8gECGAM%3D",
 } as const;
 
-// This code takes in a string that is an ID and a type. It then returns a string that is the ID prefixed with the correct identifier. The identifier is determined by the type. The type is a string that is the name of a property in the PLAYLIST_ID_IDENTIFIER object. The property is a string that is the prefix for the ID.
-const RANDOM_PLAYLIST_HEADER = "RDAM";
 
-const PLAYLIST_ID_IDENTIFIER = {
-	playlist: "PL",
-	song: "VL",
-	video: "VM",
-};
-
-// Create a funciton that will intake an ID as well as a type and return the ID with the correct prefix
-export const createRandomMixId = (
-	id: string,
-	type: keyof typeof PLAYLIST_ID_IDENTIFIER,
-) => {
-	return PLAYLIST_ID_IDENTIFIER[type] + id;
-};
-
-export const isRandomMix = (id: string) => {
-	return id.startsWith(RANDOM_PLAYLIST_HEADER);
-};

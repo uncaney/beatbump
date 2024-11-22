@@ -5,6 +5,7 @@
 	lang="ts"
 >
 	import { SERVER_DOMAIN } from "../../../env";
+    import {APIClient} from "$lib/api";
 
     const RE_ALBUM_PLAYLIST_SINGLE = /PLAYLIST|ALBUM|SINGLE/;
 	const RE_THUMBNAIL_DIM = /=w\d+-h\d+-/gm;
@@ -105,8 +106,8 @@
 			// console.log(ctx);
 			const { item } = ctx;
 			if (item.endpoint?.pageType.match(RE_ALBUM_PLAYLIST_SINGLE)) {
-				const response = await fetch(
-                    `${SERVER_DOMAIN}/api/v1/get_queue.json?playlistId=` + item.playlistId,
+				const response = await APIClient.fetch(
+                    `/api/v1/get_queue.json?playlistId=` + item.playlistId,
 				);
 				const data = await response.json();
 				const items: Item[] = data;

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { error } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
-import {SERVER_DOMAIN} from "../../../../env";
+import {APIClient} from "$lib/api";
 
 export const load: PageServerLoad = async ({ params }) => {
 /*	const response = await buildAPIRequest("artist", {
@@ -18,8 +18,8 @@ export const load: PageServerLoad = async ({ params }) => {
 			},
 		},
 	});*/
-    const response = await fetch(
-        `${SERVER_DOMAIN}/api/v1/artist/`+ params?.slug,
+    const response = await APIClient.fetch(
+        `/api/v1/artist/`+ params?.slug,
     );
 	if (!response) throw error(500, "Failed to fetch");
 	const data = await response.json();

@@ -1,7 +1,7 @@
 import type { CarouselItem } from "$lib/types";
 import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
-import {SERVER_DOMAIN} from "../../../../../env";
+import {APIClient} from "$lib/api";
 export const load: PageLoad = (async ({
 	fetch,
 	url,
@@ -15,8 +15,8 @@ export const load: PageLoad = (async ({
 	const qparams = url.searchParams.get("params");
 	const itct = url.searchParams.get("itct");
 	const visitorData = url.searchParams.get("visitorData");
-	const response = await fetch(
-        `${SERVER_DOMAIN}/api/v1/artist/${
+	const response = await APIClient.fetch(
+        `/api/v1/artist/${
 			params.slug
 		}?visitorData=${visitorData}&params=${qparams}&itct=${encodeURIComponent(
 			itct,

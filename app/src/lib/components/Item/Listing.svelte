@@ -37,6 +37,7 @@
 	import { SITE_ORIGIN_URL } from "$stores/url";
 	import { PopperButton, PopperStore } from "../Popper";
     import { SERVER_DOMAIN } from "../../../env";
+    import {APIClient} from "$lib/api";
 
 	export let data: Item;
 
@@ -110,8 +111,8 @@
 			action: async () => {
 				if (data?.endpoint?.pageType.match(/PLAYLIST|ALBUM|SINGLE/)) {
 					// console.log('PLAYLIST')
-					const response = await fetch(
-            `${SERVER_DOMAIN}/api/v1/get_queue.json?playlistId=`+ data?.playlistId,
+					const response = await APIClient.fetch(
+            `/api/v1/get_queue.json?playlistId=`+ data?.playlistId,
 					);
 					const _data = await response.json();
 					const items: Item[] = _data;

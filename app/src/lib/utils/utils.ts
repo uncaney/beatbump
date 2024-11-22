@@ -3,7 +3,7 @@ import { alertHandler } from "$lib/stores/stores";
 import type { Song } from "$lib/types";
 import { objectKeys } from "./collections/objects";
 import { normalizeURIEncoding } from "./strings/strings";
-import { SERVER_DOMAIN } from "../../env";
+import {APIClient} from "$lib/api";
 
 // notifications
 export const notify = (
@@ -71,14 +71,14 @@ export const addToQueue = async ({
 	playlistId?: string;
 }): Promise<Song[] | void> => {
 	try {
-		const url = `${SERVER_DOMAIN}/api/v1/get_queue.json?${
+		const url = `/api/v1/get_queue.json?${
 			videoId
 				? `?videoIds=${videoId}`
 				: playlistId
 				? "?playlistId=" + playlistId
 				: ""
 		}`;
-		const data = (await fetch(url, { headers: { accept: "application/json" } })
+		const data = (await APIClient.fetch(url, { headers: { accept: "application/json" } })
 			.then((json) => json.json())
 			.catch((err) => console.log(err))) as Song[];
 

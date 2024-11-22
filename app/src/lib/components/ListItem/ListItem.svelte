@@ -8,7 +8,7 @@
 	lang="ts"
 >
 	import { deleteSongFromPlaylist } from "$lib/workers/db/db";
-    import { SERVER_DOMAIN } from "../../../env";
+    import {APIClient} from "$lib/api";
 
     type StoreSubscriptions = {
 		$startIndex?: number;
@@ -217,8 +217,8 @@
 			})
 			.add("Add to Playlist", async () => {
 				if (item.endpoint?.pageType.match(/PLAYLIST|ALBUM|SINGLE/)) {
-					const response = await fetch(
-                        `${SERVER_DOMAIN}/api/v1/get_queue.json?playlistId=` + item.playlistId,
+					const response = await APIClient.fetch(
+                        `/api/v1/get_queue.json?playlistId=` + item.playlistId,
 					);
 					const data = await response.json();
 					const items: Item[] = data;

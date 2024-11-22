@@ -2,6 +2,7 @@ package api
 
 import (
 	"beatbump-server/backend/_youtube"
+	"beatbump-server/backend/api/auth"
 	"encoding/json"
 	"fmt"
 	"github.com/labstack/echo/v4"
@@ -18,15 +19,13 @@ func HomeEndpointHandler(c echo.Context) error {
 	params := query.Get("params")
 	//referrer := query.Get("ref")
 	visitorData := query.Get("visitorData")
-
-	tokenObj := extractToken(c)
-
+	authObj := (c.(*auth.AuthContext)).AuthContext
 	var responseBytes []byte
 	var err error
 	if ctoken != "" && itct != "" {
-		responseBytes, err = _youtube.Browse(tokenObj, browseID, _youtube.PageType_MusicPageTypePlaylist, params, &visitorData, &itct, &ctoken, _youtube.WebMusic)
+		responseBytes, err = _youtube.Browse(browseID, _youtube.PageType_MusicPageTypePlaylist, params, &visitorData, &itct, &ctoken, _youtube.WebMusic, authObj)
 	} else {
-		responseBytes, err = _youtube.Browse(tokenObj, browseID, _youtube.PageType_MusicPageTypePlaylist, params, &visitorData, nil, nil, _youtube.WebMusic)
+		responseBytes, err = _youtube.Browse(browseID, _youtube.PageType_MusicPageTypePlaylist, params, &visitorData, nil, nil, _youtube.WebMusic, authObj)
 	}
 
 	if err != nil {
@@ -39,12 +38,12 @@ func HomeEndpointHandler(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
 	}
 
-	r := parseHome(homeResponse)
+	r := ParseHome(homeResponse)
 
 	return c.JSON(http.StatusOK, r)
 }
 
-func parseHome(homeResponse _youtube.HomeResponse) interface{} {
+func ParseHome(homeResponse _youtube.HomeResponse) interface{} {
 	var carouselResponse []Carousel = make([]Carousel, 0)
 	var response = make(map[string]interface{}, 0)
 

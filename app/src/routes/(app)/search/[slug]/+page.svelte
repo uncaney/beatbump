@@ -10,6 +10,8 @@
 
 	import { afterNavigate } from "$app/navigation";
 	import { writable } from "svelte/store";
+    import {SERVER_DOMAIN} from "../../../../env";
+    import {APIClient} from "$lib/api";
 
 	export let data: PageData;
 	$: ({ results, continuation, filter } = data);
@@ -46,8 +48,8 @@
 		if (isLoading || hasData) return;
 		try {
 			isLoading = true;
-			const response = await fetch(
-				`/api/v1/search.json?q=` +
+			const response = await APIClient.fetch(
+                `/api/v1/search.json?q=` +
 					`&filter=` +
 					filter +
 					`&itct=${itct}${ctoken ? `&ctoken=${ctoken}` : ""}`,

@@ -11,9 +11,7 @@ import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
 import { syncTabs } from "./tabSync";
-import type { Dict } from "./types/utilities";
 import { WritableStore, notify, type ResponseBody } from "./utils";
-import { isAppleMobileDevice } from "./utils/browserDetection";
 import { objectKeys } from "./utils/collections/objects";
 import { setWorkerInterval } from "./utils/workerTimeout";
 
@@ -769,32 +767,33 @@ export const getSrc = async (
 	  }
 	| undefined
 > => {
-	try {
-		const res = (await APIClient.player({
-			videoId,
-			playerParams: params,
-			playlistId,
-		})) as Dict<Record<string, string>>;
-		if (
-			res &&
-			!res?.streamingData &&
-			res?.playabilityStatus?.status === "UNPLAYABLE"
-		) {
-			return handleError();
-		}
-		const formats = sort({
-			data: res,
-			dash: false,
-			$proxySettings: userSettings?.network || settings.value()["network"],
-		});
 
-		const src = setTrack(formats, shouldAutoplay);
-		return src;
-	} catch (err) {
-		console.error(err);
-		notify(err as string, "error");
-	}
-};
+    const res = await APIClient.fetch(`/api/v1/player.json?videoId=${videoId}&playlistId=${playlistId}&playerParams=${params}`).then((response) => {
+        if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+        }
+        return response.json();
+    })
+        .catch((err) => {
+            console.error(err);
+            return null;
+        });
+    if (
+        res &&
+        !res?.streamingData &&
+        res?.playabilityStatus?.status === "UNPLAYABLE"
+    ) {
+        return handleError();
+    }
+    const formats = sort({
+        data: res,
+        dash: false,
+        $proxySettings: userSettings?.network || settings.value()["network"],
+    });
+
+    const src = setTrack(formats, shouldAutoplay);
+    return src;
+}
 
 function setTrack(formats: PlayerFormats, shouldAutoplay: boolean) {
 	let format = undefined;

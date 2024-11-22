@@ -1,7 +1,6 @@
-package api
+package auth
 
 import (
-	"beatbump-server/backend/_youtube"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -13,7 +12,6 @@ import (
 	"golang.org/x/oauth2"
 	"io/ioutil"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -79,6 +77,9 @@ func DeviceOauth(c echo.Context) error {
 	tokenObj := extractToken(c)
 
 	if tokenObj != nil {
+		output := map[string]string{}
+		output["loggedIn"] = "true"
+		return c.JSON(http.StatusOK, output)
 		/*url := "https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true"
 
 		  // Create a Bearer string by appending string access token
@@ -97,42 +98,42 @@ func DeviceOauth(c echo.Context) error {
 		  	log.Println("Error on response.\n[ERROR] -", err)
 		  }
 		  defer resp.Body.Close()*/
-		responseBytes, err := _youtube.Browse(tokenObj, "FEmusic_home", _youtube.PageType_MusicPageTypePlaylist, "", nil, nil, nil, _youtube.WebMusic)
-		if err != nil {
-			fmt.Println("Error on response.\n[ERROR] -", err)
-			return beginOauthflow(c)
-		}
+		/*responseBytes, err := _youtube.Browse(tokenObj, "FEmusic_home", _youtube.PageType_MusicPageTypePlaylist, "", nil, nil, nil, _youtube.WebMusic)
+		  if err != nil {
+		  	fmt.Println("Error on response.\n[ERROR] -", err)
+		  	return beginOauthflow(c)
+		  }
 
-		var homeResponse _youtube.HomeResponse
-		err = json.Unmarshal(responseBytes, &homeResponse)
-		if err != nil {
-			fmt.Println("Error on response.\n[ERROR] -", err)
-			return beginOauthflow(c)
-		}
+		  var homeResponse _youtube.HomeResponse
+		  err = json.Unmarshal(responseBytes, &homeResponse)
+		  if err != nil {
+		  	fmt.Println("Error on response.\n[ERROR] -", err)
+		  	return beginOauthflow(c)
+		  }
 
-		r := parseHome(homeResponse)
-		responseMap, ok := r.(map[string]interface{})
-		if !ok {
-			return beginOauthflow(c)
-		}
+		  r := api.ParseHome(homeResponse)
+		  responseMap, ok := r.(map[string]interface{})
+		  if !ok {
+		  	return beginOauthflow(c)
+		  }
 
-		carosuel := responseMap["carousels"]
-		carosuelArray, ok := carosuel.([]Carousel)
-		if !ok {
-			return beginOauthflow(c)
-		}
+		  carosuel := responseMap["carousels"]
+		  carosuelArray, ok := carosuel.([]api.Carousel)
+		  if !ok {
+		  	return beginOauthflow(c)
+		  }
 
-		if len(carosuelArray) == 0 {
-			return beginOauthflow(c)
-		}
+		  if len(carosuelArray) == 0 {
+		  	return beginOauthflow(c)
+		  }
 
-		title := carosuelArray[0].Header.Title
-		if strings.Contains(title, "Welcome") {
-			output := map[string]string{}
-			output["loggedIn"] = "true"
-			output["name"] = strings.Replace(title, "Welcome ", "", 1)
-			return c.JSON(http.StatusOK, output)
-		}
+		  title := carosuelArray[0].Header.Title
+		  if strings.Contains(title, "Welcome") {
+		  	output := map[string]string{}
+		  	output["loggedIn"] = "true"
+		  	output["name"] = strings.Replace(title, "Welcome ", "", 1)
+		  	return c.JSON(http.StatusOK, output)
+		  }*/
 	}
 
 	return beginOauthflow(c)
@@ -307,4 +308,28 @@ func retrieveToken(payload []byte) (*oauth2.Token, error) {
 	}
 
 	return nil, errors.New(errorResponse.Error)
+}
+
+func extractToken(c echo.Context) *oauth2.Token {
+	tokenCookie, _ := c.Cookie("token")
+	tokenObj := oauth2.Token{}
+	if tokenCookie != nil {
+		tokenJson, _ := base64.StdEncoding.DecodeString(tokenCookie.Value)
+		_ = json.Unmarshal([]byte(tokenJson), &tokenObj)
+
+		if isTokenValid(tokenObj) {
+			if time.Now().Unix() >= (tokenObj.Expiry.Unix() - 60) {
+				token, err := RefreshToken(tokenObj.RefreshToken)
+				if err != nil {
+
+					return nil
+				}
+				//update cookie
+				storeTokenInCookie(c, token)
+				return &token
+			}
+			return &tokenObj
+		}
+	}
+	return nil
 }

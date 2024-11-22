@@ -1,10 +1,11 @@
 package _youtube
 
 type innertubeRequest struct {
+	ActivePlayers                    []map[string]string               `json:"activePlayers,omitempty"`
 	VideoID                          string                            `json:"videoId,omitempty"`
 	PlaylistId                       string                            `json:"playlistId,omitempty"`
 	PLayerParams                     string                            `json:"playerParams,omitempty"`
-	BrowseID                         string                            `json:"browseId"`
+	BrowseID                         string                            `json:"browseId,omitempty"`
 	Query                            string                            `json:"query,omitempty"`
 	Input                            *string                           `json:"input,omitempty"`
 	Continuation                     map[string]string                 `json:"continuation,omitempty"`
@@ -54,7 +55,7 @@ type contentPlaybackContext struct {
 type inntertubeContext struct {
 	Client innertubeClient `json:"client"`
 	//Request       string          `json:"request"`
-	//User          string          `json:"user"`
+	User map[string]string `json:"user"`
 	//CaptionParams string          `json:"caption_params"`
 }
 
@@ -124,7 +125,7 @@ var (
 
 	WebMusic = ClientInfo{
 		ClientName:    "WEB_REMIX",
-		ClientVersion: "1.20240617.01.00",
+		ClientVersion: "1.20241113.01.00",
 
 		//	ClientKey: "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30", // seems like same ClientKey works for both clients
 		userAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",

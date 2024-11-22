@@ -22,7 +22,7 @@ func ArtistEndpointHandler(c echo.Context) error {
 
 	qparams := urlQuery.Get("params")
 
-	responseBytes, err = _youtube.Browse(nil, browseId, _youtube.PageType_MusicPageTypeArtist, qparams, nil, nil, nil, _youtube.WebMusic)
+	responseBytes, err = _youtube.Browse(browseId, _youtube.PageType_MusicPageTypeArtist, qparams, nil, nil, nil, _youtube.WebMusic, nil)
 
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))

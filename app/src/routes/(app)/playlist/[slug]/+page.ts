@@ -4,6 +4,7 @@ import type { Header } from "$lib/types/playlist";
 import type { Maybe } from "$lib/utils";
 import type { PlaylistResponseBody } from "../../api/v1/playlist.json/+server.js";
 import { SERVER_DOMAIN } from "../../../../env";
+import {APIClient} from "$lib/api";
 export const load = async ({
 	params,
 	url,
@@ -19,8 +20,8 @@ export const load = async ({
 }> => {
 	const { slug } = params;
 	console.time("playlist");
-	const data = await fetch<PlaylistResponseBody>(
-		`${SERVER_DOMAIN}/api/v1/playlist.json?list=${slug}`,
+	const data = await APIClient.fetch<PlaylistResponseBody>(
+		`/api/v1/playlist.json?list=${slug}`,
 	).then((response) => {
 		if (!response.ok) {
 			console.error(response.status, response.statusText);

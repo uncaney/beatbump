@@ -1,5 +1,5 @@
 import { redirect } from "@sveltejs/kit";
-import { SERVER_DOMAIN } from "../../../env";
+import {APIClient} from "$lib/api";
 export const load = async ({ url, fetch }) => {
 	const id =
 		url.searchParams.get("id") ??
@@ -12,18 +12,19 @@ export const load = async ({ url, fetch }) => {
 	}
 
 	const [data, list] = await Promise.all([
-		fetch(
-			`${SERVER_DOMAIN}/api/v1/player.json?videoId=${id ? id : ""}${
+        APIClient.fetch(
+			`/api/v1/player.json?videoId=${id ? id : ""}${
 				playlist ? `&playlistId=${playlist}` : ""
 			}`,
 		).then((res) => res.json()),
-		fetch(
-			`${SERVER_DOMAIN}/api/v1/next.json?videoId=${id ? id : ""}${
+        APIClient.fetch(
+			`/api/v1/next.json?videoId=${id ? id : ""}${
 				playlist ? `&playlistId=${playlist}` : ""
 			}`,
 		).then((res) => res.json()),
 	]);
-
+    console.log("test")
+    consogle.log(data)
 	const {
 		videoDetails: {
 			title = "",
@@ -31,6 +32,8 @@ export const load = async ({ url, fetch }) => {
 			thumbnail: { thumbnails = [] } = {},
 		} = {},
 	} = data;
+
+    console.log(data)
 
 	return {
 		title,

@@ -2,12 +2,7 @@ package api
 
 import (
 	"beatbump-server/backend/_youtube"
-	"encoding/base64"
-	"encoding/json"
-	"github.com/labstack/echo/v4"
-	"golang.org/x/oauth2"
 	"strings"
-	"time"
 )
 
 type Carousel struct {
@@ -219,28 +214,4 @@ func parseMusicResponsiveListItemRenderer(itemRender _youtube.MusicResponsiveLis
 	*/
 
 	return item
-}
-
-func extractToken(c echo.Context) *oauth2.Token {
-	tokenCookie, _ := c.Cookie("token")
-	tokenObj := oauth2.Token{}
-	if tokenCookie != nil {
-		tokenJson, _ := base64.StdEncoding.DecodeString(tokenCookie.Value)
-		_ = json.Unmarshal([]byte(tokenJson), &tokenObj)
-
-		if isTokenValid(tokenObj) {
-			if time.Now().Unix() >= (tokenObj.Expiry.Unix() - 60) {
-				token, err := RefreshToken(tokenObj.RefreshToken)
-				if err != nil {
-
-					return nil
-				}
-				//update cookie
-				storeTokenInCookie(c, token)
-				return &token
-			}
-			return &tokenObj
-		}
-	}
-	return nil
 }

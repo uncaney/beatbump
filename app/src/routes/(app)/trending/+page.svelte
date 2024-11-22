@@ -2,10 +2,7 @@
 	import { browser } from "$app/environment";
 	import Carousel from "$components/Carousel/Carousel.svelte";
 	import Header from "$lib/components/Layouts/Header.svelte";
-	import {
-		isMoodsAndGenres,
-		isValidCarousel,
-	} from "$lib/validation/typeGuards/isIListItemRenderer";
+
 
 	export let data;
 	const { carousels, page: path } = data;

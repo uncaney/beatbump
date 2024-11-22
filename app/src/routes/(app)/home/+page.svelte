@@ -8,6 +8,7 @@
 	import { homeChipContext } from "$lib/contexts";
 	import type { PageData } from "./$types";
     import { SERVER_DOMAIN } from "../../../env";
+    import {APIClient} from "$lib/api";
 
 	export let data: PageData;
 
@@ -98,8 +99,8 @@
 			on:enterViewport={async () => {
 				if (loading || hasData) return;
 				loading = true;
-				const response = await fetch(
-					`${SERVER_DOMAIN}/api/v1/home.json?itct=${encodeURIComponent(
+				const response = await APIClient.fetch(
+					`/api/v1/home.json?itct=${encodeURIComponent(
 						continuations.clickTrackingParams,
 					)}${
 						params ? `&params=${encodeURIComponent(params)}` : ""

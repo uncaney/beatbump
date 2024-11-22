@@ -1,8 +1,8 @@
 import { error } from "@sveltejs/kit";
-import { SERVER_DOMAIN } from "../../../env";
+import {APIClient} from "$lib/api";
 export const prerender = false;
 export const load = async ({ fetch, url }) => {
-	const data = await fetch(`${SERVER_DOMAIN}/api/v1/explore`);
+	const data = await APIClient.fetch(`/api/v1/explore`);
 	const response = await data.json();
 
 	if (!data.ok) {

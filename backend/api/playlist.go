@@ -55,9 +55,9 @@ func PlaylistEndpointHandler(c echo.Context) error {
 	var responseBytes []byte
 	var err error
 	if ctoken != "" && itct != "" {
-		responseBytes, err = _youtube.Browse(nil, browseID, _youtube.PageType_MusicPageTypePlaylist, "", nil, &itct, &ctoken, _youtube.WebMusic)
+		responseBytes, err = _youtube.Browse(browseID, _youtube.PageType_MusicPageTypePlaylist, "", nil, &itct, &ctoken, _youtube.WebMusic, nil)
 	} else {
-		responseBytes, err = _youtube.Browse(nil, browseID, _youtube.PageType_MusicPageTypePlaylist, "", nil, nil, nil, _youtube.WebMusic)
+		responseBytes, err = _youtube.Browse(browseID, _youtube.PageType_MusicPageTypePlaylist, "", nil, nil, nil, _youtube.WebMusic, nil)
 	}
 
 	if err != nil {
@@ -118,7 +118,7 @@ func parsePlaylist(playlistResponse _youtube.PlaylistResponse) PlaylistAPIRespon
 		response.Tracks = tracks
 		header["playlistId"] = musicPlaylistShelfRenderer.PlaylistId
 	} else {
-		if len(playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents) != 0 {
+		if len(playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs) != 0 && len(playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents) != 0 {
 			gridRenderer := playlistResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents[0].GridRenderer
 			if gridRenderer != nil {
 				tracks := []IListItemRenderer{}

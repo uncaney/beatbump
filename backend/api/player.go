@@ -2,10 +2,10 @@ package api
 
 import (
 	"beatbump-server/backend/_youtube"
+	"beatbump-server/backend/api/auth"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/oauth2"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -21,19 +21,17 @@ func PlayerEndpointHandler(c echo.Context) error {
 	videoId := query.Get("videoId")
 	playlistId := query.Get("playlistId")
 	//playerParams := query.Get("playerParams")
-
+	authObj := (c.(*auth.AuthContext)).AuthContext
 	//authorization := headers.Get("Authorization")
 	if videoId == "" {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Missing required param: videoId"))
 	}
 
-	tokenObj := extractToken(c)
-
-	playerResponse, err := callPlayerAPI(tokenObj, _youtube.IOS, videoId, playlistId)
+	playerResponse, err := callPlayerAPI(_youtube.IOS, videoId, playlistId, authObj)
 
 	//try IOS_MUSIC as fallback
 	if err != nil {
-		playerResponse, err = callPlayerAPI(tokenObj, _youtube.WebMusic, videoId, playlistId)
+		playerResponse, err = callPlayerAPI(_youtube.WebMusic, videoId, playlistId, authObj)
 	}
 
 	if err != nil {
@@ -43,9 +41,9 @@ func PlayerEndpointHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, playerResponse)
 }
 
-func callPlayerAPI(token *oauth2.Token, clientInfo _youtube.ClientInfo, videoId string, playlistId string) (map[string]interface{}, error) {
+func callPlayerAPI(clientInfo _youtube.ClientInfo, videoId string, playlistId string, authObj *auth.Auth) (map[string]interface{}, error) {
 
-	responseBytes, err := _youtube.Player(token, videoId, playlistId, clientInfo, nil)
+	responseBytes, err := _youtube.Player(videoId, playlistId, clientInfo, nil, authObj)
 
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Error building API request: %s", err))

@@ -16,7 +16,7 @@ func TrendingEndpointHandler(c echo.Context) error {
 	var responseBytes []byte
 	var err error
 
-	responseBytes, err = _youtube.Browse(nil, browseId, _youtube.PageType_MusicPageTypePlaylist, "", nil, nil, nil, _youtube.WebMusic)
+	responseBytes, err = _youtube.Browse(browseId, _youtube.PageType_MusicPageTypePlaylist, "", nil, nil, nil, _youtube.WebMusic, nil)
 
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
@@ -39,7 +39,7 @@ func TrendingEndpointHandler(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
 	}
 
-	r := parseHome(homeResponse)
+	r := ParseHome(homeResponse)
 
 	return c.JSON(http.StatusOK, r)
 	//}

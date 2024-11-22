@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { APIParams } from "$lib/constants";
-import { SERVER_DOMAIN } from "../../../env";
 // eslint-disable-next-line import/no-cycle
 import { getSrc, updateGroupPosition, updatePlayerSrc } from "$lib/player";
 import type {
@@ -27,11 +26,11 @@ import { tick } from "svelte";
 // eslint-disable-next-line import/no-cycle
 import { syncTabs } from "$lib/tabSync";
 import { derived } from "svelte/store";
-import type { RelatedEndpointResponse } from "../../../routes/(app)/api/v1/related.json/+server";
 import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
 import { fetchNext, filterList } from "./utils.list";
+import {APIClient} from "$lib/api";
 
 const mutex = new Mutex();
 
@@ -967,8 +966,8 @@ const related = (() => {
 			(async () => {
 				if ($list.position === prevPosition) return;
 				if ($list.related !== null) {
-					await fetch<RelatedEndpointResponse>(
-						`${SERVER_DOMAIN}/api/v1/related.json?browseId=${$list.related?.browseId}`,
+					await APIClient.fetch(
+						`/api/v1/related.json?browseId=${$list.related?.browseId}`,
 					)
 						.then((res) => res.json())
 						.then(set);

@@ -2,6 +2,7 @@ package api
 
 import (
 	"beatbump-server/backend/_youtube"
+	"beatbump-server/backend/api/auth"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,7 +53,9 @@ func NextEndpointHandler(c echo.Context) error {
 	if videoId == "" && playlistId == "" && playlistSetVideoId == "" {
 		return errors.New("missing required param: videoId")
 	}
-	responseBytes, err := _youtube.Next(videoId, playlistId, _youtube.WebMusic, paramsMap)
+
+	authObj := (c.(*auth.AuthContext)).AuthContext
+	responseBytes, err := _youtube.Next(videoId, playlistId, _youtube.WebMusic, paramsMap, authObj)
 
 	var nextResponse _youtube.NextResponse
 	err = json.Unmarshal(responseBytes, &nextResponse)

@@ -1,11 +1,12 @@
 import { SERVER_DOMAIN } from "./../../../env";
+import {APIClient} from "$lib/api";
 
 export const load = async ({ url, fetch, locals }) => {
 	const path = url.pathname;
 	const browseId = url.searchParams.get("id") || "";
 	const pt = url.searchParams.get("type") || "";
-	const response = await fetch(
-		`${SERVER_DOMAIN}/api/v1/main.json?q=&endpoint=browse${
+	const response = await APIClient.fetch(
+		`/api/v1/main.json?q=&endpoint=browse${
 			browseId ? `&browseId=${browseId}` : ""
 		}${pt ? `&pt=${pt}` : ""}`,
 	);

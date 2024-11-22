@@ -7,7 +7,7 @@
 	import { createEventDispatcher } from "svelte";
 	import { fullscreenStore } from "../Player/channel";
 	import { searchFilter } from "./options";
-    import { SERVER_DOMAIN } from "../../../env";
+    import {APIClient} from "$lib/api";
 
 	export let type: "inline";
 	export let query = "";
@@ -79,8 +79,8 @@
 	}
 	const typeahead = debounce(async () => {
 		if (!query) return (results = []);
-		const response = await fetch(
-            `${SERVER_DOMAIN}/api/v1/get_search_suggestions.json?q=` + encodeURIComponent(query),
+		const response = await APIClient.fetch(
+            `/api/v1/get_search_suggestions.json?q=` + encodeURIComponent(query),
 		);
 		results = await response.json();
 	}, 250);

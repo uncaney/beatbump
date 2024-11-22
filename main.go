@@ -2,6 +2,7 @@ package main
 
 import (
 	"beatbump-server/backend/api"
+	"beatbump-server/backend/api/auth"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
@@ -11,14 +12,13 @@ func main() {
 
 	e.Use(middleware.CORS())
 	e.Use(LoggingMiddleware)
-
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
 		Root:       "./build",
 		Browse:     true,
 		IgnoreBase: true,
 		HTML5:      true,
 	}))
-
+	e.Use(auth.AuthMiddleware)
 	e.GET("/api/v1/search.json", api.SearchEndpointHandler)
 	e.GET("/api/v1/player.json", api.PlayerEndpointHandler)
 	e.GET("/api/v1/playlist.json", api.PlaylistEndpointHandler)
@@ -36,8 +36,10 @@ func main() {
 
 	e.GET("/api/v1/artist/:artistId", api.ArtistEndpointHandler)
 
-	e.GET("/api/v1/deviceOauth", api.DeviceOauth)
-	e.GET("/api/v1/deviceOauth/:deviceCode", api.AuthorizeOauth)
+	e.GET("/api/v1/deviceOauth", auth.DeviceOauth)
+	e.GET("/api/v1/deviceOauth/:deviceCode", auth.AuthorizeOauth)
+
+	e.POST("/api/v1/cookie", auth.Cookie)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }
