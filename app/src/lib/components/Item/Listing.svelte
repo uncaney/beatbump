@@ -262,6 +262,7 @@
 			} else {
 				// notify(JSON.stringify({ type: data.type }), "success");
 				await list.initAutoMixSession({
+                    clickedItem: data,
 					loggingContext: data?.loggingContext,
 					videoId: videoId,
 					playlistId: playlistId,

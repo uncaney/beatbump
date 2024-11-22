@@ -2,6 +2,7 @@ package api
 
 import (
 	"beatbump-server/backend/_youtube"
+	"beatbump-server/backend/api/auth"
 	"encoding/json"
 	"fmt"
 	"github.com/labstack/echo/v4"
@@ -13,12 +14,12 @@ func RelatedEndpointHandler(c echo.Context) error {
 	url := c.Request().URL
 	query := url.Query()
 	browseId := query.Get("browseId")
-
+	authObjauthObj := (c.(*auth.AuthContext)).AuthContext
 	if browseId == "" {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Missing required param: browseId"))
 	}
 
-	responseBytes, err := _youtube.Browse(browseId, _youtube.PageType_MusicPageTypeTrackRelated, "", nil, nil, nil, _youtube.WebMusic, nil)
+	responseBytes, err := _youtube.Browse(browseId, _youtube.PageType_MusicPageTypeTrackRelated, "", nil, nil, nil, _youtube.WebMusic, authObjauthObj)
 
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))

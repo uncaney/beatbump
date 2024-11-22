@@ -46,6 +46,7 @@ export async function clickHandler({
 		} else {
             console.log("initAutoMixSession")
 			await list.initAutoMixSession({
+                clickedItem: item,
 				videoId: item.videoId,
 				playlistId: item.playlistId,
 

@@ -38,10 +38,10 @@ func Browse(browseId string, pageType PageType, params string,
 
 		data = innertubeRequest{
 			//RequestAttributes: additionalRequestAttributes,
-			BrowseID:       browseId,
-			Context:        innertubeContext,
-			ContentCheckOK: true,
-			RacyCheckOk:    true,
+			BrowseID: browseId,
+			Context:  innertubeContext,
+			//ContentCheckOK: true,
+			//RacyCheckOk:    true,
 			BrowseEndpointContextMusicConfig: &BrowseEndpointContextMusicConfig{
 				PageType: string(pageType),
 			},
@@ -169,21 +169,22 @@ func Next(videoId string, playlistId string, client ClientInfo, params Params, a
 
 	data := innertubeRequest{
 		//RequestAttributes: additionalRequestAttributes,
-		VideoID:                       videoId,
-		Context:                       innertubeContext,
-		ContentCheckOK:                true,
-		RacyCheckOk:                   true,
+		VideoID: videoId,
+		Context: innertubeContext,
+		// ContentCheckOK:                true,
+		// RacyCheckOk:                   true,
 		PlaylistId:                    playlistId,
 		EnablePersistentPlaylistPanel: true,
 		IsAudioOnly:                   true,
 		TunerSettingValue:             "AUTOMIX_SETTING_NORMAL",
 		//PlaylistSetVideoId:            params["playlistSetVideoId"],
 		Params: "wAEB",
+
 		/*PlaybackContext: &playbackContext{
-			ContentPlaybackContext: contentPlaybackContext{
-				// SignatureTimestamp: sts,
-				HTML5Preference: "HTML5_PREF_WANTS",
-			},
+		    ContentPlaybackContext: contentPlaybackContext{
+		        // SignatureTimestamp: sts,
+		        HTML5Preference: "HTML5_PREF_WANTS",
+		    },
 		},*/
 	}
 
@@ -286,6 +287,9 @@ func callAPI(urlAddress string, requestPayload innertubeRequest, userAgent strin
 					req.Header.Set("Authorization", authorization)
 					req.Header.Set("X-Origin", "https://music.youtube.com")
 					req.Header.Set("X-Goog-AuthUser", "0")
+					req.Header.Set("X-Youtube-Bootstrap-Logged-In", "0")
+
+					req.Header.Set("X-Goog-PageId", "undefined")
 					//fmt.Printf("SAPISID: %s", authorization)
 				}
 			}
@@ -396,7 +400,7 @@ func prepareInnertubeContext(clientInfo ClientInfo, visitorData *string) inntert
 	return inntertubeContext{
 		Client: client,
 		User: map[string]string{
-			"LockedSafetyMode": "false",
+			"lockedSafetyMode": "false",
 		},
 	}
 }
