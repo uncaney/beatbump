@@ -39,7 +39,5 @@ func main() {
 	e.GET("/api/v1/deviceOauth", auth.DeviceOauth)
 	e.GET("/api/v1/deviceOauth/:deviceCode", auth.AuthorizeOauth)
 
-	e.POST("/api/v1/cookie", auth.Cookie)
-
 	e.Logger.Fatal(e.Start(":8080"))
 }

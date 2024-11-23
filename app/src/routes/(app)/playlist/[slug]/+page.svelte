@@ -17,7 +17,6 @@
 	import { onMount } from "svelte";
 	import { writable } from "svelte/store";
 	import type { PageData } from "./$types";
-  import { SERVER_DOMAIN } from "../../../../env";
     import {APIClient} from "$lib/api";
 
 	export let data: PageData;

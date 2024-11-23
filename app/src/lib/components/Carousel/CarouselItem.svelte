@@ -4,7 +4,6 @@
 	context="module"
 	lang="ts"
 >
-	import { SERVER_DOMAIN } from "../../../env";
     import {APIClient} from "$lib/api";
 
     const RE_ALBUM_PLAYLIST_SINGLE = /PLAYLIST|ALBUM|SINGLE/;

@@ -1,4 +1,3 @@
-import { SERVER_DOMAIN } from "./../../../env";
 import {APIClient} from "$lib/api";
 
 export const load = async ({ url, fetch, locals }) => {

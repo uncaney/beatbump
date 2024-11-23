@@ -7,7 +7,6 @@
 	import Loading from "$lib/components/Loading/Loading.svelte";
 	import { homeChipContext } from "$lib/contexts";
 	import type { PageData } from "./$types";
-    import { SERVER_DOMAIN } from "../../../env";
     import {APIClient} from "$lib/api";
 
 	export let data: PageData;

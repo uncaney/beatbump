@@ -1,5 +1,4 @@
 import type { ExploreSlugResponse } from "../[slug].json/+server.js";
-import { SERVER_DOMAIN } from "../../../../env";
 import {APIClient} from "$lib/api";
 
 export const load = async ({ url, params, fetch }) => {

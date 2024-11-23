@@ -3,7 +3,6 @@ import type { IListItemRenderer } from "$lib/types/musicListItemRenderer";
 import type { Header } from "$lib/types/playlist";
 import type { Maybe } from "$lib/utils";
 import type { PlaylistResponseBody } from "../../api/v1/playlist.json/+server.js";
-import { SERVER_DOMAIN } from "../../../../env";
 import {APIClient} from "$lib/api";
 export const load = async ({
 	params,

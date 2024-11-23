@@ -10,7 +10,6 @@
 
 	import { afterNavigate } from "$app/navigation";
 	import { writable } from "svelte/store";
-    import {SERVER_DOMAIN} from "../../../../env";
     import {APIClient} from "$lib/api";
 
 	export let data: PageData;

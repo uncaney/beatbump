@@ -11,8 +11,7 @@
     import { AudioPlayer } from "$lib/player";
     import { settings, type Theme } from "$stores/settings";
     import {onMount} from "svelte";
-    import {SERVER_DOMAIN} from "../../../env";
-    import {invalidate, invalidateAll} from "$app/navigation";
+    import {invalidate} from "$app/navigation";
     import {APIClient} from "$lib/api";
     const themes: Theme[] = ["Dark", "Dim", "Midnight", "YTM"];
 
@@ -44,7 +43,7 @@
             if (!response.ok) {
                 throw new Error('Failed to fetch data');
             }
-            await invalidate(`${SERVER_DOMAIN}/api/v1/deviceOauth`)
+            await invalidate(`/api/v1/deviceOauth`)
         } catch (err) {
             console.log(err)
         }

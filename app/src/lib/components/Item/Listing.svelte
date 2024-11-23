@@ -36,7 +36,6 @@
 	} from "$stores/stores";
 	import { SITE_ORIGIN_URL } from "$stores/url";
 	import { PopperButton, PopperStore } from "../Popper";
-    import { SERVER_DOMAIN } from "../../../env";
     import {APIClient} from "$lib/api";
 
 	export let data: Item;
