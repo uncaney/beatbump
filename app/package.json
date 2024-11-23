@@ -8,7 +8,7 @@
 		"vercel:deploy": "vercel deploy --prod",
 		"netlify:deploy": "netlify deploy --prod",
 		"preview": "vite preview --host",
-		"build": "vite build",
+		"build": "vite build --mode production",
 		"test": "playwright test",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",

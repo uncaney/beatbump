@@ -30,7 +30,7 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		ac.AuthContext = &Auth{}
 		ac.AuthContext.AuthType = AUTH_TYPE_NONE
 
-		cookie := c.Request().Header.Get("X-GOOGLE-COOKIE")
+		cookie := c.Request().Header.Get("X-Google-Cookie")
 		//
 		if cookie != "" {
 			ac.AuthContext.AuthType = AUTH_TYPE_COOKIES
@@ -38,7 +38,7 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		} else {
 			token := extractToken(c)
 			if token != nil {
-				ac.AuthContext.AuthType = AUTH_TYPE_NONE
+				ac.AuthContext.AuthType = AUTH_TYPE_OAUTH
 				ac.AuthContext.OauthToken = token
 				fmt.Println("using OAUTH context")
 			}
