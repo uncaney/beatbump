@@ -12,6 +12,8 @@ import (
 	"golang.org/x/oauth2"
 	"io/ioutil"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -198,7 +200,24 @@ func AuthorizeOauth(c echo.Context) error {
 	return c.JSON(http.StatusOK, token)
 }
 
+// Function to extract the base domain (without subdomains)
+func extractBaseDomain(hostname string) string {
+	// Split the hostname by dots
+	parts := strings.Split(hostname, ".")
+
+	// Check if the parts of the hostname are at least two (i.e., domain + TLD)
+	if len(parts) > 2 {
+		// Extract the last two parts for the base domain
+		return strings.Join(parts[len(parts)-2:], ".")
+	}
+	// Return the hostname as is if it's already a single domain
+	return hostname
+}
+
 func storeTokenInCookie(c echo.Context, token oauth2.Token) {
+
+	// Extract the hostname from the parsed URL
+
 	tokenJson, _ := json.Marshal(token)
 	cookie := new(http.Cookie)
 	cookie.Name = "token"
@@ -206,9 +225,18 @@ func storeTokenInCookie(c echo.Context, token oauth2.Token) {
 	cookie.Secure = false
 	cookie.HttpOnly = true
 	cookie.Path = "/"
+	cookie.Domain = ""
 	cookie.Expires = time.Now().Add(time.Hour * 24 * 30)
-	cookie.SameSite = http.SameSiteStrictMode
+	cookie.SameSite = http.SameSiteDefaultMode
 	//cookie.Expires = time.Now().Add(24 * time.Hour)
+	referer := c.Request().Header.Get("Referer")
+	if referer != "" {
+
+		// Parse the referer URL
+		parsedURL, _ := url.Parse(referer)
+		domain := extractBaseDomain(parsedURL.Hostname())
+		cookie.Domain = domain
+	}
 	c.SetCookie(cookie)
 }
 
@@ -220,7 +248,15 @@ func deleteTokenInCookie(c echo.Context) {
 	cookie.HttpOnly = true
 	cookie.Path = "/api"
 	cookie.Expires = time.Unix(0, 0)
-	cookie.SameSite = http.SameSiteStrictMode
+	cookie.SameSite = http.SameSiteDefaultMode
+	referer := c.Request().Header.Get("Referer")
+	if referer != "" {
+
+		// Parse the referer URL
+		parsedURL, _ := url.Parse(referer)
+		domain := extractBaseDomain(parsedURL.Hostname())
+		cookie.Domain = domain
+	}
 	c.SetCookie(cookie)
 }
 

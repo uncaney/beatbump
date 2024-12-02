@@ -62,7 +62,7 @@ const config = {
             routes: "src/routes",
           //  serviceWorker: "src/service-worker",
             appTemplate: "src/app.html",
-            hooks: {server: "src/hooks.server"},
+           // hooks: {server: "src/hooks.server"},
         },
         csp: {
             directives: {

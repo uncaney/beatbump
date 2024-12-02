@@ -2,7 +2,7 @@
 	"name": "beatbump-app",
 	"version": "2.2.0",
 	"scripts": {
-		"dev": "npm run sync && vite dev --host",
+		"dev": "npm run sync && vite dev --host --mode dev",
 		"cfw:deploy": "npm run build && wrangler publish",
 		"cfw:preview:deploy": "wrangler publish --env preview",
 		"vercel:deploy": "vercel deploy --prod",

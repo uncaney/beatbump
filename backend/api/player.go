@@ -27,7 +27,9 @@ func PlayerEndpointHandler(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Missing required param: videoId"))
 	}
 
-	playerResponse, err := callPlayerAPI(_youtube.IOS, videoId, playlistId, authObj)
+	//playerResponse, err := callPlayerAPI(_youtube.WebMusic, videoId, playlistId, authObj)
+	//playerResponse, err = callPlayerAPI(_youtube.IOS, videoId, playlistId, authObj)
+	playerResponse, err := callPlayerAPI(_youtube.IOS_MUSIC, videoId, playlistId, authObj)
 
 	//try IOS_MUSIC as fallback
 	if err != nil {

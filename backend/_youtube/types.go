@@ -89,6 +89,13 @@ type ClientInfo struct {
 }
 
 var (
+	MWebClient = ClientInfo{
+		ClientName:    "MWEB",
+		ClientVersion: "2.20240726.01.00",
+		//ClientKey:     "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+		//userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+	}
+
 	// WebClient, better to use Android client but go ahead.
 	WebClient = ClientInfo{
 		ClientName:    "WEB",
@@ -117,15 +124,15 @@ var (
 
 	IOS_MUSIC = ClientInfo{
 		ClientName:    "IOS_MUSIC",
-		ClientVersion: "7.08.2",
+		ClientVersion: "7.27.0",
 		//ClientKey:     "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc", // seems like same ClientKey works for both clients
 		DeviceModel: "iPhone16,2",
-		userAgent:   "com.google.ios.youtubemusic/7.08.2 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)",
+		userAgent:   "com.google.ios.youtubemusic/7.27.0 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
 	}
 
 	WebMusic = ClientInfo{
 		ClientName:    "WEB_REMIX",
-		ClientVersion: "1.20241113.01.00",
+		ClientVersion: "1.20240724.00.0",
 
 		//	ClientKey: "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30", // seems like same ClientKey works for both clients
 		userAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",

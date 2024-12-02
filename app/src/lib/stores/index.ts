@@ -20,6 +20,4 @@ export {
 } from "./stores";
 export type { Alert } from "./stores";
 export { isMobileMQ } from "./window";
-import d from "./snapshot";
 
-console.log(d);

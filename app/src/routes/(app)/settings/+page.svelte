@@ -7,7 +7,6 @@
 <script lang="ts">
     import { browser } from "$app/environment";
     import Header from "$components/Layouts/Header.svelte";
-    import { PUBLIC_ALLOW_THUMBNAIL_PROXY } from "$env/static/public";
     import { AudioPlayer } from "$lib/player";
     import { settings, type Theme } from "$stores/settings";
     import {onMount} from "svelte";
@@ -268,25 +267,6 @@
                     >
                 </div>
             </div>
-            {#if PUBLIC_ALLOW_THUMBNAIL_PROXY === "true"}
-                <div class="setting">
-                    <label
-                    >Proxy Thumbnails
-                        <span class="">Proxy all thumbnails through Beatbump.</span>
-                    </label>
-                    <input
-                        name="proxy-thumbnails"
-                        id="proxy-thumbnails"
-                        type="checkbox"
-                        on:input={updatePrefsCookie}
-                        bind:checked={$settings["network"]["Proxy Thumbnails"]}
-                    />
-                    <label
-                        for="proxy-thumbnails"
-                        class="switch"
-                    />
-                </div>
-            {/if}
             <div class="setting">
                 <label
                 >Proxy Audio

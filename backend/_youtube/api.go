@@ -212,12 +212,12 @@ func Player(videoId string, playlistId string, client ClientInfo, params Params,
 		RacyCheckOk:    true,
 		Params:         reqParams,
 		PlaylistId:     playlistId,
-		PlaybackContext: &playbackContext{
+		/*PlaybackContext: &playbackContext{
 			ContentPlaybackContext: contentPlaybackContext{
 				// SignatureTimestamp: sts,
 				HTML5Preference: "HTML5_PREF_WANTS",
 			},
-		},
+		},*/
 		/*ServiceIntegrityDimensions: &ServiceIntegrityDimensions{
 			PoToken: "51217476",
 		},*/
@@ -261,7 +261,7 @@ func callAPI(urlAddress string, requestPayload innertubeRequest, userAgent strin
 		req.Header.Set("referer", *requestPayload.Context.Client.OriginalUrl)
 	}
 
-	if authbj != nil {
+	if strings.Contains(urlAddress, "player") && authbj != nil {
 		if authbj.AuthType == auth.AUTH_TYPE_COOKIES && authbj.CookieHeader != "" {
 
 			cookies, err := parseCookieString(authbj.CookieHeader)
@@ -285,10 +285,14 @@ func callAPI(urlAddress string, requestPayload innertubeRequest, userAgent strin
 				if key == "SAPISID" {
 					authorization := getAuthorization(value)
 					req.Header.Set("Authorization", authorization)
-					req.Header.Set("X-Origin", "https://music.youtube.com")
-					req.Header.Set("X-Goog-AuthUser", "0")
-					req.Header.Set("X-Youtube-Bootstrap-Logged-In", "0")
-
+					//req.Header.Set("X-Origin", "https://music.youtube.com")
+					//req.Header.Set("X-Goog-AuthUser", "0")
+					//req.Header.Set("X-Youtube-Bootstrap-Logged-In", "0")
+					//req.Header.Set("X-YouTube-Client-Name", "67")
+					//req.Header.Set("X-YouTube-Client-Version", WebMusic.ClientVersion)
+					if requestPayload.Context.Client.VisitorData != "" {
+						req.Header.Set("X-Goog-Visitor-Id", requestPayload.Context.Client.VisitorData)
+					}
 					req.Header.Set("X-Goog-PageId", "undefined")
 					//fmt.Printf("SAPISID: %s", authorization)
 				}
@@ -314,11 +318,7 @@ func callAPI(urlAddress string, requestPayload innertubeRequest, userAgent strin
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 	req.Header.Set("Content-Type", "application/json")
 	//	req.Header.Set("X-Origin", "https://music.youtube.com")
-	req.Header.Set("X-YouTube-Client-Name", "67")
-	req.Header.Set("X-YouTube-Client-Version", WebMusic.ClientVersion)
-	if requestPayload.Context.Client.VisitorData != "" {
-		req.Header.Set("X-Goog-Visitor-Id", requestPayload.Context.Client.VisitorData)
-	}
+
 	//
 
 	resp, err := client.Do(req)
@@ -327,7 +327,7 @@ func callAPI(urlAddress string, requestPayload innertubeRequest, userAgent strin
 		return nil, err
 	}
 
-	if resp.StatusCode == http.StatusUnauthorized {
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusBadRequest {
 		req.Header.Del("Authorization")
 		resp, err = client.Do(req)
 		if err != nil {
