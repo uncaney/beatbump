@@ -1,10 +1,9 @@
-<img align="right" src="../.repo/images/logo-header.png" width="128px" height="128px" />
 
 # Beatbump
 
-Beatbump is an alternative frontend for YouTube Music created using Svelte/SvelteKit, and powered by Cloudflare Workers.
+This project is a continuation of the Beatbump by @snuffyDev.
 
-**Live Site**: https://beatbump.io/
+An alternative frontend for YouTube Music created using Svelte/SvelteKit, and Golang.
 
 <p align="center">
 	  <a href="https://www.gnu.org/licenses/agpl-3.0.en.html">
@@ -19,7 +18,7 @@ Beatbump is an alternative frontend for YouTube Music created using Svelte/Svelt
 
 - Automix for continued listening
 - No ads
-- Background play on mobile devices\*
+- Background play on mobile devices
 - Search for artists, playlists, songs, and albums
   - Note that all playback is audio only (for now)
 - Local playlist management
@@ -32,7 +31,6 @@ Beatbump is an alternative frontend for YouTube Music created using Svelte/Svelt
 
 ...and so much more!
 
-> [1] iOS updates may break this from time to time, but works as of iOS 15.6
 
 ## Privacy
 
@@ -45,15 +43,16 @@ Privacy is something you shouldn't have to think about. Using the browser extens
 redirect YouTube Music links to Beatbump. For more information, please visit the
 [LibRedirect Repo](https://github.com/libredirect/libredirect).
 
-## Development
-
 ### Contributing
 
-(TODO)
+Contributions are welcomed
 
-### Deploying Beatbump
+### Running Beatbump
 
-You can find the documentation [here](https://snuffydev.github.io/Beatbump/#/) for setup information.
+- git clone https://github.com/giwty/Beatbump.git
+- docker build . -t beatbump
+- docker run 8080:8080 beatbump
+
 
 ### Project Inspirations
 

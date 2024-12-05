@@ -23,13 +23,9 @@ RUN npm ci --legacy-peer-deps
 COPY /app .
 
 RUN npm exec svelte-kit sync
-RUN PORT=${PORT} \
-    ALLOW_IFRAME=${ALLOW_IFRAME} \
-    SERVER_DOMAIN=${SERVER_DOMAIN} \
-    PUBLIC_ALLOW_THUMBNAIL_PROXY=${PUBLIC_ALLOW_THUMBNAIL_PROXY} \
-    node ./scripts/build.cjs build
+RUN npm run build
 
-FROM golang:1.21.0 As build
+FROM golang:1.21.0 as build
 
 # Set destination for COPY
 WORKDIR /app

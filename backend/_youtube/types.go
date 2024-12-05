@@ -130,6 +130,14 @@ var (
 		userAgent:   "com.google.ios.youtubemusic/7.27.0 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
 	}
 
+	WEB_CREATOR = ClientInfo{
+		ClientName:    "WEB_CREATOR",
+		ClientVersion: "1.20240723.03.00",
+		//ClientKey:     "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc", // seems like same ClientKey works for both clients
+		//DeviceModel: "iPhone16,2",
+		//userAgent:   "com.google.ios.youtubemusic/7.27.0 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
+	}
+
 	WebMusic = ClientInfo{
 		ClientName:    "WEB_REMIX",
 		ClientVersion: "1.20240724.00.0",
