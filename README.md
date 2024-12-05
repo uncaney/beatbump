@@ -52,6 +52,7 @@ Contributions are welcomed
 - git clone https://github.com/giwty/Beatbump.git
 - docker build . -t beatbump
 - docker run 8080:8080 beatbump
+- Access http://app.localhost:8080  
 
 
 ### Project Inspirations
