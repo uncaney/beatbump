@@ -2,6 +2,7 @@ package api
 
 import (
 	"beatbump-server/backend/_youtube"
+	"beatbump-server/backend/_youtube/api"
 	"encoding/json"
 	"fmt"
 	"github.com/labstack/echo/v4"
@@ -41,9 +42,9 @@ func SearchEndpointHandler(c echo.Context) error {
 
 	var responseBytes []byte
 	if itct != "" && ctoken != "" {
-		responseBytes, err = _youtube.Search(queryUnescape, filterId, &itct, &ctoken, _youtube.WebMusic)
+		responseBytes, err = api.Search(queryUnescape, filterId, &itct, &ctoken, api.WebMusic)
 	} else {
-		responseBytes, err = _youtube.Search(queryUnescape, filterId, nil, nil, _youtube.WebMusic)
+		responseBytes, err = api.Search(queryUnescape, filterId, nil, nil, api.WebMusic)
 	}
 
 	if err != nil {

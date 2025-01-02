@@ -2,7 +2,8 @@ package api
 
 import (
 	"beatbump-server/backend/_youtube"
-	"beatbump-server/backend/api/auth"
+	"beatbump-server/backend/_youtube/api"
+	"beatbump-server/backend/_youtube/api/auth"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,12 +56,12 @@ func NextEndpointHandler(c echo.Context) error {
 	}
 
 	authObj := (c.(*auth.AuthContext)).AuthContext
-	responseBytes, err := _youtube.Next(videoId, playlistId, _youtube.WebMusic, paramsMap, authObj)
+	responseBytes, err := api.Next(videoId, playlistId, api.WebMusic, paramsMap, authObj)
 
 	var nextResponse _youtube.NextResponse
 	err = json.Unmarshal(responseBytes, &nextResponse)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Error building API request: %s", err))
+		return errors.New(fmt.Sprintf("Error parsing response: %s", err))
 	}
 
 	if continuation == "" {

@@ -1,4 +1,4 @@
-package _youtube
+package api
 
 type innertubeRequest struct {
 	ActivePlayers                    []map[string]string               `json:"activePlayers,omitempty"`
@@ -9,7 +9,7 @@ type innertubeRequest struct {
 	Query                            string                            `json:"query,omitempty"`
 	Input                            *string                           `json:"input,omitempty"`
 	Continuation                     map[string]string                 `json:"continuation,omitempty"`
-	Context                          inntertubeContext                 `json:"context"`
+	Context                          interface{}                       `json:"context"`
 	PlaybackContext                  *playbackContext                  `json:"playbackContext,omitempty"`
 	ContentCheckOK                   bool                              `json:"contentCheckOk,omitempty"`
 	RacyCheckOk                      bool                              `json:"racyCheckOk,omitempty"`
@@ -23,7 +23,9 @@ type innertubeRequest struct {
 	ClickTracking                    *ClickTracking                    `json:"clickTracking,omitempty"`
 	ServiceIntegrityDimensions       *ServiceIntegrityDimensions       `json:"serviceIntegrityDimensions,omitempty"`
 }
-
+type BrowseEndpointContextMusicConfig struct {
+	PageType string `json:"pageType"`
+}
 type ServiceIntegrityDimensions struct {
 	PoToken string `json:"poToken"`
 }
@@ -48,14 +50,15 @@ type playbackContext struct {
 }
 
 type contentPlaybackContext struct {
-	// SignatureTimestamp string `json:"signatureTimestamp"`
-	HTML5Preference string `json:"html5Preference"`
+	SignatureTimestamp string `json:"signatureTimestamp"`
+	HTML5Preference    string `json:"html5Preference"`
+	Referer            string `json:"referer,omitempty"`
 }
 
 type inntertubeContext struct {
-	Client innertubeClient `json:"client"`
-	//Request       string          `json:"request"`
-	User map[string]string `json:"user"`
+	Client  innertubeClient   `json:"client"`
+	Request map[string]string `json:"request"`
+	User    map[string]string `json:"user"`
 	//CaptionParams string          `json:"caption_params"`
 }
 
@@ -70,22 +73,33 @@ type innertubeClient struct {
 	UTCOffset          int     `json:"utcOffsetMinutes,omitempty"`
 	VisitorData        string  `json:"visitorData,omitempty"`
 	OriginalUrl        *string `json:"originalUrl,omitempty"`
-	DeviceExperimentId *string `json:"deviceExperimentId,omitempty"`
-	DeviceMake         *string `json:"deviceMake,omitempty"`
+	DeviceExperimentId string  `json:"deviceExperimentId,omitempty"`
+	DeviceMake         string  `json:"deviceMake"`
 	BrowserName        *string `json:"BrowserName,omitempty"`
 	BrowserVersion     *string `json:"browserVersion,omitempty"`
-	Platform           *string `json:"platform,omitempty"`
+	Platform           string  `json:"platform,omitempty"`
+	DeviceModel        string  `json:"deviceModel"`
+	OsName             string  `json:"osName,omitempty"`
+	OsVersion          string  `json:"osVersion,omitempty"`
+	ScreenPixelDensity string  `json:"screenPixelDensity,omitempty"`
+	UserInterfaceTheme string  `json:"userInterfaceTheme,omitempty"`
+	AcceptHeader       string  `json:"acceptHeader,omitempty"`
 }
 
 type Params map[string]string
 
 type ClientInfo struct {
+	ClientId          string
 	ClientName        string
 	ClientKey         string
 	ClientVersion     string
 	userAgent         string
 	AndroidSdkVersion int
 	DeviceModel       string
+	DeviceMake        string
+	OsName            string
+	OsVersion         string
+	Platform          string
 }
 
 var (
@@ -99,9 +113,10 @@ var (
 	// WebClient, better to use Android client but go ahead.
 	WebClient = ClientInfo{
 		ClientName:    "WEB",
-		ClientVersion: "2.20240726.00.00",
-		ClientKey:     "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
-		userAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+		ClientVersion: "2.20240814.00.00",
+		ClientId:      "1",
+		//ClientKey:     "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.19 Safari/537.36",
 	}
 
 	// AndroidClient, download go brrrrrr.
@@ -125,25 +140,50 @@ var (
 	IOS_MUSIC = ClientInfo{
 		ClientName:    "IOS_MUSIC",
 		ClientVersion: "7.27.0",
+		DeviceMake:    "Apple",
+		DeviceModel:   "iPhone16,2",
+		OsName:        "iPhone",
+		OsVersion:     "18.1.0.22B83",
 		//ClientKey:     "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc", // seems like same ClientKey works for both clients
-		DeviceModel: "iPhone16,2",
-		userAgent:   "com.google.ios.youtubemusic/7.27.0 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
+		userAgent: "com.google.ios.youtubemusic/7.27.0 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
 	}
 
 	WEB_CREATOR = ClientInfo{
 		ClientName:    "WEB_CREATOR",
-		ClientVersion: "1.20240723.03.00",
+		ClientVersion: "1.20241203.01.00",
+		ClientId:      "62",
 		//ClientKey:     "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc", // seems like same ClientKey works for both clients
 		//DeviceModel: "iPhone16,2",
 		//userAgent:   "com.google.ios.youtubemusic/7.27.0 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
 	}
 
-	WebMusic = ClientInfo{
-		ClientName:    "WEB_REMIX",
-		ClientVersion: "1.20240724.00.0",
+	ANDROID_VR = ClientInfo{
+		ClientName:    "ANDROID_VR",
+		ClientVersion: "1.60.19",
 
 		//	ClientKey: "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30", // seems like same ClientKey works for both clients
-		userAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+		userAgent: "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+	}
+
+	WebMusic = ClientInfo{
+		ClientName:    "WEB_REMIX",
+		ClientId:      "67",
+		ClientVersion: "1.20241201.00.00",
+		OsName:        "Windows",
+		OsVersion:     "10.0",
+		Platform:      "DESKTOP",
+		//	ClientKey: "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30", // seems like same ClientKey works for both clients
+		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.19 Safari/537.36",
+	}
+
+	TVHTML5_AUDIO = ClientInfo{
+		ClientName:    "TVHTML5_AUDIO",
+		ClientVersion: "2.0",
+		//OsName:        "Macintosh",
+		//OsVersion:     "10.15",
+		//Platform:      "DESKTOP",
+		//	ClientKey: "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30", // seems like same ClientKey works for both clients
+		//userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0,gzip(gfe)",
 	}
 
 	// EmbeddedClient, not really tested.

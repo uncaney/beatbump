@@ -44,14 +44,14 @@ export function sort({
 	const canProxy = $proxySettings["Proxy Streams"] === true;
 
 	if (dash === true) {
-		const proxy_url = canProxy ? new URL(proxyUrl) : new URL("");
+		//const proxy_url = canProxy ? new URL(proxyUrl) : new URL("");
 		const formats = map(
 			data?.streamingData?.adaptiveFormats as Array<IFormat>,
 			(item) => {
 				const url = new URL(item.url);
-				const host = url.host;
-				url.host = proxy_url.host ?? "hls.beatbump.io";
-				url.searchParams.set("host", host);
+				//const host = url.host;
+				//url.host = proxy_url.host ?? "hls.beatbump.io";
+				//url.searchParams.set("host", host);
 				return {
 					...item,
 					url: url.toString(),
@@ -68,13 +68,9 @@ export function sort({
 	const host = data?.playerConfig?.hlsProxyConfig?.hlsChunkHost;
 	const formats: Array<any> = data?.streamingData
 		?.adaptiveFormats as Array<any>;
-	const hostRegex = /https:\/\/(.*?)\//;
+	//const hostRegex = /https:\/\/(.*?)\//;
 	const hls =
-		(data?.streamingData?.hlsManifestUrl as string).replace(
-			hostRegex,
-			proxyUrl ? proxyUrl : "https://hls.beatbump.io/",
-		) +
-		("?host=" + host);
+		(data?.streamingData?.hlsManifestUrl as string);
 
 	let video = "";
     let duration = -1;
@@ -85,6 +81,9 @@ export function sort({
 	>(
 		formats,
 		(item) => {
+            if (item.url === ""){
+                return null;
+            }
 			const url = new URL(item.url);
 			if (canProxy) {
 				url.searchParams.set("host", url.host);

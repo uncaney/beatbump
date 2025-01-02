@@ -1,13 +1,14 @@
 package main
 
 import (
+	"beatbump-server/backend/_youtube/api/auth"
 	"beatbump-server/backend/api"
-	"beatbump-server/backend/api/auth"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
 
 func main() {
+
 	e := echo.New()
 
 	e.Use(middleware.CORS())

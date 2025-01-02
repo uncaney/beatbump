@@ -1,7 +1,7 @@
-package _youtube
+package api
 
 import (
-	"beatbump-server/backend/api/auth"
+	"beatbump-server/backend/_youtube/api/auth"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -13,7 +13,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -51,7 +53,7 @@ func Browse(browseId string, pageType PageType, params string,
 	if params != "" {
 		data.Params = params
 	}
-	resp, err := callAPI(urlAddress, data, client.userAgent, authObj)
+	resp, err := callAPI(urlAddress, data, client, authObj)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +80,7 @@ func GetSearchSuggestions(query string, client ClientInfo) ([]byte, error) {
 		Input:   strPtr(query),
 	}
 
-	resp, err := callAPI(url, data, client.userAgent, nil)
+	resp, err := callAPI(url, data, client, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +120,7 @@ func Search(query string, filter string, itct *string, ctoken *string, client Cl
 		data.Params = filter
 	}
 
-	resp, err := callAPI(url, data, client.userAgent, nil)
+	resp, err := callAPI(url, data, client, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +153,7 @@ func GetQueue(videoId string, playlistId string, client ClientInfo) ([]byte, err
 		},*/
 	}
 
-	resp, err := callAPI(url, data, client.userAgent, nil)
+	resp, err := callAPI(url, data, client, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +190,7 @@ func Next(videoId string, playlistId string, client ClientInfo, params Params, a
 		},*/
 	}
 
-	resp, err := callAPI(url, data, client.userAgent, authObj)
+	resp, err := callAPI(url, data, client, authObj)
 	if err != nil {
 		return nil, err
 	}
@@ -198,32 +200,34 @@ func Next(videoId string, playlistId string, client ClientInfo, params Params, a
 
 func Player(videoId string, playlistId string, client ClientInfo, params Params, authObj *auth.Auth) ([]byte, error) {
 
-	url := URL_BASE + "player" + "?prettyPrint=false"
+	playerUrl := URL_BASE + "player" + "?prettyPrint=false"
 
 	innertubeContext := prepareInnertubeContext(client, nil)
+	state, err := GetPlayerInfo(videoId, authObj)
 
-	reqParams, err := createRequestParams(params)
-
+	str := strconv.FormatUint(state.SignatureTimestamp, 10)
 	data := innertubeRequest{
 		//RequestAttributes: additionalRequestAttributes,
 		VideoID:        videoId,
-		Context:        innertubeContext,
+		Context:        innertubeContext, //innertubeContext,
 		ContentCheckOK: true,
 		RacyCheckOk:    true,
-		Params:         reqParams,
-		PlaylistId:     playlistId,
-		/*PlaybackContext: &playbackContext{
+		//Params:         reqParams,
+		PlaylistId: playlistId,
+
+		PlaybackContext: &playbackContext{
 			ContentPlaybackContext: contentPlaybackContext{
-				// SignatureTimestamp: sts,
-				HTML5Preference: "HTML5_PREF_WANTS",
+				SignatureTimestamp: str,
+				HTML5Preference:    "HTML5_PREF_WANTS",
+				//Referer:            "https://www.youtube.com/watch?v=" + videoId,
 			},
-		},*/
+		},
 		/*ServiceIntegrityDimensions: &ServiceIntegrityDimensions{
 			PoToken: "51217476",
 		},*/
 	}
 
-	resp, err := callAPI(url, data, client.userAgent, authObj)
+	resp, err := callAPI(playerUrl, data, client, authObj)
 	if err != nil {
 		return nil, err
 	}
@@ -232,107 +236,109 @@ func Player(videoId string, playlistId string, client ClientInfo, params Params,
 
 }
 
-func callAPI(urlAddress string, requestPayload innertubeRequest, userAgent string, authbj *auth.Auth) ([]byte, error) {
-	payload, err := json.Marshal(requestPayload)
+func DownloadWebpage(urlAddress string, clientInfo ClientInfo, authbj *auth.Auth) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, urlAddress, nil)
 	if err != nil {
 		return nil, err
 	}
+	return doRequest(clientInfo, authbj, req, nil)
+}
+
+func callAPI(urlAddress string, requestPayload innertubeRequest, clientInfo ClientInfo, authbj *auth.Auth) ([]byte, error) {
 
 	//log.Debug().Msg("Request Body:" + string(payload))
-	if requestPayload.Params == "" {
+	/*if requestPayload.Params == "" {
 		requestPayload.Params = "CgIQBg"
-	}
+	}*/
 
-	req, err := http.NewRequest(http.MethodPost, urlAddress, bytes.NewReader(payload))
+	req, err := http.NewRequest(http.MethodPost, urlAddress, nil)
+
 	if err != nil {
 		return nil, err
 	}
+	return doRequest(clientInfo, authbj, req, &requestPayload)
+}
 
-	myDialer := net.Dialer{}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return myDialer.DialContext(ctx, "tcp4", addr)
-	}
-	client := http.Client{
-		Transport: transport,
-	}
+func doRequest(clientInfo ClientInfo, authbj *auth.Auth, req *http.Request, requestPayload *innertubeRequest) ([]byte, error) {
 
-	if requestPayload.Context.Client.OriginalUrl != nil {
-		req.Header.Set("referer", *requestPayload.Context.Client.OriginalUrl)
-	}
+	urlAddress := req.URL.String()
+	fmt.Println(urlAddress)
+	var client http.Client
+	client = getHttpClient(authbj)
 
-	if strings.Contains(urlAddress, "player") && authbj != nil {
-		if authbj.AuthType == auth.AUTH_TYPE_COOKIES && authbj.CookieHeader != "" {
+	req.Header.Set("referer", "https://music.youtube.com")
 
-			cookies, err := parseCookieString(authbj.CookieHeader)
-			if err != nil {
-				fmt.Println("Error parsing cookies:", err)
-				return nil, err
-			}
-			var cookiesList []*http.Cookie
-			for key, value := range cookies {
-
-				cookie := &http.Cookie{
-					Name:    key,
-					Value:   value,
-					Path:    "/",
-					Domain:  ".youtube.com",
-					Expires: time.Now().Add(5 * time.Minute),
-					Secure:  true,
-				}
-				cookiesList = append(cookiesList, cookie)
-
-				if key == "SAPISID" {
-					authorization := getAuthorization(value)
-					req.Header.Set("Authorization", authorization)
-					//req.Header.Set("X-Origin", "https://music.youtube.com")
-					//req.Header.Set("X-Goog-AuthUser", "0")
-					//req.Header.Set("X-Youtube-Bootstrap-Logged-In", "0")
-					//req.Header.Set("X-YouTube-Client-Name", "67")
-					//req.Header.Set("X-YouTube-Client-Version", WebMusic.ClientVersion)
-					if requestPayload.Context.Client.VisitorData != "" {
-						req.Header.Set("X-Goog-Visitor-Id", requestPayload.Context.Client.VisitorData)
-					}
-					req.Header.Set("X-Goog-PageId", "undefined")
-					//fmt.Printf("SAPISID: %s", authorization)
-				}
-			}
-			jar, err := cookiejar.New(nil)
+	if strings.Contains(urlAddress, "youtubei/v1/player") {
+		if authbj != nil && authbj.AuthType == auth.AUTH_TYPE_COOKIES && authbj.CookieHeader != "" {
 			u, _ := url.Parse("https://www.youtube.com/")
-			jar.SetCookies(u, cookiesList)
-			client.Jar = jar
-		} else if authbj.AuthType == auth.AUTH_TYPE_OAUTH && authbj.OauthToken != nil {
+			for _, cookie := range client.Jar.Cookies(u) {
+
+				if cookie.Name == "__Secure-3PAPISID" || cookie.Name == "SAPISID" {
+					authorization := getAuthorization(cookie.Value)
+					req.Header.Set("Authorization", authorization)
+
+					if requestPayload != nil {
+						info, _ := GetPlayerInfo("", authbj)
+						//contextMap := info.InnerTubeContext.Context.(map[string]interface{})
+						clinetAttr := info.InnerTubeContext["client"].(map[string]interface{})
+						req.Header.Set("X-Goog-Visitor-Id", clinetAttr["visitorData"].(string))
+					}
+
+					req.Header.Set("X-Goog-AuthUser", "0")
+				}
+			}
+		} else if authbj != nil && authbj.AuthType == auth.AUTH_TYPE_OAUTH && authbj.OauthToken != nil {
 			req.Header.Set("Authorization", authbj.OauthToken.TokenType+" "+authbj.OauthToken.AccessToken)
+			// Get the current Unix timestamp as an int64
+			timestamp := time.Now().Unix()
+
+			// Convert the timestamp to a string
+			timestampString := strconv.FormatInt(timestamp, 10)
+			req.Header.Set("X-Goog-Request-Time", timestampString)
+			//	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:88.0) Gecko/20100101 Firefox/88.0 Cobalt/Version")
+
 		}
 	}
+	/*req.Header.Set("Authorization", "Bearer ")
+	timestamp := time.Now().Unix()
 
-	req.Header.Set("accept-encoding", "gzip, deflate")
-	req.Header.Set("content-encoding", "gzip")
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Host", "music.youtube.com")
-	req.Header.Set("Origin", "https://music.youtube.com")
+	// Convert the timestamp to a string
+	timestampString := strconv.FormatInt(timestamp, 10)
+	req.Header.Set("X-Goog-Request-Time", timestampString)*/
 
-	//req.Header.Set("Host", "www.youtube.com")
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
-	req.Header.Set("Content-Type", "application/json")
-	//	req.Header.Set("X-Origin", "https://music.youtube.com")
-
-	//
-
-	resp, err := client.Do(req)
-
-	if err != nil {
-		return nil, err
+	if clientInfo.userAgent != "" {
+		req.Header.Set("User-Agent", clientInfo.userAgent)
+	} else {
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.19 Safari/537.36")
 	}
+	if req.Method == http.MethodPost {
+		req.Header.Set("X-Youtube-Client-Name", clientInfo.ClientId)
+		req.Header.Set("X-Youtube-Client-Version", clientInfo.ClientVersion)
+		req.Header.Set("Origin", "https://music.youtube.com")
+		req.Header.Set("X-Origin", "https://music.youtube.com")
+		req.Header.Set("Content-Type", "application/json")
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusBadRequest {
-		req.Header.Del("Authorization")
-		resp, err = client.Do(req)
+		payload, err := json.Marshal(requestPayload)
 		if err != nil {
 			return nil, err
 		}
+		fmt.Println(string(payload))
+
+		req.Body = io.NopCloser(bytes.NewBuffer(payload))
+	}
+	req.Header.Set("Accept-Language", "en-us,en;q=0.5")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9")
+	req.Header.Set("accept-encoding", "gzip, deflate")
+
+	resp, err := client.Do(req)
+
+	if DEBUG {
+		res, _ := httputil.DumpRequest(req, true)
+		fmt.Print(string(res))
+	}
+
+	if err != nil {
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -353,45 +359,58 @@ func callAPI(urlAddress string, requestPayload innertubeRequest, userAgent strin
 
 	respBytes, err := io.ReadAll(reader)
 
-	if DEBUG {
-		fmt.Println(urlAddress)
-		fmt.Println(string(payload))
-		buffer := new(bytes.Buffer)
-		if err := json.Compact(buffer, respBytes); err != nil {
-			fmt.Println(err)
-		}
-		fmt.Println(buffer.String())
-	}
-
 	return respBytes, nil
 }
 
-func createRequestParams(params Params) (string, error) {
-	reqParams := "2AMB"
-	if params != nil {
-		paramBytes, err := json.Marshal(params)
-		if err != nil {
-			return "", err
+var client *http.Client = nil
+
+func getHttpClient(auth *auth.Auth) http.Client {
+	if client == nil {
+
+		myDialer := net.Dialer{}
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return myDialer.DialContext(ctx, "tcp4", addr)
 		}
-		reqParams = string(paramBytes)
+		client = &http.Client{
+			Transport: transport,
+		}
 	}
-	return reqParams, nil
+	if auth.CookieHeader != "" {
+		cookies, err := parseCookieString(auth.CookieHeader)
+		if err != nil {
+			fmt.Println("Error parsing cookies:", err)
+			return *client
+		}
+		var cookiesList []*http.Cookie
+		for key, value := range cookies {
+
+			cookie := &http.Cookie{
+				Name:    key,
+				Value:   value,
+				Path:    "/",
+				Domain:  ".youtube.com",
+				Expires: time.Now().Add(5 * time.Minute),
+				Secure:  true,
+			}
+			cookiesList = append(cookiesList, cookie)
+		}
+
+		jar, err := cookiejar.New(nil)
+		u, _ := url.Parse("https://www.youtube.com/")
+		jar.SetCookies(u, cookiesList)
+		client.Jar = jar
+	}
+	return *client
 }
 
 func prepareInnertubeContext(clientInfo ClientInfo, visitorData *string) inntertubeContext {
 	client := innertubeClient{
-		HL:             "en",
-		GL:             "US",
-		ClientName:     clientInfo.ClientName,
-		ClientVersion:  clientInfo.ClientVersion,
-		BrowserName:    strPtr("firefox"),
-		BrowserVersion: strPtr("127.0"),
-		DeviceMake:     strPtr("apple"),
-		TimeZone:       "America/Los_Angeles",
-		Platform:       strPtr("DESKTOP"),
-		OriginalUrl:    strPtr("https://music.youtube.com/"),
-		//AndroidSDKVersion: clientInfo.androidVersion,
-		UserAgent: clientInfo.userAgent,
+		HL:            "en",
+		GL:            "US",
+		ClientName:    clientInfo.ClientName,
+		ClientVersion: clientInfo.ClientVersion,
+		TimeZone:      "UTC",
 	}
 	if visitorData != nil {
 		escape := url.QueryEscape(*visitorData)
@@ -402,15 +421,14 @@ func prepareInnertubeContext(clientInfo ClientInfo, visitorData *string) inntert
 		User: map[string]string{
 			"lockedSafetyMode": "false",
 		},
+		Request: map[string]string{
+			"useSsl": "true",
+		},
 	}
 }
 
 func strPtr(s string) *string {
 	return &s
-}
-
-type BrowseEndpointContextMusicConfig struct {
-	PageType string `json:"pageType"`
 }
 
 // ParseCookieString parses a cookie string into a map of key-value pairs.

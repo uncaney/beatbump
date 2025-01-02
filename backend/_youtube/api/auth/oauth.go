@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"golang.org/x/oauth2"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,8 +19,6 @@ import (
 )
 
 const (
-	clientID            = "861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com"
-	clientSecret        = "SboVhoG9s0rNafixCSGGKXAT"
 	scopes              = "https://www.googleapis.com/auth/youtube"
 	TokenURL            = "https://www.youtube.com/o/oauth2/token"
 	oauth2DeviceCodeURL = "https://www.youtube.com/o/oauth2/device/code"
@@ -32,12 +31,36 @@ type YouTubeOAuth2Handler struct {
 }
 
 func isTokenValid(token oauth2.Token) bool {
-	return token.AccessToken != "" && token.TokenType != "" && token.RefreshToken != ""
+	fieldValidation := token.AccessToken != "" && token.TokenType != "" && token.RefreshToken != ""
+	if fieldValidation {
+		//return c.JSON(http.StatusOK, output)
+		url := "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true"
+
+		// Create a Bearer string by appending string access token
+		var bearer = token.TokenType + " " + token.AccessToken
+
+		// Create a new request using http
+		req, err := http.NewRequest("GET", url, nil)
+
+		// add authorization header to the req
+		req.Header.Add("Authorization", bearer)
+
+		// Send req using http Client
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Println("Error on response.\n[ERROR] -", err)
+		}
+		defer resp.Body.Close()
+
+		return resp.StatusCode == 200
+	}
+	return false
 }
 
-func RefreshToken(refreshToken string) (oauth2.Token, error) {
+func RefreshToken(refreshToken string, clientId string, clientSecret string) (oauth2.Token, error) {
 	data := map[string]string{
-		"client_id":     clientID,
+		"client_id":     clientId,
 		"client_secret": clientSecret,
 		"refresh_token": refreshToken,
 		"grant_type":    "refresh_token",
@@ -75,81 +98,29 @@ func RefreshToken(refreshToken string) (oauth2.Token, error) {
 }
 
 func DeviceOauth(c echo.Context) error {
+	clientSecret := c.Request().Header.Get("x-google-client-secret")
+	clientId := c.Request().Header.Get("x-google-client-id")
+	tokenObj := extractToken(clientId, clientSecret, c)
 
-	tokenObj := extractToken(c)
-
-	if tokenObj != nil {
+	if tokenObj != nil && isTokenValid(*tokenObj) {
 		output := map[string]string{}
 		output["loggedIn"] = "true"
+
 		return c.JSON(http.StatusOK, output)
-		/*url := "https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true"
-
-		  // Create a Bearer string by appending string access token
-		  var bearer = tokenObj.TokenType + " " + tokenObj.AccessToken
-
-		  // Create a new request using http
-		  req, err := http.NewRequest("GET", url, nil)
-
-		  // add authorization header to the req
-		  req.Header.Add("Authorization", bearer)
-
-		  // Send req using http Client
-		  client := &http.Client{}
-		  resp, err := client.Do(req)
-		  if err != nil {
-		  	log.Println("Error on response.\n[ERROR] -", err)
-		  }
-		  defer resp.Body.Close()*/
-		/*responseBytes, err := _youtube.Browse(tokenObj, "FEmusic_home", _youtube.PageType_MusicPageTypePlaylist, "", nil, nil, nil, _youtube.WebMusic)
-		  if err != nil {
-		  	fmt.Println("Error on response.\n[ERROR] -", err)
-		  	return beginOauthflow(c)
-		  }
-
-		  var homeResponse _youtube.HomeResponse
-		  err = json.Unmarshal(responseBytes, &homeResponse)
-		  if err != nil {
-		  	fmt.Println("Error on response.\n[ERROR] -", err)
-		  	return beginOauthflow(c)
-		  }
-
-		  r := api.ParseHome(homeResponse)
-		  responseMap, ok := r.(map[string]interface{})
-		  if !ok {
-		  	return beginOauthflow(c)
-		  }
-
-		  carosuel := responseMap["carousels"]
-		  carosuelArray, ok := carosuel.([]api.Carousel)
-		  if !ok {
-		  	return beginOauthflow(c)
-		  }
-
-		  if len(carosuelArray) == 0 {
-		  	return beginOauthflow(c)
-		  }
-
-		  title := carosuelArray[0].Header.Title
-		  if strings.Contains(title, "Welcome") {
-		  	output := map[string]string{}
-		  	output["loggedIn"] = "true"
-		  	output["name"] = strings.Replace(title, "Welcome ", "", 1)
-		  	return c.JSON(http.StatusOK, output)
-		  }*/
 	}
 
-	return beginOauthflow(c)
+	return beginOauthflow(clientId, clientSecret, c)
 }
 
-func beginOauthflow(c echo.Context) error {
+func beginOauthflow(clientId string, clientSecret string, c echo.Context) error {
 	//delete old token
 	deleteTokenInCookie(c)
 
 	data := map[string]string{
-		"client_id":    clientID,
-		"scope":        scopes,
-		"device_id":    uuid.New().String(),
-		"device_model": "ytlr::",
+		"client_id": clientId,
+		"scope":     scopes,
+		"device_id": uuid.New().String(),
+		//"device_model": "ytlr::",
 	}
 	payload, err := json.Marshal(data)
 	if err != nil {
@@ -190,7 +161,9 @@ func beginOauthflow(c echo.Context) error {
 
 func AuthorizeOauth(c echo.Context) error {
 	deviceCode := c.Param("deviceCode")
-	token, err := authorize(deviceCode, 5)
+	clientSecret := c.Request().Header.Get("x-google-client-secret")
+	clientId := c.Request().Header.Get("x-google-client-id")
+	token, err := authorize(clientId, clientSecret, deviceCode, 5)
 
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, err)
@@ -260,7 +233,7 @@ func deleteTokenInCookie(c echo.Context) {
 	c.SetCookie(cookie)
 }
 
-func authorize(deviceCode string, interval int) (*oauth2.Token, error) {
+func authorize(clientId string, clientSecret string, deviceCode string, interval int) (*oauth2.Token, error) {
 
 	if currcontext, ok := pendingTokens[deviceCode]; ok {
 		if currcontext != nil {
@@ -268,7 +241,7 @@ func authorize(deviceCode string, interval int) (*oauth2.Token, error) {
 		}
 	}
 	data := map[string]string{
-		"client_id":     clientID,
+		"client_id":     clientId,
 		"client_secret": clientSecret,
 		"code":          deviceCode,
 		"grant_type":    "http://oauth.net/grant_type/device/1.0",
@@ -346,7 +319,7 @@ func retrieveToken(payload []byte) (*oauth2.Token, error) {
 	return nil, errors.New(errorResponse.Error)
 }
 
-func extractToken(c echo.Context) *oauth2.Token {
+func extractToken(clientId string, clientSecret string, c echo.Context) *oauth2.Token {
 	tokenCookie, _ := c.Cookie("token")
 	tokenObj := oauth2.Token{}
 	if tokenCookie != nil {
@@ -355,7 +328,8 @@ func extractToken(c echo.Context) *oauth2.Token {
 
 		if isTokenValid(tokenObj) {
 			if time.Now().Unix() >= (tokenObj.Expiry.Unix() - 60) {
-				token, err := RefreshToken(tokenObj.RefreshToken)
+				c.Cookies()
+				token, err := RefreshToken(tokenObj.RefreshToken, clientId, clientSecret)
 				if err != nil {
 
 					return nil

@@ -136,6 +136,46 @@
                 </div>
             </div>
             <div class="setting">
+                <label for="oauthClientId">
+                    Oauth ClientID
+                    <span class="">
+                        Oauth Client ID
+                    </span>
+                </label>
+                <div class="input-container">
+                    <div class="input no-btn mb-1">
+                        <input
+                            type="text"
+                            on:input={(e) => {
+								let value = e.currentTarget.value;
+                                localStorage.setItem('x-google-client-id',value);
+							}}
+                            value={localStorage.getItem("x-google-client-id")}
+                        />
+                    </div>
+                </div>
+            </div>
+            <div class="setting">
+                <label for="oauthClientSecret">
+                    Oauth Client Secret
+                    <span class="">
+                        Oauth Client Secret
+                    </span>
+                </label>
+                <div class="input-container">
+                    <div class="input no-btn mb-1">
+                        <input
+                            type="text"
+                            on:input={(e) => {
+								let value = e.currentTarget.value;
+                                localStorage.setItem('x-google-client-secret',value);
+							}}
+                            value={localStorage.getItem("x-google-client-secret")}
+                        />
+                    </div>
+                </div>
+            </div>
+            <div class="setting">
                 <label>Oauth</label>
                 {#if oauthInfo.oauthStart == undefined || oauthInfo.oauthStart === ""}
                     <label>Logged in</label>

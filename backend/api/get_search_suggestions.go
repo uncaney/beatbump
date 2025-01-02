@@ -2,6 +2,7 @@ package api
 
 import (
 	"beatbump-server/backend/_youtube"
+	"beatbump-server/backend/_youtube/api"
 	"encoding/json"
 	"fmt"
 	"github.com/labstack/echo/v4"
@@ -22,7 +23,7 @@ func GetSearchSuggstionsHandler(c echo.Context) error {
 
 	var responseBytes []byte
 
-	responseBytes, err = _youtube.GetSearchSuggestions(queryUnescape, _youtube.WebMusic)
+	responseBytes, err = api.GetSearchSuggestions(queryUnescape, api.WebMusic)
 
 	if err != nil {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))

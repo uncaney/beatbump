@@ -2,6 +2,7 @@ package api
 
 import (
 	"beatbump-server/backend/_youtube"
+	"beatbump-server/backend/_youtube/api"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +21,7 @@ func GetQueueHandler(c echo.Context) error {
 	if videoId == "" && playlistId == "" {
 		return errors.New("missing required param: videoId")
 	}
-	responseBytes, err := _youtube.GetQueue(videoId, playlistId, _youtube.WebMusic)
+	responseBytes, err := api.GetQueue(videoId, playlistId, api.WebMusic)
 
 	var nextResponse _youtube.NextResponse
 	err = json.Unmarshal(responseBytes, &nextResponse)

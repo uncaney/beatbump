@@ -2,7 +2,8 @@ package api
 
 import (
 	"beatbump-server/backend/_youtube"
-	"beatbump-server/backend/api/auth"
+	"beatbump-server/backend/_youtube/api"
+	"beatbump-server/backend/_youtube/api/auth"
 	"encoding/json"
 	"fmt"
 	"github.com/labstack/echo/v4"
@@ -56,9 +57,9 @@ func PlaylistEndpointHandler(c echo.Context) error {
 	var responseBytes []byte
 	var err error
 	if ctoken != "" && itct != "" {
-		responseBytes, err = _youtube.Browse(browseID, _youtube.PageType_MusicPageTypePlaylist, "", nil, &itct, &ctoken, _youtube.WebMusic, authObj)
+		responseBytes, err = api.Browse(browseID, api.PageType_MusicPageTypePlaylist, "", nil, &itct, &ctoken, api.WebMusic, authObj)
 	} else {
-		responseBytes, err = _youtube.Browse(browseID, _youtube.PageType_MusicPageTypePlaylist, "", nil, nil, nil, _youtube.WebMusic, authObj)
+		responseBytes, err = api.Browse(browseID, api.PageType_MusicPageTypePlaylist, "", nil, nil, nil, api.WebMusic, authObj)
 	}
 
 	if err != nil {
