@@ -100,6 +100,9 @@ func RefreshToken(refreshToken string, clientId string, clientSecret string) (oa
 func DeviceOauth(c echo.Context) error {
 	clientSecret := c.Request().Header.Get("x-google-client-secret")
 	clientId := c.Request().Header.Get("x-google-client-id")
+	if clientId == "" || clientSecret == "" {
+		return c.JSON(http.StatusBadRequest, "missing client secret / id")
+	}
 	tokenObj := extractToken(clientId, clientSecret, c)
 
 	if tokenObj != nil && isTokenValid(*tokenObj) {
@@ -163,6 +166,9 @@ func AuthorizeOauth(c echo.Context) error {
 	deviceCode := c.Param("deviceCode")
 	clientSecret := c.Request().Header.Get("x-google-client-secret")
 	clientId := c.Request().Header.Get("x-google-client-id")
+	if clientId == "" || clientSecret == "" {
+		return c.JSON(http.StatusBadRequest, "missing client secret / id")
+	}
 	token, err := authorize(clientId, clientSecret, deviceCode, 5)
 
 	if err != nil {

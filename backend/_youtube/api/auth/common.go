@@ -38,15 +38,15 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		} else {
 			clientSecret := c.Request().Header.Get("x-google-client-secret")
 			clientId := c.Request().Header.Get("x-google-client-id")
-			token := extractToken(clientId, clientSecret, c)
-			if token != nil {
-				ac.AuthContext.AuthType = AUTH_TYPE_OAUTH
-				ac.AuthContext.OauthToken = token
-				fmt.Println("using OAUTH context")
+			if clientId != "" && clientSecret != "" {
+				token := extractToken(clientId, clientSecret, c)
+				if token != nil {
+					ac.AuthContext.AuthType = AUTH_TYPE_OAUTH
+					ac.AuthContext.OauthToken = token
+					fmt.Println("using OAUTH context")
+				}
 			}
 		}
-		//	token := extractToken(c)
-		/**/
 
 		return next(ac)
 	}
