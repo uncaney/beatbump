@@ -37,7 +37,6 @@ func PlayerEndpointHandler(c echo.Context) error {
 		responseBytes, err = callPlayerAPI(api.WEB_CREATOR, videoId, playlistId, authObj)
 	} else {
 		responseBytes, err = callPlayerAPI(api.IOS_MUSIC, videoId, playlistId, authObj)
-		//return c.String(http.StatusInternalServerError, "Missing auth - need to use Oauth or supply cookies")
 	}
 
 	if err != nil {
@@ -47,15 +46,15 @@ func PlayerEndpointHandler(c echo.Context) error {
 	var playerResponse _youtube.PlayerResponse
 	err = json.Unmarshal(responseBytes, &playerResponse)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Error building API request: %s", err))
+		return c.JSON(http.StatusInternalServerError, "Unable to parse reeponse: "+err.Error()+" (using:"+getAuthTypeString(authObj)+")")
 	}
 
 	if playerResponse.PlayabilityStatus.Status != "OK" {
-		return errors.New(fmt.Sprintf("PLayability status is not OK: %s", playerResponse.PlayabilityStatus.Status))
+		return c.JSON(http.StatusInternalServerError, "Playability status is not OK: "+playerResponse.PlayabilityStatus.Status+" (using:"+getAuthTypeString(authObj)+")")
 	}
 
 	if len(playerResponse.StreamingData.AdaptiveFormats) == 0 {
-		return errors.New(fmt.Sprintf("Error building API request: %s", playerResponse.PlayabilityStatus.Status))
+		return c.JSON(http.StatusInternalServerError, "Playability status is not OK: "+playerResponse.PlayabilityStatus.Status+" (using:"+getAuthTypeString(authObj)+")")
 	}
 
 	for i := 0; i < len(playerResponse.StreamingData.AdaptiveFormats); i++ {
@@ -84,6 +83,16 @@ func PlayerEndpointHandler(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, playerResponse)
+}
+
+func getAuthTypeString(authObj *auth.Auth) string {
+	if authObj.AuthType == auth.AUTH_TYPE_OAUTH {
+		return "OAuth"
+	}
+	if authObj.AuthType == auth.AUTH_TYPE_COOKIES {
+		return "Cookies"
+	}
+	return "No Auth configured"
 }
 
 func callPlayerAPI(clientInfo api.ClientInfo, videoId string, playlistId string, authObj *auth.Auth) ([]byte, error) {

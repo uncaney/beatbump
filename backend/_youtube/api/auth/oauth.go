@@ -101,7 +101,9 @@ func DeviceOauth(c echo.Context) error {
 	clientSecret := c.Request().Header.Get("x-google-client-secret")
 	clientId := c.Request().Header.Get("x-google-client-id")
 	if clientId == "" || clientSecret == "" {
-		return c.JSON(http.StatusBadRequest, "missing client secret / id")
+		output := map[string]string{}
+		output["status"] = "Update the Oauth client id/secret and refresh the page to begin the OAuth flow"
+		return c.JSON(http.StatusOK, output)
 	}
 	tokenObj := extractToken(clientId, clientSecret, c)
 

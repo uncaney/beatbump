@@ -29,22 +29,20 @@ export function sort({
 	data = {},
 	WebM = false,
 	dash = false,
-	$proxySettings,
 }: {
 	data: Dict<any>;
 	WebM?: boolean;
 	dash?: boolean;
-	$proxySettings: UserSettings["network"];
 }): PlayerFormats {
 	let dash_manifest = "";
 
-	const proxyUrl = ($proxySettings as Required<UserSettings["network"]>)[
+	/*const proxyUrl = ($proxySettings as Required<UserSettings["network"]>)[
 		"Stream Proxy Server"
-	];
-	const canProxy = $proxySettings["Proxy Streams"] === true;
+	];*/
+	//const canProxy = $proxySettings["Proxy Streams"] === true;
 
-	if (dash === true) {
-		//const proxy_url = canProxy ? new URL(proxyUrl) : new URL("");
+
+	/*	//const proxy_url = canProxy ? new URL(proxyUrl) : new URL("");
 		const formats = map(
 			data?.streamingData?.adaptiveFormats as Array<IFormat>,
 			(item) => {
@@ -62,10 +60,10 @@ export function sort({
 
 		const manifest = buildDashManifest(formats, length);
 		dash_manifest =
-			"data:application/dash+xml;charset=utf-8;base64," + btoa(manifest);
-	}
+			"data:application/dash+xml;charset=utf-8;base64," + btoa(manifest);*/
 
-	const host = data?.playerConfig?.hlsProxyConfig?.hlsChunkHost;
+
+	//const host = data?.playerConfig?.hlsProxyConfig?.hlsChunkHost;
 	const formats: Array<any> = data?.streamingData
 		?.adaptiveFormats as Array<any>;
 	//const hostRegex = /https:\/\/(.*?)\//;
@@ -85,10 +83,6 @@ export function sort({
                 return null;
             }
 			const url = new URL(item.url);
-			if (canProxy) {
-				url.searchParams.set("host", url.host);
-				url.host = new URL(proxyUrl).host;
-			}
 			const itag = parseInt(item.itag.toString());
 
             if (duration === -1 && item?.approxDurationMs) {

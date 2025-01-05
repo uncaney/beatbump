@@ -1,7 +1,7 @@
 
 # Beatbump
 
-This project is a continuation of the Beatbump by @snuffyDev.
+This project is a continuation of Beatbump by @snuffyDev.
 
 An alternative frontend for YouTube Music created using Svelte/SvelteKit, and Golang.
 
@@ -13,6 +13,18 @@ An alternative frontend for YouTube Music created using Svelte/SvelteKit, and Go
     <img alt="Awesome Humane Tech" src="https://raw.githubusercontent.com/humanetech-community/awesome-humane-tech/main/humane-tech-badge.svg?sanitize=true">
   </a>
 </p>
+
+### Important note
+As of Nov 2024 Google has started [blocking datacenter ips](https://github.com/yt-dlp/yt-dlp/issues/10128).
+Overcoming the ip block, requires issuing an authenticated request, this can be achieved in one of 2 ways -
+- Oatuh
+- Cookie authentication
+
+Note that Google is keep cracking down on these methods (cookies and oauth),
+so this will be a cat and mouse game (see [here](https://github.com/yt-dlp/yt-dlp/issues/11462) and [here](https://github.com/yt-dlp/yt-dlp/issues/11868))
+
+If you are running beatbump on a datacenter, and experiencing errors (songs not playing), please follow the instructions below on 
+configuring oauth/cookies
 
 ## Features
 
@@ -37,46 +49,51 @@ An alternative frontend for YouTube Music created using Svelte/SvelteKit, and Go
 All data is stored locally on your device. Data synchronization is done using PeerJS, which uses WebRTC for a
 Peer-to-Peer connection between browsers.
 
-### Extensions
-
-Privacy is something you shouldn't have to think about. Using the browser extension LibRedirect, you can automatically
-redirect YouTube Music links to Beatbump. For more information, please visit the
-[LibRedirect Repo](https://github.com/libredirect/libredirect).
-
 ### Contributing
 
 Contributions are welcomed
 
-### Running Beatbump
+### Running Beatbump locally
 
 - git clone https://github.com/giwty/Beatbump.git
 - docker build . -t beatbump
 - docker run 8080:8080 beatbump
-- Access http://app.localhost:8080  
+- Access http://app.localhost:8080
 
-As of Nov 2024, Google has removed OAuth authentication from YT Music. This means using this (somewhat cumbersome) method of cookie authentication is the only way to get YT Music working.
+### Deploying Beatbump to public clour
+... easiest way to deploy beatbump is to use Google's cloud run, which allows to deploy a docker.
+More details will provided latter
 
-Note
+### Important - additional configuration needed
+If songs do not play, that means your ip is blocked and requires authenticated session.
+Follow one of the options below, you advised to not use your main Google account, but create a dedicate one for this purpose.
 
-Cookies will expire after some time. This means that you will have to run this process again if YT Music stops working and you see 401: Unauthorized in your logs.
-Obtaining the Cookies
+#### Option 1 - oauth authentication
+- Follow the insturctions [here](https://developers.google.com/youtube/registering_an_application) to register application.
+For your new credentials, select OAuth client ID and pick TVs and Limited Input devices.
+- Obtain the client id and client secret and paste in Beatbump settings
+- Click the "Start Oauth flow" and follow the steps in the new tab
+- Once complete, go back to Beatbump and click on the complete button.
+- If all went well, a new Cookie will be saved with your Oauth access token.
+- Try to play some music and see if it works now!
 
-    Open YT Music in your browser.
+#### Option 2 - cookie authentication
+To run authenticated requests, set it up by first copying your request headers from an authenticated POST request in your browser.
+To do so, follow these steps:
 
-    Open the developer tools via View -> Developer -> Developer Tools. Note that this might be named differently based on your browser. It should open a window similar to this: Dev tools
+- Open a new tab in your favorite browser
+- Open the developer tools (Ctrl-Shift-I) and select the "Network" tab
+- Go to https://music.youtube.com and ensure you are logged in (Dont use your main Google account)
+- Find an authenticated POST request. The simplest way is to filter by ``/browse`` using the search bar of the developer tools.
+  If you don't see the request, try scrolling down a bit or clicking on the library button in the top bar.
+- Verify that the request looks like this: **Status** 200, **Name** ``browse?...``
+- Find the section called 'Request Headers'
+  Find the item named 'Cookie' and copy the value. It is VERY important that you copy the exact value. Double check that you do not include any additional spaces or characters at the start/end of the value Cookie value
+- Some browser will have an option to copy the value by right clicking and selecting "Copy Value"
+- Paste the value into Beatbump Cookie header setting.
+- Try to play some music and see if it works now!
 
-    Navigate to the 'Network' tab
-    In the filter bar, type "/browse"
-    Now navigate to a page in YT Music that requires authentication, for example, on of your library playlists
-    A request will show-up in the table:
-
-Auth request
-
-    Click the request and make sure you are on the 'Headers' tab
-    Find the section called 'Request Headers'
-    Find the item named 'Cookie' and copy the value. It is VERY important that you copy the exact value. Double check that you do not include any additional spaces or characters at the start/end of the value Cookie value
-
-
+Note :Cookies will expire after some time. This means that you will have to run this process again if Beatbump stops working. 
 
 
 ### Project Inspirations

@@ -24,7 +24,6 @@ export const load = async ({ url, fetch }) => {
 		).then((res) => res.json()),
 	]);
     console.log("test")
-    consogle.log(data)
 	const {
 		videoDetails: {
 			title = "",

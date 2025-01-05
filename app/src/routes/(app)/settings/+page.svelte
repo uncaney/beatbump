@@ -19,7 +19,7 @@
         try {
             const response = await APIClient.fetch(`/api/v1/deviceOauth`);
             if (!response.ok) {
-                throw new Error('Failed to fetch data');
+                console.log(response)
             }
             oauthInfo = await response.json();
         } catch (err) {
@@ -178,9 +178,9 @@
             <div class="setting">
                 <label>Oauth</label>
                 {#if oauthInfo.oauthStart == undefined || oauthInfo.oauthStart === ""}
-                    <label>Logged in</label>
+                    <label>{oauthInfo.status || "Logged in"}</label>
                 {:else}
-                <a target="_blank" href={oauthInfo.oauthStart}>Click here to start</a>
+                <a target="_blank" href={oauthInfo.oauthStart}>Start Oauth flow</a>
                 <button
                     class="link mt-2"
                     on:click={handleOauthComplete}>Complete</button
@@ -260,7 +260,7 @@
                 />
             </div>
         </section>
-        <section>
+        <!--<section>
             <span class="h5">Network</span>
             <div class="setting">
                 <label for="proxy"
@@ -323,7 +323,7 @@
                     class="switch"
                 />
             </div>
-        </section>
+        </section>-->
         <section>
             <span class="h5">Search</span>
             <div class="setting">

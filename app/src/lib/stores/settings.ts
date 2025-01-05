@@ -138,7 +138,7 @@ function _settings() {
 		localStorage.clear();
 		localStorage.setItem("settings", JSON.stringify(list));
 	} else {
-		if (
+		/*if (
 			(!stored?.network["Stream Proxy Server"] &&
 				"HLS Stream Proxy" in stored.network) ||
 			stored?.network["Stream Proxy Server"]?.includes(
@@ -151,7 +151,7 @@ function _settings() {
 		}
 		if (stored?.network["Proxy Thumbnails"] === undefined) {
 			stored.network["Proxy Thumbnails"] = true;
-		}
+		}*/
 		if (stored?.search && typeof stored?.search?.Restricted === "undefined") {
 			stored.search.Restricted = false;
 		}

@@ -769,26 +769,27 @@ export const getSrc = async (
 > => {
 
     const res = await APIClient.fetch(`/api/v1/player.json?videoId=${videoId}&playlistId=${playlistId}&playerParams=${params}`).then((response) => {
-        if (!response.ok) {
-            throw new Error(`Request failed with status ${response.status}`);
+       if (!response.ok) {
+           return response.text().then(message => {
+               throw new Error(message); // Throw a new error with the response text
+           });
         }
         return response.json();
     })
-        .catch((err) => {
-            console.error(err);
-            return null;
+        .catch((message) => {
+            console.error(message);
+            return message;
         });
     if (
-        res &&
+        !res || res instanceof Error ||(res &&
         !res?.streamingData &&
-        res?.playabilityStatus?.status === "UNPLAYABLE"
+        res?.playabilityStatus?.status === "UNPLAYABLE")
     ) {
-        return handleError();
+        return handleError(res.message);
     }
     const formats = sort({
         data: res,
         dash: false,
-        $proxySettings: userSettings?.network || settings.value()["network"],
     });
 
     const src = setTrack(formats, shouldAutoplay);
@@ -817,11 +818,11 @@ function setTrack(formats: PlayerFormats, shouldAutoplay: boolean) {
 	};
 }
 
-function handleError() {
+function handleError(message: string) {
 	console.log("error");
 
 	notify(
-		"An error occurred while initiating playback, skipping...",
+        message || "An error occurred while initiating playback, skipping...",
 		"error",
 		"getNextTrack",
 	);
