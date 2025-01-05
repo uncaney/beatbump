@@ -55,10 +55,19 @@ Contributions are welcomed
 
 ### Running Beatbump locally
 
+#### Run directly from source code
 - git clone https://github.com/giwty/Beatbump.git
-- docker build . -t beatbump
-- docker run 8080:8080 beatbump
+- docker build . -t beatbump:latest
+- docker run -p 8080:8080 beatbump:latest
 - Access http://app.localhost:8080
+
+#### Running Github built docker image
+- docker pull ghcr.io/giwty/beatbump:latest
+- docker run -p 8080:8080 ghcr.io/giwty/beatbump:latest
+- Access http://app.localhost:8080
+
+You can add [-dit] after [docker run] if you want the docker container to run in the background.
+
 
 ### Deploying Beatbump to public clour
 ... easiest way to deploy beatbump is to use Google's cloud run, which allows to deploy a docker.
