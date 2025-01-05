@@ -91,7 +91,10 @@ func RefreshToken(refreshToken string, clientId string, clientSecret string) (oa
 		return oauth2.Token{}, fmt.Errorf("failed to refresh access token")
 	}
 	values := map[string]interface{}{}
-	json.Unmarshal(body, &values)
+	err = json.Unmarshal(body, &values)
+	if err != nil {
+		return oauth2.Token{}, err
+	}
 	token.RefreshToken = refreshToken
 	token.Expiry = time.Now().UTC().Add(time.Second * time.Duration(values["expires_in"].(float64)))
 	return token, nil
@@ -105,9 +108,9 @@ func DeviceOauth(c echo.Context) error {
 		output["status"] = "Update the Oauth client id/secret and refresh the page to begin the OAuth flow"
 		return c.JSON(http.StatusOK, output)
 	}
-	tokenObj := extractToken(clientId, clientSecret, c)
+	tokenObj := extractAndValidateToken(clientId, clientSecret, c)
 
-	if tokenObj != nil && isTokenValid(*tokenObj) {
+	if tokenObj != nil {
 		output := map[string]string{}
 		output["loggedIn"] = "true"
 
@@ -327,25 +330,21 @@ func retrieveToken(payload []byte) (*oauth2.Token, error) {
 	return nil, errors.New(errorResponse.Error)
 }
 
-func extractToken(clientId string, clientSecret string, c echo.Context) *oauth2.Token {
+func extractAndValidateToken(clientId string, clientSecret string, c echo.Context) *oauth2.Token {
 	tokenCookie, _ := c.Cookie("token")
 	tokenObj := oauth2.Token{}
 	if tokenCookie != nil {
 		tokenJson, _ := base64.StdEncoding.DecodeString(tokenCookie.Value)
 		_ = json.Unmarshal([]byte(tokenJson), &tokenObj)
-
 		if isTokenValid(tokenObj) {
-			if time.Now().Unix() >= (tokenObj.Expiry.Unix() - 60) {
-				c.Cookies()
-				token, err := RefreshToken(tokenObj.RefreshToken, clientId, clientSecret)
-				if err != nil {
-
-					return nil
-				}
-				//update cookie
-				storeTokenInCookie(c, token)
-				return &token
+			return &tokenObj
+		} else {
+			tokenObj, err := RefreshToken(tokenObj.RefreshToken, clientId, clientSecret)
+			if err != nil {
+				return nil
 			}
+			//update cookie
+			storeTokenInCookie(c, tokenObj)
 			return &tokenObj
 		}
 	}

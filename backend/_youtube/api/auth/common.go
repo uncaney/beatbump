@@ -39,7 +39,7 @@ func AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			clientSecret := c.Request().Header.Get("x-google-client-secret")
 			clientId := c.Request().Header.Get("x-google-client-id")
 			if clientId != "" && clientSecret != "" {
-				token := extractToken(clientId, clientSecret, c)
+				token := extractAndValidateToken(clientId, clientSecret, c)
 				if token != nil {
 					ac.AuthContext.AuthType = AUTH_TYPE_OAUTH
 					ac.AuthContext.OauthToken = token
