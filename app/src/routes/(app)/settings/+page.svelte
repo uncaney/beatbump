@@ -10,8 +10,8 @@
     import { AudioPlayer } from "$lib/player";
     import { settings, type Theme } from "$stores/settings";
     import {onMount} from "svelte";
-    import {invalidate} from "$app/navigation";
     import {APIClient} from "$lib/api";
+    import {notify} from "$lib/utils";
     const themes: Theme[] = ["Dark", "Dim", "Midnight", "YTM"];
 
     let oauthInfo = {}
@@ -38,12 +38,17 @@
             if (oauthInfo == undefined || oauthInfo.deviceCode == ""){
                 return
             }
+            notify(`Calling server to complete OAuth flow`, "success");
             const response = await APIClient.fetch(`/api/v1/deviceOauth/${oauthInfo.deviceCode}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch data');
             }
-            await invalidate(`/api/v1/deviceOauth`)
+            notify(`OAuth flow completed successfully`, "success");
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000)
         } catch (err) {
+            notify(`OAuth flow failed`+err, "error");
             console.log(err)
         }
     }
@@ -116,7 +121,7 @@
                     class="switch"
                 />
             </div>
-            <div class="setting">
+           <!-- <div class="setting">
                 <label for="quality">Quality</label>
                 <div class="select">
                     <select
@@ -134,7 +139,7 @@
                         {/each}
                     </select>
                 </div>
-            </div>
+            </div>-->
             <div class="setting">
                 <label for="oauthClientId">
                     Oauth ClientID
@@ -207,20 +212,20 @@
                     </div>
                 </div>
             </div>
-            <div class="setting">
+           <!-- <div class="setting">
                 <label>Remember Last Track</label>
                 <input
                     name="lasttrack"
                     id="lasttrack"
                     type="checkbox"
-                    bind:value={$settings["playback"]["Remember Last Track"]}
+                    bind:checked={$settings["playback"]["Remember Last Track"]}
                 />
                 <label
                     for="lasttrack"
                     class="switch"
                 />
-            </div>
-            <div class="setting">
+            </div>-->
+           <!-- <div class="setting">
                 <label for="stream">Stream </label>
                 <div class="select">
                     <select
@@ -238,7 +243,7 @@
                         {/each}
                     </select>
                 </div>
-            </div>
+            </div>-->
 
             <div class="setting">
                 <!-- svelte-ignore a11y-label-has-associated-control -->
@@ -325,7 +330,7 @@
             </div>
         </section>-->
         <section>
-            <span class="h5">Search</span>
+           <!-- <span class="h5">Search</span>
             <div class="setting">
                 <label for="preserve">Preserve </label>
                 <div class="select">
@@ -343,8 +348,8 @@
                         {/each}
                     </select>
                 </div>
-            </div>
-            <div class="setting">
+            </div>-->
+           <!-- <div class="setting">
                 <label for="restricted"
                 >Restricted Mode <span
                 >Can help reduce the amount of explicit or potentially mature
@@ -363,7 +368,7 @@
                     for="restricted"
                     class="switch"
                 />
-            </div>
+            </div>-->
         </section>
     </main>
 {/if}

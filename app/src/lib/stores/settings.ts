@@ -36,7 +36,6 @@ export type UserSettings = {
 	appearance: Appearance;
 	playback: Playback;
 	search: Search;
-	network: Network;
 	appinfo: AppInfo;
 };
 
@@ -56,11 +55,6 @@ let list: UserSettings = {
 	appinfo: {
 		Donate: ENV_DONATION_URL,
 		GitHub: "https://github.com/snuffyDev/Beatbump",
-	},
-	network: {
-		"Stream Proxy Server": "https://hls.beatbump.io/",
-		"Proxy Thumbnails": true,
-		"Proxy Streams": false,
 	},
 	search: { Preserve: "Category", Restricted: false },
 };
