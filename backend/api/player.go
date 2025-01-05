@@ -36,7 +36,7 @@ func PlayerEndpointHandler(c echo.Context) error {
 	} else if authObj.AuthType == auth.AUTH_TYPE_COOKIES {
 		responseBytes, err = callPlayerAPI(api.WEB_CREATOR, videoId, playlistId, authObj)
 	} else {
-		responseBytes, err = callPlayerAPI(api.WebMusic, videoId, playlistId, authObj)
+		responseBytes, err = callPlayerAPI(api.MWebClient, videoId, playlistId, authObj)
 	}
 
 	if err != nil {

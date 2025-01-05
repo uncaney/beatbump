@@ -708,7 +708,8 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 			) return;
 
 			console.error(this.player.error);
-			this.handleError();
+
+            handleError(this.player.error.message+" (ensure you have updated cookie/oauth details)");
 		});
 
 

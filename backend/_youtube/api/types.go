@@ -105,9 +105,9 @@ type ClientInfo struct {
 var (
 	MWebClient = ClientInfo{
 		ClientName:    "MWEB",
-		ClientVersion: "2.20240726.01.00",
+		ClientVersion: "2.20241202.07.00",
 		//ClientKey:     "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
-		//userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+		userAgent: "Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)",
 	}
 
 	// WebClient, better to use Android client but go ahead.
@@ -168,7 +168,7 @@ var (
 	WebMusic = ClientInfo{
 		ClientName:    "WEB_REMIX",
 		ClientId:      "67",
-		ClientVersion: "1.20241201.00.00",
+		ClientVersion: "1.20241127.01.00",
 		OsName:        "Windows",
 		OsVersion:     "10.0",
 		Platform:      "DESKTOP",
