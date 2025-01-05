@@ -376,7 +376,7 @@ func getHttpClient(auth *auth.Auth) http.Client {
 			Transport: transport,
 		}
 	}
-	if auth.CookieHeader != "" {
+	if auth != nil && auth.CookieHeader != "" {
 		cookies, err := parseCookieString(auth.CookieHeader)
 		if err != nil {
 			fmt.Println("Error parsing cookies:", err)
