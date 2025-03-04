@@ -35,16 +35,16 @@ var (
 
 	INNERTUBE_CONTEXT    = `"INNERTUBE_CONTEXT":\s*(\{.*?\}})`
 	NSIG_FUNCTION_ARRAYS = []string{
-		`null\)&&\([a-zA-Z]=(?P<nfunc>[a-zA-Z0-9$]+)\[(?P<idx>\d+)\]\([a-zA-Z0-9]\)`,
+		`null\)&&\([a-zA-Z]=(?P<nfunc>[_a-zA-Z0-9$]+)\[(?P<idx>\d+)\]\([a-zA-Z0-9]\)`,
 		`(?x)&&\(b="n+"\[[a-zA-Z0-9.+$]+\],c=a\.get\(b\)\)&&\(c=(?P<nfunc>[a-zA-Z0-9$]+)(?:\[(?P<idx>\d+)\])?\([a-zA-Z0-9]\)`,
 	}
 	NSIG_FUNCTION_ENDINGS = []string{
-		`\s*=function\s*(\(\w\)\s*\{\s*var\s+\w=\w.split.*?\{\s*return"[a-zA-Z0-9_]+.?_w8_".*?\}\s*return\s+\w+\.join\(""\)\s*\}\s*;)`,
+		`=\s*function(\(\w\)\s*\{[\S\s]*\{return.[a-zA-Z0-9_-]+_w8_.+?\}\s*return\s*\w+.join\(""\)\};)`,
 		`=\s*function([\S\s]*?\}\s*return \w+?\.join\(\"\"\)\s*\};)`,
 		`=\s*function([\S\s]*?\}\s*return [\W\w$]+?\.call\([\w$]+?,\"\"\)\s*\};)`,
 	}
-	REGEX_PLAYER_ID          = "\\/s\\/player\\/([0-9a-f]{8})"                                                                            // Replace with actual regex for player ID
-	REGEX_SIGNATURE_FUNCTION = `\s*?([a-zA-Z0-9_]{1,})=function\([a-zA-Z]{1}\)\{(.{1}=.{1}\.split\(""\)[^\}{]+)return .{1}\.join\(""\)\}` // Replace with actual regex for signature function
+	REGEX_PLAYER_ID          = "\\/s\\/player\\/([0-9a-f]{8})"                                                                              // Replace with actual regex for player ID
+	REGEX_SIGNATURE_FUNCTION = `\s*?([a-zA-Z0-9_\$]{1,})=function\([a-zA-Z]{1}\)\{(.{1}=.{1}\.split\(""\)[^\}{]+)return .{1}\.join\(""\)\}` // Replace with actual regex for signature function
 	REGEX_HELPER_OBJ_NAME    = `;([A-Za-z0-9_\\$]{2,})\...\(`
 
 	REGEX_SIGNATURE_TIMESTAMP = `signatureTimestamp[=:](\d+)` // Replace with actual regex for signature timestamp
@@ -143,6 +143,7 @@ func parseSigFunction(playerJSBody string) (string, string, error) {
 	helperObjectName := helperObjectMatches[1]
 
 	// Now build the regex to capture the entire helper object body
+	helperObjectName = strings.ReplaceAll(helperObjectName, "$", "\\$")
 	helperObjectBodyRegexStr := fmt.Sprintf(`(var %s=\{(?:.|\n)+?\}\};)`, helperObjectName)
 	helperObjectBodyRegex := regexp.MustCompile(helperObjectBodyRegexStr)
 
