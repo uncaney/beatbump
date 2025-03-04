@@ -42,7 +42,10 @@ COPY *.go ./
 # Build
 RUN CGO_ENABLED=0 GOOS=linux go build -o /beat-server
 
-FROM golang:1.21.0
+FROM chromedp/headless-shell:latest
+
+RUN apt-get update && apt install ca-certificates -y
+
 
 WORKDIR /app
 
@@ -57,4 +60,4 @@ COPY --from=frontend-builder /app/build /app/build
 EXPOSE 8080
 
 # Run
-CMD ["/app/beat-server"]
+ENTRYPOINT ["/app/beat-server"]

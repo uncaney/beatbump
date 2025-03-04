@@ -246,11 +246,6 @@ func DownloadWebpage(urlAddress string, clientInfo ClientInfo, authbj *auth.Auth
 
 func callAPI(urlAddress string, requestPayload innertubeRequest, clientInfo ClientInfo, authbj *auth.Auth) ([]byte, error) {
 
-	//log.Debug().Msg("Request Body:" + string(payload))
-	/*if requestPayload.Params == "" {
-		requestPayload.Params = "CgIQBg"
-	}*/
-
 	req, err := http.NewRequest(http.MethodPost, urlAddress, nil)
 
 	if err != nil {
@@ -262,11 +257,7 @@ func callAPI(urlAddress string, requestPayload innertubeRequest, clientInfo Clie
 func doRequest(clientInfo ClientInfo, authbj *auth.Auth, req *http.Request, requestPayload *innertubeRequest) ([]byte, error) {
 
 	urlAddress := req.URL.String()
-	fmt.Println(urlAddress)
-	var client http.Client
-	client = getHttpClient(authbj)
-
-	req.Header.Set("referer", "https://music.youtube.com")
+	client := getHttpClient(authbj)
 
 	if strings.Contains(urlAddress, "youtubei/v1/player") {
 		if authbj != nil && authbj.AuthType == auth.AUTH_TYPE_COOKIES && authbj.CookieHeader != "" {
@@ -277,12 +268,12 @@ func doRequest(clientInfo ClientInfo, authbj *auth.Auth, req *http.Request, requ
 					authorization := getAuthorization(cookie.Value)
 					req.Header.Set("Authorization", authorization)
 
-					if requestPayload != nil {
+					/*if requestPayload != nil {
 						info, _ := GetPlayerInfo("", authbj)
 						//contextMap := info.InnerTubeContext.Context.(map[string]interface{})
 						clinetAttr := info.InnerTubeContext["client"].(map[string]interface{})
 						req.Header.Set("X-Goog-Visitor-Id", clinetAttr["visitorData"].(string))
-					}
+					}*/
 
 					req.Header.Set("X-Goog-AuthUser", "0")
 				}
@@ -296,15 +287,16 @@ func doRequest(clientInfo ClientInfo, authbj *auth.Auth, req *http.Request, requ
 			timestampString := strconv.FormatInt(timestamp, 10)
 			req.Header.Set("X-Goog-Request-Time", timestampString)
 			//	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:88.0) Gecko/20100101 Firefox/88.0 Cobalt/Version")
-
+		} else {
+			poToken := GetPoToken()
+			if poToken != nil {
+				requestPayload.ServiceIntegrityDimensions = &ServiceIntegrityDimensions{
+					PoToken: poToken.Potoken,
+				}
+				requestPayload.Context.Client.VisitorData = poToken.VisitorData
+			}
 		}
 	}
-	/*req.Header.Set("Authorization", "Bearer ")
-	timestamp := time.Now().Unix()
-
-	// Convert the timestamp to a string
-	timestampString := strconv.FormatInt(timestamp, 10)
-	req.Header.Set("X-Goog-Request-Time", timestampString)*/
 
 	if clientInfo.userAgent != "" {
 		req.Header.Set("User-Agent", clientInfo.userAgent)
@@ -322,13 +314,13 @@ func doRequest(clientInfo ClientInfo, authbj *auth.Auth, req *http.Request, requ
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println(string(payload))
 
 		req.Body = io.NopCloser(bytes.NewBuffer(payload))
 	}
 	req.Header.Set("Accept-Language", "en-us,en;q=0.5")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9")
 	req.Header.Set("accept-encoding", "gzip, deflate")
+	req.Header.Set("referer", "https://music.youtube.com")
 
 	resp, err := client.Do(req)
 
@@ -362,25 +354,22 @@ func doRequest(clientInfo ClientInfo, authbj *auth.Auth, req *http.Request, requ
 	return respBytes, nil
 }
 
-var client *http.Client = nil
+func getHttpClient(authObj *auth.Auth) http.Client {
 
-func getHttpClient(auth *auth.Auth) http.Client {
-	if client == nil {
-
-		myDialer := net.Dialer{}
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return myDialer.DialContext(ctx, "tcp4", addr)
-		}
-		client = &http.Client{
-			Transport: transport,
-		}
+	myDialer := net.Dialer{}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return myDialer.DialContext(ctx, "tcp4", addr)
 	}
-	if auth != nil && auth.CookieHeader != "" {
-		cookies, err := parseCookieString(auth.CookieHeader)
+	client := http.Client{
+		Transport: transport,
+	}
+
+	if authObj != nil && authObj.AuthType == auth.AUTH_TYPE_COOKIES && authObj.CookieHeader != "" {
+		cookies, err := parseCookieString(authObj.CookieHeader)
 		if err != nil {
 			fmt.Println("Error parsing cookies:", err)
-			return *client
+			return client
 		}
 		var cookiesList []*http.Cookie
 		for key, value := range cookies {
@@ -401,7 +390,7 @@ func getHttpClient(auth *auth.Auth) http.Client {
 		jar.SetCookies(u, cookiesList)
 		client.Jar = jar
 	}
-	return *client
+	return client
 }
 
 func prepareInnertubeContext(clientInfo ClientInfo, visitorData *string) inntertubeContext {
@@ -411,6 +400,24 @@ func prepareInnertubeContext(clientInfo ClientInfo, visitorData *string) inntert
 		ClientName:    clientInfo.ClientName,
 		ClientVersion: clientInfo.ClientVersion,
 		TimeZone:      "UTC",
+	}
+	if clientInfo.DeviceModel != "" {
+		client.DeviceModel = clientInfo.DeviceModel
+	}
+	if clientInfo.DeviceMake != "" {
+		client.DeviceMake = clientInfo.DeviceMake
+	}
+	if clientInfo.OsVersion != "" {
+		client.OsVersion = clientInfo.OsVersion
+	}
+	if clientInfo.OsName != "" {
+		client.OsName = clientInfo.OsName
+	}
+	if clientInfo.DeviceMake != "" {
+		client.DeviceMake = clientInfo.DeviceMake
+	}
+	if clientInfo.AndroidSdkVersion != 0 {
+		client.AndroidSDKVersion = clientInfo.AndroidSdkVersion
 	}
 	if visitorData != nil {
 		escape := url.QueryEscape(*visitorData)

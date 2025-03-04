@@ -24,6 +24,7 @@ func PlayerEndpointHandler(c echo.Context) error {
 	playlistId := query.Get("playlistId")
 	//playerParams := query.Get("playerParams")
 	authObj := (c.(*auth.AuthContext)).AuthContext
+	var potRequired bool = false
 	//authorization := headers.Get("Authorization")
 	if videoId == "" {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Missing required param: videoId"))
@@ -34,9 +35,12 @@ func PlayerEndpointHandler(c echo.Context) error {
 	if authObj.AuthType == auth.AUTH_TYPE_OAUTH {
 		responseBytes, err = callPlayerAPI(api.IOS_MUSIC, videoId, playlistId, authObj)
 	} else if authObj.AuthType == auth.AUTH_TYPE_COOKIES {
-		responseBytes, err = callPlayerAPI(api.WEB_CREATOR, videoId, playlistId, authObj)
+		//default cookies - web_creator / tv
+		responseBytes, err = callPlayerAPI(api.TV, videoId, playlistId, authObj)
 	} else {
-		responseBytes, err = callPlayerAPI(api.MWebClient, videoId, playlistId, authObj)
+		// no auth clients - tv / ios
+		potRequired = true
+		responseBytes, err = callPlayerAPI(api.WebMusic, videoId, playlistId, authObj)
 	}
 
 	if err != nil {
@@ -74,6 +78,13 @@ func PlayerEndpointHandler(c echo.Context) error {
 			}
 			resultUrl, err = api.DecipherNsig(resultUrl, videoId)
 			streamUrl = resultUrl.String()
+		}
+
+		if potRequired {
+			poToken := api.GetPoToken()
+			if poToken != nil {
+				streamUrl += "&pot=" + poToken.Potoken
+			}
 		}
 
 		if err != nil {

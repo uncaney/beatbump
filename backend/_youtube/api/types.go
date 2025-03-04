@@ -9,7 +9,7 @@ type innertubeRequest struct {
 	Query                            string                            `json:"query,omitempty"`
 	Input                            *string                           `json:"input,omitempty"`
 	Continuation                     map[string]string                 `json:"continuation,omitempty"`
-	Context                          interface{}                       `json:"context"`
+	Context                          inntertubeContext                 `json:"context"`
 	PlaybackContext                  *playbackContext                  `json:"playbackContext,omitempty"`
 	ContentCheckOK                   bool                              `json:"contentCheckOk,omitempty"`
 	RacyCheckOk                      bool                              `json:"racyCheckOk,omitempty"`
@@ -158,9 +158,14 @@ var (
 	}
 
 	ANDROID_VR = ClientInfo{
-		ClientName:    "ANDROID_VR",
-		ClientVersion: "1.60.19",
-
+		ClientName:        "ANDROID_VR",
+		ClientVersion:     "1.60.19",
+		ClientId:          "28",
+		DeviceModel:       "Quest 3",
+		DeviceMake:        "Oculus",
+		AndroidSdkVersion: 32,
+		OsName:            "Android",
+		OsVersion:         "12L",
 		//	ClientKey: "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30", // seems like same ClientKey works for both clients
 		userAgent: "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
 	}
@@ -174,6 +179,17 @@ var (
 		Platform:      "DESKTOP",
 		//	ClientKey: "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30", // seems like same ClientKey works for both clients
 		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.19 Safari/537.36",
+	}
+
+	TV = ClientInfo{
+		ClientName:    "TVHTML5",
+		ClientVersion: "7.20241201.18.0",
+		ClientId:      "7",
+		//OsName:        "Macintosh",
+		//OsVersion:     "10.15",
+		//Platform:      "DESKTOP",
+		//	ClientKey: "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30", // seems like same ClientKey works for both clients
+		//userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0,gzip(gfe)",
 	}
 
 	TVHTML5_AUDIO = ClientInfo{
