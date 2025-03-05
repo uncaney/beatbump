@@ -110,8 +110,8 @@ func (e *PotokenExtractor) performUpdate() error {
 	log.Println("Update started")
 
 	options := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoSandbox,
 		chromedp.NoFirstRun,
+		chromedp.NoDefaultBrowserCheck,
 		chromedp.DisableGPU,
 		chromedp.Flag("headless", false),
 	)
@@ -147,10 +147,16 @@ func (e *PotokenExtractor) performUpdate() error {
 	err := chromedp.Run(ctx,
 		chromedp.Navigate("https://www.youtube.com/embed/jNQXAC9IVRw"),
 		chromedp.WaitVisible(`#movie_player`),
+	)
+	if err != nil {
+		return fmt.Errorf("Failed trying to load page: %w", err)
+	}
+	time.Sleep(2 * time.Second)
+	err = chromedp.Run(ctx,
 		chromedp.Click("#movie_player", chromedp.NodeVisible),
 	)
 	if err != nil {
-		return fmt.Errorf("update failed: %w", err)
+		return fmt.Errorf("Failed while trying to simulate click: %w", err)
 	}
 
 	<-done
@@ -191,6 +197,10 @@ func (e *PotokenExtractor) extractToken(request *network.EventRequestWillBeSent)
 	if !ok {
 		log.Println("Failed to extract potoken")
 		return nil
+	}
+
+	if len(potoken) < 100 {
+		fmt.Println("Warnning: likely not a valid po token")
 	}
 
 	potoken, err = url.QueryUnescape(potoken)

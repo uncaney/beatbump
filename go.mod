@@ -5,6 +5,7 @@ go 1.23
 toolchain go1.23.6
 
 require (
+	github.com/chromedp/cdproto v0.0.0-20250222051814-50c6cb17f10a
 	github.com/chromedp/chromedp v0.13.0
 	github.com/dop251/goja v0.0.0-20241024094426-79f3a7efcdbd
 	github.com/google/uuid v1.6.0
@@ -15,7 +16,6 @@ require (
 )
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20250222051814-50c6cb17f10a // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
