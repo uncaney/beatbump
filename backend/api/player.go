@@ -24,7 +24,7 @@ func PlayerEndpointHandler(c echo.Context) error {
 	playlistId := query.Get("playlistId")
 	//playerParams := query.Get("playerParams")
 	authObj := (c.(*auth.AuthContext)).AuthContext
-	//var potRequired bool = false
+	var potRequired bool = false
 	//authorization := headers.Get("Authorization")
 	if videoId == "" {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Missing required param: videoId"))
@@ -39,7 +39,7 @@ func PlayerEndpointHandler(c echo.Context) error {
 		responseBytes, err = callPlayerAPI(api.TV, videoId, playlistId, authObj)
 	} else {
 		// no auth clients - tv / ios
-		//potRequired = true
+		potRequired = true
 		responseBytes, err = callPlayerAPI(api.ANDROID_VR, videoId, playlistId, authObj)
 	}
 
@@ -80,12 +80,12 @@ func PlayerEndpointHandler(c echo.Context) error {
 			streamUrl = resultUrl.String()
 		}
 
-		/*if potRequired {
+		if potRequired {
 			poToken := api.GetPoToken()
 			if poToken != nil {
 				streamUrl += "&pot=" + poToken.Potoken
 			}
-		}*/
+		}
 
 		if err != nil {
 			fmt.Println("failed to decrypt - %s", err)
