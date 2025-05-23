@@ -4,21 +4,42 @@
 	import { queryParams } from "$lib/utils";
 	import { debounce } from "$lib/utils/sync";
 	import { settings } from "$stores/settings";
-	import { createEventDispatcher } from "svelte";
+	import { createEventDispatcher, onMount } from "svelte";
 	import { fullscreenStore } from "../Player/channel";
 	import { searchFilter } from "./options";
-    import {APIClient} from "$lib/api";
+	import { APIClient } from "$lib/api";
+	import { browser } from "$app/environment";
 
 	export let type: "inline";
 	export let query = "";
 	export let filter = searchFilter[0].params;
 
 	const dispatch = createEventDispatcher();
-	let results: Array<{ query?: string; id?: number }> = [];
-	let listbox: HTMLFormElement;
+	let results: Array<{ query: string; id: string }> = [];
+	let listbox: HTMLUListElement | null = null;
+	let recentSearches: string[] = [];
+	let showRecentSearches = false;
+
+	onMount(() => {
+		if (browser) {
+			const stored = localStorage.getItem('recentSearches');
+			if (stored) {
+				recentSearches = JSON.parse(stored);
+			}
+			showRecentSearches = true;
+		}
+	});
+
+	function addToRecentSearches(searchQuery: string) {
+		if (!browser) return;
+		
+		recentSearches = [searchQuery, ...recentSearches.filter(s => s !== searchQuery)].slice(0, 5);
+		localStorage.setItem('recentSearches', JSON.stringify(recentSearches));
+	}
 
 	async function handleSubmit() {
 		if (!query.length) return;
+		addToRecentSearches(query);
 		dispatch("submitted", { submitted: true, filter, query });
 		fullscreenStore.set("closed");
 		const params = queryParams({
@@ -78,7 +99,12 @@
 		return false;
 	}
 	const typeahead = debounce(async () => {
-		if (!query) return (results = []);
+		if (!query) {
+			results = [];
+			showRecentSearches = true;
+			return;
+		}
+		showRecentSearches = false;
 		const response = await APIClient.fetch(
             `/api/v1/get_search_suggestions.json?q=` + encodeURIComponent(query),
 		);
@@ -127,36 +153,61 @@
 					if (e.shiftKey && e.ctrlKey && e.repeat) return;
 					typeahead();
 				}}
+				on:focus={() => {
+					showRecentSearches = true;
+				}}
 				bind:value={query}
 			/>
 		</div>
 	</div>
-	{#if results.length > 0}
+	{#if (results.length > 0 && !showRecentSearches) || (showRecentSearches && recentSearches.length > 0)}
 		<ul
 			role="listbox"
 			id="suggestions"
 			bind:this={listbox}
 			class="suggestions"
 		>
-			<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-			{#each results as result (result?.id)}
-				<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
-				<li
-					tabindex="0"
-					on:click={() => {
-						query = result.query;
-						handleSubmit();
-					}}
-					on:keydown={(e) => {
-						if (e.key === " ") {
+			{#if showRecentSearches}
+				<li class="recent-searches-header">Recent Searches</li>
+				{#each recentSearches as recentQuery}
+					<li
+						tabindex="0"
+						on:click={() => {
+							query = recentQuery;
+							handleSubmit();
+						}}
+						on:keydown={(e) => {
+							if (e.key === " ") {
+								query = recentQuery;
+								handleSubmit();
+							}
+						}}
+					>
+						<Icon name="history" size="1rem" style="color: var(--text-secondary);" />
+						{recentQuery}
+					</li>
+				{/each}
+			{:else}
+				<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+				{#each results as result (result.id)}
+					<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+					<li
+						tabindex="0"
+						on:click={() => {
 							query = result.query;
 							handleSubmit();
-						}
-					}}
-				>
-					{result.query}
-				</li>
-			{/each}
+						}}
+						on:keydown={(e) => {
+							if (e.key === " ") {
+								query = result.query;
+								handleSubmit();
+							}
+						}}
+					>
+						{result.query}
+					</li>
+				{/each}
+			{/if}
 		</ul>
 	{/if}
 	<div class="nav-item">
@@ -208,8 +259,9 @@
 
 		@media only screen and (max-width: 640px) {
 			left: 0;
-			width: clamp(68%, 78%, 95%);
+			width: 100%;
 			right: 0;
+			max-width: 100%;
 		}
 	}
 
@@ -231,6 +283,15 @@
 		list-style: none;
 		background: inherit;
 
+		.recent-searches-header {
+			padding: 0.5em;
+			font-size: 0.9em;
+			color: var(--text-secondary);
+			font-weight: 500;
+			background: var(--top-bg);
+			border-bottom: 1px solid hsl(0deg 0% 66.7% / 21.9%);
+		}
+
 		li {
 			&:first-child {
 				border-radius: $xs-radius $xs-radius 0 0;
@@ -247,6 +308,10 @@
 			cursor: pointer;
 			font-size: 1em;
 			background: #0000;
+			display: flex;
+			align-items: center;
+			gap: 0.5em;
+
 			&:hover {
 				background: rgb(255 255 255 / 10%);
 			}
