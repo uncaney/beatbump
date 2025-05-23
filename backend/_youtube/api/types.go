@@ -113,7 +113,7 @@ var (
 	// WebClient, better to use Android client but go ahead.
 	WebClient = ClientInfo{
 		ClientName:    "WEB",
-		ClientVersion: "2.20240814.00.00",
+		ClientVersion: "2.20250312.04.00",
 		ClientId:      "1",
 		//ClientKey:     "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
 		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.19 Safari/537.36",
@@ -131,10 +131,11 @@ var (
 
 	IOS = ClientInfo{
 		ClientName:    "IOS",
-		ClientVersion: "19.29.1",
+		ClientVersion: "20.10.4",
 		//ClientKey:     "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc", // seems like same ClientKey works for both clients
 		DeviceModel: "iPhone16,2",
-		userAgent:   "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)",
+		OsVersion:   "18.3.2.22D82",
+		userAgent:   "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
 	}
 
 	IOS_MUSIC = ClientInfo{
@@ -143,14 +144,14 @@ var (
 		DeviceMake:    "Apple",
 		DeviceModel:   "iPhone16,2",
 		OsName:        "iPhone",
-		OsVersion:     "18.1.0.22B83",
+		OsVersion:     "18.3.2.22D82",
 		//ClientKey:     "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc", // seems like same ClientKey works for both clients
 		userAgent: "com.google.ios.youtubemusic/7.27.0 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X;)",
 	}
 
 	WEB_CREATOR = ClientInfo{
 		ClientName:    "WEB_CREATOR",
-		ClientVersion: "1.20241203.01.00",
+		ClientVersion: "1.20250312.03.01",
 		ClientId:      "62",
 		//ClientKey:     "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc", // seems like same ClientKey works for both clients
 		//DeviceModel: "iPhone16,2",
@@ -159,7 +160,7 @@ var (
 
 	ANDROID_VR = ClientInfo{
 		ClientName:        "ANDROID_VR",
-		ClientVersion:     "1.60.19",
+		ClientVersion:     "1.62.27",
 		ClientId:          "28",
 		DeviceModel:       "Quest 3",
 		DeviceMake:        "Oculus",
@@ -167,13 +168,13 @@ var (
 		OsName:            "Android",
 		OsVersion:         "12L",
 		//	ClientKey: "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30", // seems like same ClientKey works for both clients
-		userAgent: "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+		userAgent: "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
 	}
 
 	WebMusic = ClientInfo{
 		ClientName:    "WEB_REMIX",
 		ClientId:      "67",
-		ClientVersion: "1.20241127.01.00",
+		ClientVersion: "1.20250310.01.00",
 		OsName:        "Windows",
 		OsVersion:     "10.0",
 		Platform:      "DESKTOP",
@@ -185,6 +186,17 @@ var (
 		ClientName:    "TVHTML5",
 		ClientVersion: "7.20241201.18.0",
 		ClientId:      "7",
+		//OsName:        "Macintosh",
+		//OsVersion:     "10.15",
+		//Platform:      "DESKTOP",
+		//	ClientKey: "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30", // seems like same ClientKey works for both clients
+		//userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0,gzip(gfe)",
+	}
+
+	tv_embedded = ClientInfo{
+		ClientName:    "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+		ClientVersion: "2.0",
+		ClientId:      "85",
 		//OsName:        "Macintosh",
 		//OsVersion:     "10.15",
 		//Platform:      "DESKTOP",

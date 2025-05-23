@@ -29,12 +29,14 @@ func DecipherSignatureCipher(videoID string, cipher string) (string, error) {
 	}
 
 	resultUrl, err = DecipherNsig(resultUrl, videoID)
-
+	if err != nil {
+		return "", err
+	}
 	encrypted_sig := params.Get("s")
 	sp := params.Get("sp")
 	resultUrl, err = DecipherSig(resultUrl, encrypted_sig, sp, videoID)
-
-	return resultUrl.String(), nil
+	
+	return resultUrl.String(), err
 }
 
 func DecipherSig(uri *url.URL, signature string, key string, videoId string) (*url.URL, error) {

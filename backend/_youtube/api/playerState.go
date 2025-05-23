@@ -30,8 +30,17 @@ type PlayerInfo struct {
 
 // from https://github.com/iv-org/inv_sig_helper
 var (
+	REGEX_HELPER_OBJ_NAME = `;([A-Za-z0-9_\$]{2,})(?:\.|\[)`
+	//REGEX_HELPER_OBJ_NAME    = `;([A-Za-z0-9_\\$]{2,})\...\(`
+
 	TEST_YOUTUBE_VIDEO = "https://www.youtube.com/watch?v=jNQXAC9IVRw" // Replace with actual URL
 	NSIG_FUNCTION_NAME = "decrypt_nsig"
+
+	REGEX_SIGNATURE_FUNCTION_PATTERNS = []string{
+		`\s*?([a-zA-Z0-9_\$]{1,})=function\([a-zA-Z]{1}\)\{(.{1}=.{1}\.split\([a-zA-Z0-9\-_\$\[\]"]+\)[^\}{]+)return .{1}\.join\([a-zA-Z0-9\-_\$\[\]"]+\)\}`, // old regex
+		`([a-zA-Z0-9_$]{1,})=function\(([a-zA-Z0-9_$]{1})\)\{[^}]*GLOBAL_VAR_NAME\[[^\]]+\][^}]*return [^}]*GLOBAL_VAR_NAME\[[^\]]+\][^}]*\}`,                // new regex
+		`([a-zA-Z0-9_$]{1,})=function\(([a-zA-Z0-9_$]{1})\)\{[^}]*return [^}]*GLOBAL_VAR_NAME\[[^\]]+\][^}]*\}`,                                              // more general regex
+	}
 
 	INNERTUBE_CONTEXT    = `"INNERTUBE_CONTEXT":\s*(\{.*?\}})`
 	NSIG_FUNCTION_ARRAYS = []string{
@@ -39,19 +48,23 @@ var (
 		`(?x)&&\(b="n+"\[[a-zA-Z0-9.+$]+\],c=a\.get\(b\)\)&&\(c=(?P<nfunc>[a-zA-Z0-9$]+)(?:\[(?P<idx>\d+)\])?\([a-zA-Z0-9]\)`,
 	}
 	NSIG_FUNCTION_ENDINGS = []string{
+		`=\s*function([\S\s]*?\}\s*return [A-Za-z0-9$]+\[[A-Za-z0-9$]+\[\d+\]\]\([A-Za-z0-9$]+\[\d+\]\)\s*\};)`,
 		`=\s*function(\(\w\)\s*\{[\S\s]*\{return.[a-zA-Z0-9_-]+_w8_.+?\}\s*return\s*\w+.join\(""\)\};)`,
-		`=\s*function([\S\s]*?\}\s*return \w+?\.join\(\"\"\)\s*\};)`,
+		`=\s*function([\S\s]*?\}\s*return \w+?\.join\([^)]+\)\s*\};)`,
 		`=\s*function([\S\s]*?\}\s*return [\W\w$]+?\.call\([\w$]+?,\"\"\)\s*\};)`,
 	}
+
 	REGEX_PLAYER_ID          = "\\/s\\/player\\/([0-9a-f]{8})"                                                                              // Replace with actual regex for player ID
 	REGEX_SIGNATURE_FUNCTION = `\s*?([a-zA-Z0-9_\$]{1,})=function\([a-zA-Z]{1}\)\{(.{1}=.{1}\.split\(""\)[^\}{]+)return .{1}\.join\(""\)\}` // Replace with actual regex for signature function
-	REGEX_HELPER_OBJ_NAME    = `;([A-Za-z0-9_\\$]{2,})\...\(`
+	//REGEX_HELPER_OBJ_NAME    = `;([A-Za-z0-9_\\$]{2,})\...\(`
 
 	REGEX_SIGNATURE_TIMESTAMP = `signatureTimestamp[=:](\d+)` // Replace with actual regex for signature timestamp
 )
 
-func fixupNsigJsCode(jscode string) string {
-	// Compile the regular expression in Go
+func fixupNsigJsCode(jscode string, playerJavascript string) string {
+	result := jscode
+
+	/*// Compile the regular expression in Go
 	fixupRe := regexp.MustCompile(`;\s*if\s*\(\s*typeof\s+[a-zA-Z0-9_$]+\s*===?\s*"undefined"\s*\)\s*return\s+\w+;`)
 
 	// Check if the regex matches
@@ -62,12 +75,59 @@ func fixupNsigJsCode(jscode string) string {
 	} else {
 		log.Println("nsig_func returned with no fixup")
 		return jscode
+	}*/
+	// Extract the original parameter name from the input JavaScript code
+	paramRegex := regexp.MustCompile(`function\s+[a-zA-Z0-9_$]+\s*\(([a-zA-Z0-9_$]+)\)`)
+	paramMatch := paramRegex.FindStringSubmatch(jscode)
+
+	// Default to 'a' if we can't find the original parameter
+	paramName := "a"
+	if len(paramMatch) > 1 {
+		paramName = paramMatch[1]
 	}
+
+	var fixupRe *regexp.Regexp
+	globalVar, varname, _, found := extractPlayerJSGlobalVar(playerJavascript)
+
+	if found {
+		log.Printf("global_var: %s", globalVar)
+		log.Printf("varname: %s", varname)
+		log.Printf("jscode: %s", jscode)
+
+		log.Printf("Prepending n function code with global array variable '%s'", varname)
+
+		// Create the new function with global variable
+		oldFuncDef := fmt.Sprintf("function decrypt_nsig(%s){", paramName)
+		newCode := fmt.Sprintf("function decrypt_nsig(%s){%s; %s",
+			paramName,
+			globalVar,
+			strings.Replace(jscode, oldFuncDef, "", 1))
+		result = newCode
+
+		// Escape special regex characters in the variable name
+		escapedVarname := regexp.QuoteMeta(varname)
+		pattern := fmt.Sprintf(`;\s*if\s*\(\s*typeof\s+[a-zA-Z0-9_$]+\s*===?\s*(?:"undefined"|'undefined'|%s\[\d+\])\s*\)\s*return\s+\w+;`, escapedVarname)
+		fixupRe = regexp.MustCompile(pattern)
+	} else {
+		log.Println("No global array variable found in player JS")
+		fixupRe = regexp.MustCompile(`;\s*if\s*\(\s*typeof\s+[a-zA-Z0-9_$]+\s*===?\s*"undefined"\s*\)\s*return\s+\w+;`)
+	}
+
+	// Now handle the conditional return statement cleanup
+	if fixupRe.MatchString(result) {
+		log.Println("Fixing up nsig_func_body")
+		result = fixupRe.ReplaceAllString(result, ";")
+	} else {
+		log.Println("nsig_func returned with no fixup")
+	}
+
+	return result
+
 }
 
 func GetPlayerInfo(videoId string, auth *auth.Auth) (*PlayerInfo, error) {
 
-	videoId = "l6_w3887Rwo"
+	videoId = "jNQXAC9IVRw"
 
 	if videoConfig, ok := videoIdToPlayerInfo[videoId]; ok {
 		return videoConfig, nil
@@ -89,7 +149,15 @@ func GetPlayerInfo(videoId string, auth *auth.Auth) (*PlayerInfo, error) {
 		return nil, err
 	}
 
-	signatureFunctionName, sigCode, err := parseSigFunction(playerJSBody)
+	globalVar, varName, _, found := extractPlayerJSGlobalVar(playerJSBody)
+	if found && globalVar != "" {
+		log.Printf("Found global var for sig: %s\n", globalVar)
+		log.Printf("Found varname for sig: %s\n", varName)
+	} else {
+		log.Println("No global var found for sig")
+	}
+
+	signatureFunctionName, sigCode, err := extractSigFunc(playerJSBody, varName, globalVar)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +186,98 @@ func GetPlayerInfo(videoId string, auth *auth.Auth) (*PlayerInfo, error) {
 	return &playerInfo, nil
 }
 
-func parseSigFunction(playerJSBody string) (string, string, error) {
+func extractSigFunc(playerJavascript string, varname string, globalVar string) (string, string, error) {
+	sigFunctionName := ""
+	foundSigFunction := false
+
+	for _, sigPattern := range REGEX_SIGNATURE_FUNCTION_PATTERNS {
+		pattern := strings.ReplaceAll(sigPattern, "GLOBAL_VAR_NAME", regexp.QuoteMeta(varname))
+		log.Printf("sig pattern: %s\n", pattern)
+
+		sigRegex, err := regexp.Compile(pattern)
+		if err != nil {
+			log.Printf("Failed to compile signature regex pattern: %v\n", err)
+			continue
+		}
+
+		match := sigRegex.FindStringSubmatch(playerJavascript)
+		if match != nil && len(match) > 1 {
+			sigFunctionName = match[1]
+			foundSigFunction = true
+			break
+		}
+	}
+
+	if !foundSigFunction {
+		sigFunctionName = "sig_function_" + time.Now().UTC().Format("20060102150405")
+		log.Printf("No signature function found in player JS, using random name: %s\n", sigFunctionName)
+	}
+
+	sigCode := ""
+
+	if foundSigFunction {
+		log.Printf("found sig function: %s\n", sigFunctionName)
+
+		sigFuncPattern := regexp.QuoteMeta(sigFunctionName) + `=function\([a-zA-Z0-9_]+\)\{.+?\}`
+		sigFuncRegex := regexp.MustCompile(sigFuncPattern)
+		sigFuncMatch := sigFuncRegex.FindStringSubmatch(playerJavascript)
+		if sigFuncMatch == nil {
+			return "", "", errors.New("no sig match") // or error
+		}
+		sigFunctionBody := sigFuncMatch[0]
+
+		helperMatch := regexp.MustCompile(REGEX_HELPER_OBJ_NAME).FindStringSubmatch(sigFunctionBody)
+		if helperMatch == nil || len(helperMatch) < 2 {
+			return "", "", errors.New("no helper match") // or error
+		}
+		helperObjectName := helperMatch[1]
+
+		helperPattern := "(var " + regexp.QuoteMeta(helperObjectName) + `=\{(?s:.)+?\}\});`
+		helperRegex := regexp.MustCompile(helperPattern)
+		helperMatchFull := helperRegex.FindStringSubmatch(playerJavascript)
+		if helperMatchFull == nil {
+			return "", "", errors.New("no helper match") // or error
+		}
+		helperObjectBody := helperMatchFull[0]
+
+		sigCode += "var " + sigFunctionName + ";"
+		if globalVar != "" {
+			sigCode += globalVar + ";"
+		}
+		sigCode += helperObjectBody
+		sigCode += sigFunctionBody
+	} else {
+		sigCode = "var " + sigFunctionName + ";"
+		log.Printf("No signature function found in player JS, just returning empty sig function code with random name: %s\n", sigFunctionName)
+	}
+
+	return sigFunctionName, sigCode, nil
+}
+
+func extractPlayerJSGlobalVar(jscode string) (string, string, string, bool) {
+	pattern := `'use\s+strict';\s*` +
+		`(var\s+([a-zA-Z0-9_$]+)\s*=\s*` +
+		`((?:"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')\.split\((?:"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')\)|\[(?:(?:"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')\s*,?\s*)*\]|"[^"]*"\.split\("[^"]*"\)))[;,]`
+
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", "", "", false
+	}
+
+	matches := re.FindStringSubmatch(jscode)
+	if matches == nil || len(matches) != 4 {
+		return "", "", "", false
+	}
+
+	// matches[0] is the full match
+	// matches[1] is the code group
+	// matches[2] is the name group
+	// matches[3] is the value group
+	return matches[1], matches[2], matches[3], true
+
+}
+
+/*func parseSigFunction(playerJSBody string) (string, string, error) {
 	// Step 8: Extract signature function and helper object
 	signatureFunctionName := regexp.MustCompile(REGEX_SIGNATURE_FUNCTION).FindStringSubmatch(string(playerJSBody))[1]
 
@@ -157,7 +316,7 @@ func parseSigFunction(playerJSBody string) (string, string, error) {
 	// Step 10: Build the final signature code
 	sigCode := fmt.Sprintf("var %s; %s %s", signatureFunctionName, helperObjectBody, sigFunctionBody)
 	return signatureFunctionName, sigCode, nil
-}
+}*/
 
 func parseNsigParams(playerJSBody string) (string, error) {
 	var nsigFunctionArrayOpt []string
@@ -240,7 +399,7 @@ func parseNsigParams(playerJSBody string) (string, error) {
 		}
 
 		nsigFunctionCode += matches[1]
-		nsigFunctionCode = fixupNsigJsCode(nsigFunctionCode)
+		nsigFunctionCode = fixupNsigJsCode(nsigFunctionCode, playerJSBody)
 		//log.Printf("Got nsig function code: %s", nsigFunctionCode)
 		break
 	}

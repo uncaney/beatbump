@@ -18,6 +18,7 @@ type PlayerResponse struct {
 		ContextParams   string `json:"contextParams"`
 	} `json:"playabilityStatus"`
 	StreamingData struct {
+		DrmFamilies      string `json:"drmFamilies,omitempty"`
 		HlsManifestUrl   string `json:"hlsManifestUrl"`
 		ExpiresInSeconds string `json:"expiresInSeconds"`
 		Formats          []struct {
