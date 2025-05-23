@@ -147,6 +147,23 @@
                 size="1.6125em"
             />
         </button>
+        <button
+            use:tooltip
+            on:click={() => {
+				$fullscreenStore && fullscreenStore.set("closed");
+				goto("/favorites");
+			}}
+            data-tooltip="Favorites"
+            aria-label="favorites"
+            class="nav-icon icon-btn no-style"
+            class:active={key.includes("favorites")}
+        >
+            <Icon
+                name="heart"
+                --stroke={key.includes("favorites") ? "#fff" : "#BCBCBE"}
+                size="1.6125em"
+            />
+        </button>
     </div>
 
     <div class="items">

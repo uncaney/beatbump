@@ -3,21 +3,17 @@
 	import Modal from "$components/Modal";
 	import Icon from "$lib/components/Icon/Icon.svelte";
 
-	import Listing from "$lib/components/Item/Listing.svelte";
 	import CreatePlaylist from "$lib/components/PlaylistPopper/CreatePlaylist.svelte";
-	// import type { Item } from '$lib/types'
-
 	import { IDBService } from "$lib/workers/db/service";
 
 	import Button from "$components/Button";
 	import { exportDB, importDB } from "$lib/db";
-	import type { Song } from "$lib/types";
 	import type { IDBPlaylist } from "$lib/workers/db/types";
+	import type { Item } from "$lib/types";
 	import { onMount, setContext } from "svelte";
 	import Sync from "./_Sync.svelte";
 	import Grid from "./_components/Grid/Grid.svelte";
 
-	let favorites: Song[] = [];
 	let playlists: IDBPlaylist[] = [];
 
 	let showSyncModal = false;
@@ -27,11 +23,6 @@
 
 	setContext("library", { isLibrary: true });
 
-	const updateFavorites = async () => {
-		favorites = (await IDBService.sendMessage("get", "favorites")) || [];
-		favorites = [...favorites.slice(0, 5)];
-		return favorites;
-	};
 	const updatePlaylists = async () => {
 		playlists = (await IDBService.sendMessage("get", "playlists")) || [];
 		playlists = [...playlists];
@@ -41,7 +32,6 @@
 	const readFiles = (files: FileList) => {
 		if (files) {
 			importDB(files[0]).then(() => {
-				updateFavorites();
 				updatePlaylists();
 			});
 		}
@@ -50,14 +40,11 @@
 
 	async function loadLibrary() {
 		try {
-			favorites = (await IDBService.sendMessage("get", "favorites")) || [];
-
 			playlists = (await IDBService.sendMessage("get", "playlists")) || [];
-
-			return { favorites, playlists };
+			return { playlists };
 		} catch (err) {
 			console.error(err);
-			return { favorites: [], playlists: [] };
+			return { playlists: [] as IDBPlaylist[] };
 		}
 	}
 
@@ -69,7 +56,6 @@
 {#if showSyncModal && browser}
 	<Sync
 		on:close={() => {
-			updateFavorites();
 			updatePlaylists();
 			showSyncModal = false;
 		}}
@@ -141,33 +127,7 @@
 		</div>
 	</header>
 
-	<section>
-		<div class="header">
-			<h2>Your Songs</h2>
-			<a href="/library/songs"
-				>{#if favorites?.length > 0}<small>See All</small>{/if}</a
-			>
-		</div>
-		<div class="list">
-			{#if favorites?.length > 0}
-				{#each favorites as favorite}
-					<Listing
-						on:update={() => {
-							updateFavorites();
-						}}
-						data={favorite}
-					/>
-				{/each}
-			{:else}
-				<div class="container">
-					<h4>Empty!</h4>
-					<span class="subheading"
-						><em>Add some songs to keep track of what you love!</em></span
-					>
-				</div>
-			{/if}
-		</div>
-	</section>
+
 	{#if showPlaylistModal}
 		<CreatePlaylist
 			defaults={{
@@ -177,7 +137,7 @@
 			}}
 			hasFocus={true}
 			on:submit={async (e) => {
-				const promise = await IDBService.sendMessage("create", "playlist", {
+				await IDBService.sendMessage("create", "playlist", {
 					name: e.detail?.title,
 					description: e.detail?.description,
 					thumbnail:
