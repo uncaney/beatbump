@@ -13,6 +13,9 @@ func AlbumEndpointHandler(c echo.Context) error {
 
 	query := c.Request().URL.Query()
 	browseID := query.Get("browseId")
+	if isLocalAlbum(browseID) {
+		return c.JSON(http.StatusOK, buildLocalAlbum(browseID))
+	}
 	//pt := query.Get("pt")
 	//	ctoken := query.Get("ctoken")
 	//referrer := query.Get("ref")

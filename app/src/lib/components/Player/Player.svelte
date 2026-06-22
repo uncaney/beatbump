@@ -25,13 +25,10 @@
         $SITE_ORIGIN_URL: string,
     ) =>
         buildDropdown()
-            .add("View Artist", () => {
-                window.scrollTo({
-                    behavior: "smooth",
-                    top: 0,
-                    left: 0,
-                });
-                goto(`/artist/${$currentTrack.artistInfo.artist[0].browseId}`);
+            .add("View Artist", async () => {
+                window.scrollTo({ behavior: "smooth", top: 0, left: 0 });
+                const __aid = await resolveArtistId($currentTrack);
+                if (__aid) goto(`/artist/${__aid}`);
             })
             .add("Add to Playlist", async () => {
                 showAddToPlaylistPopper.set({ state: true, item: $currentTrack });
@@ -81,6 +78,8 @@
 <script lang="ts">
 	import { browser } from "$app/environment";
 	import { goto } from "$app/navigation";
+	import { resolveArtistId } from "$lib/local";
+	import { recordHistory } from "$lib/me";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { clickOutside } from "$lib/actions/clickOutside";
 	import { IMAGE_NOT_FOUND } from "$lib/constants";
@@ -118,6 +117,15 @@
 	}, 500);
 
 	$: isPlaying = $paused;
+
+	// Record a play event whenever the current track changes (server-side history
+	// → recently/most-played + taste). Deduped per videoId so radio auto-advance,
+	// clicks and queue moves each count once.
+	let _lastHistory = "";
+	$: if (browser && $currentTrack?.videoId && $currentTrack.videoId !== _lastHistory) {
+		_lastHistory = $currentTrack.videoId;
+		recordHistory($currentTrack);
+	}
 
 	messenger.listen("player", () => {
 		AudioPlayer.play();
@@ -183,9 +191,16 @@
     letter-spacing: -0.02em;"
 			>
 				<span class="now-playing-title">{$currentTrack?.title}</span>
-				<span class="now-playing-artist"
-					>{$currentTrack?.artistInfo?.artist?.[0]?.text}</span
-				>
+				{#if $currentTrack?.artistInfo?.artist?.[0]?.browseId}
+					<a class="now-playing-artist" style="color:inherit;text-decoration:none"
+						href={`/artist/${$currentTrack.artistInfo.artist[0].browseId}`}
+						>{$currentTrack?.artistInfo?.artist?.[0]?.text}</a
+					>
+				{:else}
+					<span class="now-playing-artist"
+						>{$currentTrack?.artistInfo?.artist?.[0]?.text}</span
+					>
+				{/if}
 			</div>
 		{:else}
 			<img

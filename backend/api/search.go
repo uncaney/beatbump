@@ -99,6 +99,9 @@ func SearchEndpointHandler(c echo.Context) error {
 		}
 		return c.JSON(http.StatusOK, r)
 	} else {
+		if ls := localShelf(queryUnescape); ls != nil {
+			regularResponse = append([]MusicShelf{*ls}, regularResponse...)
+		}
 		r := struct {
 			Results      []MusicShelf                   `json:"results"`
 			Response     _youtube.SearchResponse        `json:"response"`

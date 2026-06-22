@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from "$app/stores";
 	import ArtistPageHeader from "$lib/components/ArtistPageHeader/ArtistPageHeader.svelte";
+	import FollowButton from "$lib/components/FollowButton/FollowButton.svelte";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
 
 	import Header from "$lib/components/Layouts/Header.svelte";
@@ -41,6 +42,13 @@
 		{header}
 		thumbnail={header?.thumbnails}
 	/>
+	<div class="artist-actions resp-content-width">
+		<FollowButton
+			artistId={id}
+			name={header?.name}
+			thumbnail={header?.thumbnails && header?.thumbnails[0]?.url}
+		/>
+	</div>
 	<main>
 		<div class="artist-body">
 			{#if songs?.items?.length > 0}

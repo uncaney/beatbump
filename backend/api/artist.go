@@ -16,6 +16,9 @@ func ArtistEndpointHandler(c echo.Context) error {
 	if browseId == "" {
 		return c.JSON(http.StatusOK, struct{}{})
 	}
+	if isLocalArtist(browseId) {
+		return c.JSON(http.StatusOK, buildLocalArtist(browseId))
+	}
 	var responseBytes []byte
 	var err error
 

@@ -97,7 +97,7 @@
 					/>
 					<source
 						media={`(min-width:${img.width + 1}px) and (max-width:${
-							thumbnail[i + 1].width
+							thumbnail[i + 1]?.width
 						}px)`}
 						srcset={img.url}
 						type="image/jpeg"
@@ -107,9 +107,9 @@
 				{:else}
 					<source
 						media={`(min-width:${img.width + 1}px) and (max-width:${
-							thumbnail[i + 1].width
+							thumbnail[i + 1]?.width
 						}px)`}
-						srcset={thumbnail[i + 1].url}
+						srcset={thumbnail[i + 1]?.url}
 						type="image/jpeg"
 					/>
 				{/if}
@@ -119,7 +119,7 @@
 				class="header-thumbnail"
 				style="opacity:{opacity};"
 				loading="eager"
-				src={thumbnail[1]?.url}
+				src={thumbnail[1]?.url ?? thumbnail[0]?.url}
 				id="artist_img"
 				alt="Artist Thumbnail"
 			/>
@@ -140,7 +140,7 @@
 								/>
 								<source
 									media={`(min-width:${img?.width + 1}px) and (max-width:${
-										header?.foregroundThumbnails[i + 1].width
+										header?.foregroundThumbnails[i + 1]?.width
 									}px)`}
 									srcset={img?.url}
 									type="image/jpeg"
@@ -150,9 +150,9 @@
 							{:else}
 								<source
 									media={`(min-width:${img?.width + 1}px) and (max-width:${
-										header?.foregroundThumbnails[i + 1].width
+										header?.foregroundThumbnails[i + 1]?.width
 									}px)`}
-									srcset={header?.foregroundThumbnails[i + 1].url}
+									srcset={header?.foregroundThumbnails[i + 1]?.url}
 									type="image/jpeg"
 								/>
 							{/if}

@@ -53,6 +53,11 @@ func NextEndpointHandler(c echo.Context) error {
 	if videoId == "" && playlistId == "" && playlistSetVideoId == "" {
 		return errors.New("missing required param: videoId")
 	}
+	if isLid(videoId) {
+		if r := LocalNext(videoId); r != nil {
+			return c.JSON(http.StatusOK, *r)
+		}
+	}
 
 	responseBytes, err := api.Next(videoId, playlistId, api.WebMusic, paramsMap)
 

@@ -638,7 +638,7 @@ export class ListService {
                         undefined,
                         true,
                     );
-                    // await this.prefetchTrackAtIndex(state.position + 1);
+                    await this.prefetchTrackAtIndex(state.position + 1);
                 }
             }
             const position = this._$.value.position;
@@ -650,12 +650,27 @@ export class ListService {
         }
     }
 
+    private _prefetched = "";
+
     public async prefetchNextTrack() {
-        return;
+        return this.prefetchTrackAtIndex(this.position + 1);
     }
 
+    // Warm the resolver/bridge for an upcoming track: pre-resolves a local copy and
+    // triggers the auto-cache ("predownload") so the next song is ready. Best-effort,
+    // no playback side effects.
     public async prefetchTrackAtIndex(index: number) {
-        return;
+        try {
+            const track = this._$.value.mix?.[index];
+            const vid = track?.videoId;
+            if (!vid || this._prefetched === vid) return;
+            this._prefetched = vid;
+            await APIClient.fetch(
+                `/api/v1/player.json?videoId=${encodeURIComponent(vid)}`,
+            ).catch(() => {});
+        } catch {
+            /* prefetch is best-effort */
+        }
     }
 
     public async previous() {

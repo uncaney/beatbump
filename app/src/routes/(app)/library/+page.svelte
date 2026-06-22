@@ -13,6 +13,7 @@
 	import { onMount, setContext } from "svelte";
 	import Sync from "./_Sync.svelte";
 	import Grid from "./_components/Grid/Grid.svelte";
+	import CollectionNav from "./_CollectionNav.svelte";
 
 	let playlists: IDBPlaylist[] = [];
 
@@ -85,6 +86,7 @@
 {/if}
 
 <main class="resp-content-width">
+	<CollectionNav active="playlists" />
 	<header>
 		<h1>Your Library</h1>
 		<button

@@ -41,6 +41,33 @@ func main() {
 
 	e.GET("/api/v1/artist/:artistId", api.ArtistEndpointHandler)
 
+	// Local collection browse (whole self-hosted library, paginated + sorted)
+	e.GET("/api/v1/local/artists", api.LocalArtistsHandler)
+	e.GET("/api/v1/local/albums", api.LocalAlbumsHandler)
+	e.GET("/api/v1/local/songs", api.LocalSongsHandler)
+	e.GET("/api/v1/local/genres", api.LocalGenresHandler)
+
+	// Per-profile server state: favorites, follows, playlists (anonymous device cookie)
+	me := e.Group("/api/v1/me")
+	me.GET("/favorites", api.MeFavoritesHandler)
+	me.POST("/favorites", api.MeAddFavoriteHandler)
+	me.DELETE("/favorites", api.MeDeleteFavoriteHandler)
+	me.GET("/follows", api.MeFollowsHandler)
+	me.POST("/follows", api.MeAddFollowHandler)
+	me.DELETE("/follows", api.MeDeleteFollowHandler)
+	me.GET("/playlists", api.MePlaylistsHandler)
+	me.POST("/playlists", api.MeCreatePlaylistHandler)
+	me.GET("/playlists/:id", api.MePlaylistHandler)
+	me.POST("/playlists/:id/items", api.MeAddPlaylistItemHandler)
+	me.DELETE("/playlists/:id", api.MeDeletePlaylistHandler)
+	me.DELETE("/playlists/:id/items", api.MeDeletePlaylistItemHandler)
+	me.POST("/history", api.MeRecordPlayHandler)
+	me.GET("/stats/recent", api.MeRecentHandler)
+	me.GET("/stats/top", api.MeTopHandler)
+	me.POST("/acquire", api.MeAcquireHandler)
+	me.GET("/acquire", api.MeAcquireStatusHandler)
+	me.GET("/mix", api.MeMixHandler)
+
 	// Download & Settings
 	e.GET("/api/v1/download/playlist", api.DownloadPlaylistHandler)
 	e.GET("/api/v1/download/song", api.DownloadSongMixHandler)

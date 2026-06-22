@@ -193,13 +193,8 @@
 	}: BuildMenuParams) =>
 		buildDropdown()
 			.add("View Artist", async () => {
-				goto(
-					`/artist/${
-						item?.artistInfo
-							? item?.artistInfo?.artist?.[0].browseId
-							: item?.subtitle[0].browseId
-					}`,
-				);
+				const __aid = await resolveArtistId(item);
+				if (__aid) goto(`/artist/${__aid}`);
 				await tick();
 				window.scrollTo({
 					behavior: "smooth",
@@ -309,6 +304,7 @@
 	import { Logger, notify } from "$lib/utils";
 
 	import { goto } from "$app/navigation";
+	import { resolveArtistId } from "$lib/local";
 	import { buildDropdown } from "$lib/configs/dropdowns.config";
 	import { APIParams, FINITE_LIST_PARAMS } from "$lib/constants";
 	import { CTX_ListItem } from "$lib/contexts";

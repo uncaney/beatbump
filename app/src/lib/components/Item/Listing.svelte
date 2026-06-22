@@ -22,6 +22,8 @@
 
 	import { browser } from "$app/environment";
 	import { goto } from "$app/navigation";
+	import { resolveArtistId } from "$lib/local";
+	import { addFavorite, removeFavoriteItem } from "$lib/me";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { mobileLongPress } from "$lib/actions/longtouch";
 	import type { Dropdown } from "$lib/configs/dropdowns.config";
@@ -61,19 +63,10 @@
 			text: "View Artist",
 			icon: "artist",
 			action: async () => {
-				window.scrollTo({
-					behavior: "smooth",
-					top: 0,
-					left: 0,
-				});
-
+				window.scrollTo({ behavior: "smooth", top: 0, left: 0 });
 				await tick();
-				goto(
-					`/artist/${
-						data?.subtitle.find((s) => s?.pageType?.includes("ARTIST"))
-							?.browseId ?? data.artistInfo.artist[0].browseId
-					}`,
-				);
+				const __aid = await resolveArtistId(data);
+				if (__aid) goto(`/artist/${__aid}`);
 			},
 		},
 		{
@@ -127,9 +120,13 @@
 			icon: !isLibrary ? "heart" : "x",
 			action: async () => {
 				if (!browser) return;
-				!isLibrary && IDBService.sendMessage("create", "favorite", data);
+				if (!isLibrary) {
+					IDBService.sendMessage("create", "favorite", data);
+					addFavorite(data).catch(() => {});
+				}
 				if (isLibrary) {
 					await IDBService.sendMessage("delete", "favorite", data);
+					removeFavoriteItem(data).catch(() => {});
 					dispatch("update");
 				}
 			},

@@ -12,7 +12,7 @@
 
 	export let type: "inline";
 	export let query = "";
-	export let filter = searchFilter[0].params;
+	export let filter = "songs";
 
 	const dispatch = createEventDispatcher();
 	let results: Array<{ query: string; id: string }> = [];

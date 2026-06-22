@@ -28,6 +28,11 @@ func PlayerEndpointHandler(c echo.Context) error {
 	if videoId == "" {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Missing required param: videoId"))
 	}
+	if isLid(videoId) {
+		if r := LocalPlayer(videoId); r != nil {
+			return c.JSON(http.StatusOK, r)
+		}
+	}
 
 	var responseBytes []byte
 	var err error
