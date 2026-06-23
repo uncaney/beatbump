@@ -68,8 +68,13 @@
             .add("Shuffle", () => {
                 list.shuffle($queuePosition, true);
             })
-            .add("Download", async () => {
-                showDownloadSongPopper.set({ state: true, item: $currentTrack });
+            .add("Download to device", async () => {
+                const r = await downloadToDevice($currentTrack);
+                notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
+            })
+            .add("Download offline", async () => {
+                const r = await downloadForOffline($currentTrack);
+                notify(r.ok ? "Saved for offline" : "Offline save failed: " + (r.reason || ""), r.ok ? "success" : "error");
             })
             .build()
             .filter(Boolean);
@@ -80,7 +85,7 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId } from "$lib/local";
 	import { recordHistory } from "$lib/me";
-	import { downloadForOffline } from "$lib/offline";
+	import { downloadForOffline, downloadToDevice } from "$lib/offline";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { clickOutside } from "$lib/actions/clickOutside";
 	import { IMAGE_NOT_FOUND } from "$lib/constants";

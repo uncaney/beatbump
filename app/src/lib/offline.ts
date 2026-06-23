@@ -50,6 +50,27 @@ export async function downloadForOffline(item: any): Promise<{ ok: boolean; reas
 	return { ok: true };
 }
 
+// Real on-device download: saves the actual audio file to the user's device
+// (Downloads folder) for tracks you own locally, via the bridge's dl=1 mode.
+export async function downloadToDevice(item: any): Promise<{ ok: boolean; reason?: string }> {
+	const lid = item && item.videoId;
+	if (!lid) return { ok: false, reason: "no id" };
+	const url = await resolveAudioUrl(lid);
+	if (!url) return { ok: false, reason: "no stream url" };
+	if (!/\/localf\b/.test(url)) {
+		return { ok: false, reason: "pas encore dans ta bibliothèque — fais 'Download offline' ou suis l'artiste pour l'acquérir" };
+	}
+	const dlUrl = url + (url.includes("?") ? "&" : "?") + "dl=1";
+	const a = document.createElement("a");
+	a.href = dlUrl;
+	a.download = "";
+	a.rel = "noopener";
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	return { ok: true };
+}
+
 export function removeOffline(item: any) {
 	const lid = item && item.videoId;
 	const t = read().find((x) => x.videoId === lid);

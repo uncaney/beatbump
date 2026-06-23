@@ -24,7 +24,7 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId, entityHref } from "$lib/local";
 	import { addFavorite, removeFavoriteItem } from "$lib/me";
-	import { downloadForOffline } from "$lib/offline";
+	import { downloadForOffline, downloadToDevice } from "$lib/offline";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { mobileLongPress } from "$lib/actions/longtouch";
 	import type { Dropdown } from "$lib/configs/dropdowns.config";
@@ -130,6 +130,15 @@
 					removeFavoriteItem(data).catch(() => {});
 					dispatch("update");
 				}
+			},
+		},
+		{
+			text: "Download to device",
+			icon: "download",
+			action: async () => {
+				if (!browser) return;
+				const r = await downloadToDevice(data);
+				notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
 			},
 		},
 		{
