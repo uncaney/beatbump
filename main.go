@@ -41,6 +41,9 @@ func main() {
 
 	e.GET("/api/v1/artist/:artistId", api.ArtistEndpointHandler)
 
+	// Lyrics via lrclib.net (universal; local or YouTube tracks)
+	e.GET("/api/v1/lyrics", api.LyricsHandler)
+
 	// Local collection browse (whole self-hosted library, paginated + sorted)
 	e.GET("/api/v1/local/artists", api.LocalArtistsHandler)
 	e.GET("/api/v1/local/albums", api.LocalAlbumsHandler)

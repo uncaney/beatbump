@@ -201,6 +201,12 @@
 						>{$currentTrack?.artistInfo?.artist?.[0]?.text}</span
 					>
 				{/if}
+				<a
+					class="now-playing-lyrics"
+					href="/lyrics"
+					style="display:block;font-size:0.78em;opacity:0.7;text-decoration:none;color:inherit;margin-top:0.15em;"
+					>Lyrics</a
+				>
 			</div>
 		{:else}
 			<img
