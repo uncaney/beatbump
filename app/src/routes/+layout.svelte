@@ -131,6 +131,26 @@
             Logger.err(err);
         }
         syncTabs.connect();
+
+        // When a new build's service worker takes control, reload ONCE so the
+        // page picks up the fresh app shell. Without this, iOS/PWA keeps showing
+        // the old UI (stale buttons, broken back/lyrics/view-artist) indefinitely.
+        try {
+            if ("serviceWorker" in navigator) {
+                const hadController = !!navigator.serviceWorker.controller;
+                let reloading = false;
+                navigator.serviceWorker.addEventListener("controllerchange", () => {
+                    // first install (no prior controller) shouldn't reload
+                    if (!hadController || reloading) return;
+                    reloading = true;
+                    window.location.reload();
+                });
+                // proactively check for an update on every app open
+                navigator.serviceWorker.getRegistration().then((reg) => reg && reg.update()).catch(() => {});
+            }
+        } catch (err) {
+            Logger.err(err);
+        }
     });
     let info: Record<string, any> = {};
 </script>

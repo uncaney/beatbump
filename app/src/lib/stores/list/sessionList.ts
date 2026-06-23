@@ -924,8 +924,6 @@ export class ListService {
                             if (!(item != undefined && item != null)) continue;
 
                             if (!VALID_KEYS.includes(key)) {
-                                console.log("SKIPPING INVALID KEY", key);
-
                                 continue;
                             }
                             if (key === "visitorData" && !to[key]) {

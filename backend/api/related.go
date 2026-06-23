@@ -4,33 +4,42 @@ import (
 	"beatbump-server/backend/_youtube"
 	"beatbump-server/backend/_youtube/api"
 	"encoding/json"
-	"fmt"
 	"github.com/labstack/echo/v4"
 	"net/http"
 )
+
+// emptyRelated returns valid (empty) JSON so the client never tries to JSON.parse
+// a plain-text error — a 500 here used to crash playlist/queue continuation.
+func emptyRelated(c echo.Context) error {
+	return c.JSON(http.StatusOK, struct {
+		Carousels   []Carousel  `json:"carousels"`
+		Description Description `json:"description"`
+	}{Carousels: []Carousel{}, Description: Description{}})
+}
 
 func RelatedEndpointHandler(c echo.Context) error {
 
 	url := c.Request().URL
 	query := url.Query()
 	browseId := query.Get("browseId")
-	if browseId == "" {
-		return c.String(http.StatusInternalServerError, fmt.Sprintf("Missing required param: browseId"))
+	// empty or local ids have no YT "related" — degrade gracefully (no crash)
+	if browseId == "" || isLid(browseId) || isLocalArtist(browseId) || isLocalAlbum(browseId) {
+		return emptyRelated(c)
 	}
 
 	responseBytes, err := api.Browse(browseId, api.PageType_MusicPageTypeTrackRelated, "", nil, nil, nil, api.WebMusic)
 
 	if err != nil {
-		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
+		return emptyRelated(c)
 	}
 
 	var relatedResponse _youtube.RelatedResponse
 	err = json.Unmarshal(responseBytes, &relatedResponse)
 	if err != nil {
-		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
+		return emptyRelated(c)
 	}
 	if len(relatedResponse.Contents.SectionListRenderer.Contents) == 0 {
-		return nil
+		return emptyRelated(c)
 	}
 	var carouselResponse []Carousel = make([]Carousel, 0)
 	var description Description = Description{}

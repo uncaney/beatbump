@@ -33,6 +33,9 @@
 		if (img) {
 			img.decode().then(() => {
 				opacity = 1;
+			}).catch(() => {
+				// broken/empty artist image → keep it visible, don't throw EncodingError
+				opacity = 1;
 			});
 		}
 		return () => {
