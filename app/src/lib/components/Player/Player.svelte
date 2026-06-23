@@ -26,11 +26,19 @@
     ) =>
         buildDropdown()
             .add("View Artist", async () => {
-                window.scrollTo({ behavior: "smooth", top: 0, left: 0 });
                 const __aid = await resolveArtistId($currentTrack);
-                if (__aid) goto(`/artist/${__aid}`);
+                if (__aid) {
+                    fullscreenStore.set("closed"); // reveal the destination on mobile
+                    window.scrollTo({ behavior: "smooth", top: 0, left: 0 });
+                    goto(`/artist/${__aid}`);
+                }
+            })
+            .add("Lyrics", () => {
+                fullscreenStore.set("closed");
+                goto("/lyrics");
             })
             .add("Add to Playlist", async () => {
+                fullscreenStore.set("closed");
                 showAddToPlaylistPopper.set({ state: true, item: $currentTrack });
             })
             .add(

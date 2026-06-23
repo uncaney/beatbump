@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { navigating } from "$app/stores";
+	import { goto } from "$app/navigation";
+	import Icon from "$components/Icon/Icon.svelte";
 	import Description from "$components/ArtistPageHeader/Description/Description.svelte";
 	import Carousel from "$components/Carousel/Carousel.svelte";
 	import DraggableList from "$components/DraggableList/DraggableList.svelte";
@@ -369,12 +371,43 @@
 			}}
 		>
 			{#if $isMobileMQ}
-				<div class="menu-mobile">
-					<PopperButton
-						items={DropdownItems}
-						tabindex={-1}
-						size="2em"
-					/>
+				<div class="menu-mobile" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:0 0.5em;">
+					<button
+						aria-label="Close player"
+						title="Close"
+						class="no-style"
+						style="background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
+						on:click={() => fullscreenStore.set("closed")}
+					>
+						<Icon
+							name="chevron-left"
+							size="1.8em"
+							color="#fff"
+						/>
+					</button>
+					<div style="display:flex;align-items:center;gap:0.4em;">
+						<button
+							aria-label="Lyrics"
+							title="Lyrics"
+							class="no-style"
+							style="background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
+							on:click={() => {
+								fullscreenStore.set("closed");
+								goto("/lyrics");
+							}}
+						>
+							<Icon
+								name="music"
+								size="1.6em"
+								color="#fff"
+							/>
+						</button>
+						<PopperButton
+							items={DropdownItems}
+							tabindex={-1}
+							size="2em"
+						/>
+					</div>
 				</div>
 			{/if}
 			<div
