@@ -11,6 +11,7 @@
 		{ key: "saved", label: "Saved", href: "/library/saved" },
 		{ key: "my-playlists", label: "My Playlists", href: "/library/playlists-srv" },
 		{ key: "recent", label: "Listening", href: "/library/recent" },
+		{ key: "account", label: "Account", href: "/library/account" },
 	];
 </script>
 

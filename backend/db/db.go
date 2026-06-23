@@ -66,7 +66,7 @@ func InitDB() {
 	}
 
 	// Auto Migrate
-	err = DB.AutoMigrate(&GroupTask{}, &SongTask{}, &Setting{}, &Favorite{}, &Follow{}, &Playlist{}, &PlaylistItem{}, &PlayEvent{}, &AcquireJob{})
+	err = DB.AutoMigrate(&GroupTask{}, &SongTask{}, &Setting{}, &Profile{}, &Favorite{}, &Follow{}, &Playlist{}, &PlaylistItem{}, &PlayEvent{}, &AcquireJob{})
 	if err != nil {
 		log.Fatal("Failed to migrate database:", err)
 	}

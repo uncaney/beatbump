@@ -54,6 +54,30 @@ func NextEndpointHandler(c echo.Context) error {
 		return errors.New("missing required param: videoId")
 	}
 	if isLid(videoId) {
+		// Relevant radio: resolve the local track to its YouTube videoId and return
+		// the REAL YT radio, but keep the owned copy as the first track (plays local).
+		if ytVid := resolveLidToYT(videoId); ytVid != "" {
+			if rb, e := api.Next(ytVid, "RDAMVM"+ytVid, api.WebMusic, paramsMap); e == nil {
+				var nr _youtube.NextResponse
+				if json.Unmarshal(rb, &nr) == nil {
+					parsed := ParseNextBody(nr)
+					if len(parsed.Results) > 0 {
+						fresh := make([]Item, 0, len(parsed.Results)+1)
+						fresh = append(fresh, localSeedItem(videoId))
+						for _, it := range parsed.Results {
+							if it.VideoID == ytVid || it.VideoID == videoId {
+								continue // drop the seed's YT duplicate
+							}
+							fresh = append(fresh, it)
+						}
+						parsed.Results = fresh
+						parsed.CurrentMixID = "RDAMVM" + videoId
+						return c.JSON(http.StatusOK, parsed)
+					}
+				}
+			}
+		}
+		// Fallback: local-only radio (same artist/genre) when not found on YT.
 		if r := LocalNext(videoId); r != nil {
 			return c.JSON(http.StatusOK, *r)
 		}

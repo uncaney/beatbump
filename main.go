@@ -47,8 +47,11 @@ func main() {
 	e.GET("/api/v1/local/songs", api.LocalSongsHandler)
 	e.GET("/api/v1/local/genres", api.LocalGenresHandler)
 
-	// Per-profile server state: favorites, follows, playlists (anonymous device cookie)
+	// Per-profile server state: favorites, follows, playlists (named or anonymous cookie)
 	me := e.Group("/api/v1/me")
+	me.POST("/login", api.MeLoginHandler)
+	me.POST("/logout", api.MeLogoutHandler)
+	me.GET("/whoami", api.MeWhoamiHandler)
 	me.GET("/favorites", api.MeFavoritesHandler)
 	me.POST("/favorites", api.MeAddFavoriteHandler)
 	me.DELETE("/favorites", api.MeDeleteFavoriteHandler)

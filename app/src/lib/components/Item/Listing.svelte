@@ -22,7 +22,7 @@
 
 	import { browser } from "$app/environment";
 	import { goto } from "$app/navigation";
-	import { resolveArtistId } from "$lib/local";
+	import { resolveArtistId, entityHref } from "$lib/local";
 	import { addFavorite, removeFavoriteItem } from "$lib/me";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { mobileLongPress } from "$lib/actions/longtouch";
@@ -235,13 +235,9 @@
 			return;
 		// console.log(event.target)
 		if (isArtist) {
-            let link = `/channel/${data.endpoint?.browseId}`
-            if (data.endpoint?.pageType.includes("ARTIST")){
-                link = `/artist/${data.artistInfo?.artist?.[0].browseId}`
-            }else if (data.endpoint?.pageType.includes("ALBUM")){
-                link = `/release?id=${data.artistInfo?.artist?.[0].browseId ? data.artistInfo?.artist?.[0].browseId : data.endpoint?.browseId}`
-            }
-			goto(link);
+			// entityHref routes by the item's OWN endpoint id (album→/release?id=lb-,
+			// artist→/artist/la-); never sends an artist id to /release.
+			goto(entityHref(data.endpoint?.browseId, data.endpoint?.pageType));
 			return;
 		}
 

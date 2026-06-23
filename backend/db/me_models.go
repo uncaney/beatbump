@@ -6,6 +6,12 @@ package db
 
 import "time"
 
+type Profile struct {
+	ID        string    `gorm:"primaryKey" json:"id"` // device-anon id, or u-<hash(name)> after login
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type Favorite struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	ProfileID string    `gorm:"uniqueIndex:idx_fav_uniq;index" json:"-"`

@@ -304,7 +304,7 @@
 	import { Logger, notify } from "$lib/utils";
 
 	import { goto } from "$app/navigation";
-	import { resolveArtistId } from "$lib/local";
+	import { resolveArtistId, entityHref } from "$lib/local";
 	import { buildDropdown } from "$lib/configs/dropdowns.config";
 	import { APIParams, FINITE_LIST_PARAMS } from "$lib/constants";
 	import { CTX_ListItem } from "$lib/contexts";
@@ -501,34 +501,14 @@
 				{#if Array.isArray(item.subtitle)}
 					{#each item.subtitle as subtitle}
 						{#if subtitle?.browseId}
-							{#if subtitle.pageType && subtitle.pageType.includes("ARTIST")}
-								<a
-									class="artist secondary"
-									href={`/artist/${subtitle.browseId}`}
-									on:click|preventDefault={() => {
-										goto(`/artist/${subtitle.browseId}`);
-										fullscreenStore.set("closed");
-									}}>{subtitle.text}</a
-								>
-							{:else if subtitle.pageType?.includes("USER_CHANNEL")}
-								<a
-									class="artist secondary"
-									href={`/channel/${subtitle.browseId}`}
-									on:click|preventDefault={() => {
-										goto(`/channel/${subtitle.browseId}`);
-										fullscreenStore.set("closed");
-									}}>{subtitle.text}</a
-								>
-							{:else}
-								<a
-									class="artist secondary"
-									href={`/release?id=${subtitle.browseId}`}
-									on:click|preventDefault={() => {
-										goto(`/release?id=${subtitle.browseId}`);
-										fullscreenStore.set("closed");
-									}}>{subtitle.text}</a
-								>
-							{/if}
+							<a
+								class="artist secondary"
+								href={entityHref(subtitle.browseId, subtitle.pageType)}
+								on:click|preventDefault={() => {
+									goto(entityHref(subtitle.browseId, subtitle.pageType));
+									fullscreenStore.set("closed");
+								}}>{subtitle.text}</a
+							>
 						{:else}
 							<span>{subtitle.text} </span>
 						{/if}

@@ -6,6 +6,17 @@ function itemRef(item: any): string {
 	return item?.videoId || item?.endpoint?.browseId || item?.browseId || "";
 }
 
+// ---- account (named profiles) ----
+export async function whoami(): Promise<{ id: string; name: string }> {
+	return (await APIClient.fetch(`/api/v1/me/whoami`)).json();
+}
+export async function login(name: string): Promise<{ id: string; name: string }> {
+	return (await APIClient.post(`/api/v1/me/login`, { name })).json();
+}
+export async function logout() {
+	return APIClient.post(`/api/v1/me/logout`, {});
+}
+
 // ---- favorites ----
 export async function getFavorites(kind?: string): Promise<{ favorites: any[]; items: any[] }> {
 	const res = await APIClient.fetch(`/api/v1/me/favorites${kind ? `?kind=${kind}` : ""}`);

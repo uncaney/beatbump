@@ -7,6 +7,7 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -30,11 +31,47 @@ func profileID(c echo.Context) string {
 		return ck.Value
 	}
 	id := randID()
+	setProfileCookie(c, id)
+	return id
+}
+
+func setProfileCookie(c echo.Context, id string) {
 	c.SetCookie(&http.Cookie{
 		Name: "bbp", Value: id, Path: "/",
 		MaxAge: 60 * 60 * 24 * 3650, HttpOnly: true, SameSite: http.SameSiteLaxMode,
 	})
-	return id
+}
+
+// ---- named profiles (lightweight login: same name = same library anywhere) ----
+func MeLoginHandler(c echo.Context) error {
+	var b struct {
+		Name string `json:"name"`
+	}
+	_ = decodeBody(c, &b)
+	name := strings.TrimSpace(b.Name)
+	if name == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name required"})
+	}
+	h := sha1.Sum([]byte(strings.ToLower(name)))
+	id := "u-" + hex.EncodeToString(h[:])[:16]
+	setProfileCookie(c, id)
+	db.DB.Where("id = ?", id).Assign(db.Profile{ID: id, Name: name, CreatedAt: time.Now()}).FirstOrCreate(&db.Profile{})
+	return c.JSON(http.StatusOK, map[string]interface{}{"id": id, "name": name})
+}
+
+func MeWhoamiHandler(c echo.Context) error {
+	pid := profileID(c)
+	name := ""
+	var p db.Profile
+	if err := db.DB.Where("id = ?", pid).First(&p).Error; err == nil {
+		name = p.Name
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"id": pid, "name": name})
+}
+
+func MeLogoutHandler(c echo.Context) error {
+	setProfileCookie(c, randID()) // fresh anonymous profile
+	return c.JSON(http.StatusOK, map[string]interface{}{"ok": true})
 }
 
 // itemMeta derives (kind, ref, title, artist, thumbnail) from a loose item map.

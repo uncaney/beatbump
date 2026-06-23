@@ -18,7 +18,6 @@
 	$: id = $page.url.searchParams.get("id");
 
 	let { items, releaseInfo } = pageItems;
-	$: console.log(data);
 	let thumbnail = releaseInfo?.thumbnails[0]?.url.replace(
 		/=(w(\d+))-(h(\d+))/g,
 		"=w512-h512",
@@ -62,7 +61,6 @@
 		page: "release",
 	});
 	releasePageContext.set({ page: "release" });
-	$: console.log(releaseInfo, items);
 </script>
 
 <Header

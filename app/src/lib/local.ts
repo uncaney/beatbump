@@ -12,6 +12,26 @@ export async function laId(text: string): Promise<string> {
 	return "la-" + hex.slice(0, 12);
 }
 
+// entityHref decides the correct route for a browseId given its (optional) pageType.
+// Critically: a subtitle/artist id (la-… or UC…) NEVER goes to /release (album route),
+// which was the dead-end bug; an album id (lb-/MPRE/OLAK/VL…) goes to /release.
+export function entityHref(browseId: string | undefined, pageType?: string): string {
+	const id = browseId || "";
+	const pt = pageType || "";
+	if (/USER_CHANNEL/.test(pt)) return `/channel/${id}`;
+	if (/ARTIST/.test(pt) || id.startsWith("la-") || id.startsWith("UC")) return `/artist/${id}`;
+	if (
+		/ALBUM|PLAYLIST|SINGLE|EP/.test(pt) ||
+		id.startsWith("lb-") ||
+		id.startsWith("MPRE") ||
+		id.startsWith("OLAK") ||
+		id.startsWith("VL")
+	)
+		return `/release?id=${id}`;
+	// A bare subtitle entry is far more often an artist than an album.
+	return `/artist/${id}`;
+}
+
 export async function resolveArtistId(item: any): Promise<string | null> {
 	if (!item) return null;
 	const sub = Array.isArray(item?.subtitle) ? item.subtitle : [];

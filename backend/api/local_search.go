@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -326,6 +327,47 @@ func randomLibrarySample(n int) []IListItemRenderer {
 		}
 	}
 	return out
+}
+
+// ---- resolve a local track to its YouTube videoId (for a RELEVANT radio) ----
+// Only 8/54k tracks store a videoId, so we search YT Music by "artist title" at
+// play time and cache the result. Lets LocalNext seed the real YT radio.
+var lidYTCache sync.Map
+
+func searchYTSong(q string) string {
+	res := selfGet("/api/v1/search.json?q=" + url.QueryEscape(q) + "&filter=songs")
+	var vids []string
+	collectKey(res, "videoId", &vids)
+	for _, v := range vids {
+		if ytVideoRe.MatchString(v) && !isLid(v) {
+			return v
+		}
+	}
+	return ""
+}
+
+func resolveLidToYT(lid string) string {
+	if v, ok := lidYTCache.Load(lid); ok {
+		return v.(string)
+	}
+	y := ""
+	if h := meiliByLid(lid); h != nil {
+		if vid := mstr(h, "videoId"); ytVideoRe.MatchString(vid) && !isLid(vid) {
+			y = vid
+		} else {
+			y = searchYTSong(strings.TrimSpace(mArtist(h) + " " + mstr(h, "title")))
+		}
+	}
+	lidYTCache.Store(lid, y)
+	return y
+}
+
+// localSeedItem builds the owned-copy queue item for a lid (plays from /localf).
+func localSeedItem(lid string) Item {
+	if h := meiliByLid(lid); h != nil {
+		return lidItem(h)
+	}
+	return Item{Title: lid, VideoID: lid}
 }
 
 func LocalNext(lid string) *NextEndpointResponse {

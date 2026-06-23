@@ -29,7 +29,6 @@ export async function clickHandler({
 	type: string;
 	kind: string;
 }) {
-    console.log(item)
 	if (item.endpoint && item.endpoint?.pageType && item.endpoint?.browseId) {
 		browseHandler(item.endpoint.pageType, item.endpoint?.browseId);
 		return;
