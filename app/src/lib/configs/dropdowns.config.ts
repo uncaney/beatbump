@@ -24,6 +24,9 @@ export type Label =
 	| "Start Radio"
 	| "Play Album"
 	| "Download"
+	| "Download to device"
+	| "Download offline"
+	| "Lyrics"
 	| "Invite Group Session"
 	| "Album Radio"
 	| "Remove from Queue";
@@ -52,7 +55,10 @@ const DROPDOWN_TEXTS: ReadonlyArray<Label> = [
 	"Start Radio",
 	"Play Album",
 	"Album Radio",
-	"Download"
+	"Download",
+	"Download to device",
+	"Download offline",
+	"Lyrics"
 ];
 
 export type Icons =
@@ -156,6 +162,21 @@ export const DROPDOWN_ITEMS: Partial<{
 	"Download": {
 		text: "Download",
 		icon: "download",
+		action: () => { },
+	},
+	"Download to device": {
+		text: "Download to device",
+		icon: "download",
+		action: () => { },
+	},
+	"Download offline": {
+		text: "Download offline",
+		icon: "download",
+		action: () => { },
+	},
+	"Lyrics": {
+		text: "Lyrics",
+		icon: "list-music",
 		action: () => { },
 	},
 	"Share Group Session": {

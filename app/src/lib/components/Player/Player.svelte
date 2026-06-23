@@ -333,7 +333,8 @@
 				style="display:flex;align-items:center;color:#fff;"
 			>
 				<Icon
-					color="white"
+					color="#fff"
+					--stroke="#fff"
 					name="music"
 					size="1.5em"
 				/>
@@ -346,7 +347,8 @@
 				style="background:none;border:none;cursor:pointer;display:flex;align-items:center;color:#fff;"
 			>
 				<Icon
-					color="white"
+					color="#fff"
+					--stroke="#fff"
 					name="download"
 					size="1.5em"
 				/>

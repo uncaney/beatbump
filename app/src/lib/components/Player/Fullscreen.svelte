@@ -26,7 +26,9 @@
 	} from "$lib/stores/list";
 	import { groupSession } from "$lib/stores/sessions";
 	import type { Thumbnail } from "$lib/types";
-	import { debounce, requestFrameSingle } from "$lib/utils";
+	import { debounce, requestFrameSingle, notify } from "$lib/utils";
+	import { downloadToDevice } from "$lib/offline";
+	import { resolveArtistId } from "$lib/local";
 	import SessionListService from "$stores/list/sessionList";
 	import { SITE_ORIGIN_URL, playbackURLStateUpdater } from "$stores/url";
 	import { windowWidth } from "$stores/window";
@@ -72,6 +74,19 @@
 		hasEverBeenOpen || (!hasEverBeenOpen && state === "open");
 	$: loading = $playerLoading;
 	$: data = $currentTrack;
+
+	// Direct mobile actions (avoid the popper, which conflicts with the swipe gesture)
+	async function mobileDownload() {
+		const r = await downloadToDevice($currentTrack);
+		notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
+	}
+	async function mobileViewArtist() {
+		const aid = await resolveArtistId($currentTrack);
+		if (aid) {
+			fullscreenStore.set("closed");
+			goto(`/artist/${aid}`);
+		}
+	}
 	$: heightCalc = -windowHeight + 120;
 	$: queueOpen = true;
 	let seeking = 0;
@@ -371,12 +386,12 @@
 			}}
 		>
 			{#if $isMobileMQ}
-				<div class="menu-mobile" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:0 0.5em;">
+				<div class="menu-mobile" style="display:flex;align-items:center;justify-content:space-between;left:0;right:0;width:auto;max-width:none;max-height:none;margin:0;padding:0.6em 0.5em;z-index:200;gap:0.2em;">
 					<button
 						aria-label="Close player"
 						title="Close"
 						class="no-style"
-						style="background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
+						style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
 						on:click={() => fullscreenStore.set("closed")}
 					>
 						<Icon
@@ -387,10 +402,38 @@
 					</button>
 					<div style="display:flex;align-items:center;gap:0.4em;">
 						<button
+							aria-label="View Artist"
+							title="View Artist"
+							class="no-style"
+							style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
+							on:click={mobileViewArtist}
+						>
+							<Icon
+								name="artist"
+								size="1.6em"
+								color="#fff"
+								--stroke="#fff"
+							/>
+						</button>
+						<button
+							aria-label="Download to device"
+							title="Download to device"
+							class="no-style"
+							style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
+							on:click={mobileDownload}
+						>
+							<Icon
+								name="download"
+								size="1.6em"
+								color="#fff"
+								--stroke="#fff"
+							/>
+						</button>
+						<button
 							aria-label="Lyrics"
 							title="Lyrics"
 							class="no-style"
-							style="background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
+							style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
 							on:click={() => {
 								fullscreenStore.set("closed");
 								goto("/lyrics");

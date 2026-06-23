@@ -15,12 +15,14 @@
 	import type { PageData } from "./$types";
 
 	export let data: PageData;
-	const { body,header, visitorData } = data;
+	// MUST be reactive: navigating artist→artist re-runs load and changes `data`,
+	// but `const` destructuring kept showing the FIRST artist clicked.
+	$: ({ body, header, visitorData } = data);
 
-	let carousels: ArtistPageBody["carousels"] = body["carousels"] ?? [];
-    let songs: ArtistPageBody["songs"] = body["songs"] ?? [];
+	$: carousels = (body?.["carousels"] ?? []) as ArtistPageBody["carousels"];
+	$: songs = (body?.["songs"] ?? []) as ArtistPageBody["songs"];
 
-	const id = $page.params.slug;
+	$: id = $page.params.slug;
 
 	let innerWidth = 640;
 
@@ -36,6 +38,7 @@
 	image={header?.thumbnails && header?.thumbnails[0]?.url}
 />
 <svelte:window bind:innerWidth />
+{#key id}
 <div class="fix-width">
 	<ArtistPageHeader
 		description={header?.description}
@@ -108,6 +111,7 @@
 		</div>
 	</main>
 </div>
+{/key}
 
 <style lang="scss">
 	@import "../../../../lib/components/ArtistPageHeader/index.scss";

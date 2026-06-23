@@ -13,12 +13,13 @@
 
 	export let data: PageData;
 
-	let { items: pageItems, id, path } = data;
-
+	// reactive so album→album navigation updates (was const → stale, like the artist page)
+	$: pageItems = data?.items;
+	$: path = data?.path;
 	$: id = $page.url.searchParams.get("id");
-
-	let { items, releaseInfo } = pageItems;
-	let thumbnail = releaseInfo?.thumbnails[0]?.url.replace(
+	$: items = pageItems?.items;
+	$: releaseInfo = pageItems?.releaseInfo ?? {};
+	$: thumbnail = releaseInfo?.thumbnails?.[0]?.url?.replace(
 		/=(w(\d+))-(h(\d+))/g,
 		"=w512-h512",
 	);
@@ -57,7 +58,7 @@
 	});
 
 	CTX_ListItem.set({
-		parentPlaylistId: releaseInfo.playlistId,
+		parentPlaylistId: data?.items?.releaseInfo?.playlistId,
 		page: "release",
 	});
 	releasePageContext.set({ page: "release" });
