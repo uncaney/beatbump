@@ -181,6 +181,23 @@
                 size="1.6125em"
             />
         </button>
+        <button
+            use:tooltip
+            on:click={() => {
+					$fullscreenStore && fullscreenStore.set("closed");
+					goto("/library/account");
+				}}
+            data-tooltip="Account"
+            aria-label="account"
+            class="nav-icon icon-btn no-style"
+            class:active={key.includes("account")}
+        >
+            <Icon
+                name="user"
+                --stroke={key.includes("account") ? "#fff" : "#BCBCBE"}
+                size="1.6125em"
+            />
+        </button>
     </div>
 
     <div class="items">

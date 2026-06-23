@@ -80,6 +80,7 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId } from "$lib/local";
 	import { recordHistory } from "$lib/me";
+	import { downloadForOffline } from "$lib/offline";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { clickOutside } from "$lib/actions/clickOutside";
 	import { IMAGE_NOT_FOUND } from "$lib/constants";
@@ -133,6 +134,12 @@
 
 	function handleImageError(event: Event) {
 		(event.target as HTMLImageElement).src = IMAGE_NOT_FOUND;
+	}
+
+	async function dlOffline() {
+		if (!$currentTrack) return;
+		const r = await downloadForOffline($currentTrack);
+		notify(r.ok ? "Saved for offline" : "Offline save failed: " + (r.reason || ""), r.ok ? "success" : "error");
 	}
 
 	$: DropdownItems = createPlayerPopperMenu(
@@ -305,6 +312,32 @@
 					</div>
 				{/if}
 			</div>
+			<a
+				class="player-btn"
+				href="/lyrics"
+				aria-label="Lyrics"
+				title="Lyrics"
+				style="display:flex;align-items:center;color:#fff;"
+			>
+				<Icon
+					color="white"
+					name="music"
+					size="1.5em"
+				/>
+			</a>
+			<button
+				class="player-btn no-style"
+				aria-label="Download offline"
+				title="Download offline"
+				on:click|stopPropagation={dlOffline}
+				style="background:none;border:none;cursor:pointer;display:flex;align-items:center;color:#fff;"
+			>
+				<Icon
+					color="white"
+					name="download"
+					size="1.5em"
+				/>
+			</button>
 			<!-- svelte-ignore a11y-click-events-have-key-events -->
 			<div
 				on:click|capture|stopPropagation={() => {
