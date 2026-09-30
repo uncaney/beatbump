@@ -22,6 +22,15 @@
 	let repeatIcon: "repeat" | "repeat-1" = "repeat";
 	let repeatAlpha = 0.5;
 
+	// French accessible names (a11y): derived only from existing UI state.
+	$: repeatLabel =
+		repeatIcon === "repeat-1"
+			? "Répéter le morceau"
+			: repeatAlpha > 0.5
+			? "Répéter la liste"
+			: "Répéter";
+	$: playLabel = loading ? "Chargement" : isPaused ? "Lecture" : "Pause";
+
 	function handleShuffle() {
 		if (isShuffled === true && original.length !== 0) {
 			isShuffled = false;
@@ -62,10 +71,12 @@
 
 <div class="player-controls">
 	<div class="buttons">
-		<!-- svelte-ignore a11y-click-events-have-key-events -->
-		<!-- svelte-ignore a11y-no-static-element-interactions -->
-		<div
+		<button
+			type="button"
 			class="player-btn"
+			aria-label="Aléatoire"
+			title="Aléatoire"
+			aria-pressed={isShuffled}
 			on:click|stopPropagation|capture={handleShuffle}
 		>
 			<Icon
@@ -77,12 +88,13 @@
 				fill={"none"}
 				size={"1em"}
 			/>
-		</div>
+		</button>
 		<div class="controls-middle">
-			<!-- svelte-ignore a11y-click-events-have-key-events -->
-			<!-- svelte-ignore a11y-no-static-element-interactions -->
-			<div
+			<button
+				type="button"
 				class="player-btn"
+				aria-label="Morceau précédent"
+				title="Morceau précédent"
 				on:click|stopPropagation|capture={prevBtn}
 			>
 				<Icon
@@ -92,11 +104,13 @@
 					fill={isQueue ? "#fff" : "none"}
 					size={sizes.skip}
 				/>
-			</div>
-			<!-- svelte-ignore a11y-click-events-have-key-events -->
-			<!-- svelte-ignore a11y-no-static-element-interactions -->
-			<div
+			</button>
+			<button
+				type="button"
 				class="player-btn player-title"
+				aria-label={playLabel}
+				title={playLabel}
+				aria-busy={loading ? true : undefined}
 				on:click|stopPropagation|capture={(e) => {
 					if (!$SessionListService.mix) return;
 					if (isPaused) {
@@ -128,11 +142,12 @@
 						size={sizes.main}
 					/>
 				{/if}
-			</div>
-			<!-- svelte-ignore a11y-click-events-have-key-events -->
-			<!-- svelte-ignore a11y-no-static-element-interactions -->
-			<div
+			</button>
+			<button
+				type="button"
 				class="player-btn"
+				aria-label="Morceau suivant"
+				title="Morceau suivant"
 				on:click|stopPropagation|capture={nextBtn}
 			>
 				<Icon
@@ -142,12 +157,14 @@
 					fill={isQueue ? "#fff" : "none"}
 					size={sizes.skip}
 				/>
-			</div>
+			</button>
 		</div>
-		<!-- svelte-ignore a11y-click-events-have-key-events -->
-		<!-- svelte-ignore a11y-no-static-element-interactions -->
-		<div
+		<button
+			type="button"
 			class="player-btn"
+			aria-label={repeatLabel}
+			title={repeatLabel}
+			aria-pressed={repeatIcon === "repeat-1" || repeatAlpha > 0.5}
 			on:click|stopPropagation|capture={handleRepeat}
 		>
 			<Icon
@@ -157,7 +174,7 @@
 				fill={"none"}
 				size={"1em"}
 			/>
-		</div>
+		</button>
 	</div>
 </div>
 
@@ -217,5 +234,21 @@
 		max-height: 4em;
 		max-width: 4em;
 		padding: 0.5em;
+		// native <button> reset (keeps the .player-btn look)
+		background: none;
+		border: none;
+		color: inherit;
+		font: inherit;
+		align-items: center;
+		justify-content: center;
+		// touch target >= 44px
+		min-width: 44px;
+		min-height: 44px;
+		border-radius: 50%;
+
+		&:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: 2px;
+		}
 	}
 </style>

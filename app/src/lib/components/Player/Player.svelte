@@ -116,6 +116,11 @@
 	import SessionListService from "$stores/list/sessionList";
 	import { SITE_ORIGIN_URL } from "$stores/url";
 	import PlayerButton from "./PlayerButton.svelte";
+	import type { Icons } from "$components/Icon/icons";
+
+	// "skip-forward" exists in icons.svg but is missing from the Icons union
+	// (same pre-existing gap as Controls.svelte); cast to avoid a new type error.
+	const ICON_SKIP_FORWARD = "skip-forward" as unknown as Icons;
 
 	const { paused, volume: AudioPlayerVolume } = AudioPlayer;
 
@@ -217,12 +222,6 @@
 						>{$currentTrack?.artistInfo?.artist?.[0]?.text}</span
 					>
 				{/if}
-				<a
-					class="now-playing-lyrics"
-					href="/lyrics"
-					style="display:block;font-size:0.78em;opacity:0.7;text-decoration:none;color:inherit;margin-top:0.15em;"
-					>Lyrics</a
-				>
 			</div>
 		{:else}
 			<img
@@ -277,14 +276,24 @@
 				use:clickOutside
 				on:click_outside={() => (volumeHover = false)}
 			>
-				<!-- svelte-ignore a11y-click-events-have-key-events -->
 				<div
 					color="white"
 					class="volume-icon player-btn"
+					role="button"
+					tabindex="0"
+					aria-label="Volume"
+					title="Volume"
+					aria-expanded={volumeHover}
 					on:pointerover={() => {
 						handleVolumeHover.toggle();
 					}}
 					on:click|capture|stopPropagation={() => (volumeHover = !volumeHover)}
+					on:keydown|stopPropagation={(e) => {
+						if (e.key === "Enter" || e.key === " ") {
+							e.preventDefault();
+							volumeHover = !volumeHover;
+						}
+					}}
 				>
 					<Icon
 						color="white"
@@ -322,10 +331,10 @@
 				{/if}
 			</div>
 			<a
-				class="player-btn"
+				class="player-btn no-style"
 				href="/lyrics"
-				aria-label="Lyrics"
-				title="Lyrics"
+				aria-label="Paroles"
+				title="Paroles"
 				style="display:flex;align-items:center;color:#fff;"
 			>
 				<Icon
@@ -336,9 +345,10 @@
 				/>
 			</a>
 			<button
+				type="button"
 				class="player-btn no-style"
-				aria-label="Download to device"
-				title="Download to device"
+				aria-label="Télécharger sur l'appareil"
+				title="Télécharger sur l'appareil"
 				on:click|stopPropagation={dlDevice}
 				style="background:none;border:none;cursor:pointer;display:flex;align-items:center;color:#fff;"
 			>
@@ -349,12 +359,22 @@
 					size="1.5em"
 				/>
 			</button>
-			<!-- svelte-ignore a11y-click-events-have-key-events -->
 			<div
 				on:click|capture|stopPropagation={() => {
 					if (!$queue) return;
 					fullscreenStore.toggle();
 				}}
+				on:keydown|stopPropagation={(e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						e.preventDefault();
+						if (!$queue) return;
+						fullscreenStore.toggle();
+					}
+				}}
+				role="button"
+				tabindex="0"
+				aria-label="File d'attente"
+				title="File d'attente"
 				class="listButton player-btn"
 			>
 				<Icon
@@ -364,7 +384,7 @@
 				/>
 			</div>
 			{#if !$isMobileMQ}
-				<div class="menu-container">
+				<div class="menu-container" title="Plus d'options">
 					<PopperButton
 						tabindex={-1}
 						type="player"
@@ -373,8 +393,27 @@
 					/>
 				</div>
 			{:else}
-				<div class="menu-container">
+				<div class="menu-container mobile-controls">
 					<PlayerButton />
+					<!-- Mobile mini-bar "next": same logic as the desktop Controls nextBtn callback. -->
+					<button
+						type="button"
+						class="player-btn no-style mini-next"
+						aria-label="Morceau suivant"
+						title="Morceau suivant"
+						on:click|capture|stopPropagation={() => {
+							if ($queue.length === 0) return;
+							SessionListService.next(undefined, true);
+						}}
+					>
+						<Icon
+							color="white"
+							style="stroke-width:2; stroke: white;"
+							name={ICON_SKIP_FORWARD}
+							fill="none"
+							size="1.5em"
+						/>
+					</button>
 				</div>
 			{/if}
 		</div>
@@ -520,6 +559,34 @@
 			position: relative !important;
 			place-self: center;
 		}
+	}
+
+	.mobile-controls {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.1em;
+	}
+
+	// a11y: icon buttons in the mini-bar: >= 44px touch target + visible focus ring
+	.player-right .player-btn {
+		min-width: 44px;
+		min-height: 44px;
+		justify-content: center;
+		border-radius: 50%;
+
+		&:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: 2px;
+		}
+	}
+	.mini-next {
+		background: none;
+		border: none;
+		color: #fff;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		padding: 0.5em;
 	}
 
 	.player-left,
