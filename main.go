@@ -4,6 +4,7 @@ import (
 	"beatbump-server/backend/api"
 	"beatbump-server/backend/api/downloader"
 	"beatbump-server/backend/db"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -17,6 +18,30 @@ func main() {
 
 	e.Use(middleware.CORS())
 	e.Use(middleware.Logger())
+	// Compression: the shell, hashed bundles and JSON APIs were served uncompressed (444 KB
+	// vendor chunk, 690 KB search.json). Audio proxy streams are skipped (already compressed
+	// media; Range/206 must pass through untouched).
+	e.Use(middleware.GzipWithConfig(middleware.GzipConfig{
+		Level:   5,
+		Skipper: func(c echo.Context) bool { return api.IsAudioProxyPath(c.Request().URL.Path) },
+	}))
+	// Cache policy: hashed immutable assets are cached forever, the shell / service worker /
+	// manifest are always revalidated, API responses are never stored by the browser.
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			p := c.Request().URL.Path
+			h := c.Response().Header()
+			switch {
+			case strings.HasPrefix(p, "/_app/immutable/"):
+				h.Set("Cache-Control", "public, max-age=31536000, immutable")
+			case p == "/" || p == "/index.html" || p == "/service-worker.js" || p == "/manifest.json":
+				h.Set("Cache-Control", "no-cache")
+			case strings.HasPrefix(p, "/api/"):
+				h.Set("Cache-Control", "no-store")
+			}
+			return next(c)
+		}
+	})
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
 		Root: "./build",
 		// Audio reverse-proxy paths must bypass the SPA static handler: with IgnoreBase
