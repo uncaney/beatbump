@@ -78,7 +78,10 @@ func PlayerEndpointHandler(c echo.Context) error {
 
 	// Auto-cache on play: enqueue this track (+ its album + queue lookahead)
 	// into the owned library. Fire-and-forget; never delays the JSON response.
-	autoCacheOnPlay(videoId, playlistId, playerResponse)
+	// Prefetch requests (next track warm-up) must not trigger server side acquisition.
+	if c.Request().Header.Get("X-Ytm-Prefetch") == "" && c.QueryParam("prefetch") != "1" {
+		autoCacheOnPlay(videoId, playlistId, playerResponse)
+	}
 
 	return c.JSON(http.StatusOK, playerResponse)
 }

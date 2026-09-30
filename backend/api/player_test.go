@@ -5,15 +5,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"testing"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 )
 
-
-
 func TestPlayer(t *testing.T) {
+	if os.Getenv("COMPANION_URL") == "" {
+		t.Skip("needs a reachable companion (COMPANION_URL)")
+	}
 
 	//
 	// Setup

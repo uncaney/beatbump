@@ -222,12 +222,18 @@ func serveAudioProxy(c echo.Context, upstream string) error {
 // AudioCompanionProxyHandler proxies /localf, /vp and /cover (same path, same
 // query, Range passthrough) to the ytm-cache bridge at COMPANION_URL.
 func AudioCompanionProxyHandler(c echo.Context) error {
+	if err := validateAudioProxyRequest(c.Request().URL.Path, c.Request().URL.Query()); err != nil {
+		return c.String(http.StatusBadRequest, "bad request: "+err.Error())
+	}
 	return serveAudioProxy(c, os.Getenv("COMPANION_URL"))
 }
 
 // AudioIVVPProxyHandler proxies /aud/<videoId> (Range passthrough) to the
 // iv-vp fallback at IVVP_URL (default http://iv-vp:5007).
 func AudioIVVPProxyHandler(c echo.Context) error {
+	if err := ValidateAudPath(c.Param("*")); err != nil {
+		return c.String(http.StatusBadRequest, "bad request: "+err.Error())
+	}
 	return serveAudioProxy(c, envOr("IVVP_URL", "http://iv-vp:5007"))
 }
 
