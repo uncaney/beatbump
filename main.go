@@ -24,6 +24,10 @@ func main() {
 		HTML5:      true,
 	}))
 
+	// Same-origin audio: /localf, /vp, /cover -> COMPANION_URL (ytm-cache),
+	// /aud/* -> IVVP_URL (iv-vp). Streaming reverse proxies, GET + HEAD.
+	api.RegisterAudioProxyRoutes(e)
+
 	e.GET("/api/v1/search.json", api.SearchEndpointHandler)
 	e.GET("/api/v1/player.json", api.PlayerEndpointHandler)
 	e.GET("/api/v1/playlist.json", api.PlaylistEndpointHandler)

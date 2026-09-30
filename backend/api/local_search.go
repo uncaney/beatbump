@@ -56,12 +56,16 @@ func envOr(k, d string) string {
 	return d
 }
 
+// localfURL / coverURL emit SAME-ORIGIN relative URLs by default (/localf,
+// /cover), reverse-proxied by this backend to the ytm-cache bridge (see
+// audioproxy.go). A legacy absolute LOCALF_BASE/COVER_BASE on a known public
+// host is rewritten to relative as well.
 func localfURL(path string) string {
-	return envOr("LOCALF_BASE", "https://ytify.ekaii.fr/localf") + "?p=" + url.QueryEscape(path)
+	return RewriteAudioURL(envOr("LOCALF_BASE", "/localf") + "?p=" + url.QueryEscape(path))
 }
 
 func coverURL(lid string) string {
-	return envOr("COVER_BASE", "https://ytify.ekaii.fr/cover") + "?lid=" + lid
+	return RewriteAudioURL(envOr("COVER_BASE", "/cover") + "?lid=" + lid)
 }
 
 func escapeMeili(s string) string {
