@@ -82,7 +82,7 @@ export function sort({
             if (item.url === ""){
                 return null;
             }
-			const url = new URL(item.url);
+			const url = new URL(item.url, typeof location !== "undefined" ? location.origin : "http://localhost"); // relative same-origin stream URLs (A1)
 			const itag = parseInt(item.itag.toString());
 
             if (duration === -1 && item?.approxDurationMs) {

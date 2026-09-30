@@ -178,6 +178,15 @@ func localSongItem(h map[string]interface{}) IListItemRenderer {
 		item.Length = fmt.Sprintf("%d:%02d", dur/60, dur%60)
 	}
 	item.ArtistInfo.Artist = []Artist{{Text: artist, BrowseId: artistID(artist)}}
+	// Album metadata so the offline page can group local tracks by album (lane A3):
+	// the Meili doc carries album + albumArtist; browseId matches localAlbumItem (lb-...).
+	if album := mstr(h, "album"); album != "" {
+		aa := mstr(h, "albumArtist")
+		if aa == "" {
+			aa = artist
+		}
+		item.Album = &Artist{Text: album, BrowseId: albumID(aa, album), PageType: "MUSIC_PAGE_TYPE_ALBUM"}
+	}
 	return item
 }
 
@@ -201,7 +210,7 @@ func localShelf(query string) *MusicShelf {
 	}
 	hits := meiliSearchIndex("tracks", map[string]interface{}{
 		"q": query, "limit": 12,
-		"attributesToRetrieve": []string{"title", "artist", "albumArtist", "lid", "track", "durationSec"},
+		"attributesToRetrieve": []string{"title", "artist", "albumArtist", "lid", "track", "durationSec", "album"},
 	})
 	if len(hits) == 0 {
 		return nil
@@ -270,7 +279,7 @@ func radioPool(seed map[string]interface{}, seedLid string) []map[string]interfa
 	artist := mArtist(seed)
 	genre := mstr(seed, "genre")
 	pool := []map[string]interface{}{}
-	attrs := []string{"lid", "title", "artist", "albumArtist", "track", "durationSec"}
+	attrs := []string{"lid", "title", "artist", "albumArtist", "track", "durationSec", "album"}
 	if artist != "" {
 		pool = append(pool, meiliSearchIndex("tracks", map[string]interface{}{
 			"q": "", "filter": "albumArtist = \"" + escapeMeili(artist) + "\" AND lid != \"" + seedLid + "\"",
@@ -323,7 +332,7 @@ func randomLibrarySample(n int) []IListItemRenderer {
 	off := rand.Intn(40000)
 	hits := meiliSearchIndex("tracks", map[string]interface{}{
 		"q": "", "offset": off, "limit": n, "sort": []string{"dateAdded:desc"},
-		"attributesToRetrieve": []string{"lid", "title", "artist", "albumArtist", "track", "durationSec"},
+		"attributesToRetrieve": []string{"lid", "title", "artist", "albumArtist", "track", "durationSec", "album"},
 	})
 	out := make([]IListItemRenderer, 0, len(hits))
 	for _, h := range hits {

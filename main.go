@@ -18,7 +18,7 @@ func main() {
 	e.Use(middleware.CORS())
 	e.Use(middleware.Logger())
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
-		Root:       "./build",
+		Root: "./build",
 		// Audio reverse-proxy paths must bypass the SPA static handler: with IgnoreBase
 		// the exact routes /localf, /vp, /cover collapse to the build root and get index.html.
 		Skipper:    func(c echo.Context) bool { return api.IsAudioProxyPath(c.Request().URL.Path) },
