@@ -2,6 +2,11 @@
 	// One album (or an artist's "Singles" bucket): cover, name, artist, count,
 	// play / shuffle buttons and a collapsible track list (click a track to play
 	// the album from there). Events: play {tracks, index, shuffle}, remove track.
+	//
+	// The global stylesheet forces `color: #0f0f0f !important`, `display:
+	// inline-flex` and `text-transform: capitalize` on every `button:not(.icon-btn)`;
+	// the styles below override those explicitly so the album name and meta stack
+	// (name on top, artist/count under it) and stay readable on dark backgrounds.
 	import Icon from "$components/Icon/Icon.svelte";
 	import type { AlbumGroup } from "$lib/offlineQueue";
 	import { formatBytes } from "$lib/offlineQueue";
@@ -22,6 +27,7 @@
 	$: count = album.tracks.length;
 	$: size = formatBytes(album.bytes);
 	$: isActive = !!activeId && album.tracks.some((t) => t.videoId === activeId);
+	$: toggleLabel = open ? "Replier l'album" : "Déplier l'album";
 </script>
 
 <section
@@ -32,7 +38,8 @@
 		<button
 			class="cover"
 			type="button"
-			aria-label={open ? "Replier" : "Déplier"}
+			title={toggleLabel}
+			aria-label={toggleLabel}
 			on:click={() => (open = !open)}
 		>
 			{#if album.thumbnail && !imgBroken}
@@ -50,20 +57,31 @@
 			class="info"
 			type="button"
 			aria-expanded={open}
+			title={toggleLabel}
 			on:click={() => (open = !open)}
 		>
-			<p class="name">{album.name}</p>
-			<p class="sub">
-				{#if showArtist}{album.artist}<span class="dot">·</span>{/if}
-				{count} {count > 1 ? "pistes" : "piste"}{#if size}<span class="dot">·</span>{size}{/if}
-			</p>
+			<span class="text">
+				<span
+					class="name"
+					title={album.name}>{album.name}</span
+				>
+				<span class="sub">
+					{#if showArtist}<span class="artist">{album.artist}</span><span class="dot">·</span>{/if}
+					{count} {count > 1 ? "pistes" : "piste"}{#if size}<span class="dot">·</span>{size}{/if}
+				</span>
+			</span>
+			<span
+				class="chev"
+				class:open
+				aria-hidden="true">›</span
+			>
 		</button>
 		<div class="actions">
 			<button
 				class="btn"
 				type="button"
-				title="Lire"
-				aria-label="Lire"
+				title="Lire l'album"
+				aria-label="Lire l'album"
 				on:click={() => dispatch("play", { tracks: album.tracks, index: 0 })}
 			>
 				<Icon
@@ -75,27 +93,14 @@
 			<button
 				class="btn"
 				type="button"
-				title="Aléatoire"
-				aria-label="Aléatoire"
+				title="Album en aléatoire"
+				aria-label="Album en aléatoire"
 				on:click={() => dispatch("play", { tracks: album.tracks, index: 0, shuffle: true })}
 			>
 				<Icon
 					name="shuffle"
 					size="1.1em"
 				/>
-			</button>
-			<button
-				class="btn chev"
-				class:open
-				type="button"
-				title={open ? "Replier" : "Déplier"}
-				aria-label={open ? "Replier" : "Déplier"}
-				on:click={() => (open = !open)}
-			>
-				<span
-					class="chev-glyph"
-					aria-hidden="true">›</span
-				>
 			</button>
 		</div>
 	</div>
@@ -116,6 +121,10 @@
 </section>
 
 <style lang="scss">
+	$text: var(--color-dark, #fafafa);
+	$muted: #b3b3b3;
+	$accent: #1ed760;
+
 	.album {
 		border: 1px solid rgba(255, 255, 255, 0.08);
 		border-radius: 0.75rem;
@@ -125,57 +134,112 @@
 		&.active {
 			border-color: rgba(30, 215, 96, 0.35);
 		}
+		&.active .name {
+			color: $accent;
+		}
 	}
 	.head {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
 		padding: 0.6rem;
+		min-width: 0;
 	}
-	button {
-		background: none;
-		border: 0;
-		color: inherit;
+	// Shared reset for the three buttons: beats the global %button-base
+	// (dark text / border / hover backgrounds, all !important there).
+	.cover,
+	.info,
+	.btn {
+		color: $text !important;
+		box-shadow: none !important;
 		font: inherit;
-		padding: 0;
+		text-transform: none;
+		line-height: 1.3;
 		cursor: pointer;
 		text-align: left;
+		&:focus-visible {
+			outline: 2px solid $accent;
+			outline-offset: 2px;
+		}
 	}
 	.cover {
 		flex: 0 0 auto;
 		width: 3.5rem;
 		height: 3.5rem;
+		padding: 0;
+		border: 0 !important;
 		border-radius: 0.5rem;
 		overflow: hidden;
-		background: rgba(255, 255, 255, 0.06);
+		background: rgba(255, 255, 255, 0.06) !important;
 		display: grid;
 		place-items: center;
-		color: #aaa;
+		color: #aaa !important;
 		img {
 			width: 100%;
 			height: 100%;
 			object-fit: cover;
+			display: block;
 		}
 	}
+	// Name + meta stacked in a column; the chevron sits at the right end of the
+	// same button (it already toggles), so the card keeps only two round buttons
+	// and leaves room for the title on a 390px screen.
 	.info {
-		flex: 1;
+		flex: 1 1 auto;
 		min-width: 0;
-		p {
-			margin: 0;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
+		min-height: 2.75rem;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0;
+		border: 0 !important;
+		background: none !important;
+		white-space: normal;
+		&:hover .name {
+			text-decoration: underline;
 		}
+	}
+	.text {
+		flex: 1 1 auto;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
 	}
 	.name {
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+		overflow-wrap: anywhere;
 		font-weight: 600;
+		font-size: 1rem;
 	}
 	.sub {
+		display: block;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		font-size: 0.85rem;
-		color: #999;
+		font-weight: 400;
+		color: $muted;
 	}
 	.dot {
 		margin: 0 0.3em;
+	}
+	.chev {
+		flex: 0 0 auto;
+		width: 1rem;
+		display: inline-grid;
+		place-items: center;
+		font-size: 1.4rem;
+		line-height: 1;
+		color: $muted;
+		transition: transform 150ms ease;
+		&.open {
+			transform: rotate(90deg);
+		}
 	}
 	.actions {
 		flex: 0 0 auto;
@@ -183,27 +247,18 @@
 		gap: 0.3rem;
 	}
 	.btn {
-		width: 2.4rem;
-		height: 2.4rem;
+		width: 2.75rem; // 44px touch target
+		height: 2.75rem;
+		padding: 0;
 		border-radius: 999px;
 		display: grid;
 		place-items: center;
-		background: rgba(255, 255, 255, 0.08);
-		border: 1px solid rgba(255, 255, 255, 0.15);
-		&:hover {
-			background: rgba(255, 255, 255, 0.16);
-		}
-	}
-	.chev {
-		transition: transform 150ms ease;
-		&.open {
-			transform: rotate(90deg);
-		}
-	}
-	.chev-glyph {
-		font-size: 1.4rem;
 		line-height: 1;
-		transform: translateY(-1px);
+		background: rgba(255, 255, 255, 0.08) !important;
+		border: 1px solid rgba(255, 255, 255, 0.15) !important;
+		&:hover {
+			background: rgba(255, 255, 255, 0.16) !important;
+		}
 	}
 	.tracks {
 		padding: 0 0.4rem 0.5rem;
@@ -218,9 +273,8 @@
 			width: 3rem;
 			height: 3rem;
 		}
-		.btn {
-			width: 2.2rem;
-			height: 2.2rem;
+		.actions {
+			gap: 0.25rem;
 		}
 	}
 </style>

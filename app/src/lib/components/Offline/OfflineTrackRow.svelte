@@ -17,14 +17,17 @@
 	$: artist = artistName(track);
 	$: length = (track?.length && (track.length.text || track.length)) || "";
 	$: pending = track?._cached === false;
+	$: title = track?.title || track?.videoId;
 	let imgBroken = false;
 </script>
 
 <div
 	class="row"
 	class:active
+	class:pending
 	role="button"
 	tabindex="0"
+	title={pending ? "Mise en cache en cours : lecture possible dès la fin du téléchargement" : "Lire"}
 	on:click={() => dispatch("play", track)}
 	on:keydown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), dispatch("play", track))}
 >
@@ -46,12 +49,19 @@
 		{/if}
 	</div>
 	<div class="meta">
-		<p class="title">{track?.title || track?.videoId}</p>
+		<p
+			class="title"
+			{title}
+		>
+			{title}
+		</p>
 		<p class="sub">
-			{#if showArtist}{artist}{/if}
+			{#if showArtist}<span class="artist">{artist}</span>{/if}
 			{#if showArtist && length}<span class="dot">·</span>{/if}
 			{#if length}{length}{/if}
-			{#if pending}<span class="pending">· en cours de cache</span>{/if}
+			{#if pending}<span class="pending-label"
+					>{#if showArtist || length}<span class="dot">·</span>{/if}mise en cache en cours</span
+				>{/if}
 		</p>
 	</div>
 	<button
@@ -64,11 +74,17 @@
 </div>
 
 <style lang="scss">
+	$text: var(--color-dark, #fafafa);
+	$muted: #b3b3b3;
+	$accent: #1ed760;
+	$warn: #e0a000;
+
 	.row {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
 		padding: 0.4rem 0.5rem;
+		min-height: 2.75rem;
 		border-radius: 0.5rem;
 		cursor: pointer;
 		min-width: 0;
@@ -77,6 +93,10 @@
 		&:focus-visible {
 			background: rgba(255, 255, 255, 0.06);
 			outline: none;
+		}
+		&:focus-visible {
+			outline: 2px solid $accent;
+			outline-offset: -2px;
 		}
 		&:active {
 			background: rgba(255, 255, 255, 0.1);
@@ -100,10 +120,11 @@
 			width: 100%;
 			height: 100%;
 			object-fit: cover;
+			display: block;
 		}
 		.num {
 			font-variant-numeric: tabular-nums;
-			color: #999;
+			color: $muted;
 		}
 		.playing {
 			position: absolute;
@@ -111,41 +132,74 @@
 			display: grid;
 			place-items: center;
 			background: rgba(0, 0, 0, 0.55);
-			color: #1ed760;
+			color: $accent;
 		}
 	}
 	.meta {
-		flex: 1;
+		flex: 1 1 auto;
 		min-width: 0;
 		p {
 			margin: 0;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
+			min-width: 0;
 		}
 	}
+	// Title: up to two lines, then an ellipsis (long "(feat. …)" titles on mobile).
+	.title {
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+		overflow-wrap: anywhere;
+		line-height: 1.3;
+	}
 	.active .title {
-		color: #1ed760;
+		color: $accent;
+	}
+	.pending .title {
+		opacity: 0.75;
 	}
 	.sub {
 		font-size: 0.85rem;
-		color: #999;
+		color: $muted;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.dot {
 		margin: 0 0.3em;
 	}
-	.pending {
-		color: #e0a000;
+	.pending-label {
+		color: $warn;
 	}
+	// Remove button: 44px square, light glyph (overrides global %button-base).
 	.rm {
 		flex: 0 0 auto;
-		background: rgba(255, 255, 255, 0.08);
-		border: 1px solid rgba(255, 255, 255, 0.2);
-		color: inherit;
-		border-radius: 0.4rem;
-		padding: 0.3rem 0.6rem;
+		width: 2.75rem;
+		height: 2.75rem;
+		padding: 0;
+		display: grid;
+		place-items: center;
+		background: rgba(255, 255, 255, 0.08) !important;
+		border: 1px solid rgba(255, 255, 255, 0.2) !important;
+		box-shadow: none !important;
+		color: $text !important;
+		border-radius: 0.5rem;
+		font: inherit;
+		font-size: 1rem;
+		line-height: 1;
+		text-transform: none;
 		cursor: pointer;
-		min-width: 2.25rem;
-		min-height: 2.25rem;
+		&:hover {
+			background: rgba(255, 255, 255, 0.16) !important;
+		}
+		&:focus-visible {
+			outline: 2px solid $accent;
+			outline-offset: 2px;
+		}
+	}
+	@media (max-width: 640px) {
+		.sub {
+			white-space: normal;
+		}
 	}
 </style>

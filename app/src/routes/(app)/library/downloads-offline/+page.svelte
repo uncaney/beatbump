@@ -3,6 +3,13 @@
 	// service worker). This page lists the cache by album / artist / recency and
 	// starts playback from the cached copies only (see $lib/offlineQueue.play),
 	// so it works with no connection at all.
+	//
+	// Styling note: the global redesign stylesheet applies `%button-base` to every
+	// `button:not(.icon-btn)` with `color: #0f0f0f !important`, `display: inline-flex`,
+	// `text-transform: capitalize` and `!important` backgrounds on hover/active/
+	// disabled. Every button below therefore carries explicit overrides (with
+	// `!important` only where the global rule itself uses it) so labels stay
+	// readable on the dark background and titles can stack on mobile.
 	import Icon from "$components/Icon/Icon.svelte";
 	import AlbumCard from "$components/Offline/AlbumCard.svelte";
 	import OfflineTrackRow from "$components/Offline/OfflineTrackRow.svelte";
@@ -36,7 +43,26 @@
 	$: artists = groupByArtist(tracks) as ArtistGroup[];
 	$: recent = recentlyCached(tracks, -1);
 	$: size = formatBytes(totalBytes(tracks));
+	// Only entries acknowledged by the service worker (`_cached === true`) are
+	// playable offline; `_cached === false` = download still in flight.
+	$: readyCount = tracks.filter((t) => t?._cached === true).length;
 	$: pendingCount = tracks.filter((t) => t?._cached === false).length;
+	$: canPlay = readyCount > 0;
+	$: canShuffle = readyCount >= 2;
+	$: canMixtape = readyCount >= 2;
+	$: readyHint =
+		readyCount === 0
+			? "Aucun morceau prêt pour l'instant"
+			: `${readyCount} ${readyCount > 1 ? "morceaux prêts" : "morceau prêt"} sur ${tracks.length}`;
+	$: playTitle = canPlay
+		? `Lire les ${readyCount} ${readyCount > 1 ? "morceaux prêts" : "morceau prêt"}`
+		: "Aucun morceau prêt : la mise en cache est en cours";
+	$: shuffleTitle = canShuffle
+		? "Lecture aléatoire des morceaux prêts"
+		: `Il faut au moins 2 morceaux prêts pour l'aléatoire (${readyHint})`;
+	$: mixtapeTitle = canMixtape
+		? "Mixtape : enchaîne les morceaux prêts en variant les artistes"
+		: `Il faut au moins 2 morceaux prêts pour une mixtape (${readyHint})`;
 	$: activeId = $currentTrack?.videoId || "";
 
 	function refresh() {
@@ -96,12 +122,15 @@
 	}
 
 	function playAll() {
+		if (!canPlay) return notify(playTitle, "error");
 		start(recent, 0);
 	}
 	function playShuffle() {
+		if (!canShuffle) return notify(shuffleTitle, "error");
 		start(recent, 0, { shuffle: true });
 	}
 	function playMixtape() {
+		if (!canMixtape) return notify(mixtapeTitle, "error");
 		start(mixtape(tracks, { avoidSameArtistInARow: true }), 0);
 	}
 
@@ -123,7 +152,9 @@
 					{tracks.length} {tracks.length > 1 ? "morceaux" : "morceau"}
 					{#if size}<span class="dot">·</span>{size}{/if}
 					{#if albums.length}<span class="dot">·</span>{albums.length} {albums.length > 1 ? "albums" : "album"}{/if}
-					{#if pendingCount}<span class="dot">·</span><span class="pending">{pendingCount} en cours</span>{/if}
+					{#if pendingCount}<span class="dot">·</span><span class="pending"
+							>{pendingCount} en cours de mise en cache</span
+						>{/if}
 				{/if}
 			</p>
 		</div>
@@ -141,10 +172,18 @@
 			Rien pour l'instant. Lance une écoute : le morceau sera gardé ici et disponible sans réseau.
 		</p>
 	{:else}
-		<div class="actions">
+		<div
+			class="actions"
+			role="group"
+			aria-label="Lecture hors-ligne"
+		>
 			<button
 				class="cta primary"
+				class:is-disabled={!canPlay}
 				type="button"
+				title={playTitle}
+				aria-disabled={!canPlay || starting}
+				aria-describedby="offline-ready"
 				disabled={starting}
 				on:click={playAll}
 			>
@@ -157,7 +196,11 @@
 			</button>
 			<button
 				class="cta"
+				class:is-disabled={!canShuffle}
 				type="button"
+				title={shuffleTitle}
+				aria-disabled={!canShuffle || starting}
+				aria-describedby="offline-ready"
 				disabled={starting}
 				on:click={playShuffle}
 			>
@@ -169,7 +212,11 @@
 			</button>
 			<button
 				class="cta"
+				class:is-disabled={!canMixtape}
 				type="button"
+				title={mixtapeTitle}
+				aria-disabled={!canMixtape || starting}
+				aria-describedby="offline-ready"
 				disabled={starting}
 				on:click={playMixtape}
 			>
@@ -180,6 +227,20 @@
 				Mixtape
 			</button>
 		</div>
+		<p
+			class="ready"
+			class:none={readyCount === 0}
+			id="offline-ready"
+			aria-live="polite"
+		>
+			{#if readyCount === 0}
+				Aucun morceau prêt pour l'instant : {pendingCount || tracks.length} en cours de mise en cache. Ils
+				apparaîtront ici dès qu'ils seront enregistrés.
+			{:else}
+				{readyHint}{#if pendingCount}<span class="dot">·</span>{pendingCount} en cours de mise en cache{/if}
+				{#if !canShuffle}<span class="dot">·</span>aléatoire et mixtape dès 2 morceaux prêts{/if}
+			{/if}
+		</p>
 
 		<nav
 			class="views"
@@ -188,16 +249,19 @@
 			<button
 				type="button"
 				class:active={view === "albums"}
+				aria-pressed={view === "albums"}
 				on:click={() => setView("albums")}>Albums</button
 			>
 			<button
 				type="button"
 				class:active={view === "artists"}
+				aria-pressed={view === "artists"}
 				on:click={() => setView("artists")}>Artistes</button
 			>
 			<button
 				type="button"
 				class:active={view === "recent"}
+				aria-pressed={view === "recent"}
 				on:click={() => setView("recent")}>Récents</button
 			>
 		</nav>
@@ -227,6 +291,7 @@
 								class="artist-name"
 								type="button"
 								aria-expanded={open}
+								title={open ? "Replier l'artiste" : "Déplier l'artiste"}
 								on:click={() => (openArtists[artist.key] = !open)}
 							>
 								<span
@@ -234,11 +299,13 @@
 									class:open
 									aria-hidden="true">›</span
 								>
-								<span class="name">{artist.name}</span>
-								<span class="sub">
-									{artist.tracks.length} {artist.tracks.length > 1 ? "pistes" : "piste"}
-									{#if artist.albums.length > 1}<span class="dot">·</span>{artist.albums.length} albums{/if}
-									{#if formatBytes(artist.bytes)}<span class="dot">·</span>{formatBytes(artist.bytes)}{/if}
+								<span class="text">
+									<span class="name">{artist.name}</span>
+									<span class="sub">
+										{artist.tracks.length} {artist.tracks.length > 1 ? "pistes" : "piste"}
+										{#if artist.albums.length > 1}<span class="dot">·</span>{artist.albums.length} albums{/if}
+										{#if formatBytes(artist.bytes)}<span class="dot">·</span>{formatBytes(artist.bytes)}{/if}
+									</span>
 								</span>
 							</button>
 							<div class="artist-actions">
@@ -302,6 +369,12 @@
 </main>
 
 <style lang="scss">
+	// Project text colour (light on dark) as defined in global/_css-variables.scss.
+	$text: var(--color-dark, #fafafa);
+	$muted: #b3b3b3; // ≥ 9:1 on the page background
+	$accent: #1ed760;
+	$warn: #e0a000;
+
 	main {
 		min-height: 100%;
 		padding-bottom: 5rem;
@@ -324,16 +397,16 @@
 		font-size: 0.9rem;
 	}
 	.pending {
-		color: #e0a000;
+		color: $warn;
 	}
 	.status {
-		color: #1ed760;
+		color: $accent;
 		font-size: 0.9rem;
 		white-space: nowrap;
 		margin-top: 0.4rem;
 	}
 	.status.off {
-		color: #e0a000;
+		color: $warn;
 	}
 	.note {
 		color: #999;
@@ -351,56 +424,107 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
-		margin-bottom: 1rem;
+		margin-bottom: 0.5rem;
 	}
+	.ready {
+		margin: 0 0 1rem;
+		font-size: 0.85rem;
+		color: $muted;
+		&.none {
+			color: $warn;
+			border: 1px solid rgba(224, 160, 0, 0.35);
+			background: rgba(224, 160, 0, 0.08);
+			border-radius: 0.5rem;
+			padding: 0.5rem 0.75rem;
+		}
+	}
+	// Pill CTA. Overrides the global %button-base (dark text !important,
+	// capitalize, 0.15em border, 1.1rem font) so the label is readable.
 	.cta {
 		display: inline-flex;
 		align-items: center;
+		justify-content: center;
 		gap: 0.45rem;
 		padding: 0.55rem 1rem;
+		min-height: 2.75rem; // 44px touch target
 		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.18);
-		background: rgba(255, 255, 255, 0.08);
-		color: inherit;
+		border: 1px solid rgba(255, 255, 255, 0.18) !important;
+		background: rgba(255, 255, 255, 0.08) !important;
+		color: $text !important;
+		box-shadow: none !important;
 		font: inherit;
+		font-size: 1rem;
 		font-weight: 600;
+		line-height: 1.2;
+		text-transform: none;
+		white-space: nowrap;
 		cursor: pointer;
-		min-height: 2.6rem;
 		&:hover {
-			background: rgba(255, 255, 255, 0.16);
+			background: rgba(255, 255, 255, 0.16) !important;
+			border-color: rgba(255, 255, 255, 0.3) !important;
+			color: $text !important;
 		}
-		&:disabled {
-			opacity: 0.6;
-			cursor: default;
+		&:focus-visible {
+			outline: 2px solid $accent;
+			outline-offset: 2px;
 		}
 		&.primary {
-			background: #1ed760;
-			border-color: #1ed760;
-			color: #000;
+			background: $accent !important;
+			border-color: $accent !important;
+			color: #000 !important;
 			&:hover {
-				background: #22e668;
+				background: #22e668 !important;
+				border-color: #22e668 !important;
+			}
+		}
+		&:disabled,
+		&.is-disabled {
+			opacity: 0.6;
+			cursor: not-allowed;
+			background: rgba(255, 255, 255, 0.06) !important;
+			border-color: rgba(255, 255, 255, 0.12) !important;
+			color: $text !important;
+			&:hover {
+				background: rgba(255, 255, 255, 0.06) !important;
 			}
 		}
 	}
+	// View switcher: label always visible (light text) and 44px tall.
 	.views {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 0.4rem;
 		margin-bottom: 0.9rem;
 		button {
-			background: rgba(255, 255, 255, 0.05);
-			border: 0;
-			color: inherit;
+			display: inline-flex;
+			align-items: center;
+			min-height: 2.75rem;
+			padding: 0 0.95rem;
+			border: 1px solid transparent !important;
+			border-radius: 1.4rem;
+			background: rgba(255, 255, 255, 0.06) !important;
+			color: #d4d4d4 !important; // ≈ 13:1 on the dark background
+			box-shadow: none !important;
 			font: inherit;
-			padding: 0.35rem 0.85rem;
-			border-radius: 1rem;
-			opacity: 0.7;
+			font-size: 1rem;
+			font-weight: 500;
+			line-height: 1.2;
+			text-transform: none;
+			white-space: nowrap;
 			cursor: pointer;
-			&:hover,
-			&.active {
-				opacity: 1;
+			&:hover {
+				background: rgba(255, 255, 255, 0.12) !important;
+				color: $text !important;
+			}
+			&:focus-visible {
+				outline: 2px solid $accent;
+				outline-offset: 2px;
 			}
 			&.active {
-				background: rgba(255, 255, 255, 0.16);
+				background: rgba(255, 255, 255, 0.18) !important;
+				border-color: rgba(255, 255, 255, 0.28) !important;
+				color: $text !important;
+				font-weight: 600;
 			}
 		}
 	}
@@ -409,7 +533,7 @@
 		padding: 0.35rem 0 0.5rem;
 		margin-bottom: 0.4rem;
 		&.active .name {
-			color: #1ed760;
+			color: $accent;
 		}
 	}
 	.artist-head {
@@ -417,38 +541,64 @@
 		align-items: center;
 		gap: 0.5rem;
 	}
+	// Artist toggle: chevron + (name / meta). Meta sits beside the name on wide
+	// screens and stacks under it on mobile; the name never overlaps the meta.
 	.artist-name {
 		flex: 1;
 		min-width: 0;
+		min-height: 2.75rem;
 		display: flex;
-		align-items: baseline;
+		align-items: center;
 		gap: 0.5rem;
-		background: none;
-		border: 0;
-		color: inherit;
+		background: none !important;
+		border: 0 !important;
+		box-shadow: none !important;
+		color: $text !important;
 		font: inherit;
-		padding: 0.4rem 0;
+		font-size: 1rem;
+		line-height: 1.3;
+		padding: 0.3rem 0;
+		text-transform: none;
+		white-space: normal;
 		cursor: pointer;
 		text-align: left;
+		&:hover .name {
+			text-decoration: underline;
+		}
+		&:focus-visible {
+			outline: 2px solid $accent;
+			outline-offset: 2px;
+			border-radius: 0.4rem;
+		}
+		.text {
+			flex: 1;
+			min-width: 0;
+			display: flex;
+			align-items: baseline;
+			gap: 0.5rem;
+		}
 		.name {
 			font-weight: 600;
 			font-size: 1.05rem;
+			min-width: 0;
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
 		.sub {
-			color: #999;
+			color: $muted;
 			font-size: 0.85rem;
 			white-space: nowrap;
+			flex: 0 0 auto;
 		}
 		.chev {
 			display: inline-grid;
 			place-items: center;
-			align-self: center;
+			flex: 0 0 auto;
+			width: 1rem;
 			font-size: 1.3rem;
 			line-height: 1;
-			color: #999;
+			color: $muted;
 			transition: transform 150ms ease;
 			&.open {
 				transform: rotate(90deg);
@@ -460,18 +610,26 @@
 		gap: 0.3rem;
 		flex: 0 0 auto;
 	}
+	// Round icon button, 44px, light icon (overrides the global dark-text rule).
 	.btn {
-		width: 2.4rem;
-		height: 2.4rem;
+		width: 2.75rem;
+		height: 2.75rem;
+		padding: 0;
 		border-radius: 999px;
 		display: grid;
 		place-items: center;
-		background: rgba(255, 255, 255, 0.08);
-		border: 1px solid rgba(255, 255, 255, 0.15);
-		color: inherit;
+		background: rgba(255, 255, 255, 0.08) !important;
+		border: 1px solid rgba(255, 255, 255, 0.15) !important;
+		box-shadow: none !important;
+		color: $text !important;
+		line-height: 1;
 		cursor: pointer;
 		&:hover {
-			background: rgba(255, 255, 255, 0.16);
+			background: rgba(255, 255, 255, 0.16) !important;
+		}
+		&:focus-visible {
+			outline: 2px solid $accent;
+			outline-offset: 2px;
 		}
 	}
 	.artist-albums {
@@ -486,11 +644,20 @@
 		.status {
 			margin-top: 0;
 		}
-		.artist-name {
-			flex-wrap: wrap;
-			.sub {
-				white-space: normal;
-			}
+		.artist-name .text {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 0.1rem;
+		}
+		.artist-name .name {
+			white-space: normal;
+			display: -webkit-box;
+			-webkit-line-clamp: 2;
+			-webkit-box-orient: vertical;
+			overflow-wrap: anywhere;
+		}
+		.artist-name .sub {
+			white-space: normal;
 		}
 		.artist-albums {
 			padding-left: 0;
