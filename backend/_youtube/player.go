@@ -38,6 +38,7 @@ type PlayerResponse struct {
 			ApproxDurationMs string `json:"approxDurationMs"`
 			AudioSampleRate  string `json:"audioSampleRate"`
 			AudioChannels    int    `json:"audioChannels"`
+			URL              string `json:"url,omitempty"`
 			SignatureCipher  string `json:"signatureCipher"`
 		} `json:"formats"`
 		AdaptiveFormats []struct {

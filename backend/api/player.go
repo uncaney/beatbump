@@ -67,7 +67,13 @@ func PlayerEndpointHandler(c echo.Context) error {
 		}*/
 		streamUrl := format.URL
 
-		format.URL = strings.Clone(streamUrl)
+		// Same-origin audio: known public bases (ytify/invidious) become
+		// relative paths proxied by this backend (see audioproxy.go).
+		format.URL = RewriteAudioURL(strings.Clone(streamUrl))
+	}
+	for i := 0; i < len(playerResponse.StreamingData.Formats); i++ {
+		format := &playerResponse.StreamingData.Formats[i]
+		format.URL = RewriteAudioURL(format.URL)
 	}
 
 	// Auto-cache on play: enqueue this track (+ its album + queue lookahead)
