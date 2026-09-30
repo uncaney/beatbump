@@ -49,6 +49,11 @@
 	import { progressBarSeek } from "./ProgressBar/ProgressBar.svelte";
 	import blurURL from "./blur.svg?url";
 	import { fullscreenStore } from "./channel";
+	import type { Icons } from "$components/Icon/icons";
+
+	// "chevron-right" exists in icons.svg but is missing from the Icons union
+	// (pre-existing gap, cf. "chevron-left" above); cast to avoid a new type error.
+	const ICON_CHEVRON = "chevron-right" as unknown as Icons;
 
 	export let state: "open" | "closed";
 
@@ -132,9 +137,30 @@
 		sliding = true;
 	}
 
+	// Mobile queue sheet: explicit open/closed state for the labelled handle
+	// (the legacy `queueOpen` flag is shared with the desktop side panel).
+	let sheetOpen = false;
+	const TAP_THRESHOLD_PX = 10;
+
+	function toggleSheet() {
+		if (sheetOpen) {
+			motion.set(-28, { duration: 240 });
+		} else {
+			motion.set(heightCalc, { duration: 240 });
+		}
+		sheetOpen = !sheetOpen;
+		queueOpen = !queueOpen;
+	}
+
 	function release(kind: Kind, detail: Detail) {
 		if (sliding) {
-			if (Math.sign(detail.deltaY || 0) < 0) {
+			if (
+				kind === Kind.Queue &&
+				Math.abs(detail.deltaY || 0) < TAP_THRESHOLD_PX
+			) {
+				// a tap on the handle (no real drag) toggles the sheet
+				toggleSheet();
+			} else if (Math.sign(detail.deltaY || 0) < 0) {
 				open(kind, detail);
 			} else {
 				close(kind, detail as Required<Detail>);
@@ -165,6 +191,7 @@
 		const distance = miss * windowHeight;
 		if (kind === Kind.Queue) {
 			queueOpen = !queueOpen;
+			sheetOpen = true;
 			motion.update(
 				() => {
 					return heightCalc;
@@ -194,6 +221,7 @@
 		const distance = miss * windowHeight;
 		if (kind === Kind.Queue) {
 			queueOpen = !queueOpen;
+			sheetOpen = false;
 			motion.set(-28, {
 				// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 				duration: Math.min(distance / Math.abs(detail.velocityY!), 720),
@@ -244,6 +272,7 @@
 		fullscreenStore.set("closed");
 		$motion = 0;
 		$queueTween = 0;
+		sheetOpen = false;
 
 		playbackURLStateUpdater.toggle();
 	}
@@ -388,8 +417,9 @@
 			{#if $isMobileMQ}
 				<div class="menu-mobile" style="display:flex;align-items:center;justify-content:space-between;left:0;right:0;width:auto;max-width:none;max-height:none;margin:0;padding:0.6em 0.5em;z-index:200;gap:0.2em;">
 					<button
-						aria-label="Close player"
-						title="Close"
+						type="button"
+						aria-label="Fermer le lecteur"
+						title="Fermer le lecteur"
 						class="no-style"
 						style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
 						on:click={() => fullscreenStore.set("closed")}
@@ -402,8 +432,9 @@
 					</button>
 					<div style="display:flex;align-items:center;gap:0.4em;">
 						<button
-							aria-label="View Artist"
-							title="View Artist"
+							type="button"
+							aria-label="Voir l'artiste"
+							title="Voir l'artiste"
 							class="no-style"
 							style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
 							on:click={mobileViewArtist}
@@ -416,8 +447,9 @@
 							/>
 						</button>
 						<button
-							aria-label="Download to device"
-							title="Download to device"
+							type="button"
+							aria-label="Télécharger sur l'appareil"
+							title="Télécharger sur l'appareil"
 							class="no-style"
 							style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
 							on:click={mobileDownload}
@@ -430,8 +462,9 @@
 							/>
 						</button>
 						<button
-							aria-label="Lyrics"
-							title="Lyrics"
+							type="button"
+							aria-label="Paroles"
+							title="Paroles"
 							class="no-style"
 							style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
 							on:click={() => {
@@ -445,11 +478,17 @@
 								color="#fff"
 							/>
 						</button>
-						<PopperButton
-							items={DropdownItems}
-							tabindex={-1}
-							size="2em"
-						/>
+						<span
+							class="more-options"
+							title="Plus d'options"
+							style="display:inline-flex;align-items:center;"
+						>
+							<PopperButton
+								items={DropdownItems}
+								tabindex={-1}
+								size="2em"
+							/>
+						</span>
 					</div>
 				</div>
 			{/if}
@@ -466,14 +505,24 @@
 							  }vw, 0px, 0) !important;`
 							: ""}
 					>
-						<div class="player-kind-wrapper">
+						<div
+							class="player-kind-wrapper"
+							role="group"
+							aria-label="Mode de lecture"
+						>
 							<button
+								type="button"
 								class:active={$mode === "video"}
+								aria-pressed={$mode === "video"}
+								title="Mode vidéo"
 								on:click={() => {
 									$mode = "video";
-								}}>Video</button
+								}}>Vidéo</button
 							><button
+								type="button"
 								class:active={$mode === "audio"}
+								aria-pressed={$mode === "audio"}
+								title="Mode audio"
 								on:click={() => {
 									$mode = "audio";
 								}}>Audio</button
@@ -599,6 +648,7 @@
 		</div>
 		<div
 			class="column container tracklist"
+			id="fullscreen-queue-sheet"
 			bind:clientHeight={queueHeight}
 			bind:this={tracklist}
 			style={$isMobileMQ
@@ -626,10 +676,32 @@
 						});
 					}, 200);
 				}}
+				on:keydown={(e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						e.preventDefault();
+						toggleSheet();
+					}
+				}}
 				class="handle horizontal"
+				role="button"
+				tabindex="0"
+				aria-expanded={sheetOpen}
+				aria-controls="fullscreen-queue-sheet"
+				aria-label={sheetOpen
+					? "Masquer la file d'attente"
+					: "Afficher la file d'attente"}
+				title={sheetOpen ? "Masquer la file d'attente" : "Afficher la file d'attente"}
 			>
 				<hr class="horizontal" />
-				<span />
+				<span class="handle-label" aria-hidden="true">
+					<Icon
+						name={ICON_CHEVRON}
+						size="1em"
+						color="currentColor"
+						style="transform: rotate({sheetOpen ? 90 : -90}deg); transition: transform 200ms;"
+					/>
+					<span>File d'attente</span>
+				</span>
 			</div>
 			<Tabs
 				{tabs}
@@ -1030,6 +1102,12 @@
 		@media screen and (min-width: 720px) {
 			width: 53vw;
 		}
+		// Mobile: the absolute top action row (.menu-mobile, ~3.6em tall) must not
+		// overlap the segment, and the segment must not wrap ("Vide/o").
+		@media screen and (max-width: 719px) {
+			margin-top: 3.75rem;
+			min-height: unset;
+		}
 	}
 
 	.player-kind-wrapper {
@@ -1038,6 +1116,21 @@
 		position: relative;
 		isolation: isolate;
 		max-width: 50%;
+		@media screen and (max-width: 719px) {
+			max-width: none;
+			width: fit-content;
+			margin-bottom: 0.75rem;
+			> button {
+				white-space: nowrap;
+				font-size: 0.95rem;
+				min-height: 44px;
+				padding: 0.5rem 1.1rem !important;
+			}
+		}
+		> button:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: 2px;
+		}
 		// width: 100%;
 		&::before {
 			content: "";
@@ -1097,6 +1190,20 @@
 		z-index: 155;
 		max-width: 3em;
 		max-height: 3em;
+
+		// a11y: >= 44px touch targets + visible keyboard focus
+		button {
+			min-width: 44px;
+			min-height: 44px;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			border-radius: 50%;
+			&:focus-visible {
+				outline: 2px solid #fff;
+				outline-offset: 2px;
+			}
+		}
 	}
 
 	.backdrop {
@@ -1222,6 +1329,41 @@
 			display: none !important;
 			visibility: none !important;
 		}
+	}
+
+	// Explicit, labelled queue sheet handle (mobile): grip bar + "File d'attente"
+	.handle.horizontal {
+		grid-template-rows: auto auto;
+		justify-items: center;
+		row-gap: 0.15em;
+		padding-block: 0.5em 0.4em;
+		height: auto;
+		min-height: 3.6em;
+
+		// the grip bar (::before, 0.45em) is centered inside this box
+		hr.horizontal {
+			height: 1.2em;
+			margin: 0 0 0.2em;
+			padding: 0;
+		}
+
+		&:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: -3px;
+		}
+	}
+
+	.handle-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35em;
+		font-size: 0.85em;
+		font-weight: 600;
+		letter-spacing: 0.01em;
+		color: hsla(0, 0%, 100%, 0.85);
+		line-height: 1;
+		user-select: none;
+		pointer-events: none;
 	}
 
 	.handle {

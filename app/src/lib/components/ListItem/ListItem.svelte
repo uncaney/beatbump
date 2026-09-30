@@ -527,6 +527,9 @@
 		<div
 			class="length"
 			tabindex="0"
+			role="group"
+			aria-label="Plus d'options"
+			title="Plus d'options"
 			on:focus={() => (isHovering = true)}
 		>
 			<PopperButton

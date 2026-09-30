@@ -410,7 +410,12 @@
 			</div>
 		</div>
 
-		<div class="menu">
+		<div
+			class="menu"
+			role="group"
+			aria-label="Plus d'options"
+			title="Plus d'options"
+		>
 			<PopperButton
 				metadata={{
 					artist: data.type !== "playlist" &&
