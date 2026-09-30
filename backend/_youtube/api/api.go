@@ -13,7 +13,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const URL_BASE = "https://music.youtube.com/youtubei/v1/"
@@ -26,6 +28,55 @@ var companionAPIKey string
 func init() {
 	companionBaseURL = os.Getenv("COMPANION_URL")
 	companionAPIKey = os.Getenv("COMPANION_SECRET_KEY")
+}
+
+// ErrCompanionNotConfigured: COMPANION_URL is empty; a deployment bug, not an
+// upstream failure.
+var ErrCompanionNotConfigured = errors.New("companion base URL not configured (COMPANION_URL)")
+
+// UpstreamStatusError is returned when the upstream (companion bridge or
+// YouTube) answered with a non-200 HTTP status. Callers can errors.As on it to
+// distinguish "upstream answered badly" from "upstream unreachable".
+type UpstreamStatusError struct {
+	StatusCode int
+	Status     string
+	Body       string // truncated response body, for logs / reason
+}
+
+func (e *UpstreamStatusError) Error() string {
+	return "upstream status " + e.Status
+}
+
+// companionURL returns the companion base URL without a trailing slash.
+// COMPANION_URL is re-read on every call so tests (t.Setenv) and runtime
+// reconfiguration work; the init-time value is only a fallback.
+func companionURL() string {
+	u := os.Getenv("COMPANION_URL")
+	if u == "" {
+		u = companionBaseURL
+	}
+	return strings.TrimRight(u, "/")
+}
+
+// httpClientTimeout is the hard ceiling for any single InnerTube / companion
+// call made through getHttpClient() (previously unbounded: a hung upstream
+// pinned the Echo handler forever). Per-endpoint budgets (see PlayerTimeout)
+// use request contexts below this ceiling.
+const httpClientTimeout = 120 * time.Second
+
+// defaultPlayerTimeout is the budget for one player resolution through the
+// bridge. It must cover the bridge's own chain: companion (45 s) and, when the
+// anonymous companion is walled, the logged-in iv-vp fallback (up to 75 s,
+// metube download). Cutting it shorter would turn a late success into a 504.
+const defaultPlayerTimeout = 90 * time.Second
+
+// PlayerTimeout returns the player call budget, overridable with
+// PLAYER_TIMEOUT_SECONDS (integer seconds, > 0).
+func PlayerTimeout() time.Duration {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("PLAYER_TIMEOUT_SECONDS"))); err == nil && v > 0 {
+		return time.Duration(v) * time.Second
+	}
+	return defaultPlayerTimeout
 }
 
 func Browse(browseId string, pageType PageType, params string,
@@ -41,7 +92,7 @@ func Browse(browseId string, pageType PageType, params string,
 		data = innertubeRequest{
 			//RequestAttributes: additionalRequestAttributes,
 			Continuation: ctoken,
-			Context:  innertubeContext,
+			Context:      innertubeContext,
 			//ContentCheckOK: true,
 			//RacyCheckOk:    true,
 			BrowseEndpointContextMusicConfig: &BrowseEndpointContextMusicConfig{
@@ -216,16 +267,21 @@ func Next(videoId string, playlistId string, client ClientInfo, params Params) (
 
 }
 
+// Player resolves a videoId through the companion bridge
+// (COMPANION_URL/companion/youtubei/v1/player). The bridge already applies
+// the logged-in iv-vp fallback when the anonymous companion answers a
+// non-playable status, so callers must NOT re-call on a non-OK
+// playabilityStatus: the answer is final for this resolution.
+//
+// Errors: ErrCompanionNotConfigured (deployment bug), *UpstreamStatusError
+// (bridge answered non-200), a timeout error (context.DeadlineExceeded /
+// net.Error.Timeout after PlayerTimeout()), or a transport error.
 func Player(videoId string, playlistId string, client ClientInfo, params Params) ([]byte, error) {
-		
-	if companionBaseURL == "" {
-		return nil, errors.New("Missing companion base URL")
+	base := companionURL()
+	if base == "" {
+		return nil, ErrCompanionNotConfigured
 	}
-	//if companion url ends with /, remove it
-	if companionBaseURL[len(companionBaseURL)-1] == '/' {
-		companionBaseURL = companionBaseURL[:len(companionBaseURL)-1]
-	}
-	playerUrl := companionBaseURL + "/companion/youtubei/v1/player"
+	playerUrl := base + "/companion/youtubei/v1/player"
 	innertubeContext := prepareInnertubeContext(client, nil)
 
 	data := innertubeRequest{
@@ -246,13 +302,13 @@ func Player(videoId string, playlistId string, client ClientInfo, params Params)
 		},
 	}
 
-	resp, err := callAPI(playerUrl, data, client)
+	ctx, cancel := context.WithTimeout(context.Background(), PlayerTimeout())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, playerUrl, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	return resp, nil
-
+	return doRequest(client, req, &data)
 }
 
 func DownloadWebpage(urlAddress string, clientInfo ClientInfo) ([]byte, error) {
@@ -333,7 +389,11 @@ func doRequestClient(client http.Client, clientInfo ClientInfo, req *http.Reques
 		dump, _ := httputil.DumpRequestOut(req, true)
 		log.Println(string(dump))
 		log.Println(string(respBytes))
-		return nil, errors.New(resp.Status)
+		body := string(respBytes)
+		if len(body) > 512 {
+			body = body[:512]
+		}
+		return nil, &UpstreamStatusError{StatusCode: resp.StatusCode, Status: resp.Status, Body: body}
 	}
 
 	return respBytes, nil
@@ -348,6 +408,7 @@ func getHttpClient() http.Client {
 	}
 	client := http.Client{
 		Transport: transport,
+		Timeout:   httpClientTimeout,
 	}
 
 	return client
@@ -437,5 +498,3 @@ func prepareInnertubeContext(clientInfo ClientInfo, visitorData *string) inntert
 func strPtr(s string) *string {
 	return &s
 }
-
-

@@ -13,7 +13,12 @@ type PlayerResponse struct {
 		MaxAgeSeconds int `json:"maxAgeSeconds"`
 	} `json:"responseContext"`
 	PlayabilityStatus struct {
-		Status          string `json:"status"`
+		Status string `json:"status"`
+		// Reason is the human-readable explanation YouTube attaches to a
+		// non-OK status ("Video unavailable", "Sign in to confirm your age",
+		// "This video is not available in your country", ...). Empty on OK,
+		// hence omitempty so the success payload shape is unchanged.
+		Reason          string `json:"reason,omitempty"`
 		PlayableInEmbed bool   `json:"playableInEmbed"`
 		ContextParams   string `json:"contextParams"`
 	} `json:"playabilityStatus"`

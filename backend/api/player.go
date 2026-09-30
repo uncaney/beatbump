@@ -3,10 +3,13 @@ package api
 import (
 	"beatbump-server/backend/_youtube"
 	"beatbump-server/backend/_youtube/api"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,8 +20,95 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-type PlayerAPIResponse struct {
-	// Define your response structure based on the actual data fields
+// PlayerError is the structured error payload of /api/v1/player.json.
+//
+// Contract (HTTP status -> Error -> Status):
+//
+//	400 bad_request  BAD_REQUEST       missing/malformed videoId
+//	404 unplayable   <playability>     YouTube says the content cannot be played
+//	                                   (UNPLAYABLE, LOGIN_REQUIRED, ERROR, AGE_VERIFICATION_REQUIRED,
+//	                                   CONTENT_CHECK_REQUIRED, ...) or NO_STREAMS when
+//	                                   the status is OK but no adaptive format came back
+//	502 upstream     UNREACHABLE       companion bridge cannot be reached (dial/reset)
+//	                 BAD_STATUS        companion bridge answered a non-200 HTTP status
+//	                 INVALID_RESPONSE  companion bridge answered non-JSON / unparsable JSON
+//	504 timeout      TIMEOUT           no answer within the player budget (api.PlayerTimeout)
+//	500 internal     INTERNAL          a bug or a deployment error on this backend
+//
+// Reason is always a human-readable sentence the front can display as-is.
+// The success payload (200) is unchanged: the raw InnerTube player response.
+type PlayerError struct {
+	Error   string `json:"error"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	VideoID string `json:"videoId"`
+}
+
+// Error kinds (PlayerError.Error).
+const (
+	PlayerErrBadRequest = "bad_request"
+	PlayerErrUnplayable = "unplayable"
+	PlayerErrUpstream   = "upstream"
+	PlayerErrTimeout    = "timeout"
+	PlayerErrInternal   = "internal"
+)
+
+// autoCacheOnPlayFn is the auto-cache trigger; a variable so tests can
+// observe whether a request counted as a play or as a prefetch.
+var autoCacheOnPlayFn = autoCacheOnPlay
+
+// isPrefetchRequest reports whether the request is a next-track warm-up
+// (X-Ytm-Prefetch header or ?prefetch=1): served identically, but it must not
+// trigger server-side acquisition.
+func isPrefetchRequest(c echo.Context) bool {
+	return c.Request().Header.Get("X-Ytm-Prefetch") != "" || c.QueryParam("prefetch") == "1"
+}
+
+func playerErrorResponse(c echo.Context, code int, kind, status, reason, videoId string) error {
+	if reason == "" {
+		reason = "Playback is not available for this track"
+	}
+	c.Response().Header().Set("Cache-Control", "no-store")
+	log.Printf("[player] %s -> %d %s/%s: %s", videoId, code, kind, status, reason)
+	return c.JSON(code, PlayerError{Error: kind, Status: status, Reason: reason, VideoID: videoId})
+}
+
+// classifyPlayerCallError maps an api.Player error to (HTTP code, kind,
+// status, reason).
+func classifyPlayerCallError(err error) (int, string, string, string) {
+	var upstream *api.UpstreamStatusError
+	var netErr net.Error
+	switch {
+	case errors.Is(err, api.ErrCompanionNotConfigured):
+		return http.StatusInternalServerError, PlayerErrInternal, "INTERNAL", "Player backend is not configured (companion URL missing)"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		return http.StatusGatewayTimeout, PlayerErrTimeout, "TIMEOUT",
+			fmt.Sprintf("The player service did not answer within %s", api.PlayerTimeout())
+	case errors.As(err, &upstream):
+		return http.StatusBadGateway, PlayerErrUpstream, "BAD_STATUS",
+			fmt.Sprintf("The player service answered HTTP %d", upstream.StatusCode)
+	default:
+		return http.StatusBadGateway, PlayerErrUpstream, "UNREACHABLE", "The player service cannot be reached"
+	}
+}
+
+// unplayableReason builds the displayable reason for a non-OK playability
+// status, preferring YouTube's own text.
+func unplayableReason(status, reason string) string {
+	if reason != "" {
+		return reason
+	}
+	switch status {
+	case "LOGIN_REQUIRED":
+		return "This track requires a signed-in account"
+	case "AGE_VERIFICATION_REQUIRED", "AGE_CHECK_REQUIRED":
+		return "This track is age-restricted"
+	case "CONTENT_CHECK_REQUIRED":
+		return "This track requires a content check"
+	case "ERROR", "UNPLAYABLE":
+		return "This track is unavailable"
+	}
+	return "This track cannot be played (" + status + ")"
 }
 
 func PlayerEndpointHandler(c echo.Context) error {
@@ -28,7 +118,10 @@ func PlayerEndpointHandler(c echo.Context) error {
 	playlistId := query.Get("playlistId")
 	//playerParams := query.Get("playerParams")
 	if videoId == "" {
-		return c.String(http.StatusInternalServerError, fmt.Sprintf("Missing required param: videoId"))
+		return playerErrorResponse(c, http.StatusBadRequest, PlayerErrBadRequest, "BAD_REQUEST", "Missing required param: videoId", videoId)
+	}
+	if !ytVideoRe.MatchString(videoId) {
+		return playerErrorResponse(c, http.StatusBadRequest, PlayerErrBadRequest, "BAD_REQUEST", "Malformed videoId", videoId)
 	}
 	if isLid(videoId) {
 		if r := LocalPlayer(videoId); r != nil {
@@ -36,27 +129,42 @@ func PlayerEndpointHandler(c echo.Context) error {
 		}
 	}
 
-	var responseBytes []byte
-	var err error
-
-	responseBytes, err = callPlayerAPI(api.IOS_MUSIC, videoId, playlistId)
-
+	// One call: the bridge already runs the logged-in iv-vp fallback whenever
+	// the anonymous companion answers a non-playable status, so a non-OK
+	// playabilityStatus here is final. Only a transport failure (bridge
+	// restarting, connection reset) is retried, once.
+	responseBytes, err := callPlayerAPI(api.IOS_MUSIC, videoId, playlistId)
 	if err != nil {
-		return c.String(http.StatusInternalServerError, err.Error())
+		if code, _, status, _ := classifyPlayerCallError(err); code == http.StatusBadGateway && status == "UNREACHABLE" {
+			time.Sleep(playerRetryDelay)
+			responseBytes, err = callPlayerAPI(api.IOS_MUSIC, videoId, playlistId)
+		}
+	}
+	if err != nil {
+		code, kind, status, reason := classifyPlayerCallError(err)
+		return playerErrorResponse(c, code, kind, status, reason, videoId)
 	}
 
 	var playerResponse _youtube.PlayerResponse
-	err = json.Unmarshal(responseBytes, &playerResponse)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, "Unable to parse reeponse: "+err.Error())
+	if err := json.Unmarshal(responseBytes, &playerResponse); err != nil {
+		return playerErrorResponse(c, http.StatusBadGateway, PlayerErrUpstream, "INVALID_RESPONSE",
+			"The player service returned an unreadable response", videoId)
 	}
 
-	if playerResponse.PlayabilityStatus.Status != "OK" {
-		return c.JSON(http.StatusInternalServerError, "Playability status is not OK: "+playerResponse.PlayabilityStatus.Status)
+	ps := playerResponse.PlayabilityStatus
+	if ps.Status != "OK" {
+		status := ps.Status
+		if status == "" {
+			// JSON without any playabilityStatus is not a player response at all.
+			return playerErrorResponse(c, http.StatusBadGateway, PlayerErrUpstream, "INVALID_RESPONSE",
+				"The player service returned an unexpected response", videoId)
+		}
+		return playerErrorResponse(c, http.StatusNotFound, PlayerErrUnplayable, status, unplayableReason(status, ps.Reason), videoId)
 	}
 
 	if len(playerResponse.StreamingData.AdaptiveFormats) == 0 {
-		return c.JSON(http.StatusInternalServerError, "Playability status is not OK: "+playerResponse.PlayabilityStatus.Status)
+		return playerErrorResponse(c, http.StatusNotFound, PlayerErrUnplayable, "NO_STREAMS",
+			"No playable stream was returned for this track", videoId)
 	}
 
 	//258/251/22/256/140/250/18/249/139
@@ -79,12 +187,16 @@ func PlayerEndpointHandler(c echo.Context) error {
 	// Auto-cache on play: enqueue this track (+ its album + queue lookahead)
 	// into the owned library. Fire-and-forget; never delays the JSON response.
 	// Prefetch requests (next track warm-up) must not trigger server side acquisition.
-	if c.Request().Header.Get("X-Ytm-Prefetch") == "" && c.QueryParam("prefetch") != "1" {
-		autoCacheOnPlay(videoId, playlistId, playerResponse)
+	if !isPrefetchRequest(c) {
+		autoCacheOnPlayFn(videoId, playlistId, playerResponse)
 	}
 
 	return c.JSON(http.StatusOK, playerResponse)
 }
+
+// playerRetryDelay is the pause before the single transport-level retry of the
+// companion call (a variable so tests keep fast).
+var playerRetryDelay = 300 * time.Millisecond
 
 func autoCacheOnPlay(videoId string, playlistId string, playerResponse _youtube.PlayerResponse) {
 	go func() {
@@ -256,13 +368,8 @@ func enqueueLookahead(videoId string, playlistId string, limit int) {
 	}
 }
 
+// callPlayerAPI returns api.Player's error unwrapped so the handler can
+// classify it (typed upstream error, timeout, configuration).
 func callPlayerAPI(clientInfo api.ClientInfo, videoId string, playlistId string) ([]byte, error) {
-
-	responseBytes, err := api.Player(videoId, playlistId, clientInfo, nil)
-
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Error building API request: %s", err))
-	}
-
-	return responseBytes, err
+	return api.Player(videoId, playlistId, clientInfo, nil)
 }
