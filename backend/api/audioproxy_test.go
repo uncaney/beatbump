@@ -174,7 +174,7 @@ func TestAudioProxy_HeadAndFullGet(t *testing.T) {
 	t.Setenv("COMPANION_URL", srv.URL)
 	e := newAudioTestApp(t)
 
-	for _, p := range []string{"/vp?u=https%3A%2F%2Fx", "/cover?lid=abc"} {
+	for _, p := range []string{"/vp?u=https%3A%2F%2Frr1---sn-abc.googlevideo.com%2Fvideoplayback%3Fid%3D1", "/cover?lid=abc"} {
 		req := httptest.NewRequest(http.MethodHead, p, nil)
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)

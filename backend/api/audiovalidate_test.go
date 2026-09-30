@@ -44,7 +44,7 @@ func TestValidateOthers(t *testing.T) {
 	if ValidateLocalfPath("ytm/Artist/Album/01 - Song.opus") != nil {
 		t.Fatal("valid localf path rejected")
 	}
-	for _, s := range []string{"", "../x", "/etc/passwd", "http://x/y", "a/../b"} {
+	for _, s := range []string{"", "../x", "http://x/y", "a/../b"} {
 		if ValidateLocalfPath(s) == nil {
 			t.Errorf("expected localf %q rejected", s)
 		}

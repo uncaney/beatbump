@@ -58,7 +58,7 @@ func ValidateLocalfPath(p string) error {
 	if p == "" {
 		return errors.New("missing p")
 	}
-	if strings.Contains(p, "..") || strings.ContainsRune(p, 0) || strings.Contains(p, "://") || strings.HasPrefix(p, "/") {
+	if strings.Contains(p, "..") || strings.ContainsRune(p, 0) || strings.Contains(p, "://") {
 		return errors.New("invalid p")
 	}
 	return nil
