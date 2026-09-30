@@ -86,7 +86,27 @@ export type Icons =
 	| "dots"
 	| "trash"
 	| "refresh"
-	| "play-circle";
+	| "play-circle"
+	// Icons present in components/Icon/icons.svg (also used outside dropdowns).
+	| "chevron-left"
+	| "chevron-right"
+	| "clock"
+	| "folder"
+	| "frown"
+	| "home"
+	| "image"
+	| "import"
+	| "minus"
+	| "music"
+	| "repeat"
+	| "repeat-1"
+	| "search"
+	| "settings"
+	| "skip-back"
+	| "skip-forward"
+	| "trending"
+	| "upload"
+	| "user";
 
 const DROPDOWN_ICONS: ReadonlyArray<Icons> = [
 	"artist",

@@ -111,12 +111,16 @@
 	}> = {};
 	export let size = "1.5rem";
 	export let tabindex = 0;
+	/** Accessible name of the button (aria-label + title). */
+	export let label = "More options";
 </script>
 
 <div
 	class="dd-button"
 	role="button"
-	aria-label="menu"
+	aria-label={label}
+	title={label}
+	aria-haspopup="menu"
 	use:dropdown={{ items, metadata, type }}
 	{tabindex}
 >

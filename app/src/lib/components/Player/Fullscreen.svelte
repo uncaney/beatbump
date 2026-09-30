@@ -49,12 +49,6 @@
 	import { progressBarSeek } from "./ProgressBar/ProgressBar.svelte";
 	import blurURL from "./blur.svg?url";
 	import { fullscreenStore } from "./channel";
-	import type { Icons } from "$components/Icon/icons";
-
-	// "chevron-right" exists in icons.svg but is missing from the Icons union
-	// (pre-existing gap, cf. "chevron-left" above); cast to avoid a new type error.
-	const ICON_CHEVRON = "chevron-right" as unknown as Icons;
-
 	export let state: "open" | "closed";
 
 	const {
@@ -695,7 +689,7 @@
 				<hr class="horizontal" />
 				<span class="handle-label" aria-hidden="true">
 					<Icon
-						name={ICON_CHEVRON}
+						name="chevron-right"
 						size="1em"
 						color="currentColor"
 						style="transform: rotate({sheetOpen ? 90 : -90}deg); transition: transform 200ms;"

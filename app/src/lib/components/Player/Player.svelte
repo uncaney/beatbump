@@ -116,12 +116,6 @@
 	import SessionListService from "$stores/list/sessionList";
 	import { SITE_ORIGIN_URL } from "$stores/url";
 	import PlayerButton from "./PlayerButton.svelte";
-	import type { Icons } from "$components/Icon/icons";
-
-	// "skip-forward" exists in icons.svg but is missing from the Icons union
-	// (same pre-existing gap as Controls.svelte); cast to avoid a new type error.
-	const ICON_SKIP_FORWARD = "skip-forward" as unknown as Icons;
-
 	const { paused, volume: AudioPlayerVolume } = AudioPlayer;
 
 	$: volume = $AudioPlayerVolume;
@@ -409,7 +403,7 @@
 						<Icon
 							color="white"
 							style="stroke-width:2; stroke: white;"
-							name={ICON_SKIP_FORWARD}
+							name="skip-forward"
 							fill="none"
 							size="1.5em"
 						/>
