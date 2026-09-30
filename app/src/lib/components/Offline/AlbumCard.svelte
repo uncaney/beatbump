@@ -157,6 +157,15 @@
 		line-height: 1.3;
 		cursor: pointer;
 		text-align: left;
+		// Global `button:not(.icon-btn):focus/:active` (0,2,1) paints a light
+		// grey background !important; keep ours on every interactive state.
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
+			color: $text !important;
+			box-shadow: none !important;
+		}
 		&:focus-visible {
 			outline: 2px solid $accent;
 			outline-offset: 2px;
@@ -174,6 +183,14 @@
 		display: grid;
 		place-items: center;
 		color: #aaa !important;
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
+			background: rgba(255, 255, 255, 0.12) !important;
+			border-color: transparent !important;
+			color: #aaa !important;
+		}
 		img {
 			width: 100%;
 			height: 100%;
@@ -195,6 +212,13 @@
 		border: 0 !important;
 		background: none !important;
 		white-space: normal;
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
+			background: none !important;
+			border-color: transparent !important;
+		}
 		&:hover .name {
 			text-decoration: underline;
 		}
@@ -256,8 +280,12 @@
 		line-height: 1;
 		background: rgba(255, 255, 255, 0.08) !important;
 		border: 1px solid rgba(255, 255, 255, 0.15) !important;
-		&:hover {
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
 			background: rgba(255, 255, 255, 0.16) !important;
+			border-color: rgba(255, 255, 255, 0.3) !important;
 		}
 	}
 	.tracks {

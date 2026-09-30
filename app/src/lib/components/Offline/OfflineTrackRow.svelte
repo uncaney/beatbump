@@ -189,8 +189,16 @@
 		line-height: 1;
 		text-transform: none;
 		cursor: pointer;
-		&:hover {
+		// Global `button:not(.icon-btn):focus/:active` (0,2,1) paints a light
+		// grey background !important; keep ours on every interactive state.
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
 			background: rgba(255, 255, 255, 0.16) !important;
+			border-color: rgba(255, 255, 255, 0.35) !important;
+			color: $text !important;
+			box-shadow: none !important;
 		}
 		&:focus-visible {
 			outline: 2px solid $accent;

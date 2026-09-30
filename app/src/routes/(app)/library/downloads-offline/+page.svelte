@@ -459,10 +459,17 @@
 		text-transform: none;
 		white-space: nowrap;
 		cursor: pointer;
-		&:hover {
+		// :focus / :focus-within / :active are listed explicitly: the global
+		// `button:not(.icon-btn):focus` (0,2,1) would otherwise paint a light
+		// grey background under our light text.
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
 			background: rgba(255, 255, 255, 0.16) !important;
 			border-color: rgba(255, 255, 255, 0.3) !important;
 			color: $text !important;
+			box-shadow: none !important;
 		}
 		&:focus-visible {
 			outline: 2px solid $accent;
@@ -472,9 +479,13 @@
 			background: $accent !important;
 			border-color: $accent !important;
 			color: #000 !important;
-			&:hover {
+			&:hover,
+			&:focus,
+			&:focus-within,
+			&:active {
 				background: #22e668 !important;
 				border-color: #22e668 !important;
+				color: #000 !important;
 			}
 		}
 		&:disabled,
@@ -484,8 +495,13 @@
 			background: rgba(255, 255, 255, 0.06) !important;
 			border-color: rgba(255, 255, 255, 0.12) !important;
 			color: $text !important;
-			&:hover {
+			&:hover,
+			&:focus,
+			&:focus-within,
+			&:active {
 				background: rgba(255, 255, 255, 0.06) !important;
+				border-color: rgba(255, 255, 255, 0.12) !important;
+				color: $text !important;
 			}
 		}
 	}
@@ -512,15 +528,21 @@
 			text-transform: none;
 			white-space: nowrap;
 			cursor: pointer;
-			&:hover {
+			&:hover,
+			&:focus,
+			&:focus-within,
+			&:active {
 				background: rgba(255, 255, 255, 0.12) !important;
+				border-color: transparent !important;
 				color: $text !important;
 			}
 			&:focus-visible {
 				outline: 2px solid $accent;
 				outline-offset: 2px;
 			}
-			&.active {
+			&.active,
+			&.active:focus,
+			&.active:active {
 				background: rgba(255, 255, 255, 0.18) !important;
 				border-color: rgba(255, 255, 255, 0.28) !important;
 				color: $text !important;
@@ -562,6 +584,14 @@
 		white-space: normal;
 		cursor: pointer;
 		text-align: left;
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
+			background: none !important;
+			border-color: transparent !important;
+			color: $text !important;
+		}
 		&:hover .name {
 			text-decoration: underline;
 		}
@@ -624,8 +654,13 @@
 		color: $text !important;
 		line-height: 1;
 		cursor: pointer;
-		&:hover {
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
 			background: rgba(255, 255, 255, 0.16) !important;
+			border-color: rgba(255, 255, 255, 0.3) !important;
+			color: $text !important;
 		}
 		&:focus-visible {
 			outline: 2px solid $accent;
