@@ -10,6 +10,7 @@
 	import { APIClient } from "$lib/api";
 	import { AudioPlayer } from "$lib/player";
 	import { settings, type Theme } from "$stores/settings";
+	import OfflineSettings from "./OfflineSettings.svelte";
 	const themes: Theme[] = ["Dark", "Dim", "Midnight", "YTM"];
 
 	function handleStreamSelect() {
@@ -231,6 +232,7 @@
 				/>
 			</div>
 		</section>
+		<OfflineSettings />
 		<!--<section>
             <span class="h5">Network</span>
             <div class="setting">
