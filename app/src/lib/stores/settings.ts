@@ -32,11 +32,20 @@ interface AppInfo {
 	Donate: string;
 	GitHub: string;
 }
+// Offline core (src/lib/offline.ts + service worker): autoCache = every played
+// track is cached for offline playback (default on; only an explicit `false`
+// disables it). Settings persisted before this key existed are backfilled with
+// the default by _settings() on load, so the category is always present.
+export interface Offline {
+	autoCache?: boolean;
+}
+export const DEFAULT_OFFLINE_SETTINGS: Required<Offline> = { autoCache: true };
 export type UserSettings = {
 	appearance: Appearance;
 	playback: Playback;
 	search: Search;
 	appinfo: AppInfo;
+	offline: Offline;
 };
 
 let list: UserSettings = {
@@ -57,6 +66,7 @@ let list: UserSettings = {
 		GitHub: "https://github.com/snuffyDev/Beatbump",
 	},
 	search: { Preserve: "Category", Restricted: false },
+	offline: { ...DEFAULT_OFFLINE_SETTINGS },
 };
 
 export const SERVER_PERSISTED_SETTING_KEYS: Extract<
@@ -149,6 +159,9 @@ function _settings() {
 		if (stored?.search && typeof stored?.search?.Restricted === "undefined") {
 			stored.search.Restricted = false;
 		}
+		// Offline core: backfill defaults for settings persisted before the key existed.
+		if (!stored.offline || typeof stored.offline !== "object") stored.offline = { ...DEFAULT_OFFLINE_SETTINGS };
+		else if (typeof stored.offline.autoCache === "undefined") stored.offline.autoCache = DEFAULT_OFFLINE_SETTINGS.autoCache;
 		list = stored as UserSettings;
 	}
 

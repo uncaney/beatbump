@@ -7,6 +7,7 @@ import { tick } from "svelte";
 import { tweened } from "svelte/motion";
 import { writable } from "svelte/store";
 import { APIClient } from "./api";
+import { cacheTrackOffline } from "./offline";
 import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
@@ -782,7 +783,7 @@ export const getSrc = async (
 			video: "",
 			duration: -1
 		}
-		return setTrack(formats, true);
+		return setTrack(formats, true, currentTrack);
 	}
 
 	const res = await APIClient.fetch(`/api/v1/player.json?videoId=${videoId}&playlistId=${playlistId}&playerParams=${params}`).then((response) => {
@@ -809,24 +810,42 @@ export const getSrc = async (
 		dash: false,
 	});
 
-	const src = setTrack(formats, shouldAutoplay);
+	const src = setTrack(formats, shouldAutoplay, currentTrack || (videoId ? { videoId } : undefined));
 	return src;
 }
 
-function setTrack(formats: PlayerFormats, shouldAutoplay: boolean) {
+// Offline core: every track that actually starts playing is cached for offline
+// playback by the service worker (settings.offline.autoCache, default on; only
+// an explicit `false` disables it). Fire-and-forget, never blocks playback.
+function autoCacheEnabled(): boolean {
+	return userSettings?.offline?.autoCache !== false;
+}
+function autoCache(track: { videoId?: string } | undefined, url: string | undefined) {
+	if (!browser || !track || !track.videoId || !url) return;
+	if (!autoCacheEnabled()) return;
+	try {
+		void cacheTrackOffline(track, url).catch(() => {});
+	} catch {
+		/* never let offline caching affect playback */
+	}
+}
+
+function setTrack(formats: PlayerFormats, shouldAutoplay: boolean, track?: { videoId?: string }) {
 	let format = undefined;
 	if (userSettings?.playback?.Stream === "HLS") {
 		format = { original_url: formats?.hls || "", url: formats.hls || "" };
 	} else {
 		format = formats.streams?.[0];
 	}
-	if (format && shouldAutoplay)
+	if (format && shouldAutoplay) {
 		updatePlayerSrc({
 			video_url: formats.video,
 			original_url: format.original_url,
 			url: format.url,
 			duration: formats.duration
 		});
+		autoCache(track, format.url);
+	}
 	return {
 		body: format
 			? { original_url: format.original_url, url: format.url }
