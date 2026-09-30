@@ -319,6 +319,8 @@
 	import type { BuildMenuParams } from "$lib/types/common";
 	import { IDBService } from "$lib/workers/db/service";
 	import list from "$stores/list/sessionList";
+	import { AudioPlayer, getSrc } from "$lib/player";
+	import { get } from "svelte/store";
 	import { SITE_ORIGIN_URL } from "$stores/url";
 	import { isDesktopMQ } from "$stores/window";
 	import { createEventDispatcher, tick } from "svelte";
@@ -422,6 +424,15 @@
 
 				break;
 			default:
+				// The clicked row is already the current track (e.g. restored session,
+				// paused at 0:00): resume it instead of re-resolving the mix, which was
+				// a silent no-op. Already playing: leave it alone.
+				if (item.videoId && $currentTrack?.videoId === item.videoId) {
+					if (get(AudioPlayer.paused)) {
+						await getSrc(item.videoId, item.playlistId ?? parentPlaylistId ?? undefined, item?.playerParams ?? undefined, true);
+					}
+					break;
+				}
 				await list.initAutoMixSession({
 					videoId: item.videoId,
 					playlistId: item.playlistId ?? parentPlaylistId,

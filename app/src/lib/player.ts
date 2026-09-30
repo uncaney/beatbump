@@ -822,24 +822,12 @@ export const getSrc = async (
 	const cached = await offlineFormats(videoId);
 	if (cached) return setTrack(cached, shouldAutoplay, currentTrack || (videoId ? { videoId } : undefined));
 
-	const res = await APIClient.fetch(`/api/v1/player.json?videoId=${videoId}&playlistId=${playlistId}&playerParams=${params}`).then((response) => {
-		if (!response.ok) {
-			return response.text().then(message => {
-				throw new Error(message); // Throw a new error with the response text
-			});
-		}
-		return response.json();
-	})
-		.catch((message) => {
-			console.error(message);
-			return message;
-		});
-	if (
-        !res || res instanceof Error ||(res &&
-			!res?.streamingData &&
-			res?.playabilityStatus?.status === "UNPLAYABLE")
-	) {
-		return handleError(res.message);
+	const res = await fetchPlayerJson(videoId, playlistId, params);
+	if (res instanceof PlayerRequestError) {
+		return handleError(res);
+	}
+	if (!res || (!res?.streamingData && res?.playabilityStatus?.status === "UNPLAYABLE")) {
+		return handleError(new PlayerRequestError(404, "unplayable", "UNPLAYABLE", res?.playabilityStatus?.reason || ""));
 	}
 	const formats = sort({
 		data: res,
@@ -873,6 +861,7 @@ function setTrack(formats: PlayerFormats, shouldAutoplay: boolean, track?: { vid
 	} else {
 		format = formats.streams?.[0];
 	}
+	if (format) playerFailStreak = 0;
 	if (format && shouldAutoplay) {
 		updatePlayerSrc({
 			video_url: formats.video,
@@ -890,14 +879,101 @@ function setTrack(formats: PlayerFormats, shouldAutoplay: boolean, track?: { vid
 	};
 }
 
-function handleError(message: string) {
-	console.log("error");
+// Structured error contract of /api/v1/player.json (backend cycle 2):
+// {error: bad_request|unplayable|upstream|timeout|internal, status, reason, videoId}.
+export class PlayerRequestError extends Error {
+	constructor(
+		public code: number,
+		public kind: string,
+		public status: string,
+		public reason: string,
+	) {
+		super(reason || kind);
+	}
+}
 
-	notify(
-		message || "An error occurred while initiating playback, skipping...",
-		"error",
-		"getNextTrack",
-	);
+const PLAYER_RETRY_DELAY_MS = 1500;
+
+async function fetchPlayerJson(videoId?: string, playlistId?: string, params?: string, attempt = 0): Promise<any> {
+	let response: Response;
+	try {
+		response = await APIClient.fetch(`/api/v1/player.json?videoId=${videoId}&playlistId=${playlistId}&playerParams=${params}`);
+	} catch (e) {
+		// Network failure (offline, DNS): behaves like an unreachable upstream.
+		if (attempt === 0) {
+			await new Promise((r) => setTimeout(r, PLAYER_RETRY_DELAY_MS));
+			return fetchPlayerJson(videoId, playlistId, params, 1);
+		}
+		return new PlayerRequestError(0, "network", "NETWORK", String((e as Error)?.message || e));
+	}
+	if (response.ok) {
+		try {
+			return await response.json();
+		} catch {
+			return new PlayerRequestError(502, "upstream", "INVALID_RESPONSE", "");
+		}
+	}
+	// Non-200: parse the JSON contract defensively (older servers answered plain text).
+	let err = new PlayerRequestError(response.status, response.status === 404 ? "unplayable" : "upstream", String(response.status), "");
+	try {
+		const text = await response.text();
+		try {
+			const j = JSON.parse(text);
+			if (j && typeof j === "object" && typeof j.error === "string") {
+				err = new PlayerRequestError(response.status, j.error, String(j.status || ""), String(j.reason || ""));
+			} else {
+				err.reason = text.slice(0, 200);
+			}
+		} catch {
+			err.reason = text.slice(0, 200);
+		}
+	} catch {
+		/* body unreadable */
+	}
+	if ((err.kind === "upstream" || err.kind === "timeout") && attempt === 0) {
+		notify("Service lecteur indisponible, nouvelle tentative…", "error");
+		await new Promise((r) => setTimeout(r, PLAYER_RETRY_DELAY_MS));
+		return fetchPlayerJson(videoId, playlistId, params, 1);
+	}
+	return err;
+}
+
+// Auto-skip guard: skip to the next track on a failure, but never chain skips
+// (a dead backend would otherwise race through the whole queue). The streak is
+// reset by the next successful setTrack.
+let playerFailStreak = 0;
+
+function handleError(err: PlayerRequestError | string | undefined) {
+	const e = typeof err === "string" || !err ? new PlayerRequestError(0, "unknown", "UNKNOWN", typeof err === "string" ? err : "") : err;
+	console.error("[player] source error", e.code, e.kind, e.status, e.reason);
+	let message: string;
+	switch (e.kind) {
+		case "unplayable":
+			message = "Morceau indisponible" + (e.reason ? " : " + e.reason : "");
+			break;
+		case "bad_request":
+			message = "Morceau invalide" + (e.reason ? " : " + e.reason : "");
+			break;
+		case "timeout":
+			message = "Le service lecteur ne répond pas, réessaie dans un instant";
+			break;
+		case "upstream":
+		case "network":
+			message = "Service lecteur indisponible" + (e.reason ? " (" + e.reason + ")" : "");
+			break;
+		default:
+			message = e.reason || "Lecture impossible pour ce morceau";
+	}
+	playerFailStreak += 1;
+	const canSkip = playerFailStreak <= 1 && SessionListService.value.mix.length > 1;
+	if (canSkip && (e.kind === "unplayable" || e.kind === "bad_request" || e.kind === "upstream" || e.kind === "timeout")) {
+		notify(message + " · passage au suivant", "error", "getNextTrack");
+		setTimeout(() => {
+			void Promise.resolve(SessionListService.next()).catch(() => {});
+		}, 600);
+	} else {
+		notify(message, "error");
+	}
 	return {
 		body: null,
 		error: true,
