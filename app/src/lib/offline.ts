@@ -44,6 +44,29 @@ function patch(videoId: string, fields: Partial<OfflineTrack>) {
 	write(list);
 }
 
+// What we persist per track: enough for the offline library (title, artist,
+// album, a couple of thumbnails, length, track number) plus our own fields.
+// Full Beatbump items (subtitle runs, loggingContext, …) weigh 2-3 KB each and
+// blow the localStorage cap around 2 000 tracks.
+const KEEP_KEYS = ["title", "videoId", "artistInfo", "album", "length", "index", "playlistId", "_offlineUrl", "_cached", "_bytes", "_at"] as const;
+export function slimTrack(item: any): OfflineTrack {
+	const out: Record<string, any> = {};
+	for (const k of KEEP_KEYS) if (item && item[k] !== undefined) out[k] = item[k];
+	const th = item && Array.isArray(item.thumbnails) ? item.thumbnails : [];
+	if (th.length) out.thumbnails = th.slice(0, 2).map((t: any) => ({ url: t && t.url, width: t && t.width, height: t && t.height }));
+	// Keep the artist from the subtitle runs when artistInfo is missing (local tracks).
+	if (!out.artistInfo && item && Array.isArray(item.subtitle)) {
+		const a = item.subtitle.find((s: any) => s && /ARTIST/.test(s.pageType || "") && s.text);
+		if (a) out.artistInfo = { artist: [{ text: a.text, browseId: a.browseId }] };
+	}
+	if (!out.album && item && Array.isArray(item.subtitle)) {
+		const al = item.subtitle.find((s: any) => s && /ALBUM/.test(s.pageType || "") && (s.text || s.browseId));
+		if (al) out.album = { text: al.text, browseId: al.browseId };
+	}
+	if (typeof item?.artist === "string" && !out.artistInfo) out.artist = item.artist;
+	return out as OfflineTrack;
+}
+
 export function getOfflineTracks(): OfflineTrack[] {
 	return read();
 }
@@ -52,6 +75,15 @@ export function isDownloaded(videoId: string): boolean {
 }
 export function isCached(videoId: string): boolean {
 	return read().some((t) => t.videoId === videoId && t._cached === true);
+}
+/** The URL under which `videoId` is cached by the SW (per our list), or "" when not cached. */
+export function getCachedUrl(videoId: string): string {
+	const t = read().find((x) => x.videoId === videoId && x._cached === true);
+	return (t && t._offlineUrl) || "";
+}
+/** Whether `_offlineUrl` points at a locally owned file (served without any upstream). */
+export function isLocalUrl(url: string | undefined): boolean {
+	return !!url && /\/localf\b/.test(url);
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -105,7 +137,7 @@ function cacheableUrl(url: string): boolean {
 // Service worker plumbing: one message listener, per-URL pending acks
 // ---------------------------------------------------------------------------
 
-type Ack = { ok: boolean; bytes?: number; reason?: string; already?: boolean; videoId?: string };
+type Ack = { ok: boolean; bytes?: number; reason?: string; already?: boolean; videoId?: string; cachedUrl?: string };
 const pending = new Map<string, Array<(a: Ack) => void>>();
 const inflight = new Map<string, Promise<OfflineResult>>();
 let listening = false;
@@ -183,14 +215,96 @@ export async function swRequest<T = any>(msg: Record<string, unknown>, replyType
 		sw.postMessage(msg);
 	});
 }
+export type AudioListEntry = { url: string; videoId: string; bytes: number; at: number; lastAccess?: number; contentType: string };
 export function listCachedAudio() {
-	return swRequest<{ type: "audio-list"; entries: { url: string; videoId: string; bytes: number; at: number; contentType: string }[]; total: number; quota: number }>(
-		{ type: "list-audio" },
-		"audio-list",
-	);
+	return swRequest<{ type: "audio-list"; entries: AudioListEntry[]; total: number; quota: number }>({ type: "list-audio" }, "audio-list");
 }
 export function setAudioQuota(bytes: number) {
 	return swRequest<{ type: "audio-quota"; quota: number }>({ type: "set-audio-quota", bytes }, "audio-quota");
+}
+
+/**
+ * Light asynchronous check with the SW: is `videoId` really in the audio cache
+ * (by videoId, whatever URL it was cached under)? `null` = no answer (no SW,
+ * timeout): callers then trust the local list. On a definite answer the local
+ * list is patched (`_cached`, and `_offlineUrl` when the SW holds another URL).
+ */
+export async function verifyCached(videoId: string, ms = 1_500): Promise<{ cached: boolean; url: string } | null> {
+	if (!videoId) return null;
+	const r = await swRequest<{ type: "audio-is-cached"; videoId: string; cached: boolean; url?: string; bytes?: number }>(
+		{ type: "is-cached", videoId },
+		"audio-is-cached",
+		ms,
+	);
+	if (!r || r.videoId !== videoId) return null;
+	const known = read().find((t) => t.videoId === videoId);
+	if (known) {
+		if (r.cached) {
+			const fields: Partial<OfflineTrack> = { _cached: true };
+			if (r.url && r.url !== known._offlineUrl) fields._offlineUrl = r.url;
+			if (typeof r.bytes === "number" && r.bytes > 0) fields._bytes = r.bytes;
+			if (known._cached !== true || fields._offlineUrl || (fields._bytes && fields._bytes !== known._bytes)) patch(videoId, fields);
+		} else if (known._cached === true) {
+			patch(videoId, { _cached: false });
+		}
+	}
+	return { cached: !!r.cached, url: (r.cached && r.url) || "" };
+}
+
+/** Tell the SW which URL/track is playing so its LRU never evicts it. */
+export function announceNowPlaying(url: string | undefined, videoId: string | undefined) {
+	try {
+		const ctrl = typeof navigator !== "undefined" && navigator.serviceWorker && navigator.serviceWorker.controller;
+		if (ctrl) ctrl.postMessage({ type: "now-playing", url: url || "", videoId: videoId || "" });
+	} catch {
+		/* ignore */
+	}
+}
+
+// Grace period for entries still being downloaded (recorded `_cached:false`
+// before the SW ack): reconcile must not drop them.
+const RECONCILE_GRACE_MS = 5 * 60 * 1000;
+
+/**
+ * Reconcile "ytm-offline-tracks" with what the SW really holds (`list-audio`):
+ * `_cached` follows the cache, `_offlineUrl` follows the URL the SW has for the
+ * videoId, entries with neither cached audio nor a local-file URL are removed
+ * (except very recent ones still in flight). Entries are slimmed on the way.
+ * Returns the reconciled list; `null` when the SW gave no answer (list untouched).
+ */
+export async function reconcileOfflineList(): Promise<OfflineTrack[] | null> {
+	const l = await listCachedAudio();
+	if (!l || !Array.isArray(l.entries)) return null;
+	const byId = new Map<string, AudioListEntry>();
+	const byUrl = new Map<string, AudioListEntry>();
+	for (const e of l.entries) {
+		if (e.videoId) byId.set(e.videoId, e);
+		if (e.url) byUrl.set(ackKey(e.url), e);
+	}
+	const now = Date.now();
+	const out: OfflineTrack[] = [];
+	for (const raw of read()) {
+		if (!raw || !raw.videoId) continue;
+		const t = slimTrack(raw);
+		const hit = byId.get(t.videoId) || (t._offlineUrl ? byUrl.get(ackKey(t._offlineUrl)) : undefined);
+		if (hit) {
+			t._cached = true;
+			if (hit.url) t._offlineUrl = hit.url;
+			if (hit.bytes > 0) t._bytes = hit.bytes;
+			if (!t._at && hit.at) t._at = hit.at;
+		} else {
+			t._cached = false;
+			const recent = typeof t._at === "number" && now - t._at < RECONCILE_GRACE_MS;
+			if (!isLocalUrl(t._offlineUrl) && !recent) continue;
+		}
+		out.push(t);
+	}
+	write(out);
+	return out;
+}
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+	// Once per page load, after the SW had a chance to claim the page.
+	setTimeout(() => void reconcileOfflineList().catch(() => {}), 4_000);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +321,9 @@ export function cacheTrackOffline(item: any, url: string): Promise<OfflineResult
 	const lid = item && item.videoId;
 	if (!lid) return Promise.resolve({ ok: false, reason: "no id" });
 	if (!cacheableUrl(url)) return Promise.resolve({ ok: false, reason: "not cacheable" });
-	const k = ackKey(url);
+	// One in-flight request per track (the SW dedups by videoId too, but this
+	// spares the round-trip and the duplicate list write).
+	const k = "id:" + lid;
 	const running = inflight.get(k);
 	if (running) return running;
 	const p = (async (): Promise<OfflineResult> => {
@@ -216,10 +332,20 @@ export function cacheTrackOffline(item: any, url: string): Promise<OfflineResult
 			if (!sw) return { ok: false, reason: "no service worker" };
 			ensureListener();
 
-			// Record first (head of list, no duplicate) so the library shows it at once.
+			// Already cached under this videoId: the SW answers `already` by
+			// videoId whatever the URL, so keep the URL it holds (the stable one).
 			const prev = read().find((t) => t.videoId === lid);
+			if (prev && prev._cached === true && prev._offlineUrl && prev._offlineUrl !== url) {
+				// Refresh the metadata only; no new download for a rotated signed URL.
+				const list = read().filter((t) => t.videoId !== lid);
+				list.unshift(slimTrack({ ...prev, ...item, videoId: lid, _offlineUrl: prev._offlineUrl, _cached: true, _bytes: prev._bytes, _at: prev._at }));
+				write(list);
+				return { ok: true, cached: true, bytes: prev._bytes };
+			}
+
+			// Record first (head of list, no duplicate) so the library shows it at once.
 			const list = read().filter((t) => t.videoId !== lid);
-			const entry: OfflineTrack = {
+			const entry: OfflineTrack = slimTrack({
 				...(prev || {}),
 				...item,
 				videoId: lid,
@@ -227,7 +353,7 @@ export function cacheTrackOffline(item: any, url: string): Promise<OfflineResult
 				_at: Date.now(),
 				_cached: prev && prev._offlineUrl === url ? prev._cached : false,
 				_bytes: prev && prev._offlineUrl === url ? prev._bytes : undefined,
-			};
+			});
 			list.unshift(entry);
 			write(list);
 
@@ -238,7 +364,11 @@ export function cacheTrackOffline(item: any, url: string): Promise<OfflineResult
 				// No ack in time: the SW may still finish; leave _cached as-is.
 				return { ok: false, reason: "timeout", cached: entry._cached === true };
 			}
-			patch(lid, { _cached: !!a.ok, _bytes: a.ok ? a.bytes : entry._bytes });
+			const fields: Partial<OfflineTrack> = { _cached: !!a.ok, _bytes: a.ok ? a.bytes : entry._bytes };
+			// The SW may hold the track under another (earlier) URL: that is the
+			// one the <audio> element must request to hit the cache.
+			if (a.ok && typeof a.cachedUrl === "string" && a.cachedUrl) fields._offlineUrl = a.cachedUrl;
+			patch(lid, fields);
 			return { ok: !!a.ok, cached: !!a.ok, bytes: a.bytes, reason: a.ok ? undefined : a.reason || "sw refused" };
 		} catch (e: any) {
 			return { ok: false, reason: String((e && e.message) || e || "error") };
@@ -373,6 +503,6 @@ export function removeOffline(item: any) {
 	const lid = item && item.videoId;
 	const t = read().find((x) => x.videoId === lid);
 	const ctrl = typeof navigator !== "undefined" && navigator.serviceWorker && navigator.serviceWorker.controller;
-	if (t && t._offlineUrl && ctrl) ctrl.postMessage({ type: "uncache-audio", url: t._offlineUrl });
+	if (ctrl && (t || lid)) ctrl.postMessage({ type: "uncache-audio", url: (t && t._offlineUrl) || "", videoId: lid || "" });
 	write(read().filter((x) => x.videoId !== lid));
 }

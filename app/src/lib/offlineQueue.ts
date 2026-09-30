@@ -312,13 +312,27 @@ export function recentlyCached(tracks: OfflineTrack[], n: number): OfflineTrack[
 
 /**
  * Clone every item with `localUrl` = its cached audio URL so getSrc() plays it
- * without any request. Items without a cached URL are dropped.
+ * without any request. Only tracks that are really cached are kept: `_cached
+ * === true`, or confirmed by the service worker (`confirmed`: videoId -> cached
+ * URL, from `list-audio`). A `/vp` (signed, expiring) URL that is not cached is
+ * never handed to the player. Returns [] when nothing is playable (never throws).
  */
-export function toPlayableItems(tracks: OfflineTrack[]): OfflineTrack[] {
+export function toPlayableItems(tracks: OfflineTrack[], confirmed?: Map<string, string> | Set<string>): OfflineTrack[] {
 	const out: OfflineTrack[] = [];
 	for (const t of tracks || []) {
-		const url = firstString(t?._offlineUrl, t?.localUrl);
-		if (!t || !t.videoId || !url) continue;
+		if (!t || !t.videoId) continue;
+		let url = firstString(t._offlineUrl, t.localUrl);
+		let ok = t._cached === true;
+		if (confirmed) {
+			if (confirmed instanceof Map) {
+				const u = confirmed.get(t.videoId);
+				if (u !== undefined) {
+					ok = true;
+					if (u) url = u;
+				}
+			} else if (confirmed.has(t.videoId)) ok = true;
+		}
+		if (!ok || !url) continue;
 		out.push({ ...t, localUrl: url });
 	}
 	return out;
@@ -329,16 +343,35 @@ export function toPlayableItems(tracks: OfflineTrack[]): OfflineTrack[] {
  * SessionListService.setMix(items, "local") + updatePosition + getSrc, i.e. the
  * same "local" path the store already supports (next()/previous() then stay on
  * localUrl, no continuation fetch). With `shuffle`, the clicked track plays
- * first and the rest is shuffled. Returns false when nothing is playable.
+ * first and the rest is shuffled. Returns false when nothing is playable (the
+ * page then shows its empty state; nothing is thrown).
+ * Cached-ness is confirmed with the service worker (`list-audio`) when it
+ * answers; otherwise `_cached === true` from the list is trusted.
  */
 export async function play(
 	items: OfflineTrack[],
 	startIndex = 0,
-	opts: { shuffle?: boolean } = {},
+	opts: { shuffle?: boolean; confirmed?: Map<string, string> } = {},
 ): Promise<boolean> {
-	let list = toPlayableItems(items);
+	let confirmed = opts.confirmed;
+	if (!confirmed) {
+		try {
+			const { listCachedAudio } = await import("$lib/offline");
+			const l = await listCachedAudio();
+			if (l && Array.isArray(l.entries)) {
+				confirmed = new Map<string, string>();
+				for (const e of l.entries) if (e.videoId) confirmed.set(e.videoId, e.url || "");
+			}
+		} catch {
+			confirmed = undefined;
+		}
+	}
+	let list = toPlayableItems(items, confirmed);
 	if (!list.length) return false;
-	let idx = Math.min(Math.max(0, startIndex | 0), list.length - 1);
+	// The clicked track must stay the start; map startIndex through the filter.
+	const wanted = items?.[startIndex]?.videoId;
+	const mapped = wanted ? list.findIndex((t) => t.videoId === wanted) : -1;
+	let idx = mapped >= 0 ? mapped : Math.min(Math.max(0, startIndex | 0), list.length - 1);
 	if (opts.shuffle) {
 		const first = list[idx];
 		list = [first, ...shuffle(list.filter((_, i) => i !== idx))];

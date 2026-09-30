@@ -7,7 +7,7 @@ import { tick } from "svelte";
 import { tweened } from "svelte/motion";
 import { writable } from "svelte/store";
 import { APIClient } from "./api";
-import { cacheTrackOffline } from "./offline";
+import { announceNowPlaying, cacheTrackOffline, getCachedUrl, verifyCached } from "./offline";
 import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
@@ -758,6 +758,31 @@ export const AudioPlayer = new AudioPlayerImpl();
 /** Updates the current track for the audio player */
 export function updatePlayerSrc({ url, video_url,duration }: SrcDict): void {
 	AudioPlayer.updateSrc({ url, videoUrl: video_url,duration });
+	// The SW's LRU must never evict what is playing right now.
+	if (browser) {
+		const cur = SessionListService.value?.mix?.[SessionListService.value?.position ?? -1];
+		announceNowPlaying(url, cur?.videoId);
+	}
+}
+
+// Offline-first source: when the track is in our offline list as cached, ask
+// the SW (light, ~ms; 1.5 s cap) whether it really holds it, then play the
+// cached URL directly instead of re-resolving player.json (which would yield a
+// fresh signed URL that misses the cache, and offline would fail outright).
+async function offlineFormats(videoId?: string): Promise<PlayerFormats | null> {
+	if (!browser || !videoId) return null;
+	let url = getCachedUrl(videoId);
+	if (!url) return null;
+	const v = await verifyCached(videoId).catch(() => null);
+	if (v && !v.cached) return null; // definitely gone (evicted): regular flow
+	if (v && v.url) url = v.url;
+	return {
+		hls: "",
+		dash: "",
+		streams: [{ url, original_url: url, mimeType: "audio/mp4" }],
+		video: "",
+		duration: -1,
+	};
 }
 
 // Get source URLs
@@ -785,6 +810,9 @@ export const getSrc = async (
 		}
 		return setTrack(formats, true, currentTrack);
 	}
+
+	const cached = await offlineFormats(videoId);
+	if (cached) return setTrack(cached, shouldAutoplay, currentTrack || (videoId ? { videoId } : undefined));
 
 	const res = await APIClient.fetch(`/api/v1/player.json?videoId=${videoId}&playlistId=${playlistId}&playerParams=${params}`).then((response) => {
 		if (!response.ok) {

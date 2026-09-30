@@ -31,6 +31,7 @@ import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
 import { fetchNext, filterList } from "./utils.list";
 import { APIClient } from "$lib/api";
+import { SERVER_DOMAIN } from "../../../env";
 
 const mutex = new Mutex();
 
@@ -68,7 +69,9 @@ const VALID_KEYS = [
 
 export class ListService {
     private isLocal = false;
-    private nextTrackUrl: string | null = null;
+    // Instant-start URL for position + 1, with an expiry (signed stream URLs
+    // die; a long pause must not make next() play a dead URL).
+    private nextTrackUrl: { url: string; expiresAt: number } | null = null;
     private restricted = false;
 
     _$: WritableStore<ISessionListProvider> =
@@ -588,16 +591,19 @@ export class ListService {
 
             return;
         } else {
-            if (nextSrc || this.nextTrackUrl) {
+            // A stale (expired) prefetched URL is dropped: the regular
+            // getSrc() path below re-resolves the stream.
+            const warm = this.freshNextTrackUrl();
+            if (nextSrc || warm) {
                 Logger.dev("next track Cond A", {
                     nextSrc,
                     _$: this._$,
                     nextTrack,
-                    thisNextTrackURL: this.nextTrackUrl,
+                    thisNextTrackURL: warm,
                 });
                 // Capture before updatePosition(): it clears `nextTrackUrl`
                 // and schedules the prefetch of the new position + 1.
-                const url = nextSrc ? (nextSrc as string) : (this.nextTrackUrl as string);
+                const url = nextSrc ? (nextSrc as string) : (warm as string);
                 this.nextTrackUrl = null;
                 await this.updatePosition("next");
                 updatePlayerSrc({ original_url: url, url });
@@ -659,11 +665,46 @@ export class ListService {
      * (dedupe + short-lived URL cache so a track prefetched as "+2" is promoted
      * to "next" without a second round-trip). Stream URLs expire, hence the TTL.
      */
-    private _prefetched = new Map<string, { url: string; at: number }>();
+    private _prefetched = new Map<string, { url: string; at: number; expiresAt: number }>();
     private _prefetchInflight = new Set<string>();
     private _prefetchTimer: ReturnType<typeof setTimeout> | null = null;
     private _prefetchGen = 0;
-    private static readonly PREFETCH_TTL_MS = 30 * 60 * 1000;
+    /** Default lifetime of a resolved stream URL when it carries no `expire=`. */
+    private static readonly PREFETCH_TTL_MS = 20 * 60 * 1000;
+    /** Safety margin before a googlevideo `expire=` deadline. */
+    private static readonly EXPIRE_MARGIN_MS = 60 * 1000;
+
+    /**
+     * When a resolved URL stops being playable. Googlevideo URLs (direct or
+     * wrapped in `/vp?u=…`) carry `expire=<unix seconds>`; everything else
+     * (local files, `/aud/<id>`) gets the default TTL.
+     */
+    private static audioUrlExpiry(url: string, now = Date.now()): number {
+        const fallback = now + ListService.PREFETCH_TTL_MS;
+        try {
+            let target = url;
+            const u = new URL(url, "https://music.invalid/");
+            const wrapped = u.searchParams.get("u");
+            if (wrapped) target = wrapped;
+            const m = /[?&]expire=(\d{9,11})(?:&|$)/.exec(target);
+            if (!m) return fallback;
+            const exp = parseInt(m[1], 10) * 1000 - ListService.EXPIRE_MARGIN_MS;
+            return exp > now ? Math.min(exp, fallback) : now;
+        } catch {
+            return fallback;
+        }
+    }
+
+    /** The instant-start URL for position + 1 if it has not expired (else null, and forgotten). */
+    private freshNextTrackUrl(): string | null {
+        const n = this.nextTrackUrl;
+        if (!n) return null;
+        if (Date.now() >= n.expiresAt) {
+            this.nextTrackUrl = null;
+            return null;
+        }
+        return n.url;
+    }
     private static readonly PREFETCH_CACHE_MAX = 64;
     /** Let the current track's own player.json go out first. */
     private static readonly PREFETCH_NEXT_DELAY_MS = 250;
@@ -734,22 +775,12 @@ export class ListService {
     }
 
     /**
-     * Hand a resolved next-track URL to the offline layer: the service worker
-     * caches the audio bytes (`cache-audio`) and the offline store records the
-     * track metadata (`ytm:prefetched`). Both best-effort, both no-ops on SSR.
+     * Hand a resolved next-track URL to the offline layer (`$lib/offline`
+     * listens to `ytm:prefetched` and is the ONLY caller of the service
+     * worker's `cache-audio`, so a prefetch never downloads a track twice).
+     * Best-effort, no-op on SSR.
      */
     private static announcePrefetched(item: Item, url: string) {
-        try {
-            if (typeof navigator !== "undefined") {
-                navigator.serviceWorker?.controller?.postMessage({
-                    type: "cache-audio",
-                    url,
-                    videoId: item.videoId,
-                });
-            }
-        } catch {
-            /* no SW / no controller yet */
-        }
         try {
             if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
                 window.dispatchEvent(
@@ -766,7 +797,8 @@ export class ListService {
             const oldest = this._prefetched.keys().next().value;
             if (oldest !== undefined) this._prefetched.delete(oldest);
         }
-        this._prefetched.set(vid, { url, at: Date.now() });
+        const at = Date.now();
+        this._prefetched.set(vid, { url, at, expiresAt: ListService.audioUrlExpiry(url, at) });
     }
 
     /**
@@ -776,7 +808,11 @@ export class ListService {
     private promoteIfNext(index: number, vid: string, url: string) {
         const nextIdx = this._$.value.position + 1;
         if (index === nextIdx && this._$.value.mix?.[nextIdx]?.videoId === vid) {
-            this.nextTrackUrl = url;
+            const known = this._prefetched.get(vid);
+            this.nextTrackUrl = {
+                url,
+                expiresAt: known && known.url === url ? known.expiresAt : ListService.audioUrlExpiry(url),
+            };
         }
     }
 
@@ -793,7 +829,7 @@ export class ListService {
             if (!vid || this._prefetchInflight.has(vid)) return;
 
             const cached = this._prefetched.get(vid);
-            if (cached && Date.now() - cached.at < ListService.PREFETCH_TTL_MS) {
+            if (cached && Date.now() < cached.expiresAt) {
                 // Already resolved (and already handed to the SW): only promote.
                 this.promoteIfNext(index, vid, cached.url);
                 return;
@@ -806,8 +842,12 @@ export class ListService {
             } else {
                 this._prefetchInflight.add(vid);
                 try {
-                    const res = await APIClient.fetch(
-                        `/api/v1/player.json?videoId=${encodeURIComponent(vid)}`,
+                    // Direct fetch (APIClient.fetch takes no headers): the
+                    // `X-Ytm-Prefetch: 1` header tells the backend this is a
+                    // prefetch, not a play, so it triggers no acquisition.
+                    const res = await fetch(
+                        `${SERVER_DOMAIN}/api/v1/player.json?videoId=${encodeURIComponent(vid)}`,
+                        { headers: { "X-Ytm-Prefetch": "1" }, credentials: "same-origin" },
                     );
                     if (res && res.ok) {
                         url = ListService.pickAudioUrl(await res.json());
