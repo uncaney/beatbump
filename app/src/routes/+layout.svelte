@@ -20,7 +20,7 @@
     import {groupSession, settings} from "$lib/stores";
     import {currentTrack, queue} from "$lib/stores/list";
     import {syncTabs} from "$lib/tabSync.js";
-    import {Logger} from "$lib/utils";
+    import {Logger, notify} from "$lib/utils";
     import {SessionListService} from "$stores/list/sessionList";
     import {onMount} from "svelte";
     import {get, writable} from "svelte/store";
@@ -99,6 +99,20 @@
     });
 
     let scrollTop = 0;
+    // Offline banner: the service worker answers API calls with {"offline":true}
+    // when the network is gone, which leaves pages empty without explanation.
+    let online = true;
+    onMount(() => {
+        online = navigator.onLine !== false;
+        const goOnline = () => (online = true);
+        const goOffline = () => (online = false);
+        window.addEventListener("online", goOnline);
+        window.addEventListener("offline", goOffline);
+        return () => {
+            window.removeEventListener("online", goOnline);
+            window.removeEventListener("offline", goOffline);
+        };
+    });
     onMount(() => {
 
         const url = new URL(window.location.href);
@@ -138,11 +152,24 @@
             if ("serviceWorker" in navigator) {
                 const hadController = !!navigator.serviceWorker.controller;
                 let reloading = false;
+                const reloadNow = () => {
+                    if (reloading) return;
+                    reloading = true;
+                    window.location.reload();
+                };
                 navigator.serviceWorker.addEventListener("controllerchange", () => {
                     // first install (no prior controller) shouldn't reload
                     if (!hadController || reloading) return;
-                    reloading = true;
-                    window.location.reload();
+                    // Playing: don't cut the music. Reload when the track ends or the
+                    // user pauses (the paused store flips to true in both cases).
+                    if (get(AudioPlayer.paused)) return reloadNow();
+                    notify("Nouvelle version installée, elle s'appliquera à la fin du morceau", "success");
+                    const unsub = AudioPlayer.paused.subscribe((paused) => {
+                        if (!paused) return;
+                        unsub();
+                        // Let the player finish its end-of-track bookkeeping (lastTrack).
+                        setTimeout(reloadNow, 250);
+                    });
                 });
                 // proactively check for an update on every app open
                 navigator.serviceWorker.getRegistration().then((reg) => reg && reg.update()).catch(() => {});
@@ -219,6 +246,13 @@ left: 0; background: var(--base-bg); font-size: 1.1rem; display: flex; flex-dire
 	}}
 />
 <GroupSessionCreator />
+{#if !online && !$page.url.pathname.startsWith("/library/downloads-offline")}
+    <div class="offline-banner" role="status" aria-live="polite">
+        <span class="offline-dot" aria-hidden="true"></span>
+        <span>Hors connexion : les pages en ligne ne se chargent pas.</span>
+        <a href="/library/downloads-offline">Écouter ma musique hors-ligne</a>
+    </div>
+{/if}
 <Alert --alert-bottom={hasplayer ? "5.75em" : "0rem"} />
 <Fullscreen state={isFullscreen ? "open" : "closed"} />
 <footer
@@ -251,5 +285,39 @@ left: 0; background: var(--base-bg); font-size: 1.1rem; display: flex; flex-dire
 
     .wrapper {
         -webkit-overflow-scrolling: touch;
+    }
+
+    .offline-banner {
+        position: fixed;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: calc(var(--player-bar-height, 5.75em) + 0.75rem);
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        max-width: calc(100vw - 2rem);
+        padding: 0.55rem 0.9rem;
+        border-radius: 999px;
+        background: rgba(20, 20, 24, 0.96);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: #eee;
+        font-size: 0.85rem;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+    }
+
+    .offline-banner a {
+        color: #7ee0a5;
+        font-weight: 600;
+        text-decoration: underline;
+        white-space: nowrap;
+    }
+
+    .offline-dot {
+        width: 0.55rem;
+        height: 0.55rem;
+        border-radius: 50%;
+        background: #f0b429;
+        flex: none;
     }
 </style>
