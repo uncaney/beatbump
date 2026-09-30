@@ -127,12 +127,39 @@ describe("recentlyCached", () => {
 });
 
 describe("toPlayableItems", () => {
-	it("clones with localUrl set and drops items without a cached url", () => {
-		const items = toPlayableItems([lib[0], { videoId: "nourl", title: "x" }, track("k", "K", { _offlineUrl: "" })]);
+	it("clones with localUrl set and keeps only tracks really cached", () => {
+		const cached = track("a1", "Alpha", { _cached: true });
+		const items = toPlayableItems([
+			cached,
+			{ videoId: "nourl", title: "x", _cached: true },
+			track("k", "K", { _offlineUrl: "", _cached: true }),
+			track("p", "P", { _offlineUrl: "/vp?u=https%3A%2F%2Fr1.googlevideo.com%2Fvideoplayback%3Fexpire%3D1", _cached: false }),
+			track("q", "Q", { _offlineUrl: "/vp?u=x" }), // legacy entry without _cached
+		]);
 		expect(items).toHaveLength(1);
+		expect(items[0].videoId).toBe("a1");
 		expect(items[0].localUrl).toBe("https://cdn/a1.opus");
-		expect(items[0]).not.toBe(lib[0]);
-		expect((lib[0] as { localUrl?: string }).localUrl).toBeUndefined();
+		expect(items[0]).not.toBe(cached);
+		expect((cached as { localUrl?: string }).localUrl).toBeUndefined();
+	});
+	it("accepts service-worker confirmation and prefers the URL the SW holds", () => {
+		const confirmed = new Map<string, string>([
+			["q", "/aud/q"],
+			["r", ""],
+		]);
+		const items = toPlayableItems(
+			[track("q", "Q", { _offlineUrl: "/vp?u=old", _cached: false }), track("r", "R", { _cached: false }), track("s", "S", { _cached: false })],
+			confirmed,
+		);
+		expect(items.map((t) => t.videoId)).toEqual(["q", "r"]);
+		expect(items[0].localUrl).toBe("/aud/q");
+		expect(items[1].localUrl).toBe("https://cdn/r.opus");
+		expect(toPlayableItems([track("s", "S", { _cached: false })], new Set(["s"]))).toHaveLength(1);
+	});
+	it("returns [] instead of throwing when nothing is playable", () => {
+		expect(toPlayableItems([])).toEqual([]);
+		expect(toPlayableItems([null, undefined, { title: "no id", _cached: true }] as never)).toEqual([]);
+		expect(toPlayableItems(lib)).toEqual([]); // fixture entries carry no _cached
 	});
 });
 
