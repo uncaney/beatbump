@@ -126,7 +126,7 @@ function createFallbackUrl(currentUrl: string) {
 		throw Error(
 			`Expected parameter 'currentUrl' to be a string, received ${currentUrl}`,
 		);
-	const srcUrl = new URL(currentUrl);
+	const srcUrl = new URL(currentUrl, typeof location !== "undefined" ? location.origin : "http://localhost"); // relative same-origin stream URLs (A1)
 
 	if (!srcUrl.hostname.includes("googlevideo.com")) return currentUrl;
 
