@@ -13,7 +13,7 @@
 	import Icon from "$components/Icon/Icon.svelte";
 	import AlbumCard from "$components/Offline/AlbumCard.svelte";
 	import OfflineTrackRow from "$components/Offline/OfflineTrackRow.svelte";
-	import { getOfflineTracks, removeOffline } from "$lib/offline";
+	import { getOfflineTracks, removeOffline, reconcileOfflineList } from "$lib/offline";
 	import {
 		formatBytes,
 		groupByAlbum,
@@ -67,6 +67,9 @@
 
 	function refresh() {
 		tracks = getOfflineTracks();
+		// Reconcile the localStorage list with what the service worker really holds (lane c1b),
+		// then re-read so _cached flags and evicted entries are accurate.
+		Promise.resolve(reconcileOfflineList()).then(() => { tracks = getOfflineTracks(); }).catch(() => {});
 	}
 
 	onMount(() => {
