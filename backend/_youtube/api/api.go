@@ -10,7 +10,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"strconv"
@@ -385,14 +384,13 @@ func doRequestClient(client http.Client, clientInfo ClientInfo, req *http.Reques
 	respBytes, err := io.ReadAll(reader)
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("API call failed with status %d \n  %s", resp.StatusCode, string(respBytes))
-		dump, _ := httputil.DumpRequestOut(req, true)
-		log.Println(string(dump))
-		log.Println(string(respBytes))
 		body := string(respBytes)
 		if len(body) > 512 {
 			body = body[:512]
 		}
+		// Log method/URL only: a full request dump would write the Authorization
+		// bearer and cookies into the container logs on every upstream error.
+		log.Printf("API call failed with status %d: %s %s\n  %s", resp.StatusCode, req.Method, req.URL.String(), body)
 		return nil, &UpstreamStatusError{StatusCode: resp.StatusCode, Status: resp.Status, Body: body}
 	}
 
