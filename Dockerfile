@@ -25,7 +25,7 @@ COPY /app .
 RUN npm exec svelte-kit sync
 RUN npm run build
 
-FROM golang:1.21.0 AS backend-builder
+FROM golang:1.24.5 AS backend-builder
 
 # Set destination for COPY
 WORKDIR /app

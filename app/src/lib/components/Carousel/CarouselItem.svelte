@@ -167,7 +167,6 @@
 					ctx,
 				),
 			)
-			.add("Download", MENU_HANDLERS.download.bind(MENU_HANDLERS.download, ctx))
 			.add("Share", MENU_HANDLERS.share.bind(MENU_HANDLERS.share, ctx))
 			.build();
 </script>

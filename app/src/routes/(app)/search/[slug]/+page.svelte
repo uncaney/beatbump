@@ -91,6 +91,22 @@
 	url={$page.url.pathname}
 />
 
+{#if data.correction && (data.correction.correctedQuery || data.correction.showingResultsFor)}
+	<div class="search-correction resp-content-width">
+		<span
+			>Showing results for
+			<strong>{data.correction.correctedQuery || data.correction.showingResultsFor}</strong></span
+		>
+		{#if data.correction.originalQuery}
+			<a
+				class="link secondary"
+				href={`/search/${encodeURIComponent(data.correction.originalQuery)}?filter=${filter}`}
+				>Search instead for {data.correction.originalQuery}</a
+			>
+		{/if}
+	</div>
+{/if}
+
 <main
 	class="parent"
 	class:max-height={filter !== "all"}
@@ -146,6 +162,20 @@
 <style lang="scss">
 	.h3 {
 		font-weight: 600;
+	}
+
+	.search-correction {
+		margin: 0.75em auto 0.25em;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.25em 0.75em;
+		font-size: 0.95em;
+		color: var(--text-secondary);
+	}
+
+	.search-correction .link {
+		text-transform: none;
 	}
 
 	.max-height {

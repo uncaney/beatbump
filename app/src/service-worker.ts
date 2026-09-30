@@ -13,7 +13,12 @@ declare const self: ServiceWorkerGlobalScope;
 
 self.addEventListener("install", (event) => {
 	event.waitUntil(
-		caches.open(SHELL).then((c) => c.addAll(SHELL_ASSETS)).then(() => self.skipWaiting()).catch(() => {}),
+		caches.open(SHELL).then(async (c) => {
+			// Cache each shell asset independently so one failing asset can't abort
+			// the whole precache (which would leave the PWA unable to boot offline).
+			await Promise.all(SHELL_ASSETS.map((a) => c.add(a).catch(() => {})));
+			await self.skipWaiting();
+		}).catch(() => {}),
 	);
 });
 

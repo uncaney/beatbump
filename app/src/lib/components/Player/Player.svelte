@@ -80,10 +80,6 @@
                 const r = await downloadToDevice($currentTrack);
                 notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
             })
-            .add("Download offline", async () => {
-                const r = await downloadForOffline($currentTrack);
-                notify(r.ok ? "Saved for offline" : "Offline save failed: " + (r.reason || ""), r.ok ? "success" : "error");
-            })
             .build()
             .filter(Boolean);
 </script>
@@ -93,7 +89,7 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId } from "$lib/local";
 	import { recordHistory } from "$lib/me";
-	import { downloadForOffline, downloadToDevice } from "$lib/offline";
+	import { downloadToDevice } from "$lib/offline";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { clickOutside } from "$lib/actions/clickOutside";
 	import { IMAGE_NOT_FOUND } from "$lib/constants";
@@ -149,10 +145,10 @@
 		(event.target as HTMLImageElement).src = IMAGE_NOT_FOUND;
 	}
 
-	async function dlOffline() {
+	async function dlDevice() {
 		if (!$currentTrack) return;
-		const r = await downloadForOffline($currentTrack);
-		notify(r.ok ? "Saved for offline" : "Offline save failed: " + (r.reason || ""), r.ok ? "success" : "error");
+		const r = await downloadToDevice($currentTrack);
+		notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
 	}
 
 	$: DropdownItems = createPlayerPopperMenu(
@@ -341,9 +337,9 @@
 			</a>
 			<button
 				class="player-btn no-style"
-				aria-label="Download offline"
-				title="Download offline"
-				on:click|stopPropagation={dlOffline}
+				aria-label="Download to device"
+				title="Download to device"
+				on:click|stopPropagation={dlDevice}
 				style="background:none;border:none;cursor:pointer;display:flex;align-items:center;color:#fff;"
 			>
 				<Icon

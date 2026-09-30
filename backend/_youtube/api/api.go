@@ -274,8 +274,11 @@ func callAPI(urlAddress string, requestPayload innertubeRequest, clientInfo Clie
 }
 
 func doRequest(clientInfo ClientInfo, req *http.Request, requestPayload *innertubeRequest) ([]byte, error) {
+	return doRequestClient(getHttpClient(), clientInfo, req, requestPayload)
+}
 
-	client := getHttpClient()
+func doRequestClient(client http.Client, clientInfo ClientInfo, req *http.Request, requestPayload *innertubeRequest) ([]byte, error) {
+
 	urlAddress := req.URL.String()
 
 	if strings.Contains(urlAddress, "companion") {
@@ -348,6 +351,46 @@ func getHttpClient() http.Client {
 	}
 
 	return client
+}
+
+// getResidentialHttpClient returns an http.Client whose upstream egresses
+// through the residential gost proxy (env RESIDENTIAL_PROXY, default
+// http://gost:8888). Used for background auto-cache lookups so they do not
+// hit YouTube from the datacenter IP and trip rate-limits.
+func getResidentialHttpClient() http.Client {
+	myDialer := net.Dialer{}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return myDialer.DialContext(ctx, "tcp4", addr)
+	}
+	proxy := os.Getenv("RESIDENTIAL_PROXY")
+	if proxy == "" {
+		proxy = "http://gost:8888"
+	}
+	if u, err := url.Parse(proxy); err == nil {
+		transport.Proxy = http.ProxyURL(u)
+	}
+	return http.Client{Transport: transport}
+}
+
+// NextResidential is Next() but egresses through the residential proxy.
+func NextResidential(videoId string, playlistId string, client ClientInfo, params Params) ([]byte, error) {
+	urlAddress := URL_BASE + "next" + "?prettyPrint=false"
+	innertubeContext := prepareInnertubeContext(client, strPtr(params["visitorData"]))
+	data := innertubeRequest{
+		VideoID:                       videoId,
+		Context:                       innertubeContext,
+		PlaylistId:                    playlistId,
+		EnablePersistentPlaylistPanel: true,
+		IsAudioOnly:                   true,
+		TunerSettingValue:             "AUTOMIX_SETTING_NORMAL",
+		Params:                        "wAEB",
+	}
+	req, err := http.NewRequest(http.MethodPost, urlAddress, nil)
+	if err != nil {
+		return nil, err
+	}
+	return doRequestClient(getResidentialHttpClient(), client, req, &data)
 }
 
 func prepareInnertubeContext(clientInfo ClientInfo, visitorData *string) inntertubeContext {

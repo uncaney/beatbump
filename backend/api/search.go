@@ -99,19 +99,23 @@ func SearchEndpointHandler(c echo.Context) error {
 		}
 		return c.JSON(http.StatusOK, r)
 	} else {
+		// YouTube shelves first; the owned-library shelf goes LAST (append).
 		if ls := localShelf(queryUnescape); ls != nil {
-			regularResponse = append([]MusicShelf{*ls}, regularResponse...)
+			regularResponse = append(regularResponse, *ls)
 		}
+		correction := extractCorrection(searchResponse)
 		r := struct {
 			Results      []MusicShelf                   `json:"results"`
 			Response     _youtube.SearchResponse        `json:"response"`
 			Continuation *_youtube.NextContinuationData `json:"continuation,omitempty"`
 			Type         *string                        `json:"type,omitempty"`
+			Correction   *SearchCorrection              `json:"correction,omitempty"`
 		}{
 			Results:      regularResponse,
 			Response:     searchResponse,
 			Continuation: &continuation,
 			Type:         responseType,
+			Correction:   correction,
 		}
 		return c.JSON(http.StatusOK, r)
 	}
@@ -191,4 +195,53 @@ func parseResponse(content []_youtube.SectionListRendererContents) ([]MusicShelf
 	}
 
 	return response, nil
+}
+
+// SearchCorrection surfaces YT Music's spelling-correction hints (already parsed
+// into ShowingResultsForRenderer but never previously exposed to the client).
+type SearchCorrection struct {
+	CorrectedQuery    string `json:"correctedQuery,omitempty"`
+	ShowingResultsFor string `json:"showingResultsFor,omitempty"`
+	SearchInsteadFor  string `json:"searchInsteadFor,omitempty"`
+	OriginalQuery     string `json:"originalQuery,omitempty"`
+}
+
+// extractCorrection walks the first search tab's section list for a
+// ShowingResultsForRenderer and flattens its runs into a typed correction.
+func extractCorrection(sr _youtube.SearchResponse) *SearchCorrection {
+	tabs := sr.Content.TabbedSearchResultsRenderer.Tabs
+	if len(tabs) == 0 {
+		return nil
+	}
+	contents := tabs[0].TabRenderer.Content.SectionListRenderer.SectionListRendererContents
+	for _, sec := range contents {
+		if sec.ItemSectionRenderer == nil {
+			continue
+		}
+		for _, e := range sec.ItemSectionRenderer.Contents {
+			srr := e.ShowingResultsForRenderer
+			var corrected, showing, instead, original string
+			for _, r := range srr.CorrectedQuery.Runs {
+				corrected += r.Text
+			}
+			for _, r := range srr.ShowingResultsFor.Runs {
+				showing += r.Text
+			}
+			for _, r := range srr.SearchInsteadFor.Runs {
+				instead += r.Text
+			}
+			for _, r := range srr.OriginalQuery.Runs {
+				original += r.Text
+			}
+			if corrected != "" || showing != "" || instead != "" || original != "" {
+				return &SearchCorrection{
+					CorrectedQuery:    corrected,
+					ShowingResultsFor: showing,
+					SearchInsteadFor:  instead,
+					OriginalQuery:     original,
+				}
+			}
+		}
+	}
+	return nil
 }

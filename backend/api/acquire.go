@@ -122,6 +122,24 @@ func enqueueYubal(vid string) bool {
 	return resp.StatusCode < 400
 }
 
+// enqueueYubalURL posts an arbitrary album/playlist url (+ optional max_items)
+// to Yubal. A 409 (queue full) is reported as false == silent drop.
+func enqueueYubalURL(u string, maxItems int) bool {
+	payload := map[string]interface{}{"url": u}
+	if maxItems > 0 {
+		payload["max_items"] = maxItems
+	}
+	body, _ := json.Marshal(payload)
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Post(
+		envOr("YUBAL_URL", "http://yubal:8000")+"/api/jobs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode < 400
+}
+
 // runAcquire enqueues a discography to Yubal (rate-limited) + records jobs.
 func runAcquire(profileID, artistID, name string, limit int) int {
 	if _, busy := acquiring.LoadOrStore(artistID, true); busy {

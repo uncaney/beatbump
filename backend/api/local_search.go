@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -377,4 +378,114 @@ func LocalNext(lid string) *NextEndpointResponse {
 	}
 	results := append([]Item{lidItem(h)}, localRadio(h, lid)...)
 	return &NextEndpointResponse{Results: results, CurrentMixID: "RDAMVM" + lid}
+}
+
+// ---------------------------------------------------------------------------
+// content-level owned check -- a Go port of the ytm-cache bridge's title_match
+// (bridge.py). videoId is present on <1% of the ~55k library docs, so the
+// videoId-only owned check was a near no-op; this matches by normalized title
+// equality + artist confirmation so already-owned tracks/albums aren't
+// re-downloaded. Kept intentionally in lock-step with bridge.norm/title_match.
+// ---------------------------------------------------------------------------
+
+var acStopRe = regexp.MustCompile(`(?i)\b(official|video|audio|lyrics?|music|hd|4k|mv|visualizer|remaster(ed)?|explicit|topic|vevo)\b`)
+var acFeatRe = regexp.MustCompile(`(?i)\b(feat|ft)\.?\b.*`)
+var acNonAlnumRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+// acNorm mirrors bridge.norm: lowercase, drop "feat.<...>", strip YouTube noise
+// words (but KEEP version words like remix/live so we never match the wrong cut).
+func acNorm(s string) string {
+	s = strings.ToLower(s)
+	s = acFeatRe.ReplaceAllString(s, " ")
+	s = acStopRe.ReplaceAllString(s, " ")
+	s = acNonAlnumRe.ReplaceAllString(s, " ")
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func acCollapse(s string) string { return strings.ReplaceAll(acNorm(s), " ", "") }
+
+func acTokens(s string) map[string]bool {
+	m := map[string]bool{}
+	for _, t := range strings.Fields(s) {
+		m[t] = true
+	}
+	return m
+}
+
+func acSetEqual(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
+}
+
+// acTitleMatch mirrors bridge.title_match: remove the library track's artist
+// tokens from the play title (handles "Artist - Title" prefixes), require the
+// remaining title tokens to EQUAL the library title tokens (version-safe), and
+// confirm the artist via collapsed-substring (so "MarkRonsonVEVO" still matches).
+func acTitleMatch(playTitle, playAuthor string, hit map[string]interface{}) bool {
+	libTitle := acTokens(acNorm(mstr(hit, "title")))
+	if len(libTitle) == 0 {
+		return false
+	}
+	libArtistTokens := acTokens(acNorm(mstr(hit, "artist")) + " " + acNorm(mstr(hit, "albumArtist")))
+	core := map[string]bool{}
+	for t := range acTokens(acNorm(playTitle)) {
+		if !libArtistTokens[t] {
+			core[t] = true
+		}
+	}
+	if !acSetEqual(core, libTitle) {
+		return false
+	}
+	la := acCollapse(mstr(hit, "artist"))
+	if la == "" {
+		la = acCollapse(mstr(hit, "albumArtist"))
+	}
+	cand := acCollapse(playAuthor) + acCollapse(playTitle)
+	return la != "" && strings.Contains(cand, la)
+}
+
+// meiliOwnsTitleArtist reports whether the owned library already holds a
+// content-equal copy of (title, artist) -- the same strong match ytm-cache uses
+// to serve locally.
+func meiliOwnsTitleArtist(title, artist string) bool {
+	if strings.TrimSpace(title) == "" {
+		return false
+	}
+	q := strings.TrimSpace(title + " " + artist)
+	hits := meiliSearchIndex("tracks", map[string]interface{}{
+		"q": q, "limit": 12,
+		"attributesToRetrieve": []string{"title", "artist", "albumArtist"},
+	})
+	for _, h := range hits {
+		if acTitleMatch(title, artist, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// meiliOwnsTrack combines the (rare) videoId check with the content-level check.
+func meiliOwnsTrack(videoId, title, artist string) bool {
+	if videoId != "" && meiliOwnsVideo(videoId) {
+		return true
+	}
+	return meiliOwnsTitleArtist(title, artist)
+}
+
+// itemArtist pulls a best-effort artist string off a queue Item.
+func itemArtist(it Item) string {
+	if len(it.ArtistInfo.Artist) > 0 && it.ArtistInfo.Artist[0].Text != "" {
+		return it.ArtistInfo.Artist[0].Text
+	}
+	if len(it.Subtitle) > 0 {
+		return it.Subtitle[0].Text
+	}
+	return ""
 }

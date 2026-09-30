@@ -308,29 +308,6 @@
 					text: "Start Radio",
 				},
 				{
-					action: async () => {
-						try {
-							const res = await APIClient.fetch(
-								`/api/v1/download/playlist?playlistId=${id}&playlistName=${encodeURIComponent(
-									pageTitle,
-								)}`,
-							);
-							if (res.ok) {
-								notify("Download started!", "success");
-							} else if (res.status === 409) {
-								notify("Download already queued!", "info");
-							} else {
-								notify("Failed to start download", "error");
-							}
-						} catch (e) {
-							notify("Failed to start download", "error");
-						}
-					},
-					icon: "download",
-					text: "Download",
-					type: "outlined",
-				},
-				{
 					// eslint-disable-next-line @typescript-eslint/no-empty-function
 					action: () => {},
 					icon: { name: "dots", size: "1.25rem" },

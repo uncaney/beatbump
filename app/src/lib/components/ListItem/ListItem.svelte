@@ -236,10 +236,6 @@
 				const r = await downloadToDevice(item);
 				notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
 			})
-			.add("Download offline", async () => {
-				const r = await downloadForOffline(item);
-				notify(r.ok ? "Saved for offline" : "Offline save failed: " + (r.reason || ""), r.ok ? "success" : "error");
-			})
 			.add("Favorite", () => {
 				IDBService.sendMessage("create", "favorite", item);
 			})
@@ -310,7 +306,7 @@
 
 	import { goto } from "$app/navigation";
 	import { resolveArtistId, entityHref } from "$lib/local";
-	import { downloadToDevice, downloadForOffline } from "$lib/offline";
+	import { downloadToDevice } from "$lib/offline";
 	import { buildDropdown } from "$lib/configs/dropdowns.config";
 	import { APIParams, FINITE_LIST_PARAMS } from "$lib/constants";
 	import { CTX_ListItem } from "$lib/contexts";

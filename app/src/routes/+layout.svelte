@@ -8,7 +8,6 @@
     import {Popper} from "$lib/components/Popper";
 
 	import PlaylistPopper from "$lib/components/PlaylistPopper";
-	import DownloadSongModal from "$lib/components/DownloadSongModal/DownloadSongModal.svelte";
 	import "@fontsource-variable/commissioner";
 
     import {browser, dev} from "$app/environment";
@@ -219,7 +218,6 @@ left: 0; background: var(--base-bg); font-size: 1.1rem; display: flex; flex-dire
 		showAddToPlaylistPopper.set({ state: false, item: {} });
 	}}
 />
-<DownloadSongModal />
 <GroupSessionCreator />
 <Alert --alert-bottom={hasplayer ? "5.75em" : "0rem"} />
 <Fullscreen state={isFullscreen ? "open" : "closed"} />

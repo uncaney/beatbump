@@ -167,23 +167,6 @@
         <button
             use:tooltip
             on:click={() => {
-				$fullscreenStore && fullscreenStore.set("closed");
-				goto("/downloads");
-			}}
-            data-tooltip="Downloads"
-            aria-label="downloads"
-            class="nav-icon icon-btn no-style"
-            class:active={key.includes("downloads")}
-        >
-            <Icon
-                name="download"
-                --stroke={key.includes("downloads") ? "#fff" : "#BCBCBE"}
-                size="1.6125em"
-            />
-        </button>
-        <button
-            use:tooltip
-            on:click={() => {
 					$fullscreenStore && fullscreenStore.set("closed");
 					goto("/library/account");
 				}}

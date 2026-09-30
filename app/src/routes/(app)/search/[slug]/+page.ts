@@ -9,6 +9,48 @@ export interface SearchResponse {
 	continuation?: NextContinuationData;
 	filter: SearchFilter;
 	type?: "next" | undefined;
+	correction?: {
+		showingResultsFor: string;
+		correctedQuery: string;
+		searchInsteadFor: string;
+		originalQuery: string;
+	} | null;
+}
+
+// Surface YouTube Music's spell-correction ("Showing results for … / search
+// instead for …"). The renderer is buried deep in the raw response; walk it
+// defensively and normalize to a flat object (or null if there is no correction).
+function runsText(x: any): string {
+	return ((x && x.runs) || []).map((r: any) => r && r.text).filter(Boolean).join("");
+}
+function extractSearchCorrection(data: any) {
+	try {
+		const tabs = (((((data || {}).response || {}).contents || {}).tabbedSearchResultsRenderer || {}).tabs) || [];
+		for (const t of tabs) {
+			const sections = (((((t || {}).tabRenderer || {}).content || {}).sectionListRenderer || {}).contents) || [];
+			for (const s of sections) {
+				const items = (((s || {}).itemSectionRenderer || {}).contents) || [];
+				for (const it of items) {
+					const r = (it || {}).showingResultsForRenderer;
+					if (!r) continue;
+					const correctedQuery = runsText(r.correctedQuery);
+					const showingResultsFor = runsText(r.showingResultsFor);
+					if (!correctedQuery && !showingResultsFor) continue;
+					const oqe = (r.originalQueryEndpoint || {}).searchEndpoint || {};
+					const originalQuery = oqe.query || runsText(r.originalQuery);
+					return {
+						showingResultsFor,
+						correctedQuery,
+						searchInsteadFor: runsText(r.searchInsteadFor),
+						originalQuery,
+					};
+				}
+			}
+		}
+	} catch {
+		/* ignore malformed responses */
+	}
+	return null;
 }
 export const load: PageLoad = async ({
 	url,
@@ -24,7 +66,7 @@ export const load: PageLoad = async ({
 	}${restricted ? `&restricted=${restricted}` : ""}`;
 	const response = await APIClient.fetch(apiUrl);
 	const data = (await response.json()) as SearchResponse;
-	Object.assign(data, { filter });
+	Object.assign(data, { filter, correction: extractSearchCorrection(data) });
 	// if (response.ok) {
 	return data;
 	// }
