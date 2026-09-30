@@ -292,3 +292,18 @@ func TestAudioProxy_Streams(t *testing.T) {
 		t.Fatalf("rest = %q", rest)
 	}
 }
+
+func TestIsAudioProxyPath(t *testing.T) {
+	yes := []string{"/localf", "/vp", "/cover", "/aud/dQw4w9WgXcQ"}
+	no := []string{"/", "/localfoo", "/aud", "/aud/", "/api/v1/player.json", "/vp2"}
+	for _, p := range yes {
+		if !IsAudioProxyPath(p) {
+			t.Errorf("expected %q to be an audio proxy path", p)
+		}
+	}
+	for _, p := range no {
+		if IsAudioProxyPath(p) {
+			t.Errorf("expected %q NOT to be an audio proxy path", p)
+		}
+	}
+}

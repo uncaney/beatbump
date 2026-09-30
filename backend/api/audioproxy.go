@@ -232,8 +232,23 @@ func AudioIVVPProxyHandler(c echo.Context) error {
 }
 
 // RegisterAudioProxyRoutes wires the same-origin audio routes (GET + HEAD).
+var audioCompanionPaths = []string{"/localf", "/vp", "/cover"}
+
+// IsAudioProxyPath reports whether p is served by the audio reverse proxies. Used by the
+// SPA static middleware Skipper: the Echo IgnoreBase option strips the last URL segment
+// when it equals the base of the matched route, so /localf, /vp and /cover would collapse
+// to the build root and be answered with index.html instead of reaching the proxy handlers.
+func IsAudioProxyPath(p string) bool {
+	for _, base := range audioCompanionPaths {
+		if p == base {
+			return true
+		}
+	}
+	return len(p) > 5 && p[:5] == "/aud/"
+}
+
 func RegisterAudioProxyRoutes(e *echo.Echo) {
-	for _, p := range []string{"/localf", "/vp", "/cover"} {
+	for _, p := range audioCompanionPaths {
 		e.GET(p, AudioCompanionProxyHandler)
 		e.HEAD(p, AudioCompanionProxyHandler)
 	}
