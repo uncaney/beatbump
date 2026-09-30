@@ -657,6 +657,11 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		});
 
 
+		this.onEvent("durationchange", () => {
+			const d = this.player.duration;
+			if (isFinite(d) && d > 0) this._durationStore.set(d);
+		});
+
 		this.onEvent("timeupdate", async () => {
 			this._currentTimeStore.set(this.player.currentTime);
 			/*const duration = isAppleMobileDevice
@@ -664,7 +669,10 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 				: this.player.duration;*/
 
 			// We're at the end - get the next track!
-			if (this.player.currentTime >= this.duration - 1.0 && !locked) {
+			// Only auto-advance against a KNOWN duration: right after a source swap the store is 0
+			// (prefetched / cached sources carry no duration) and `currentTime >= -1` would skip tracks.
+			const knownDuration = this.duration > 0 ? this.duration : (isFinite(this.player.duration) ? this.player.duration : 0);
+			if (knownDuration > 0 && this.player.currentTime >= knownDuration - 1.0 && !locked) {
 				try {
 					if (this._repeat !== "off") {
 						const allowContinuation = await this.handleRepeat();
