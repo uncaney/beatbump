@@ -249,7 +249,7 @@ export class ListService {
             }
             const nextTrack = this._$.value.mix[nextIndex];
             await getSrc(nextTrack?.videoId, nextTrack?.playlistId, undefined, true);
-            // await this.prefetchTrackAtIndex(nextIndex + 1);
+            // prefetch of nextIndex + 1 is scheduled by updatePosition() above
             syncTabs.updatePosition(nextIndex);
             toggle();
             return;
@@ -350,6 +350,7 @@ export class ListService {
                 this.isLocal = true;
                 await this.setMix(itemsToPlay, "local");
                 await getSrc(videoId, playlistId, undefined, true);
+                this.schedulePrefetch();
                 return;
             }
 
@@ -430,6 +431,9 @@ export class ListService {
                     item?.playlistId || playlistId,
                     config?.playerParams,
                 );
+                // Position was set through #sanitizeAndUpdate (not
+                // updatePosition), so warm position + 1 explicitly.
+                this.schedulePrefetch(state.position);
                 syncTabs.updateSessionList(state);
 
                 if (groupSession?.initialized && groupSession?.hasActiveSession) {
@@ -591,13 +595,12 @@ export class ListService {
                     nextTrack,
                     thisNextTrackURL: this.nextTrackUrl,
                 });
-                const state = await this.updatePosition("next");
-                updatePlayerSrc({
-                    original_url: nextSrc ? nextSrc : (this.nextTrackUrl as string),
-                    url: nextSrc ? (nextSrc as string) : (this.nextTrackUrl as string),
-                });
+                // Capture before updatePosition(): it clears `nextTrackUrl`
+                // and schedules the prefetch of the new position + 1.
+                const url = nextSrc ? (nextSrc as string) : (this.nextTrackUrl as string);
                 this.nextTrackUrl = null;
-                // await this.prefetchTrackAtIndex(state + 1);
+                await this.updatePosition("next");
+                updatePlayerSrc({ original_url: url, url });
             } else {
                 let position = await this.updatePosition("next");
                 if (position >= this._$.value.mix.length) {
@@ -638,7 +641,8 @@ export class ListService {
                         undefined,
                         true,
                     );
-                    await this.prefetchTrackAtIndex(state.position + 1);
+                    // The mix was just extended: position + 1 may only exist now.
+                    this.schedulePrefetch(state.position);
                 }
             }
             const position = this._$.value.position;
@@ -650,24 +654,175 @@ export class ListService {
         }
     }
 
-    private _prefetched = "";
+    /**
+     * Prefetch bookkeeping. `_prefetched` maps videoId -> resolved audio URL
+     * (dedupe + short-lived URL cache so a track prefetched as "+2" is promoted
+     * to "next" without a second round-trip). Stream URLs expire, hence the TTL.
+     */
+    private _prefetched = new Map<string, { url: string; at: number }>();
+    private _prefetchInflight = new Set<string>();
+    private _prefetchTimer: ReturnType<typeof setTimeout> | null = null;
+    private _prefetchGen = 0;
+    private static readonly PREFETCH_TTL_MS = 30 * 60 * 1000;
+    private static readonly PREFETCH_CACHE_MAX = 64;
+    /** Let the current track's own player.json go out first. */
+    private static readonly PREFETCH_NEXT_DELAY_MS = 250;
+    /** Lower priority: position + 2 only once "next" is settled. */
+    private static readonly PREFETCH_AHEAD_DELAY_MS = 4000;
+
+    private cancelScheduledPrefetch() {
+        this._prefetchGen++;
+        if (this._prefetchTimer) {
+            clearTimeout(this._prefetchTimer);
+            this._prefetchTimer = null;
+        }
+    }
+
+    /** Forget every cached prefetch URL (the queue was replaced). */
+    private invalidatePrefetch() {
+        this.cancelScheduledPrefetch();
+        this._prefetched.clear();
+        this._prefetchInflight.clear();
+        this.clearNextTrack();
+    }
+
+    /**
+     * Fire-and-forget, called whenever a track starts or the queue around the
+     * current position changes: prefetch `position + 1` almost immediately
+     * (this is what lets `next()` start instantly via `nextTrackUrl`), then
+     * `position + 2` at a lower priority. Any newer call supersedes it.
+     * Never awaited by playback code paths.
+     */
+    private schedulePrefetch(position = this._$.value.position) {
+        this.cancelScheduledPrefetch();
+        if (typeof setTimeout === "undefined") return;
+        const gen = this._prefetchGen;
+        const live = () => gen === this._prefetchGen && this._$.value.position === position;
+
+        this._prefetchTimer = setTimeout(() => {
+            this._prefetchTimer = null;
+            if (!live()) return;
+            void this.prefetchTrackAtIndex(position + 1).finally(() => {
+                if (!live()) return;
+                this._prefetchTimer = setTimeout(() => {
+                    this._prefetchTimer = null;
+                    if (!live()) return;
+                    void this.prefetchTrackAtIndex(position + 2);
+                }, ListService.PREFETCH_AHEAD_DELAY_MS);
+            });
+        }, ListService.PREFETCH_NEXT_DELAY_MS);
+    }
 
     public async prefetchNextTrack() {
         return this.prefetchTrackAtIndex(this.position + 1);
     }
 
-    // Warm the resolver/bridge for an upcoming track: pre-resolves a local copy and
-    // triggers the auto-cache ("predownload") so the next song is ready. Best-effort,
-    // no playback side effects.
+    /**
+     * Pick the audio stream URL out of a `player.json` response. Same rule as
+     * `resolveAudioUrl` in `$lib/offline` (kept in sync by hand, not imported):
+     * first adaptive format whose mimeType starts with `audio` and has a url.
+     * URLs are passed through verbatim (same-origin `/localf`, `/vp`, `/aud/…`
+     * or transitional absolute `https://ytify.ekaii.fr/…`).
+     */
+    private static pickAudioUrl(player: any): string {
+        const fmts: any[] = player?.streamingData?.adaptiveFormats;
+        if (!Array.isArray(fmts)) return "";
+        const audio = fmts.find(
+            (f) => f && typeof f.url === "string" && f.url && /^audio/i.test(f.mimeType || ""),
+        );
+        return (audio && audio.url) || "";
+    }
+
+    /**
+     * Hand a resolved next-track URL to the offline layer: the service worker
+     * caches the audio bytes (`cache-audio`) and the offline store records the
+     * track metadata (`ytm:prefetched`). Both best-effort, both no-ops on SSR.
+     */
+    private static announcePrefetched(item: Item, url: string) {
+        try {
+            if (typeof navigator !== "undefined") {
+                navigator.serviceWorker?.controller?.postMessage({
+                    type: "cache-audio",
+                    url,
+                    videoId: item.videoId,
+                });
+            }
+        } catch {
+            /* no SW / no controller yet */
+        }
+        try {
+            if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
+                window.dispatchEvent(
+                    new CustomEvent("ytm:prefetched", { detail: { item, url } }),
+                );
+            }
+        } catch {
+            /* listeners are optional */
+        }
+    }
+
+    private rememberPrefetched(vid: string, url: string) {
+        if (this._prefetched.size >= ListService.PREFETCH_CACHE_MAX) {
+            const oldest = this._prefetched.keys().next().value;
+            if (oldest !== undefined) this._prefetched.delete(oldest);
+        }
+        this._prefetched.set(vid, { url, at: Date.now() });
+    }
+
+    /**
+     * If `vid` is (still) the track right after the current one, make it the
+     * instant-start URL consumed by `next()`.
+     */
+    private promoteIfNext(index: number, vid: string, url: string) {
+        const nextIdx = this._$.value.position + 1;
+        if (index === nextIdx && this._$.value.mix?.[nextIdx]?.videoId === vid) {
+            this.nextTrackUrl = url;
+        }
+    }
+
+    /**
+     * Prefetch the track at `index`: resolve `player.json`, extract the audio
+     * URL, ask the service worker to cache it, notify the offline layer, and
+     * (when `index` is position + 1) remember it so `next()` starts instantly.
+     * Best-effort: never throws, never blocks playback, deduped by videoId.
+     */
     public async prefetchTrackAtIndex(index: number) {
         try {
             const track = this._$.value.mix?.[index];
             const vid = track?.videoId;
-            if (!vid || this._prefetched === vid) return;
-            this._prefetched = vid;
-            await APIClient.fetch(
-                `/api/v1/player.json?videoId=${encodeURIComponent(vid)}`,
-            ).catch(() => {});
+            if (!vid || this._prefetchInflight.has(vid)) return;
+
+            const cached = this._prefetched.get(vid);
+            if (cached && Date.now() - cached.at < ListService.PREFETCH_TTL_MS) {
+                // Already resolved (and already handed to the SW): only promote.
+                this.promoteIfNext(index, vid, cached.url);
+                return;
+            }
+            this._prefetched.delete(vid);
+
+            let url = "";
+            if (track.localUrl) {
+                url = track.localUrl;
+            } else {
+                this._prefetchInflight.add(vid);
+                try {
+                    const res = await APIClient.fetch(
+                        `/api/v1/player.json?videoId=${encodeURIComponent(vid)}`,
+                    );
+                    if (res && res.ok) {
+                        url = ListService.pickAudioUrl(await res.json());
+                    }
+                } catch {
+                    url = "";
+                } finally {
+                    this._prefetchInflight.delete(vid);
+                }
+            }
+            if (!url) return;
+
+            this.rememberPrefetched(vid, url);
+            ListService.announcePrefetched(track, url);
+            this.promoteIfNext(index, vid, url);
         } catch {
             /* prefetch is best-effort */
         }
@@ -723,10 +878,14 @@ export class ListService {
             ...u,
             mix: [...u.mix.slice(0, index), ...u.mix.slice(index + 1)],
         }));
+        // The track after the current one may have changed.
+        this.clearNextTrack();
+        this.schedulePrefetch();
         syncTabs.updateSessionList(this._$.value);
     }
 
     public async setMix(mix: Item[], type?: "auto" | "playlist" | "local") {
+        this.invalidatePrefetch();
         const guard = await mutex.do(async () => {
             await tick();
             return new Promise<ISessionListProvider>((resolve) => {
@@ -773,8 +932,10 @@ export class ListService {
                     undefined,
                     true,
                 );
-                await this.prefetchTrackAtIndex(state.position + 1);
             }
+            // "Play next" inserts right after the current track: re-warm.
+            this.clearNextTrack();
+            this.schedulePrefetch(state.position);
         } catch (err) {
             console.error(err);
             notify(`Error: ${err}`, "error");
@@ -805,6 +966,8 @@ export class ListService {
         // console.log(mix)
         this.#sanitizeAndUpdate("APPLY", { mix: this._$.value.mix }).then(
             (state) => {
+                this.clearNextTrack();
+                this.schedulePrefetch(state.position);
                 if (groupSession?.initialized && groupSession?.hasActiveSession) {
                     groupSession.updateGuestTrackQueue(state);
                 }
@@ -848,6 +1011,8 @@ export class ListService {
         );
 
         this.#sanitizeAndUpdate("SET", { mix: this._$.value.mix }).then((state) => {
+            this.clearNextTrack();
+            this.schedulePrefetch(state.position);
             if (groupSession?.initialized && groupSession?.hasActiveSession) {
                 groupSession.updateGuestTrackQueue(state);
             }
@@ -862,28 +1027,26 @@ export class ListService {
     public async updatePosition(
         direction: "next" | "back" | number,
     ): Promise<number> {
+        let position: number;
         if (typeof direction === "number") {
-            const state = await this.#sanitizeAndUpdate("APPLY", {
-                position: direction,
-            });
-
-            return state.position;
-        }
-        if (direction === "next") {
-            const state = await this.#sanitizeAndUpdate("APPLY", {
-                position: this._$.value.position + 1,
-            });
-
-            return state.position;
-        }
-        if (direction === "back") {
-            const state = await this.#sanitizeAndUpdate("APPLY", {
-                position: this._$.value.position - 1,
-            });
-            return state.position;
+            position = direction;
+        } else if (direction === "next") {
+            position = this._$.value.position + 1;
+        } else if (direction === "back") {
+            position = this._$.value.position - 1;
+        } else {
+            return this._$.value.position;
         }
 
-        return this._$.value.position;
+        const state = await this.#sanitizeAndUpdate("APPLY", { position });
+
+        // Every "a track starts" path (initial play, next, previous, queue
+        // click, group/tab sync) goes through here: the old `nextTrackUrl`
+        // no longer points at position + 1, and the new one must be warmed.
+        this.clearNextTrack();
+        this.schedulePrefetch(state.position);
+
+        return state.position;
     }
 
     #currentTrack(position = 0) {
@@ -891,6 +1054,7 @@ export class ListService {
     }
 
     #revertState(): ISessionListProvider {
+        this.invalidatePrefetch();
         this._$.set({
             clickTrackingParams: "",
             continuation: "",
