@@ -353,7 +353,8 @@
 	}
 	.lbl {
 		color: #bbb;
-		font-size: 0.85rem;
+		/* U12-11: 0.85rem was 10.2 px at the 12 px mobile root. */
+		font-size: var(--text-secondary-size);
 	}
 	.facts {
 		display: grid;
@@ -400,7 +401,7 @@
 		padding: 0.75rem;
 		border-radius: 0.5rem;
 		background: rgba(255, 255, 255, 0.06);
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
 		user-select: all;

@@ -166,8 +166,8 @@
 		background: rgba(255, 255, 255, 0.16);
 	}
 	.chip .count {
-		color: #999;
-		font-size: 0.85rem;
+		color: #b3b3b3;
+		font-size: var(--text-secondary-size);
 	}
 	// L8-7: scoped `.genre-btn` (0,2,0) beats the button system's
 	// `min-height: max(2.75rem, 44px)` (0,1,0): `width/height: 2rem` gave

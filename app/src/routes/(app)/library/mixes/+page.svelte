@@ -214,7 +214,7 @@
 		margin-left: auto;
 		color: #bbb;
 		text-decoration: none;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 		min-height: max(2.75rem, 44px);
 		display: inline-flex;
 		align-items: center;

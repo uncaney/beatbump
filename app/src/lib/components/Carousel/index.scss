@@ -9,17 +9,25 @@
 // "Voir tout" / "See All" (audit v4 TOP 10 / 3.1): 11.7px capitals in a
 // 16px tall link on mobile. 13px floor and a 28px tall box (padding kept
 // inside the box, so the header row does not grow much).
+// U12-10 (audit UX v12): the 44px box sat on the <small> child while the
+// <a> itself stayed an inline 48x28 / 39x28 box (what is hit-tested and
+// measured). The anchor now carries the 44x44 floor; the negative block
+// margins give the extra height back to the line box, so the header row keeps
+// its 28px rhythm while the tap zone is 44px.
+.header > a {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	min-height: max(2.75rem, 44px);
+	min-width: max(2.75rem, 44px);
+	margin-block: calc((28px - max(2.75rem, 44px)) / 2);
+	padding-inline: 0.25rem;
+}
 .header a > small {
 	display: inline-flex;
 	align-items: center;
 	box-sizing: border-box;
-	// U11-6 (audit UX v11): "Voir tout" measured 48x28, "See All" 39x28. The
-	// box is 44px tall (px floor: 2.75rem = 33px at the 12px mobile root) and
-	// the negative block margins give the 16px back to the line box, so the
-	// header row keeps its 28px rhythm while the tap zone is 44px.
-	min-height: max(2.75rem, 44px);
-	margin-block: calc((28px - max(2.75rem, 44px)) / 2);
-	padding: 0.25rem 0;
 	font-size: max(0.8125rem, 13px);
 	/* The global `a small` rule draws petite caps: the 13px label rendered
 	   at x-height, 7px tall (audit v5 TOP 7). Plain case instead. */
