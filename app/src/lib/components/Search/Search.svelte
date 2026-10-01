@@ -14,6 +14,7 @@
 	import { buildResumeRow, readLastTrack } from "$lib/homeRows";
 	import { getRecent } from "$lib/me";
 	import { getOfflineTracks } from "$lib/offline";
+	import { entityHref } from "$lib/local";
 	import type { Item } from "$lib/types";
 
 	export let type: "inline";
@@ -61,6 +62,21 @@
 	// library hits (songs then artists) once the user types.
 	$: localBlock = showRecentSearches ? resumeRows : localRows;
 
+	// "Tendances" (audit v4 TOP 7 / 3.3): a fresh profile has neither resume
+	// rows nor recent searches, so the empty overlay used to show nothing.
+	// Fallback: TRENDING_MAX items of /api/v1/trending (cached 5 min server
+	// side), the "Trending" songs carousel first, any non-empty one otherwise;
+	// the recently added local songs if trending fails (YouTube down/offline).
+	const TRENDING_MAX = 6;
+	let trendingRows: Item[] = [];
+	let trendingRequested = false;
+	let destroyed = false;
+	$: showTrending =
+		showRecentSearches &&
+		resumeRows.length === 0 &&
+		recentSearches.length === 0 &&
+		trendingRows.length > 0;
+
 	onMount(() => {
 		if (browser) {
 			const stored = localStorage.getItem("recentSearches");
@@ -73,6 +89,7 @@
 	});
 
 	onDestroy(() => {
+		destroyed = true;
 		cancelLocal();
 		cancelResume();
 	});
@@ -119,6 +136,81 @@
 		resumeRows = buildResumeRow(last, recent, RESUME_MAX * 4)
 			.filter((it) => isLocalTrackId(it?.videoId))
 			.slice(0, RESUME_MAX) as Item[];
+		if (resumeRows.length === 0 && recentSearches.length === 0) {
+			void loadTrending();
+		}
+	}
+
+	async function loadTrending() {
+		if (trendingRequested || destroyed) return;
+		trendingRequested = true;
+		let rows: Item[] = [];
+		try {
+			const res = await APIClient.fetch(`/api/v1/trending`);
+			if (res.ok) {
+				const data = await res.json();
+				const carousels: any[] = Array.isArray(data?.carousels)
+					? data.carousels
+					: [];
+				const withItems = carousels.filter(
+					(c) => Array.isArray(c?.items) && c.items.length > 0,
+				);
+				const pick =
+					withItems.find((c) => /trending|tendance/i.test(c?.header?.title ?? "")) ??
+					withItems[0];
+				rows = (pick?.items ?? [])
+					.filter((it: any) => it?.title && (it?.videoId || it?.endpoint?.browseId))
+					.slice(0, TRENDING_MAX);
+			}
+		} catch {
+			rows = [];
+		}
+		if (rows.length === 0) {
+			try {
+				const res = await APIClient.fetch(
+					`/api/v1/local/songs?limit=${TRENDING_MAX}&sort=dateAdded:desc`,
+				);
+				const data = res.ok ? await res.json() : { items: [] };
+				rows = Array.isArray(data?.items) ? data.items.slice(0, TRENDING_MAX) : [];
+			} catch {
+				rows = [];
+			}
+		}
+		if (destroyed) return;
+		trendingRows = rows;
+	}
+
+	/** A trending song plays (local lid = local mix), an album/playlist opens. */
+	async function activateTrending(item: Item) {
+		const vid = item?.videoId;
+		if (vid) {
+			if (isLocalTrackId(vid)) {
+				await playLocalSong(item);
+				return;
+			}
+			closeOverlay();
+			await SessionListService.initAutoMixSession({
+				videoId: vid,
+				playlistId: (item as any)?.playlistId,
+				clickedItem: item,
+			});
+			return;
+		}
+		const ep = (item as any)?.endpoint;
+		if (!ep?.browseId) return;
+		closeOverlay();
+		goto(entityHref(ep.browseId, ep.pageType));
+	}
+
+	function trendingSubtitle(item: Item): string {
+		const sub = Array.isArray(item?.subtitle) ? item.subtitle : [];
+		return (
+			item?.artistInfo?.artist?.[0]?.text ??
+			sub
+				.map((s: any) => s?.text ?? "")
+				.join("")
+				.trim()
+		);
 	}
 
 	function addToRecentSearches(searchQuery: string) {
@@ -411,7 +503,7 @@
 			/>
 		</div>
 	</div>
-	{#if ((results.length > 0 || hasLocal) && !showRecentSearches) || (showRecentSearches && (recentSearches.length > 0 || resumeRows.length > 0))}
+	{#if ((results.length > 0 || hasLocal) && !showRecentSearches) || (showRecentSearches && (recentSearches.length > 0 || resumeRows.length > 0 || showTrending))}
 		<ul
 			role="listbox"
 			id="suggestions"
@@ -483,6 +575,42 @@
 							{/if}
 						</span>
 						<span class="local-badge">{showRecentSearches ? "reprendre" : "bibliothèque"}</span>
+					</li>
+				{/each}
+			{/if}
+			{#if showTrending}
+				<li
+					class="recent-searches-header group-header"
+					data-testid="trending-header">Tendances</li
+				>
+				{#each trendingRows as item, i (item.videoId || item?.endpoint?.browseId || i)}
+					<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+					<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+					<li
+						tabindex="0"
+						class="local-row"
+						data-testid="trending-suggestion"
+						on:click={() => activateTrending(item)}
+						on:keydown={(e) => {
+							if (e.key === "Enter" || e.key === " ") {
+								e.preventDefault();
+								e.stopPropagation();
+								activateTrending(item);
+							}
+						}}
+					>
+						<Icon
+							name={item.videoId ? "play" : "album"}
+							size="1rem"
+							style="color: var(--text-secondary);"
+						/>
+						<span class="local-text">
+							<span class="local-title">{item.title}</span>
+							{#if trendingSubtitle(item)}
+								<span class="local-artist">{trendingSubtitle(item)}</span>
+							{/if}
+						</span>
+						<span class="local-badge">tendance</span>
 					</li>
 				{/each}
 			{/if}
