@@ -179,6 +179,38 @@ func rowsOf(m map[string]interface{}) []map[string]interface{} {
 	return out
 }
 
+// windowRows.data is the data of the ref's most recent play, not max(data)
+// (audit v3 G10): the older JSON here sorts lexicographically AFTER the newer
+// one, so max(data) would have returned the stale, length-less variant.
+func TestWindowRows_LatestData(t *testing.T) {
+	useTestDB(t)
+	now := time.Now()
+	older := db.PlayEvent{ProfileID: "p-test", Ref: "A", Title: "Song A", Source: "local", PlayedAt: now.Add(-2 * time.Hour),
+		Data: `{"videoId":"A","title":"Song A"}`}
+	newer := db.PlayEvent{ProfileID: "p-test", Ref: "A", Title: "Song A", Source: "local", PlayedAt: now.Add(-1 * time.Hour),
+		Data: `{"album":{"text":"Album New"},"length":"4:00","title":"Song A","videoId":"A"}`}
+	other := db.PlayEvent{ProfileID: "p-other", Ref: "A", Title: "Song A", Source: "local", PlayedAt: now,
+		Data: `{"album":{"text":"Album Other"},"title":"Song A","videoId":"A"}`}
+	if err := db.DB.Create(&[]db.PlayEvent{older, newer, other}).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	rows := windowRows("p-test", 30)
+	if len(rows) != 1 || rows[0].Ref != "A" || rows[0].Cnt != 2 {
+		t.Fatalf("expected one row for A with 2 plays, got %+v", rows)
+	}
+	if rows[0].Data != newer.Data {
+		t.Fatalf("data must come from the most recent play, got %s", rows[0].Data)
+	}
+	if itemLengthSec(rows[0].Data) != 240 || itemAlbum(rows[0].Data) != "Album New" {
+		t.Fatalf("latest data must carry length and album, got %s", rows[0].Data)
+	}
+	// the summary is therefore not "estimated" for this ref
+	sum := summarize(rows, []time.Time{older.PlayedAt, newer.PlayedAt}, []string{"local", "local"}, 0)
+	if sum.Estimated {
+		t.Fatalf("summary must not be estimated when the latest play carries a length: %+v", sum)
+	}
+}
+
 func TestTopTracksArtistsAlbums(t *testing.T) {
 	useTestDB(t)
 	seedPlays(t)
