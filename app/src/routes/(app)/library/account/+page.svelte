@@ -1,5 +1,6 @@
 <script lang="ts">
 	import MeOffline from "$components/Offline/MeOffline.svelte";
+	import { migratedSummary, readMigration } from "$lib/identity";
 	import { whoami, login, logout } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
 	import { notify } from "$lib/utils/utils";
@@ -14,6 +15,13 @@
 	// H2: whoami unreachable offline; without this the page showed the guest
 	// sign-in form as if the profile were gone.
 	let offline = false;
+	// 39A: what the last login moved from this device's anonymous history
+	// (this page's login, or the identity prompt's, kept in localStorage).
+	let attached = "";
+	function readAttached(who: string) {
+		const m = who ? readMigration() : null;
+		attached = m && m.name.toLowerCase() === who.toLowerCase() ? migratedSummary(m.migrated, m.name) : "";
+	}
 
 	async function refresh() {
 		let w: any = null;
@@ -24,7 +32,10 @@
 			err = e;
 		}
 		offline = meLoadOffline([w], err);
-		if (!offline) current = (w && w.name) || "";
+		if (!offline) {
+			current = (w && w.name) || "";
+			readAttached(current);
+		}
 		loading = false;
 	}
 	onMount(() => {
@@ -44,6 +55,8 @@
 			const r = await login(name.trim());
 			current = r.name;
 			msg = `Connecté en tant que ${r.name}. Tes favoris, abonnements, playlists et ton historique suivent ce prénom sur tous tes appareils.`;
+			// null (switching between two names): nothing was merged, keep the old line hidden.
+			attached = r.migrated ? migratedSummary(r.migrated, r.name) : "";
 			name = "";
 		} catch (e) {
 			msg = "Connexion impossible.";
@@ -57,6 +70,7 @@
 		try {
 			await logout();
 			current = "";
+			attached = "";
 			msg = "Tu es passé sur un nouveau profil invité.";
 		} catch (e) {
 			// L10-8: the server kept the session: the profile stays as it was.
@@ -124,6 +138,14 @@
 		</form>
 
 		{#if msg}<p class="msg">{msg}</p>{/if}
+		{#if current && attached}
+			<p
+				class="attached"
+				data-testid="account-migrated"
+			>
+				<strong>Historique de cet appareil rattaché</strong> : {attached}.
+			</p>
+		{/if}
 		<p class="note">
 			Les profils reposent sur un prénom (sans mot de passe) · même prénom = même bibliothèque. Toute personne de l'instance peut
 			utiliser n'importe quel prénom : c'est fait pour une instance de confiance (la maison, les amis).
@@ -195,6 +217,10 @@
 	.msg {
 		margin-top: 1rem;
 		color: var(--accent, #1ed760);
+	}
+	.attached {
+		margin-top: 0.75rem;
+		color: #ccc;
 	}
 	.note {
 		margin-top: 1.5rem;
