@@ -69,6 +69,11 @@
 	<CollectionNav active="my-playlists" />
 	<header class="head">
 		<h1>My Playlists</h1>
+		<a
+			class="back-link"
+			href="/library"
+			data-testid="playlists-local-link">‹ Playlists de cet appareil</a
+		>
 		<div class="actions">
 			<button
 				class="btn"
@@ -123,6 +128,21 @@
 	.actions {
 		display: flex;
 		gap: 0.5rem;
+	}
+	/* F9: the two playlist systems share one chip; this is the way back. */
+	.back-link {
+		flex-basis: 100%;
+		order: 1;
+		color: #bbb;
+		text-decoration: none;
+		font-size: 0.9rem;
+		min-height: max(2.75rem, 44px);
+		display: inline-flex;
+		align-items: center;
+	}
+	.back-link:hover {
+		color: inherit;
+		text-decoration: underline;
 	}
 	.btn {
 		background: rgba(255, 255, 255, 0.1);

@@ -155,17 +155,17 @@
             use:tooltip
             on:click={() => {
 				$fullscreenStore && fullscreenStore.set("closed");
-				goto("/favorites");
+				goto("/library/saved");
 			}}
-            data-tooltip="Favorites"
-            aria-label="Favorites"
-            title="Favorites"
+            data-tooltip="Favoris"
+            aria-label="Favoris"
+            title="Favoris"
             class="nav-icon icon-btn no-style"
-            class:active={key.includes("favorites")}
+            class:active={key.includes("favorites") || key.includes("saved")}
         >
             <Icon
                 name="heart"
-                --stroke={key.includes("favorites") ? "#fff" : "#BCBCBE"}
+                --stroke={key.includes("favorites") || key.includes("saved") ? "#fff" : "#BCBCBE"}
                 size="1.6125em"
             />
         </button>

@@ -10,6 +10,8 @@
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 
+	// F10: the one favourites page (/favorites redirects here), reached from
+	// the ♥ of the navigation bar; no chip of its own in CollectionNav (F9).
 	let items: any[] = [];
 	let follows: any[] = [];
 	let loading = true;
@@ -61,11 +63,11 @@
 
 <main>
 	<CollectionNav active="saved" />
-	<h1>Saved</h1>
+	<h1>Favoris</h1>
 
 	{#if follows.length > 0}
 		<section class="follows">
-			<h2>Following</h2>
+			<h2>Artistes suivis</h2>
 			<div class="artist-row">
 				{#each follows as f (f.artistId)}
 					<a
@@ -86,17 +88,17 @@
 
 	<section>
 		<div class="fav-head">
-			<h2>Favorites</h2>
+			<h2>Morceaux et albums</h2>
 			{#if !loading && keepableTracks(items).length}
 				<KeepOfflineButton tracks={items} />
 			{/if}
 		</div>
 		{#if loading}
-			<p class="state">Loading…</p>
+			<p class="state">Chargement…</p>
 		{:else if offline && items.length === 0}
 			<MeOffline text="Tes sauvegardes reviendront avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
 		{:else if items.length === 0}
-			<p class="state">No saved items yet. Use the ♥ in any track's menu.</p>
+			<p class="state">Aucun favori pour l'instant : utilise le ♥ dans le menu d'un morceau.</p>
 		{:else}
 			{#if offline}
 				<p

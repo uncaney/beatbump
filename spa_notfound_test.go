@@ -19,6 +19,8 @@ func TestIsKnownSPAPath(t *testing.T) {
 		"/library/downloads-offline": true, "/listen": true, "/about": true, "/nope": false,
 		"/this/does/not/exist": false, "/api/v1/x": false, "/favicon.ico": false,
 		"/share-target": true, "/share-target/": true, "/share-targets": false,
+		// F10: /favorites stays a route (client redirect to /library/saved).
+		"/favorites": true, "/library/saved": true,
 	} {
 		if got := IsKnownSPAPath(p); got != want {
 			t.Errorf("IsKnownSPAPath(%q) = %v, want %v", p, got, want)

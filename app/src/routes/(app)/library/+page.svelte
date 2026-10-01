@@ -177,6 +177,22 @@
 			}}
 		/>
 	{/if}
+	<!-- F9: "Playlists" and "My Playlists" (server) share one chip; the server
+	     playlists are the second section of this page, one link away. -->
+	<section class="srv-playlists">
+		<a
+			class="srv-link"
+			href="/library/playlists-srv"
+			data-testid="playlists-srv-link"
+		>
+			<span class="srv-title">Mes playlists sur le serveur</span>
+			<span class="srv-sub">Partagées entre tes appareils, avec la file sauvegardée</span>
+			<span
+				class="srv-go"
+				aria-hidden="true">›</span
+			>
+		</a>
+	</section>
 	<section>
 		<Grid
 			heading="Your Playlists"
@@ -234,6 +250,42 @@
 	section:not(:last-of-type) {
 		margin-top: 1rem;
 		margin-bottom: 4.5rem;
+	}
+	/* F9: server playlists card, right under the header, before the local grid. */
+	section.srv-playlists {
+		margin-top: 0.5rem;
+		margin-bottom: 1.25rem;
+	}
+	.srv-link {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		grid-template-areas: "title go" "sub go";
+		align-items: center;
+		gap: 0.1rem 0.75rem;
+		min-height: max(2.75rem, 44px);
+		padding: 0.6rem 0.9rem;
+		border-radius: 0.8rem;
+		background: rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		color: inherit;
+		text-decoration: none;
+		&:hover {
+			background: rgba(255, 255, 255, 0.12);
+		}
+	}
+	.srv-title {
+		grid-area: title;
+		font-weight: 600;
+	}
+	.srv-sub {
+		grid-area: sub;
+		color: #aaa;
+		font-size: 0.85rem;
+	}
+	.srv-go {
+		grid-area: go;
+		font-size: 1.5rem;
+		color: #aaa;
 	}
 
 	// "Delete All Playlists" disabled (no playlist) looked identical to the

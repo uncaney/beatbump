@@ -1,5 +1,10 @@
 <script lang="ts">
 	// Tab bar linking the self-hosted collection browse pages + the IDB library.
+	// F9: 9 chips in 3 visual groups (was 13, two "Playlists", mixed fr/en):
+	// Collection (Albums, Artistes, Titres, Playlists), Pour toi (Pour toi,
+	// Mixes), Activité (Écoutes, Tes stats), then Hors-ligne. Genres live under
+	// Mixes (a link on that page and on Explore), Favoris under the ♥ of the
+	// navigation bar (/library/saved), Compte under its user icon.
 	import { onMount } from "svelte";
 
 	export let active = "";
@@ -30,20 +35,37 @@
 		ro?.observe(nav);
 		return () => ro?.disconnect();
 	});
-	const tabs = [
-		{ key: "for-you", label: "For You", href: "/library/for-you" },
-		{ key: "playlists", label: "Playlists", href: "/library" },
-		{ key: "artists", label: "Artists", href: "/library/artists" },
-		{ key: "albums", label: "Albums", href: "/library/albums" },
-		{ key: "songs", label: "Songs", href: "/library/all-songs" },
-		{ key: "genres", label: "Genres", href: "/library/genres" },
-		{ key: "mixes", label: "Mixes", href: "/library/mixes" },
-		{ key: "saved", label: "Saved", href: "/library/saved" },
-		{ key: "my-playlists", label: "My Playlists", href: "/library/playlists-srv" },
-		{ key: "recent", label: "Listening", href: "/library/recent" },
-		{ key: "stats", label: "Ton mois", href: "/library/stats" },
-		{ key: "downloads-offline", label: "Hors-ligne", href: "/library/downloads-offline" },
-		{ key: "account", label: "Account", href: "/library/account" },
+	// Pages without a chip of their own highlight the chip they belong to.
+	const ALIAS: Record<string, string> = { genres: "mixes", "my-playlists": "playlists" };
+	$: current = ALIAS[active] ?? active;
+	const groups: { name: string; tabs: { key: string; label: string; href: string }[] }[] = [
+		{
+			name: "Collection",
+			tabs: [
+				{ key: "albums", label: "Albums", href: "/library/albums" },
+				{ key: "artists", label: "Artistes", href: "/library/artists" },
+				{ key: "songs", label: "Titres", href: "/library/all-songs" },
+				{ key: "playlists", label: "Playlists", href: "/library" },
+			],
+		},
+		{
+			name: "Pour toi",
+			tabs: [
+				{ key: "for-you", label: "Pour toi", href: "/library/for-you" },
+				{ key: "mixes", label: "Mixes", href: "/library/mixes" },
+			],
+		},
+		{
+			name: "Activité",
+			tabs: [
+				{ key: "recent", label: "Écoutes", href: "/library/recent" },
+				{ key: "stats", label: "Tes stats", href: "/library/stats" },
+			],
+		},
+		{
+			name: "Hors-ligne",
+			tabs: [{ key: "downloads-offline", label: "Hors-ligne", href: "/library/downloads-offline" }],
+		},
 	];
 </script>
 
@@ -51,14 +73,25 @@
 	class="collnav"
 	class:fade-start={fadeStart}
 	class:fade-end={fadeEnd}
+	aria-label="Bibliothèque"
 	bind:this={nav}
 	on:scroll={updateFades}
 >
-	{#each tabs as t}
-		<a
-			href={t.href}
-			class:active={t.key === active}>{t.label}</a
+	{#each groups as g, gi (g.name)}
+		<span
+			class="group"
+			class:first={gi === 0}
+			role="group"
+			aria-label={g.name}
 		>
+			{#each g.tabs as t (t.key)}
+				<a
+					href={t.href}
+					aria-current={t.key === current ? "page" : undefined}
+					class:active={t.key === current}>{t.label}</a
+				>
+			{/each}
+		</span>
 	{/each}
 </nav>
 
@@ -70,6 +103,17 @@
 		margin-bottom: 1.25rem;
 		border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 		padding-bottom: 0.6rem;
+	}
+	/* A group is a run of chips; a thin rule separates groups (F9). */
+	.group {
+		display: inline-flex;
+		gap: 0.4rem;
+		padding-left: 0.6rem;
+		border-left: 1px solid rgba(255, 255, 255, 0.18);
+		&.first {
+			padding-left: 0;
+			border-left: 0;
+		}
 	}
 	a {
 		color: inherit;
@@ -137,6 +181,9 @@
 		}
 		.collnav.fade-end {
 			--fade-r: 24px;
+		}
+		.group {
+			flex: 0 0 auto;
 		}
 		a {
 			flex: 0 0 auto;
