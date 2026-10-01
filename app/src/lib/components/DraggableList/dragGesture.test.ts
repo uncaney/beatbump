@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HOLD_MS, holdDelay, idleMove, keyTarget, moveIndex, swallowClick } from "./dragGesture";
+import { HOLD_MS, holdDelay, holdStartsDrag, idleMove, keyTarget, moveIndex, swallowClick } from "./dragGesture";
 
 describe("holdDelay", () => {
 	it("starts at once from the grip, holds 250 ms on the row", () => {
@@ -68,5 +68,27 @@ describe("keyTarget", () => {
 		expect(keyTarget("ArrowUp", 0, 4)).toBeNull();
 		expect(keyTarget("ArrowDown", 3, 4)).toBeNull();
 		expect(keyTarget("Enter", 1, 4)).toBeNull();
+	});
+});
+
+describe("mouse on the row body needs hold AND travel (I21)", () => {
+	it("travel alone (quick click drifting 7 px) is not a drag", () => {
+		expect(idleMove("mouse", 7, 0, true, 80)).toBe("none");
+		expect(idleMove("mouse", 0, 40, true, HOLD_MS - 1)).toBe("none");
+	});
+	it("hold alone (released in place) is not a drag", () => {
+		expect(idleMove("mouse", 2, 3, true, 2000)).toBe("none");
+		expect(holdStartsDrag("mouse")).toBe(false);
+		expect(holdStartsDrag("pen")).toBe(false);
+	});
+	it("hold then travel starts the drag", () => {
+		expect(idleMove("mouse", 6, 0, true, HOLD_MS)).toBe("drag");
+		expect(idleMove("pen", 0, -10, true, 600)).toBe("drag");
+	});
+	it("touch long press and the grip are unchanged", () => {
+		expect(holdStartsDrag("touch")).toBe(true);
+		expect(holdDelay(true)).toBe(0);
+		expect(holdDelay(false)).toBe(HOLD_MS);
+		expect(idleMove("touch", 0, 9, true, 50)).toBe("cancel");
 	});
 });

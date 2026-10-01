@@ -3,7 +3,9 @@
  * and touch; no native HTML5 drag and drop).
  *
  * - Grip (`.drag-handle`), any pointer: the drag starts on pointerdown.
- * - Row, mouse / pen: the drag starts after a 250 ms hold or 6 px of travel.
+ * - Row, mouse / pen: the drag starts once the press was held 250 ms AND
+ *   travelled 6 px (I21: a quick click that drifts onto the next row, or a
+ *   hold released in place, stays a click).
  * - Row, touch: long press (250 ms, no travel); travel instead either opens
  *   the swipe-to-remove (leftwards, mostly horizontal) or hands the gesture
  *   back to the browser (vertical scroll).
@@ -20,15 +22,23 @@ export const holdDelay = (fromHandle: boolean): number => (fromHandle ? 0 : HOLD
 export type IdleOutcome = "none" | "drag" | "swipe" | "cancel";
 
 /**
- * What a move does while the press is not a drag yet (`dx`, `dy` = travel
- * since pointerdown). Mouse / pen: 6 px of travel starts the drag. Touch:
- * a leftward, mostly horizontal travel of 24 px opens the swipe (when the
- * row can be swiped away), more than 8 px of any other travel cancels the
- * press (the browser scrolls).
+ * Whether the hold timer itself starts the drag: touch long press only. A
+ * mouse / pen press on the row body also needs travel (I21), checked by
+ * idleMove on the next move.
  */
-export function idleMove(pointerType: string, dx: number, dy: number, canSwipe: boolean): IdleOutcome {
+export const holdStartsDrag = (pointerType: string): boolean => pointerType === "touch";
+
+/**
+ * What a move does while the press is not a drag yet (`dx`, `dy` = travel
+ * since pointerdown, `heldMs` = time since pointerdown). Mouse / pen: the
+ * drag starts when the press was held HOLD_MS AND travelled MOUSE_SLOP (I21:
+ * either alone is not enough). Touch: a leftward, mostly horizontal travel
+ * of 24 px opens the swipe (when the row can be swiped away), more than 8 px
+ * of any other travel cancels the press (the browser scrolls).
+ */
+export function idleMove(pointerType: string, dx: number, dy: number, canSwipe: boolean, heldMs = Infinity): IdleOutcome {
 	if (pointerType !== "touch") {
-		return Math.hypot(dx, dy) >= MOUSE_SLOP ? "drag" : "none";
+		return heldMs >= HOLD_MS && Math.hypot(dx, dy) >= MOUSE_SLOP ? "drag" : "none";
 	}
 	if (canSwipe && dx <= -SWIPE_ENGAGE && Math.abs(dx) > Math.abs(dy)) return "swipe";
 	if (Math.abs(dx) > TOUCH_SLOP || Math.abs(dy) > TOUCH_SLOP) return "cancel";

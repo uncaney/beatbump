@@ -13,7 +13,7 @@
 	import { SessionListService } from "$stores/list/sessionList";
 	import { planDragCommit } from "$stores/list/queueOps";
 	import { createEventDispatcher, onMount, tick } from "svelte";
-	import { SWIPE_ENGAGE, holdDelay, idleMove, keyTarget, moveIndex, swallowClick } from "./dragGesture";
+	import { SWIPE_ENGAGE, holdDelay, holdStartsDrag, idleMove, keyTarget, moveIndex, swallowClick } from "./dragGesture";
 
 	// eslint-disable-next-line no-undef
 	export let items: T[] = [];
@@ -153,6 +153,8 @@
 		moved: boolean;
 		el: HTMLElement;
 		mode: PressMode;
+		/** performance.now() at pointerdown (I21: mouse hold + travel). */
+		t0: number;
 		timer?: ReturnType<typeof setTimeout>;
 	} | null = null;
 	let lastPointerType = "";
@@ -238,12 +240,16 @@
 			moved: false,
 			el,
 			mode: "idle",
+			t0: performance.now(),
 		};
 		const delay = holdDelay(fromHandle);
 		if (delay === 0) {
 			startDrag(event);
 			return;
 		}
+		// I21: a mouse / pen press on the row body starts the drag on a move
+		// once held AND moved (idleMove); only a touch long press starts it here.
+		if (!holdStartsDrag(event.pointerType)) return;
 		touch.timer = setTimeout(() => {
 			if (!touch || touch.mode !== "idle") return;
 			startDrag(event);
@@ -296,7 +302,7 @@
 		const dy = event.clientY - touch.y;
 		if (touch.mode === "idle") {
 			const canSwipe = swipeToRemove && touch.index !== lockedIndex;
-			const outcome = idleMove(touch.pointerType, dx, dy, canSwipe);
+			const outcome = idleMove(touch.pointerType, dx, dy, canSwipe, performance.now() - touch.t0);
 			if (outcome === "none") return;
 			if (outcome === "cancel") {
 				if (touch.timer) clearTimeout(touch.timer);
