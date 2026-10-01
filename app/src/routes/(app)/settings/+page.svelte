@@ -7,7 +7,6 @@
 <script lang="ts">
 	import { browser } from "$app/environment";
 	import Header from "$components/Layouts/Header.svelte";
-	import { APIClient } from "$lib/api";
 	import { AudioPlayer } from "$lib/player";
 	import { settings, type Theme } from "$stores/settings";
 	import OfflineSettings from "./OfflineSettings.svelte";
@@ -29,27 +28,12 @@
 		});
 	};
 
-	import { onMount } from "svelte";
-	onMount(async () => {
-		if (browser) {
-			const res = await APIClient.fetch("/api/v1/settings");
-			if (res.ok) {
-				const data = await res.json();
-				const input = document.getElementById(
-					"downloadPath",
-				) as HTMLInputElement;
-				if (input && data.downloadPath) {
-					input.value = data.downloadPath;
-				}
-				const ongoingInput = document.getElementById(
-					"ongoing-listening",
-				) as HTMLInputElement;
-				if (ongoingInput && data.ongoingListeningEnabled) {
-					ongoingInput.checked = data.ongoingListeningEnabled === "true";
-				}
-			}
-		}
-	});
+	// The legacy "Download Path" / "Ongoing Listening Download" controls
+	// (backend /api/v1/settings keys downloadPath / ongoingListeningEnabled) were
+	// removed from this page: every played track is already cached by the
+	// service worker, and the single switch for that lives in Settings > Offline
+	// (OfflineSettings.svelte, settings.offline.autoCache). The backend keys are
+	// untouched and keep their defaults.
 </script>
 
 <Header
@@ -161,57 +145,7 @@
                     </select>
                 </div>
             </div>-->
-			
-			<div class="setting">
-				<label for="downloadPath">
-					Download Path
-					<span class=""> Folder where playlists will be downloaded. </span>
-				</label>
-				<div class="input-container">
-					<div class="input no-btn mb-1">
-						<input
-							type="text"
-							id="downloadPath"
-							placeholder="downloads"
-							on:change={async (e) => {
-								const value = e.currentTarget.value;
-								const res = await APIClient.post("/api/v1/settings", {
-									downloadPath: value,
-								});
-								if (!res.ok) {
-									const data = await res.json();
-									alert(data.error || "Failed to update download path");
-								}
-							}}
-						/>
-					</div>
-				</div>
-			</div>
-			<div class="setting">
-				<label
-					>Ongoing Listening Download
-					<span class="">Automatically download songs you listen to.</span>
-				</label>
-				<input
-					type="checkbox"
-					id="ongoing-listening"
-					on:change={async (e) => {
-						const checked = e.currentTarget.checked;
-						const res = await APIClient.post("/api/v1/settings", {
-							ongoingListeningEnabled: checked ? "true" : "false",
-						});
-						if (!res.ok) {
-							const data = await res.json();
-							alert(data.error || "Failed to update setting");
-							e.currentTarget.checked = !checked; // Revert
-						}
-					}}
-				/>
-				<label
-					for="ongoing-listening"
-					class="switch"
-				/>
-			</div>
+
 			<div class="setting">
 				<!-- svelte-ignore a11y-label-has-associated-control -->
 				<label
