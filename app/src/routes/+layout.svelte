@@ -23,7 +23,7 @@
     import {syncTabs} from "$lib/tabSync.js";
     import {Logger, notify} from "$lib/utils";
     import {SessionListService} from "$stores/list/sessionList";
-    import {restoreResumeState, startResumePersistence} from "$lib/stores/resumeState";
+    import {restoreResumeState, resumeShortcutClaimed, startResumePersistence} from "$lib/stores/resumeState";
     import {onDestroy, onMount} from "svelte";
     import {get, writable} from "svelte/store";
 
@@ -155,7 +155,8 @@
         if (remember()) {
             void restoreResumeState({autoplay: false})
                 .then((restored) => {
-                    if (restored || !localStorage["lastTrack"]) return;
+                    // I3: the ?resume=1 shortcut handles its own fallback.
+                    if (restored || resumeShortcutClaimed() || !localStorage["lastTrack"]) return;
                     const track = JSON.parse(
                         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                         localStorage.getItem("lastTrack")! as string,

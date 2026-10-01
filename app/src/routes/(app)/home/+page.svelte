@@ -13,6 +13,9 @@
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
 	import { buildResumeRow, readLastTrack } from "$lib/homeRows";
 	import { getRecent } from "$lib/me";
+	import { claimResumeShortcut, resumePlayback } from "$lib/stores/resumeState";
+	import { settings } from "$lib/stores/settings";
+	import { get } from "svelte/store";
 
 	export let data: PageData;
 
@@ -44,6 +47,16 @@
 	}
 
 	async function resumeListening() {
+		// I3: the saved queue first, through the same restoration as the
+		// layout (shared in-flight promise, restored queue + position, paused).
+		// The old "last track from 0 + history" row is only a fallback.
+		if (get(settings)?.playback?.["Remember Last Track"] === true) {
+			try {
+				if (await resumePlayback({ autoplay: false })) return;
+			} catch (err) {
+				console.error("resume shortcut: restore failed", err);
+			}
+		}
 		let last = null;
 		try {
 			last = readLastTrack(localStorage);
@@ -72,6 +85,7 @@
 		} catch {
 			/* keep the parameter: harmless */
 		}
+		if (resume) claimResumeShortcut();
 		if (resume) void resumeListening().catch((err) => console.error("resume shortcut failed", err));
 		if (search) void openSearchOverlay();
 	});

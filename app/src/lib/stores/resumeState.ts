@@ -258,7 +258,19 @@ const loadRuntime = () =>
  * `autoplay`. Resolves false when nothing was saved (the caller may fall
  * back to `lastTrack`).
  */
-export async function restoreResumeState(opts: { autoplay?: boolean } = {}): Promise<boolean> {
+export function restoreResumeState(opts: { autoplay?: boolean } = {}): Promise<boolean> {
+	// I3: one restoration at a time. The layout (startup) and the home
+	// shortcut / button share the in-flight one instead of racing.
+	if (restoring) return restoring;
+	const p = doRestore(opts).finally(() => {
+		if (restoring === p) restoring = null;
+	});
+	restoring = p;
+	return p;
+}
+let restoring: Promise<boolean> | null = null;
+
+async function doRestore(opts: { autoplay?: boolean }): Promise<boolean> {
 	const state = readResumeState(browserStorage());
 	if (!state) return false;
 	const { SessionListService, AudioPlayer, getSrc } = await loadRuntime();
@@ -287,19 +299,51 @@ export async function restoreResumeState(opts: { autoplay?: boolean } = {}): Pro
 }
 
 /**
- * Home "Reprendre": play the saved queue. When startup already restored it
- * (same track under the cursor), only start playback.
+ * I3/I4: what "Reprendre" does given the current queue row, the saved state
+ * and whether the player holds a usable source. "play" only when startup
+ * already restored this track AND its source loaded; otherwise the
+ * restoration runs (again).
  */
-export async function resumePlayback(): Promise<boolean> {
+export function resumeAction(
+	current: { videoId?: string } | null | undefined,
+	state: Pick<ResumeState, "mix" | "position">,
+	hasSource: boolean,
+): "play" | "restore" {
+	const saved = state.mix[state.position]?.videoId;
+	return current && saved && current.videoId === saved && hasSource ? "play" : "restore";
+}
+
+/**
+ * Home "Reprendre" button and the `/home?resume=1` shortcut: bring the
+ * saved queue back (shared with an in-flight startup restoration). When it
+ * is already restored with a source, only start playback (unless
+ * `autoplay: false`). Resolves false when nothing was saved.
+ */
+export async function resumePlayback(opts: { autoplay?: boolean } = {}): Promise<boolean> {
+	const autoplay = opts.autoplay !== false;
+	if (restoring) await restoring.catch(() => false);
 	const state = readResumeState(browserStorage());
 	if (!state) return false;
 	const { SessionListService, AudioPlayer } = await loadRuntime();
+	if (restoring) await restoring.catch(() => false);
 	const cur = SessionListService.value.mix[SessionListService.value.position];
-	if (cur && cur.videoId === state.mix[state.position]?.videoId) {
-		AudioPlayer.play();
+	if (resumeAction(cur, state, AudioPlayer.hasSource()) === "play") {
+		if (autoplay) AudioPlayer.play();
 		return true;
 	}
-	return restoreResumeState({ autoplay: true });
+	return restoreResumeState({ autoplay });
+}
+
+/**
+ * I3: the `/home?resume=1` shortcut owns the startup resume; the layout then
+ * skips its `lastTrack` fallback (which would rewrite the queue).
+ */
+let shortcutClaimed = false;
+export function claimResumeShortcut(): void {
+	shortcutClaimed = true;
+}
+export function resumeShortcutClaimed(): boolean {
+	return shortcutClaimed;
 }
 
 /**

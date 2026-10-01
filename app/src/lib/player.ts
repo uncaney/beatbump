@@ -567,6 +567,11 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		if (this.player) this.player.autoplay = true;
 	}
 
+	/** I4: the element holds a source that did not fail. */
+	public hasSource(): boolean {
+		return !!this.player && !!(this.player.currentSrc || this.player.src) && !this.player.error;
+	}
+
 	/** I2: a source for `videoId` is about to load; keep the restore only for its own track. */
 	public sourceLoading(videoId?: string) {
 		if (!resumeKeptFor(this._resumeAt, videoId)) this.clearResume();
