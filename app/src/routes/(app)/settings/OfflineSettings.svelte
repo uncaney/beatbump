@@ -9,7 +9,9 @@
 		listCachedAudio,
 		reconcileOfflineList,
 		removeOffline,
+		requestPersistentStorage,
 		setAudioQuota,
+		storageStatus,
 		swRequest,
 		type AudioListEntry,
 	} from "$lib/offline";
@@ -57,7 +59,31 @@
 		return q > 0 ? fmtBytes(q) : "unlimited";
 	}
 
+	// O10: persistent storage (navigator.storage.persist) + estimate().
+	let persisted: boolean | null = null;
+	let usage = 0;
+	let storageQuota = 0;
+	let persistBusy = false;
+	async function refreshStorage() {
+		const s = await storageStatus();
+		persisted = s.persisted;
+		usage = s.usage;
+		storageQuota = s.quota;
+	}
+	async function askPersist() {
+		if (persistBusy) return;
+		persistBusy = true;
+		try {
+			const r = await requestPersistentStorage(true);
+			await refreshStorage();
+			if (r === false) notify("Le navigateur a refusé : installe l'app sur l'écran d'accueil puis réessaie", "error");
+		} finally {
+			persistBusy = false;
+		}
+	}
+
 	async function refresh() {
+		void refreshStorage();
 		loading = true;
 		error = "";
 		try {
@@ -261,6 +287,31 @@
 		>
 			{busy === "resync" ? "Re-syncing…" : "Re-sync list"}
 		</button>
+	</div>
+
+	<div class="setting">
+		<!-- svelte-ignore a11y-label-has-associated-control -->
+		<label id="offline-storage-label">
+			Stockage de l'appareil
+			<span
+				id="offline-persisted"
+				data-persisted={persisted === null ? "unknown" : String(persisted)}
+				>Stockage protégé : {persisted === null ? "inconnu" : persisted ? "oui" : "non"}{#if usage > 0}<span
+						id="offline-storage-usage"
+						> · {fmtBytes(usage)} utilisés{#if storageQuota > 0} sur {fmtBytes(storageQuota)}{/if}</span
+					>{/if}</span
+			>
+		</label>
+		{#if persisted === false}
+			<button
+				type="button"
+				id="offline-persist-request"
+				class="btn"
+				disabled={persistBusy}
+				title="Demande au navigateur de ne jamais effacer le hors-ligne de cet appareil"
+				on:click={askPersist}>Protéger</button
+			>
+		{/if}
 	</div>
 
 	<div class="setting">

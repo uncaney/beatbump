@@ -8,6 +8,7 @@ vi.mock("$lib/offline", () => ({
 	isStableAudioUrl: () => false,
 	listCachedAudio: vi.fn(),
 	pinOffline: vi.fn(),
+	requestPersistentStorage: vi.fn(),
 }));
 
 import { keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, type KeepDeps } from "./offlineBatch";

@@ -291,6 +291,8 @@ export async function pinOffline(item: { videoId?: string }, pinned: boolean): P
 	const r = await swRequest<{ type: "audio-pinned"; ok: boolean; reason?: string }>({ type: "pin-audio", videoId, pinned }, "audio-pinned");
 	if (!r) return { ok: false, reason: "no_sw" };
 	if (!r.ok) return { ok: false, reason: r.reason || "error" };
+	// O10: the first pin asks the browser to keep this origin's storage.
+	if (pinned) void requestPersistentStorage();
 	try {
 		write(read().map((t) => (t.videoId === videoId ? { ...t, _pinned: pinned } : t)));
 	} catch {
@@ -640,4 +642,54 @@ export function isOfflineAnswer(r: unknown): boolean {
 export function meLoadOffline(answers: unknown[], err?: unknown): boolean {
 	if (answers.some(isOfflineAnswer)) return true;
 	return err !== undefined && deviceOffline();
+}
+
+// ---- O10: persistent storage ----
+// Without navigator.storage.persist() the browser may wipe the whole offline
+// cache of a PWA opened rarely. Asked once per page at the first pin / first
+// "Garder hors-ligne", and when the PWA is installed (or runs standalone).
+
+let persistAsked = false;
+/**
+ * Ask for persistent storage (once per page unless `force`). Resolves true
+ * when granted (or already), false when refused, null when unsupported.
+ */
+export async function requestPersistentStorage(force = false): Promise<boolean | null> {
+	try {
+		const st = typeof navigator !== "undefined" ? navigator.storage : undefined;
+		if (!st || typeof st.persist !== "function") return null;
+		if (typeof st.persisted === "function" && (await st.persisted())) return true;
+		if (persistAsked && !force) return false;
+		persistAsked = true;
+		return await st.persist();
+	} catch {
+		return null;
+	}
+}
+
+/** Settings > Offline: persisted flag (null = unknown) + storage.estimate(). */
+export async function storageStatus(): Promise<{ persisted: boolean | null; usage: number; quota: number }> {
+	const out = { persisted: null as boolean | null, usage: 0, quota: 0 };
+	try {
+		const st = typeof navigator !== "undefined" ? navigator.storage : undefined;
+		if (!st) return out;
+		if (typeof st.persisted === "function") out.persisted = await st.persisted();
+		if (typeof st.estimate === "function") {
+			const e = await st.estimate();
+			out.usage = Number(e?.usage) || 0;
+			out.quota = Number(e?.quota) || 0;
+		}
+	} catch {
+		/* unsupported / blocked: unknown */
+	}
+	return out;
+}
+
+if (typeof window !== "undefined") {
+	try {
+		window.addEventListener("appinstalled", () => void requestPersistentStorage(true));
+		if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) void requestPersistentStorage();
+	} catch {
+		/* no matchMedia (tests) */
+	}
 }

@@ -12,6 +12,7 @@ import {
 	isStableAudioUrl,
 	listCachedAudio,
 	pinOffline,
+	requestPersistentStorage,
 	type OfflineResult,
 	type PinResult,
 } from "$lib/offline";
@@ -83,6 +84,8 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 	};
 	const aborted = () => !!opts.signal?.aborted;
 	if (!list.length) return { ...p, cancelled: false };
+	// O10: the first "Garder hors-ligne" asks for persistent storage.
+	if (deps === defaultDeps) void requestPersistentStorage();
 	emit();
 
 	// 1. Cached tracks: pin right away; "not_cached" ones are downloaded below.
