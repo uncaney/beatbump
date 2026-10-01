@@ -270,6 +270,36 @@
         }
     });
     let info: Record<string, any> = {};
+
+    // QR1: a global `aria-live=polite` region announcing the track change, for
+    // screen readers (today only `queue-count` and the shortcuts sheet have
+    // one). Debounced 1 s so a fast skip-skip-skip only speaks the last
+    // track; the very first value a session ever sees (the restored "last
+    // track" on load, or the first track of a fresh queue) is never
+    // announced, only actual changes afterwards.
+    let nowPlayingMessage = "";
+    let announcedVideoId: string | undefined;
+    let skipNextAnnouncement = true;
+    let nowPlayingTimer: ReturnType<typeof setTimeout> | undefined;
+    onDestroy(() => clearTimeout(nowPlayingTimer));
+    $: if (browser && $currentTrack) {
+        const track = $currentTrack as any;
+        const id = track?.videoId ?? track?.id;
+        if (id !== announcedVideoId) {
+            announcedVideoId = id;
+            if (skipNextAnnouncement) {
+                skipNextAnnouncement = false;
+            } else {
+                clearTimeout(nowPlayingTimer);
+                nowPlayingTimer = setTimeout(() => {
+                    const title = track?.title ?? "";
+                    const artist = track?.artistInfo?.artist?.[0]?.text ?? track?.artist ?? "";
+                    if (!title) return;
+                    nowPlayingMessage = artist ? `Lecture : ${title} · ${artist}` : `Lecture : ${title}`;
+                }, 1000);
+            }
+        }
+    }
 </script>
 
 <svelte:body class={$fullscreenStore === "open" ? "no-scroll" : ""}/>
@@ -339,6 +369,8 @@ left: 0; background: var(--base-bg); font-size: 1.1rem; display: flex; flex-dire
 	}}
 />
 <svelte:component this={$GroupSessionCreator} />
+
+<div class="sr-only" role="status" aria-live="polite" data-testid="now-playing-live">{nowPlayingMessage}</div>
 {#if !online && !$page.url.pathname.startsWith("/library/downloads-offline")}
     <div class="offline-banner" role="status" aria-live="polite">
         <span class="offline-dot" aria-hidden="true"></span>
