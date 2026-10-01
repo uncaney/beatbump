@@ -94,3 +94,27 @@ describe("PF3-7: staticPrecacheList", () => {
 		expect(staticPrecacheList(icons)).toEqual(icons);
 	});
 });
+
+describe("PF3-1: cover 404 memory", () => {
+	it("answers a missed lid for an hour, then asks again", async () => {
+		const { createCoverMissSet } = await import("./service-worker");
+		const m = createCoverMissSet(3, 1000);
+		m.add("/cover?lid=a", 0);
+		expect(m.has("/cover?lid=a", 999)).toBe(true);
+		expect(m.has("/cover?lid=b", 10)).toBe(false);
+		expect(m.has("/cover?lid=a", 1000)).toBe(false);
+		expect(m.size).toBe(0); // expired entry dropped on read
+	});
+	it("stays bounded, evicting the oldest", async () => {
+		const { createCoverMissSet } = await import("./service-worker");
+		const m = createCoverMissSet(3, 1000);
+		for (const l of ["a", "b", "c"]) m.add("/cover?lid=" + l, 0);
+		m.add("/cover?lid=a", 1); // refreshed: now the newest
+		m.add("/cover?lid=d", 2);
+		expect(m.size).toBe(3);
+		expect(m.has("/cover?lid=b", 3)).toBe(false);
+		expect(m.has("/cover?lid=a", 3)).toBe(true);
+		expect(m.has("/cover?lid=c", 3)).toBe(true);
+		expect(m.has("/cover?lid=d", 3)).toBe(true);
+	});
+});

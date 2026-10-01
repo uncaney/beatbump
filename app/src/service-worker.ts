@@ -642,6 +642,47 @@ async function trimCoverCache(c: Cache): Promise<void> {
 	}
 }
 
+// PF3-1: a lid without embedded art answers 404 after 0.5-6 s upstream and
+// was asked again on every view. Its URL is remembered COVER_MISS_TTL_MS in a
+// bounded in-memory set and answered locally meanwhile (the Go proxy also
+// stamps those 404s cacheable for an hour). Pure, unit-tested.
+const COVER_MISS_TTL_MS = 60 * 60 * 1000;
+const COVER_MISS_MAX = 500;
+export function createCoverMissSet(max = COVER_MISS_MAX, ttlMs = COVER_MISS_TTL_MS) {
+	const until = new Map<string, number>(); // insertion order = oldest first
+	return {
+		has(url: string, now = Date.now()): boolean {
+			const t = until.get(url);
+			if (t === undefined) return false;
+			if (now >= t) {
+				until.delete(url);
+				return false;
+			}
+			return true;
+		},
+		add(url: string, now = Date.now()): void {
+			until.delete(url);
+			until.set(url, now + ttlMs);
+			while (until.size > max) {
+				const oldest = until.keys().next().value as string;
+				until.delete(oldest);
+			}
+		},
+		delete(url: string): void {
+			until.delete(url);
+		},
+		get size(): number {
+			return until.size;
+		},
+	};
+}
+const coverMisses = createCoverMissSet();
+const coverMissResponse = () =>
+	new Response("no art", {
+		status: 404,
+		headers: { "Content-Type": "text/plain", "Cache-Control": "public, max-age=3600", "X-Ytm-Cover": "sw-miss" },
+	});
+
 async function coverFetch(req: Request): Promise<Response> {
 	let c: Cache | null = null;
 	try {
@@ -664,7 +705,9 @@ async function coverFetch(req: Request): Promise<Response> {
 	} catch {
 		c = null;
 	}
+	if (coverMisses.has(req.url)) return coverMissResponse();
 	const res = await fetch(req);
+	if (res.status === 404) coverMisses.add(req.url);
 	if (c && res.ok && res.status === 200 && req.method === "GET") {
 		coverLastHit.set(req.url, Date.now());
 		const copy = res.clone();
