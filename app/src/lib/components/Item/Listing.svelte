@@ -394,16 +394,23 @@
 								{#if !artist.pageType}
 									{artist.text}
 								{:else if artist.pageType.includes("ALBUM")}
+									<!-- The link's hit area is its text only (see .sub-link): on a
+									     390px row the subtitle wraps and a tap aimed at the row must
+									     play it, not open the album / artist page. -->
 									<a
+										class="sub-link"
 										on:click|preventDefault|stopPropagation={() =>
 											goto(`/release?id=${artist?.browseId}`)}
-										href={`/release?id=${artist?.browseId}`}>{artist.text}</a
+										href={`/release?id=${artist?.browseId}`}
+										><span>{artist.text}</span></a
 									>
 								{:else}
 									<a
+										class="sub-link"
 										on:click|preventDefault|stopPropagation={() =>
 											goto(`/artist/${artist?.browseId}`)}
-										href={`/artist/${artist?.browseId}`}>{artist.text}</a
+										href={`/artist/${artist?.browseId}`}
+										><span>{artist.text}</span></a
 									>
 								{/if}
 							{/each}
@@ -525,6 +532,22 @@
 		margin-top: 0;
 
 		@include mixins.trim(2);
+
+		// Subtitle links (artist / album) stay inline text: no padding, no flex
+		// growth, and the anchor box itself is transparent to taps; only the
+		// text span catches them. The rest of the (wrapped) subtitle line falls
+		// through to .innercard, which plays the row. Pure hit-testing: no
+		// layout change on desktop.
+		.sub-link {
+			display: inline;
+			padding: 0;
+			margin: 0;
+			pointer-events: none;
+
+			> span {
+				pointer-events: auto;
+			}
+		}
 	}
 
 	.text-title {

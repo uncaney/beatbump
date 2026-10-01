@@ -84,6 +84,20 @@ overflow:hidden;
 	span {
 		color: rgb(212, 212, 212);
 	}
+	/* Artist / album links are inline text with no padding or flex growth; the
+	   anchor box is transparent to taps and only its text span catches them, so
+	   a tap on the rest of a wrapped subtitle line (390px) reaches the row and
+	   plays it instead of opening the artist page. Hit-testing only: no layout
+	   change on desktop. */
+	> a {
+		display: inline;
+		padding: 0;
+		margin: 0;
+		pointer-events: none;
+		> span {
+			pointer-events: auto;
+		}
+	}
 }
 
 .length {
