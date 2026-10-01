@@ -121,3 +121,73 @@ export function applyMixOp<T extends Row>(
 	const idx = current === undefined ? -1 : kept.indexOf(current);
 	return { mix: kept, position: idx >= 0 ? idx : clamp(position, kept.length) };
 }
+
+/** Same rows (by identity) in the same order. */
+function sameOrder<T>(a: T[], b: T[]): boolean {
+	return a.length === b.length && a.every((r, i) => r === b[i]);
+}
+
+/** Index of `row` in `list`: by identity, else first row with the same videoId. */
+function locate<T extends Row>(list: T[], row: T): number {
+	const idx = list.indexOf(row);
+	if (idx >= 0 || !row?.videoId) return idx;
+	return list.findIndex((r) => r?.videoId === row.videoId);
+}
+
+/**
+ * Rebase a drag reorder on a queue that changed during the gesture (H4).
+ * `base` is the queue when the drag started, `reordered` the private copy
+ * after the drag, `moved` the dragged row, `fresh` the queue now. The drag
+ * must be a single move of `moved` (base and reordered equal once `moved`
+ * is taken out), which is re-applied on `fresh`: `moved` is placed right
+ * after the row that precedes it in `reordered` (or before the row that
+ * follows it, or first when it has no neighbour). Rows are found by identity,
+ * else by videoId. Returns null (abort) when the drag was not a single move
+ * or `moved` / its neighbours are gone from `fresh`. Never mutates inputs.
+ */
+export function rebaseMove<T extends Row>(fresh: T[], base: T[], reordered: T[], moved: T): T[] | null {
+	const to = reordered.indexOf(moved);
+	if (to < 0 || base.indexOf(moved) < 0) return null;
+	const strip = (list: T[]) => list.filter((r) => r !== moved);
+	if (!sameOrder(strip(base), strip(reordered))) return null;
+	const from = locate(fresh, moved);
+	if (from < 0) return null;
+	const row = fresh[from];
+	const rest = [...fresh.slice(0, from), ...fresh.slice(from + 1)];
+	const prev = to > 0 ? reordered[to - 1] : undefined;
+	const next = to < reordered.length - 1 ? reordered[to + 1] : undefined;
+	let at = -1;
+	if (prev !== undefined) {
+		const p = locate(rest, prev);
+		if (p >= 0) at = p + 1;
+	} else {
+		at = 0;
+	}
+	if (at < 0 && next !== undefined) {
+		const n = locate(rest, next);
+		if (n >= 0) at = n;
+	}
+	if (at < 0) return null;
+	return [...rest.slice(0, at), row, ...rest.slice(at)];
+}
+
+export type DragCommit<T> =
+	/** Hand `mix` to SessionListService.reorder (`rebased`: the queue changed). */
+	| { kind: "apply"; mix: T[]; rebased: boolean }
+	/** The drag did not change the order: nothing to commit. */
+	| { kind: "noop" }
+	/** The queue changed during the drag and the move cannot be rebased. */
+	| { kind: "abort" };
+
+/**
+ * What a queue drag commits on drop (H4): the private copy as is when the
+ * queue still holds the drag-start rows in the same order, else the single
+ * move rebased on the fresh queue (`rebaseMove`), else an abort. The cursor
+ * is then re-anchored by `planReorder` on the fresh playing row.
+ */
+export function planDragCommit<T extends Row>(base: T[], reordered: T[], moved: T | null, fresh: T[]): DragCommit<T> {
+	if (sameOrder(base, reordered)) return { kind: "noop" };
+	if (sameOrder(base, fresh)) return { kind: "apply", mix: reordered.slice(), rebased: false };
+	const rebased = moved ? rebaseMove(fresh, base, reordered, moved) : null;
+	return rebased ? { kind: "apply", mix: rebased, rebased: true } : { kind: "abort" };
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMixOp, planInsert, planReorder, removeAt } from "./queueOps";
+import { applyMixOp, planDragCommit, planInsert, planReorder, rebaseMove, removeAt } from "./queueOps";
 
 const row = (videoId: string) => ({ videoId, title: "T " + videoId });
 const ids = (list: { videoId?: string }[]) => list.map((r) => r.videoId);
@@ -148,5 +148,63 @@ describe("applyMixOp (H3, Dedupe Automix)", () => {
 		const r = applyMixOp([], 5, "set", [row("A"), {} as { videoId?: string }, row("A")], true);
 		expect(r.mix.length).toBe(2);
 		expect(r.position).toBe(1);
+	});
+});
+
+describe("planDragCommit / rebaseMove (H4, queue changed during a drag)", () => {
+	const make = () => {
+		const [a, b, c, d] = [row("A"), row("B"), row("C"), row("D")];
+		return { a, b, c, d, base: [a, b, c] };
+	};
+	it("queue unchanged: commits the private copy as is", () => {
+		const { a, b, c, base } = make();
+		const r = planDragCommit(base, [a, c, b], c, base.slice());
+		expect(r.kind).toBe("apply");
+		if (r.kind === "apply") {
+			expect(r.mix).toEqual([a, c, b]);
+			expect(r.rebased).toBe(false);
+		}
+	});
+	it("no move: noop", () => {
+		const { base } = make();
+		expect(planDragCommit(base, base.slice(), base[2], [...base, row("X")]).kind).toBe("noop");
+	});
+	it("continuation appended during the drag: the move is rebased, new rows kept", () => {
+		const { a, b, c, d, base } = make();
+		const fresh = [a, b, c, d];
+		const r = planDragCommit(base, [a, c, b], c, fresh);
+		expect(r.kind).toBe("apply");
+		if (r.kind === "apply") {
+			expect(r.mix).toEqual([a, c, b, d]);
+			expect(r.rebased).toBe(true);
+			// still a permutation of the fresh queue: planReorder accepts it and
+			// anchors the cursor on the fresh playing row
+			const plan = planReorder(fresh, 1, r.mix);
+			expect(plan?.mix[plan.position]).toBe(b);
+		}
+	});
+	it("a row removed during the drag: rebases on the next neighbour", () => {
+		const { a, b, c, d } = make();
+		const base = [a, b, c, d];
+		// C dragged to the front... [C, A, B, D]; meanwhile A was removed
+		const r = rebaseMove([b, c, d], base, [c, a, b, d], c);
+		expect(r).toEqual([c, b, d]);
+		// D dragged after A; meanwhile A was removed: falls back to before B
+		expect(rebaseMove([b, c, d], base, [a, d, b, c], d)).toEqual([d, b, c]);
+	});
+	it("rows re-created with the same videoId are matched by videoId", () => {
+		const { a, b, c, base } = make();
+		const fresh = [row("A"), row("B"), row("C"), row("D")];
+		expect(ids(rebaseMove(fresh, base, [c, a, b], c) ?? [])).toEqual(["C", "A", "B", "D"]);
+	});
+	it("aborts when the dragged row is gone or the drag was not a single move", () => {
+		const { a, b, c, d, base } = make();
+		expect(planDragCommit(base, [a, c, b], c, [a, b, d]).kind).toBe("abort");
+		expect(planDragCommit(base, [c, a, b], c, [a, b, c, d]).kind).toBe("apply");
+		// not a single move of the dragged row (a jump swapped two rows)
+		expect(rebaseMove([a, b, c, d], base, [b, c, a], b)).toBeNull();
+		expect(planDragCommit(base, [b, c, a], b, [a, b, c, d]).kind).toBe("abort");
+		expect(planDragCommit(base, [c, b, a], c, [a, b, c, d]).kind).toBe("abort");
+		expect(planDragCommit(base, [c, a, b], null, [a, b, c, d]).kind).toBe("abort");
 	});
 });

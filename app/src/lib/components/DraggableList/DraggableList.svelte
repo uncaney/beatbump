@@ -11,6 +11,7 @@
 	import Icon from "$components/Icon/Icon.svelte";
 	import ListItem from "$components/ListItem/ListItem.svelte";
 	import { SessionListService } from "$stores/list/sessionList";
+	import { planDragCommit } from "$stores/list/queueOps";
 	import { createEventDispatcher } from "svelte";
 
 	// eslint-disable-next-line no-undef
@@ -50,18 +51,54 @@
 	// "suivant" plays the new neighbour (G1). Before, the shared array was
 	// swapped in place and no subscriber ever heard of it.
 	let queueDrag = false;
+	// Queue drag (H4): the parent re-pushes `items` (= the store mix) on every
+	// store emission (track change, continuation), so the swaps live in
+	// `dragItems`, rendered instead of `items` while the drag lasts; `dragBase`
+	// is the queue at drag start and `dragRow` the dragged row. On drop the
+	// fresh queue is compared with `dragBase` (planDragCommit): unchanged, the
+	// copy is committed; changed, the single move is rebased on the fresh
+	// queue or the reorder is dropped with a warning, never a stale overwrite.
+	let dragItems: T[] = [];
+	let dragBase: T[] = [];
+	let dragRow: T | null = null;
+	$: rows = queueDrag ? dragItems : items;
 
-	const captureCurrent = () => {
+	const captureCurrent = (startIndex: number) => {
 		const s = $SessionListService;
 		queueDrag = (items as unknown) === s.mix;
-		if (queueDrag) items = items.slice();
+		if (queueDrag) {
+			dragBase = items.slice();
+			dragItems = items.slice();
+			dragRow = items[startIndex] ?? null;
+		}
 		dragCurrentTrack = (s.mix[s.position] as T) ?? null;
+	};
+	const swapRows = (a: number, b: number) => {
+		if (queueDrag) {
+			[dragItems[a], dragItems[b]] = [dragItems[b], dragItems[a]];
+			dragItems = dragItems;
+		} else {
+			[items[a], items[b]] = [items[b], items[a]];
+			items = items;
+		}
 	};
 	const syncCursor = () => {
 		if (queueDrag) {
+			const fresh = $SessionListService.mix as unknown as T[];
+			const commit = planDragCommit(dragBase, dragItems, dragRow, fresh);
 			queueDrag = false;
 			dragCurrentTrack = null;
-			SessionListService.reorder(items as unknown as Item[]);
+			dragItems = [];
+			dragBase = [];
+			dragRow = null;
+			if (commit.kind === "abort") {
+				console.warn("[queue] reorder dropped: the queue changed during the drag");
+			} else if (commit.kind === "apply") {
+				if (commit.rebased) console.warn("[queue] queue changed during the drag: move rebased on the fresh queue");
+				if (!SessionListService.reorder(commit.mix as unknown as Item[])) {
+					console.warn("[queue] reorder refused: not a permutation of the current queue");
+				}
+			}
 			return;
 		}
 		if (!dragCurrentTrack) return;
@@ -82,10 +119,7 @@
 	/** Swap the rows the way the mouse path always did, then hand the result over. */
 	const commitSwap = () => {
 		if (dragOverId !== null && currentDragId !== null) {
-			[items[currentDragId], items[dragOverId]] = [
-				items[dragOverId],
-				items[currentDragId],
-			];
+			swapRows(currentDragId, dragOverId);
 			currentDragId = dragOverId;
 		}
 		syncCursor();
@@ -98,7 +132,7 @@
 		dragTimer = setTimeout(() => {
 			currentDragId = startId;
 			dragY = event.clientY;
-			captureCurrent();
+			captureCurrent(startId);
 			dispatch("dragstart", { event, index: currentDragId });
 			isDragging = true;
 		}, 250);
@@ -131,11 +165,7 @@
 
 	$: {
 		if (dragOverId !== null && currentDragId !== null) {
-			[items[currentDragId], items[dragOverId]] = [
-				items[dragOverId],
-				items[currentDragId],
-			];
-
+			swapRows(currentDragId, dragOverId);
 			currentDragId = dragOverId;
 		}
 	}
@@ -211,7 +241,7 @@
 			dragOverId = null;
 			ghostOffset = `${Math.round(el.offsetHeight / 2)}px`;
 			updateGhostY(event.clientY);
-			captureCurrent();
+			captureCurrent(index);
 			isDragging = true;
 			try {
 				navigator.vibrate?.(10);
@@ -361,12 +391,12 @@
 				: ''}"
 		>
 			<ListItem
-				item={items[currentDragId]}
+				item={rows[currentDragId]}
 				idx={currentDragId}
 			/>
 		</div>
 	{/if}
-	{#each items as item, index (item)}
+	{#each rows as item, index (item)}
 		<!-- svelte-ignore a11y-no-static-element-interactions -->
 		<!-- svelte-ignore a11y-click-events-have-key-events -->
 		<div
