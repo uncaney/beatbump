@@ -212,6 +212,10 @@
 	});
 </script>
 
+<svelte:head>
+	<title>{$currentTrack?.title ? `Paroles · ${$currentTrack.title}` : "Paroles"}</title>
+</svelte:head>
+
 <main
 	class="size-{size}"
 	data-lyrics-size={size}
@@ -355,13 +359,25 @@
 	.sub {
 		color: #999;
 	}
+	// One text column for the toolbar and the lyrics (audit v5 TOP 10: label,
+	// lines and A-/A+ sat on three different edges on desktop). The label and
+	// A+ align on the line boxes; their 0.75rem inner padding matches .line.
+	.toolbar,
+	.synced,
+	.plain {
+		box-sizing: border-box;
+		width: 100%;
+		max-width: 34rem;
+		margin-inline: auto;
+	}
 	.toolbar {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.75rem;
-		margin: 0 0 1.25rem;
-		padding: 0 0.25rem;
+		margin-top: 0;
+		margin-bottom: 1.25rem;
+		padding: 0 0.75rem;
 	}
 	.mode {
 		color: $muted;

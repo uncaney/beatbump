@@ -673,6 +673,22 @@
 		@media screen and (hover: none) {
 			opacity: 1;
 		}
+
+		// White dots vanished on light covers (audit v5 3.1 / TOP 10): a 32px
+		// dark disc behind the icon, inside the 44px button (isolation: isolate
+		// on .dd-button keeps z-index -1 above the cover).
+		:global(.dd-button)::before {
+			content: "";
+			position: absolute;
+			inset: 0;
+			margin: auto;
+			width: 32px;
+			height: 32px;
+			border-radius: 50%;
+			background: rgba(0, 0, 0, 0.45);
+			z-index: -1;
+			pointer-events: none;
+		}
 	}
 
 	@mixin active {
