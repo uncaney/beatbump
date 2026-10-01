@@ -96,7 +96,7 @@ func newServer() *echo.Echo {
 	e.GET("/api/v1/artist/:artistId", api.CacheResponse(5*time.Minute, api.ArtistEndpointHandler))
 
 	// Lyrics via lrclib.net (universal; local or YouTube tracks)
-	e.GET("/api/v1/lyrics", api.LyricsHandler)
+	e.GET("/api/v1/lyrics", api.CacheResponse(24*time.Hour, api.LyricsHandler))
 
 	// Local collection browse (whole self-hosted library, paginated + sorted)
 	e.GET("/api/v1/local/artists", api.LocalArtistsHandler)
