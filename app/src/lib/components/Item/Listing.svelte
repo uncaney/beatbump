@@ -708,11 +708,12 @@
 		// max-width: calc(100% - 4.45em);max-width
 		@media screen and (min-width: 640px) {
 			padding: 0.2rem 0;
-			// Desktop (audit v4 TOP 8 / 3.2): the text column is sized to its
-			// content (capped by the row), so the kebab sits right after the
-			// text instead of 600px away at the far edge of a 1280px row.
-			grid-template-columns: minmax(0, max-content) auto;
-			justify-content: start;
+			// Desktop (audit v8 TOP 6, after v4 TOP 8): the row is capped at
+			// 48rem so the kebab sits at a constant x (~900px at 1280) instead of
+			// following the end of each title, and the text column gets the
+			// whole row for its ellipsis.
+			grid-template-columns: minmax(0, 1fr) auto;
+			max-width: 48rem;
 			column-gap: 0.25rem;
 		}
 	}

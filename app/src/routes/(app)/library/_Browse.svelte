@@ -159,7 +159,9 @@
 	}
 	.grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+		// 18rem cells: 3 columns in the 1020px content column at 1280px
+		// (audit v8 TOP 6: 4 x 255px left ~100px of title, 9/32 clipped).
+		grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
 		gap: 0.25rem 1rem;
 	}
 	.cell {
