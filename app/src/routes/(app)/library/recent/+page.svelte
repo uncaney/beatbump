@@ -102,7 +102,7 @@
 						<span class="day-count">{g.items.length} titre{g.items.length > 1 ? "s" : ""}</span>
 						<button
 							type="button"
-							class="replay"
+							class="replay btn-reset"
 							data-testid="replay-day"
 							disabled={replaying !== ""}
 							on:click={() => replayDay(g)}>Rejouer cette journée</button
@@ -183,14 +183,18 @@
 		color: #999;
 		font-size: 0.9em;
 	}
+	// btn-reset (audit v8 TOP 1 / 3.5): "Rejouer Cette Journee" rendered black
+	// on the dark pill (ratio 1.05) in title-case, 27px tall, under the global
+	// `button:not(.icon-btn)` rule. Own colour, plain case, 44px touch target.
 	.replay {
 		margin-left: auto;
-		min-height: 2.25rem;
+		min-height: max(2.75rem, 44px);
 		padding: 0.35rem 0.9rem;
 		border-radius: 2rem;
 		border: 1px solid rgba(255, 255, 255, 0.25);
 		background: rgba(255, 255, 255, 0.08);
 		color: inherit;
+		text-transform: none;
 		font-weight: 600;
 		cursor: pointer;
 	}

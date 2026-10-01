@@ -156,7 +156,7 @@
 					{#if seeAllUrl && !allSongs && songsTotal > (songs?.items?.length ?? 0)}
 						<button
 							type="button"
-							class="see-all-titles"
+							class="see-all-titles btn-reset"
 							data-testid="see-all-titles"
 							disabled={loadingAll}
 							on:click={showAllSongs}
@@ -232,13 +232,17 @@
 		margin-bottom: 1rem;
 	}
 
+	// btn-reset (audit v8 TOP 1): the global `button:not(.icon-btn)` rule gave
+	// it black text on the translucent pill (1.05:1) and title-case. Own colour,
+	// plain case, 44px touch target (2.75rem = 33px at the 12px mobile root).
 	.see-all-titles {
-		min-height: 2.5rem;
+		min-height: max(2.75rem, 44px);
 		padding: 0.45rem 1rem;
 		border-radius: 2rem;
 		border: 1px solid rgba(255, 255, 255, 0.25);
 		background: rgba(255, 255, 255, 0.08);
 		color: inherit;
+		text-transform: none;
 		font-weight: 600;
 		cursor: pointer;
 		&:disabled {

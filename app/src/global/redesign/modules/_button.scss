@@ -91,7 +91,20 @@ $focus-color: #1c1c1c;
 	}
 }
 
-button:not(.icon-btn),
+// `button:not(.icon-btn)` forces `color: #0f0f0f !important`, title-case
+// (`text-transform: capitalize`), a light background and a fixed em padding
+// on EVERY plain button in the app. Components that fully style themselves
+// (KeepOfflineButton, PlayAllBar, the home "Reprendre" pills, the fullscreen
+// artist button, "Rejouer cette journee", "Voir les N titres") carry their
+// own colour, casing and 44px touch size, which this rule overrode: they
+// rendered black-on-dark at 1.05:1 (audit v7 3.0, v8 TOP 1).
+// `.btn-reset` is the documented opt-out: a button carrying it keeps its own
+// styles (the selector below is the ONLY place the escape is needed, every
+// other rule of this file is opt-in by class). It never disables `.icon-btn`.
+// Cycle 24 put this escape in `global/stylesheet/modules/_button.scss`, which
+// is NOT loaded (nothing imports `global/stylesheet.scss`; only three partials
+// of that tree are pulled by components). This file is the live one.
+button:not(.icon-btn):not(.btn-reset),
 .button {
 	@extend %button-base;
 }
