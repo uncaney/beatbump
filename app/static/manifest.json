@@ -14,19 +14,31 @@
 	"categories": ["music", "entertainment"],
 	"shortcuts": [
 		{
-			"name": "Home",
-			"url": "/home",
+			"name": "Reprendre",
+			"short_name": "Reprendre",
+			"url": "/home?resume=1",
+			"description": "Reprendre la lecture là où tu t'es arrêté.",
 			"icons": [{ "src": "android/android-launchericon-96-96.png", "sizes": "96x96" }]
 		},
 		{
-			"name": "Trending",
-			"url": "/trending",
-			"description": "See the hottest tracks and releases.",
+			"name": "Hors-ligne",
+			"short_name": "Hors-ligne",
+			"url": "/library/downloads-offline",
+			"description": "Tes morceaux gardés sur cet appareil.",
 			"icons": [{ "src": "android/android-launchericon-96-96.png", "sizes": "96x96" }]
 		},
 		{
-			"name": "Library",
-			"url": "/library",
+			"name": "Rechercher",
+			"short_name": "Rechercher",
+			"url": "/home?search=1",
+			"description": "Chercher un titre, un artiste ou un album.",
+			"icons": [{ "src": "android/android-launchericon-96-96.png", "sizes": "96x96" }]
+		},
+		{
+			"name": "Pour toi",
+			"short_name": "Pour toi",
+			"url": "/library/for-you",
+			"description": "Ta sélection d'après ta bibliothèque.",
 			"icons": [{ "src": "android/android-launchericon-96-96.png", "sizes": "96x96" }]
 		}
 	],

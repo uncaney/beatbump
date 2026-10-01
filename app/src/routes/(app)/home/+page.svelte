@@ -9,6 +9,10 @@
 	import { homeChipContext } from "$lib/contexts";
 	import type { PageData } from "./$types";
     import {APIClient} from "$lib/api";
+	import { onMount } from "svelte";
+	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
+	import { buildResumeRow, readLastTrack } from "$lib/homeRows";
+	import { getRecent } from "$lib/me";
 
 	export let data: PageData;
 
@@ -21,6 +25,56 @@
 		visitorData,
 		path,
 	} = data);
+
+	// W6: icon shortcuts land on /home with a one-shot action:
+	// ?search=1 opens the search overlay (the Nav search button, the same
+	// toggle a tap uses), ?resume=1 starts the "Reprendre" row (last track
+	// first, then the recent history), like its first card. The parameter is
+	// then dropped from the URL so a reload does not replay the action.
+	async function openSearchOverlay() {
+		for (let i = 0; i < 20; i++) {
+			if (document.getElementById("searchBox")) return;
+			const btn = document.querySelector<HTMLButtonElement>("button.nav-item__search");
+			if (btn) {
+				btn.click();
+				return;
+			}
+			await new Promise((r) => setTimeout(r, 100));
+		}
+	}
+
+	async function resumeListening() {
+		let last = null;
+		try {
+			last = readLastTrack(localStorage);
+		} catch {
+			last = null;
+		}
+		let recent: any[] = [];
+		try {
+			const r = await getRecent(30);
+			recent = Array.isArray(r?.items) ? r.items : [];
+		} catch {
+			recent = [];
+		}
+		await playTracks(buildResumeRow(last, recent, 10));
+	}
+
+	onMount(() => {
+		const url = new URL(window.location.href);
+		const search = url.searchParams.get("search") === "1";
+		const resume = url.searchParams.get("resume") === "1";
+		if (!search && !resume) return;
+		url.searchParams.delete("search");
+		url.searchParams.delete("resume");
+		try {
+			history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+		} catch {
+			/* keep the parameter: harmless */
+		}
+		if (resume) void resumeListening().catch((err) => console.error("resume shortcut failed", err));
+		if (search) void openSearchOverlay();
+	});
 
 	let loading = false;
 	let hasData = false;
