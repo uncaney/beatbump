@@ -303,6 +303,15 @@
 		$list.mix,
 		$list.position,
 	);
+
+	// Audit UX v11 U11-10: the mobile mini-bar had no progress at all (the
+	// desktop bar has the ProgressBar slider). A 2px line on the bar's top
+	// edge, same stores as the slider; decorative (aria-hidden), absolutely
+	// positioned so it never shifts the bar's layout.
+	$: miniProgress =
+		$historyDuration > 0
+			? Math.min(1, Math.max(0, $historyTime / $historyDuration))
+			: 0;
 </script>
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -316,6 +325,18 @@
 	tabindex="-1"
 	use:keyboardHandler={{ shortcut }}
 >
+	{#if $queue.length !== 0}
+		<div
+			class="mini-progress"
+			data-testid="mini-progress"
+			aria-hidden="true"
+		>
+			<div
+				class="mini-progress-fill"
+				style="transform: scaleX({miniProgress});"
+			/>
+		</div>
+	{/if}
 	<div
 		class="now-playing"
 		style="align-items:center;"
@@ -719,6 +740,32 @@
 
 	.player {
 		background-color: inherit;
+		// containing block of the U11-10 progress line
+		position: relative;
+	}
+
+	// U11-10: 2px progress line on the top edge of the mobile mini-bar. Absolute
+	// (no layout shift), decorative, hidden from 720px where the bar has the
+	// ProgressBar slider. The fill is scaled, not resized (cheap per tick).
+	.mini-progress {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 2px;
+		background: rgba(255, 255, 255, 0.14);
+		pointer-events: none;
+		overflow: hidden;
+		@media screen and (min-width: 720px) {
+			display: none;
+		}
+	}
+	.mini-progress-fill {
+		width: 100%;
+		height: 100%;
+		background: rgba(255, 255, 255, 0.92);
+		transform-origin: left center;
+		will-change: transform;
 	}
 
 	.volume-wrapper {
