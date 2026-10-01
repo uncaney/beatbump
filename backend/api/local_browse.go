@@ -179,13 +179,7 @@ func LocalSongsHandler(c echo.Context) error {
 		payload["filter"] = strings.Join(filters, " AND ")
 	}
 	hits, total := meiliBrowse("tracks", payload)
-	items := make([]IListItemRenderer, 0, len(hits))
-	for _, h := range hits {
-		if mstr(h, "lid") == "" {
-			continue
-		}
-		items = append(items, localSongItem(h))
-	}
+	items := localSongItemsWithCovers(hits)
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"items": items, "total": total, "offset": off, "limit": lim, "sort": sortBy,
 	})

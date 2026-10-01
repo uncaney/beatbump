@@ -10,20 +10,39 @@ import (
 
 // shelfStub is a Meilisearch double for localShelf: one canned hit list per
 // index, plus the list of indexes queried (in order) so a test can assert that
-// e.g. filter=albums never touches the tracks index.
+// e.g. filter=albums never touches the tracks index. Searches return the whole
+// canned list (filters are recorded, not evaluated); a document GET on an index
+// ("<index>/doc" in queried) answers the canned doc with that id, else 404.
 type shelfStub struct {
 	hits    map[string][]map[string]interface{}
 	queried []string
+	filters []string
 }
 
 func (s *shelfStub) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/indexes/") && strings.Contains(r.URL.Path, "/documents/") {
+			rest := strings.TrimPrefix(r.URL.Path, "/indexes/")
+			index, id, _ := strings.Cut(rest, "/documents/")
+			s.queried = append(s.queried, index+"/doc")
+			for _, h := range s.hits[index] {
+				if mstr(h, "id") == id {
+					json.NewEncoder(w).Encode(h)
+					return
+				}
+			}
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		if r.Method != "POST" || !strings.HasPrefix(r.URL.Path, "/indexes/") || !strings.HasSuffix(r.URL.Path, "/search") {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		index := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/indexes/"), "/search")
 		s.queried = append(s.queried, index)
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		s.filters = append(s.filters, mstr(body, "filter"))
 		hits := []interface{}{}
 		for _, h := range s.hits[index] {
 			hits = append(hits, h)
@@ -34,6 +53,7 @@ func (s *shelfStub) handler() http.Handler {
 
 func newShelfStub(t *testing.T) *shelfStub {
 	t.Helper()
+	resetAlbumCoverMemo()
 	stub := &shelfStub{hits: map[string][]map[string]interface{}{
 		"tracks": {
 			{"lid": "e182ccc85ad", "title": "One More Time", "artist": "Daft Punk", "albumArtist": "Daft Punk", "album": "Discovery", "track": 1.0, "durationSec": 320.0},
@@ -65,8 +85,9 @@ func TestLocalShelfFollowsFilter(t *testing.T) {
 		if len(s.Contents) != 1 || s.Contents[0].VideoId == nil || *s.Contents[0].VideoId != "e182ccc85ad" || s.Contents[0].Type != "song" {
 			t.Fatalf("filter=%q: expected 1 song hit (lid e182ccc85ad), got %+v", f, s.Contents)
 		}
-		if strings.Join(stub.queried, ",") != "tracks" {
-			t.Fatalf("filter=%q: expected only the tracks index, queried %v", f, stub.queried)
+		// tracks index for the hits, albums index ONCE for the batched cover lookup
+		if strings.Join(stub.queried, ",") != "tracks,albums" {
+			t.Fatalf("filter=%q: expected tracks then one albums query, queried %v", f, stub.queried)
 		}
 	}
 

@@ -37,12 +37,14 @@ func buildLocalArtist(artistId string) map[string]interface{} {
 
 	songs := meiliSearchIndex("tracks", map[string]interface{}{
 		"q": "", "filter": "albumArtist = \"" + escapeMeili(name) + "\"", "limit": 12,
-		"attributesToRetrieve": []string{"lid", "title", "artist", "albumArtist", "track", "durationSec"},
+		"attributesToRetrieve": []string{"lid", "title", "artist", "albumArtist", "album", "track", "durationSec"},
 	})
-	songItems := make([]IListItemRenderer, 0, len(songs))
-	for _, s := range songs {
-		songItems = append(songItems, localSongItem(s))
+	// The artist's album docs are already in hand: memoise their covers so the
+	// song rows need no extra albums query.
+	for _, a := range albs {
+		albumCoverStore(mstr(a, "id"), mstr(a, "coverLid"))
 	}
+	songItems := localSongItemsWithCovers(songs)
 
 	// Two thumbnail sizes: ArtistPageHeader iterates thumbnails and references
 	// thumbnail[i+1], so a single entry made the page crash (now also guarded UI-side).
@@ -155,6 +157,11 @@ func buildLocalAlbum(ref string) (map[string]interface{}, bool) {
 	}
 	if !found {
 		return nil, false
+	}
+	// The page cover (album doc coverLid, else the first rebuilt track's lid) is
+	// the cover of every row: memoise it under the canonical id, no extra query.
+	if cover != "" {
+		albumCoverStore(albumId, cover)
 	}
 	items := make([]IListItemRenderer, 0, len(tracks))
 	for _, t := range tracks {
