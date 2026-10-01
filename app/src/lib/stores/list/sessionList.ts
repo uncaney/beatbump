@@ -29,6 +29,7 @@ import { derived } from "svelte/store";
 import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
+import { removeAt } from "./queueOps";
 import { fetchNext, filterList } from "./utils.list";
 import { APIClient } from "$lib/api";
 import { SERVER_DOMAIN } from "../../../env";
@@ -893,22 +894,27 @@ export class ListService {
 
     /**
      * Remove the row at `index`. The cursor keeps pointing at the playing
-     * track (it shifts left by one when a row before it is removed); removing
-     * the current row leaves the cursor on the row that took its place.
+     * track (it shifts left by one when a row before it is removed). Removing
+     * the playing row leaves the cursor on the row that took its place (the
+     * previous row when it was the last one) and starts that row, so the
+     * audio never plays a track the queue no longer shows (G3). Removing the
+     * only row empties the queue; the audio is left alone.
      */
     public removeTrack(index: number) {
         const { mix, position } = this._$.value;
         if (index < 0 || index >= mix.length) return;
-        const next = [...mix.slice(0, index), ...mix.slice(index + 1)];
-        const newPosition =
-            index < position
-                ? position - 1
-                : Math.min(position, Math.max(next.length - 1, 0));
-        this._$.update((u) => ({ ...u, mix: next, position: newPosition }));
+        const plan = removeAt(mix, position, index);
+        this._$.update((u) => ({ ...u, mix: plan.mix, position: plan.position }));
         // The track after the current one may have changed.
         this.clearNextTrack();
         this.schedulePrefetch();
         syncTabs.updateSessionList(this._$.value);
+        if (plan.replay) {
+            const track = plan.mix[plan.position];
+            void Promise.resolve(
+                getSrc(track?.videoId, track?.playlistId, undefined, true),
+            ).catch(() => {});
+        }
     }
 
     /**
