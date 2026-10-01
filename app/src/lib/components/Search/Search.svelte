@@ -14,6 +14,7 @@
 	import { buildResumeRow, readLastTrack } from "$lib/homeRows";
 	import { getRecent } from "$lib/me";
 	import { getOfflineTracks } from "$lib/offline";
+	import { entityHref } from "$lib/local";
 	import type { Item } from "$lib/types";
 
 	export let type: "inline";
@@ -50,7 +51,7 @@
 
 	// "Reprendre" (audit v3 3.3): with an empty box the overlay also lists the
 	// last RESUME_MAX played local tracks (lastTrack + me/stats/recent, the
-	// offline cache as fallback), as playable rows under the recent searches.
+	// offline cache as fallback), as playable rows above the recent searches.
 	// Loaded 150 ms after mount; typing before that cancels the load.
 	const RESUME_MAX = 5;
 	const RESUME_DEBOUNCE_MS = 150;
@@ -61,18 +62,31 @@
 	// library hits (songs then artists) once the user types.
 	$: localBlock = showRecentSearches ? resumeRows : localRows;
 
+	// "Tendances" (audit v4 TOP 7 / 3.3): a fresh profile has neither resume
+	// rows nor recent searches, so the empty overlay used to show nothing.
+	// Fallback: TRENDING_MAX items of /api/v1/trending (cached 5 min server
+	// side), the "Trending" songs carousel first, any non-empty one otherwise;
+	// the recently added local songs if trending fails (YouTube down/offline).
+	const TRENDING_MAX = 6;
+	let trendingRows: Item[] = [];
+	let trendingRequested = false;
+	let destroyed = false;
+	$: showTrending =
+		showRecentSearches &&
+		resumeRows.length === 0 &&
+		recentSearches.length === 0 &&
+		trendingRows.length > 0;
+
 	onMount(() => {
 		if (browser) {
-			const stored = localStorage.getItem("recentSearches");
-			if (stored) {
-				recentSearches = JSON.parse(stored);
-			}
+			recentSearches = readRecentSearches();
 			showRecentSearches = true;
 			scheduleResume();
 		}
 	});
 
 	onDestroy(() => {
+		destroyed = true;
 		cancelLocal();
 		cancelResume();
 	});
@@ -119,16 +133,147 @@
 		resumeRows = buildResumeRow(last, recent, RESUME_MAX * 4)
 			.filter((it) => isLocalTrackId(it?.videoId))
 			.slice(0, RESUME_MAX) as Item[];
+		if (resumeRows.length === 0 && recentSearches.length === 0) {
+			void loadTrending();
+		}
+	}
+
+	async function loadTrending() {
+		if (trendingRequested || destroyed) return;
+		trendingRequested = true;
+		let rows: Item[] = [];
+		try {
+			const res = await APIClient.fetch(`/api/v1/trending`);
+			if (res.ok) {
+				const data = await res.json();
+				const carousels: any[] = Array.isArray(data?.carousels)
+					? data.carousels
+					: [];
+				const withItems = carousels.filter(
+					(c) => Array.isArray(c?.items) && c.items.length > 0,
+				);
+				const pick =
+					withItems.find((c) => /trending|tendance/i.test(c?.header?.title ?? "")) ??
+					withItems[0];
+				rows = (pick?.items ?? [])
+					.filter((it: any) => it?.title && (it?.videoId || it?.endpoint?.browseId))
+					.slice(0, TRENDING_MAX);
+			}
+		} catch {
+			rows = [];
+		}
+		if (rows.length === 0) {
+			try {
+				const res = await APIClient.fetch(
+					`/api/v1/local/songs?limit=${TRENDING_MAX}&sort=dateAdded:desc`,
+				);
+				const data = res.ok ? await res.json() : { items: [] };
+				rows = Array.isArray(data?.items) ? data.items.slice(0, TRENDING_MAX) : [];
+			} catch {
+				rows = [];
+			}
+		}
+		if (destroyed) return;
+		trendingRows = rows;
+	}
+
+	/** A trending song plays (local lid = local mix), an album/playlist opens. */
+	async function activateTrending(item: Item) {
+		const vid = item?.videoId;
+		if (vid) {
+			if (isLocalTrackId(vid)) {
+				await playLocalSong(item);
+				return;
+			}
+			closeOverlay();
+			await SessionListService.initAutoMixSession({
+				videoId: vid,
+				playlistId: (item as any)?.playlistId,
+				clickedItem: item,
+			});
+			return;
+		}
+		const ep = (item as any)?.endpoint;
+		if (!ep?.browseId) return;
+		closeOverlay();
+		goto(entityHref(ep.browseId, ep.pageType));
+	}
+
+	function trendingSubtitle(item: Item): string {
+		const sub = Array.isArray(item?.subtitle) ? item.subtitle : [];
+		return (
+			item?.artistInfo?.artist?.[0]?.text ??
+			sub
+				.map((s: any) => s?.text ?? "")
+				.join("")
+				.trim()
+		);
+	}
+
+	// Recent searches (audit v4 3.3): last RECENT_MAX submitted queries under
+	// localStorage `ytm-recent-searches`, shown under "Reprendre" while the box
+	// is empty; click = run the search again, a button clears the list. The
+	// pre-v4 `recentSearches` key is migrated once, then dropped.
+	const RECENT_KEY = "ytm-recent-searches";
+	const RECENT_LEGACY_KEY = "recentSearches";
+	const RECENT_MAX = 5;
+
+	function cleanRecent(v: unknown): string[] {
+		if (!Array.isArray(v)) return [];
+		const out: string[] = [];
+		for (const q of v) {
+			if (typeof q !== "string") continue;
+			const t = q.trim();
+			if (t && !out.includes(t)) out.push(t);
+			if (out.length >= RECENT_MAX) break;
+		}
+		return out;
+	}
+
+	function readRecentSearches(): string[] {
+		try {
+			const stored = localStorage.getItem(RECENT_KEY);
+			if (stored !== null) return cleanRecent(JSON.parse(stored));
+			const legacy = localStorage.getItem(RECENT_LEGACY_KEY);
+			if (legacy === null) return [];
+			const migrated = cleanRecent(JSON.parse(legacy));
+			localStorage.setItem(RECENT_KEY, JSON.stringify(migrated));
+			localStorage.removeItem(RECENT_LEGACY_KEY);
+			return migrated;
+		} catch {
+			return [];
+		}
+	}
+
+	function writeRecentSearches() {
+		try {
+			localStorage.setItem(RECENT_KEY, JSON.stringify(recentSearches));
+		} catch {
+			/* private mode / quota: the list just lives for this overlay */
+		}
 	}
 
 	function addToRecentSearches(searchQuery: string) {
 		if (!browser) return;
+		const q = searchQuery.trim();
+		if (!q) return;
+		recentSearches = [q, ...recentSearches.filter((s) => s !== q)].slice(
+			0,
+			RECENT_MAX,
+		);
+		writeRecentSearches();
+	}
 
-		recentSearches = [
-			searchQuery,
-			...recentSearches.filter((s) => s !== searchQuery),
-		].slice(0, 5);
-		localStorage.setItem("recentSearches", JSON.stringify(recentSearches));
+	function clearRecentSearches() {
+		recentSearches = [];
+		writeRecentSearches();
+		// Nothing left to show on a fresh profile: bring the Tendances in.
+		if (resumeRows.length === 0) void loadTrending();
+	}
+
+	function runRecentSearch(q: string) {
+		query = q;
+		handleSubmit();
 	}
 
 	async function handleSubmit() {
@@ -371,7 +516,7 @@
 	on:keydown={handleKeyDown}
 	on:submit|preventDefault={handleSubmit}
 >
-	<div class="nav-item">
+	<div class="nav-item search-field">
 		<div
 			role="textbox"
 			class="input search-input-wrapper"
@@ -411,38 +556,13 @@
 			/>
 		</div>
 	</div>
-	{#if ((results.length > 0 || hasLocal) && !showRecentSearches) || (showRecentSearches && (recentSearches.length > 0 || resumeRows.length > 0))}
+	{#if ((results.length > 0 || hasLocal) && !showRecentSearches) || (showRecentSearches && (recentSearches.length > 0 || resumeRows.length > 0 || showTrending))}
 		<ul
 			role="listbox"
 			id="suggestions"
 			bind:this={listbox}
 			class="suggestions"
 		>
-			{#if showRecentSearches && recentSearches.length > 0}
-				<li class="recent-searches-header group-header">Recent Searches</li>
-				{#each recentSearches as recentQuery}
-					<li
-						tabindex="0"
-						on:click={() => {
-							query = recentQuery;
-							handleSubmit();
-						}}
-						on:keydown={(e) => {
-							if (e.key === " ") {
-								query = recentQuery;
-								handleSubmit();
-							}
-						}}
-					>
-						<Icon
-							name="history"
-							size="1rem"
-							style="color: var(--text-secondary);"
-						/>
-						{recentQuery}
-					</li>
-				{/each}
-			{/if}
 			{#if localBlock.length > 0}
 				<!-- One markup for both local blocks: "Reprendre" (empty box, last
 				     played local tracks) and "Dans ta bibliothèque" (typed query). -->
@@ -486,6 +606,80 @@
 					</li>
 				{/each}
 			{/if}
+			{#if showRecentSearches && recentSearches.length > 0}
+				<li
+					class="recent-searches-header group-header recent-header"
+					data-testid="recent-searches-header"
+				>
+					<span>Recherches récentes</span>
+					<button
+						type="button"
+						class="recent-clear"
+						data-testid="recent-searches-clear"
+						aria-label="Effacer les recherches récentes"
+						on:click|stopPropagation={clearRecentSearches}>Effacer</button
+					>
+				</li>
+				{#each recentSearches as recentQuery (recentQuery)}
+					<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+					<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+					<li
+						tabindex="0"
+						data-testid="recent-search"
+						on:click={() => runRecentSearch(recentQuery)}
+						on:keydown={(e) => {
+							if (e.key === "Enter" || e.key === " ") {
+								e.preventDefault();
+								e.stopPropagation();
+								runRecentSearch(recentQuery);
+							}
+						}}
+					>
+						<Icon
+							name="clock"
+							size="1rem"
+							style="color: var(--text-secondary);"
+						/>
+						<span class="recent-text">{recentQuery}</span>
+					</li>
+				{/each}
+			{/if}
+			{#if showTrending}
+				<li
+					class="recent-searches-header group-header"
+					data-testid="trending-header">Tendances</li
+				>
+				{#each trendingRows as item, i (item.videoId || item?.endpoint?.browseId || i)}
+					<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+					<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+					<li
+						tabindex="0"
+						class="local-row"
+						data-testid="trending-suggestion"
+						on:click={() => activateTrending(item)}
+						on:keydown={(e) => {
+							if (e.key === "Enter" || e.key === " ") {
+								e.preventDefault();
+								e.stopPropagation();
+								activateTrending(item);
+							}
+						}}
+					>
+						<Icon
+							name={item.videoId ? "play" : "album"}
+							size="1rem"
+							style="color: var(--text-secondary);"
+						/>
+						<span class="local-text">
+							<span class="local-title">{item.title}</span>
+							{#if trendingSubtitle(item)}
+								<span class="local-artist">{trendingSubtitle(item)}</span>
+							{/if}
+						</span>
+						<span class="local-badge">tendance</span>
+					</li>
+				{/each}
+			{/if}
 			{#if !showRecentSearches}
 				<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 				{#each results as result (result.id)}
@@ -509,7 +703,7 @@
 			{/if}
 		</ul>
 	{/if}
-	<div class="nav-item">
+	<div class="nav-item filter-field">
 		<div
 			class="select search-select-wrapper"
 			class:inline={type === "inline" ? true : false}
@@ -574,6 +768,48 @@
 		left: 0;
 		right: 0;
 		width: 100%;
+
+		// Phones (audit v4 TOP 7 bis): the box takes the whole row (>= 300 px
+		// at 390 px) and the filter select shrinks to a compact pill on the
+		// right, instead of a 190 px box next to a 130 px select.
+		@media only screen and (max-width: 640px) {
+			box-sizing: border-box;
+			justify-content: stretch;
+			align-items: center;
+			gap: 0.375rem;
+			padding-inline: 0.375rem;
+
+			.nav-item {
+				margin: 0;
+			}
+
+			.search-field {
+				flex: 1 1 auto;
+				min-width: 0;
+			}
+
+			.filter-field {
+				flex: 0 0 auto;
+			}
+
+			.search-input-wrapper {
+				width: 100%;
+				min-width: 0;
+				max-width: none;
+			}
+
+			.search-select-wrapper.inline {
+				width: 5.75rem;
+				min-width: 0;
+				max-width: 5.75rem;
+
+				select {
+					padding-right: 1.6em;
+					text-overflow: ellipsis;
+					overflow: hidden;
+				}
+			}
+		}
 	}
 
 	ul {
@@ -615,6 +851,36 @@
 			&:hover {
 				background: rgb(255 255 255 / 10%);
 			}
+		}
+
+		li.recent-header {
+			justify-content: space-between;
+			padding-block: 0.25em;
+		}
+
+		.recent-clear {
+			font: inherit;
+			font-size: 0.9em;
+			color: var(--text-secondary);
+			background: none;
+			border: 1px solid hsl(0deg 0% 66.7% / 35%);
+			border-radius: 999px;
+			padding: 0.35em 0.9em;
+			min-height: 2.25rem;
+			cursor: pointer;
+
+			&:hover,
+			&:focus-visible {
+				color: inherit;
+				border-color: hsl(0deg 0% 66.7% / 70%);
+			}
+		}
+
+		.recent-text {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
 		}
 
 		li.group-header {

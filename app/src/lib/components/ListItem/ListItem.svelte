@@ -484,6 +484,7 @@
 	class="m-item"
 	tabindex="0"
 	class:isPlaying
+	class:release-row={currentCtx === "release"}
 	{draggable}
 	on:click|stopPropagation={handleClick}
 	on:pointerenter={() => {
