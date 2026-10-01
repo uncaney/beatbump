@@ -31,7 +31,10 @@
 	on:click={() => dispatch("play", track)}
 	on:keydown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), dispatch("play", track))}
 >
-	<div class="lead">
+	<div
+		class="lead"
+		class:has-thumb={number === undefined && !!thumb && !imgBroken}
+	>
 		{#if number !== undefined}
 			<span class="num">{number}</span>
 		{:else if thumb && !imgBroken}
@@ -181,16 +184,24 @@
 	.pending-label {
 		color: $warn;
 	}
-	// Remove button: 44px square, light glyph (overrides global %button-base).
+	// Pin + remove buttons (audit v3 1.8 / TOP 10 #9): outline boxes, 44x36
+	// minimum, transparent background with a 1px rgba(255,255,255,.35) border
+	// (the global %button-base paints a solid white pill, which made the
+	// unpinned pin look "active"). Pinned = green border + icon.
+	.pin,
 	.rm {
 		flex: 0 0 auto;
+		box-sizing: border-box;
+		min-width: 2.75rem; // 44px
+		min-height: 2.25rem; // 36px
 		width: 2.75rem;
-		height: 2.75rem;
+		height: 2.25rem;
 		padding: 0;
+		margin: 0;
 		display: grid;
 		place-items: center;
-		background: rgba(255, 255, 255, 0.08) !important;
-		border: 1px solid rgba(255, 255, 255, 0.2) !important;
+		background: transparent !important;
+		border: 1px solid rgba(255, 255, 255, 0.35) !important;
 		box-shadow: none !important;
 		color: $text !important;
 		border-radius: 0.5rem;
@@ -205,8 +216,8 @@
 		&:focus,
 		&:focus-within,
 		&:active {
-			background: rgba(255, 255, 255, 0.16) !important;
-			border-color: rgba(255, 255, 255, 0.35) !important;
+			background: rgba(255, 255, 255, 0.12) !important;
+			border-color: rgba(255, 255, 255, 0.6) !important;
 			color: $text !important;
 			box-shadow: none !important;
 		}
@@ -215,12 +226,41 @@
 			outline-offset: 2px;
 		}
 	}
+	.pin.on,
+	.pin.on:hover,
+	.pin.on:focus,
+	.pin.on:focus-within,
+	.pin.on:active {
+		color: $accent !important;
+		border-color: $accent !important;
+		background: rgba(30, 215, 96, 0.12) !important;
+	}
 	@media (max-width: 640px) {
 		.sub {
 			white-space: normal;
 		}
 	}
-	.pin.on {
-		color: #1ed760;
+	// Touch screens: a visible 36px round play badge on the cover, like the
+	// search rows (ListItem index.scss). Decorative: the row itself is the
+	// button ("Lire"), so pointer-events none and no extra name.
+	@media (hover: none) {
+		.lead.has-thumb::after {
+			content: "";
+			position: absolute;
+			inset: 0;
+			margin: auto;
+			width: 36px;
+			height: 36px;
+			border-radius: 50%;
+			pointer-events: none;
+			background: rgba(0, 0, 0, 0.55)
+				url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff'><path d='M8 5v14l11-7z'/></svg>")
+				center / 16px 16px no-repeat;
+			box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+		}
+		.row.active .lead.has-thumb::after,
+		.row.pending .lead.has-thumb::after {
+			display: none;
+		}
 	}
 </style>
