@@ -127,6 +127,9 @@
 	const RESUME_DEBOUNCE_MS = 150;
 	let resumeRows: Item[] = [];
 	let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+	// J18: true once the resume lookup answered (empty or not) for this
+	// opening; the Tendances block (and its placeholders) waits for it.
+	let resumeResolved = false;
 
 	// The local block shows the resume rows while the box is empty, the
 	// library hits (songs then artists) once the user types.
@@ -135,13 +138,18 @@
 	// Tendances (fetch + cache in the module script above). Audit v6 TOP 4:
 	// the block (heading + TRENDING_MAX placeholder rows) renders as soon as
 	// the empty overlay has nothing else to show, without waiting for the
-	// resume lookup nor the YouTube answer.
+	// YouTube answer. J18: but only once the resume lookup answered empty,
+	// never during it: a profile with history would otherwise flash six
+	// placeholders that the "Reprendre" rows then push out (layout jump).
+	// The fetch itself still starts at mount (prefetchTrending, 5 min cache),
+	// so the rows are usually ready the moment the block may show.
 	let trendingRows: Item[] = [];
 	let trendingRequested = false;
 	let trendingLoading = false;
 	let destroyed = false;
 	$: showTrending =
 		showRecentSearches &&
+		resumeResolved &&
 		resumeRows.length === 0 &&
 		recentSearches.length === 0 &&
 		(trendingRows.length > 0 || trendingLoading);
@@ -152,8 +160,9 @@
 			// A pre-filled box (H7) must not open on the empty-box rows.
 			showRecentSearches = !query.trim();
 			scheduleResume();
-			// Fresh profile: start the Tendances now (placeholders render at
-			// once), not after the 150 ms resume debounce + getRecent.
+			// Fresh profile: start the Tendances fetch now (rows warm), not
+			// after the 150 ms resume debounce + getRecent; the block itself
+			// shows once the resume lookup answered empty (J18).
 			if (showRecentSearches && recentSearches.length === 0) void loadTrending();
 		}
 	});
@@ -203,9 +212,15 @@
 				recent = [];
 			}
 		}
-		resumeRows = buildResumeRow(last, recent, RESUME_MAX * 4)
-			.filter((it) => isLocalTrackId(it?.videoId))
-			.slice(0, RESUME_MAX) as Item[];
+		try {
+			resumeRows = buildResumeRow(last, recent, RESUME_MAX * 4)
+				.filter((it) => isLocalTrackId(it?.videoId))
+				.slice(0, RESUME_MAX) as Item[];
+		} catch {
+			resumeRows = [];
+		}
+		if (destroyed) return;
+		resumeResolved = true; // J18: the Tendances block may show from here on
 		if (resumeRows.length === 0 && recentSearches.length === 0) {
 			void loadTrending();
 		}
@@ -536,6 +551,9 @@
 	function handleFocus() {
 		if (!query.trim()) {
 			showRecentSearches = true;
+			// J18: a lookup cancelled by typing (cancelResume) never answered:
+			// ask again so the Tendances gate can open on an empty profile.
+			if (!resumeResolved && !resumeTimer) scheduleResume();
 			return;
 		}
 		scheduleLocal();
@@ -547,6 +565,7 @@
 		if (!query) {
 			results = [];
 			showRecentSearches = true;
+			if (!resumeResolved && !resumeTimer) scheduleResume(); // J18, see handleFocus
 			return;
 		}
 		showRecentSearches = false;
