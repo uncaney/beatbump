@@ -51,28 +51,53 @@
 </div>
 
 <style lang="scss">
+	// Audit UX v9 TOP 10 #10: anchored above the mini-bar (not mid-screen),
+	// stacked, and off to the side on desktop so it stops reading as a banner
+	// blocking the flow; still full-width bottom-centre on phones, where
+	// there is no room to dock it to a corner.
 	.alert-container {
 		display: flex;
-        flex-direction: column;
+		flex-direction: column;
+		gap: 0.5rem;
 		justify-content: center;
 		position: fixed;
-		bottom: var(--alert-bottom, 5.75rem);
+		// --alert-bottom is set by +layout.svelte (5.75em with a mini-bar,
+		// 0rem without): keep using it so the offset still reacts to the
+		// player bar actually being shown. Its own fallback uses the shared
+		// --player-bar-height var (72px if that's unset either).
+		bottom: calc(var(--alert-bottom, calc(var(--player-bar-height, 72px) + 0.75rem)) + env(safe-area-inset-bottom, 0px));
 		left: 0;
-		// flex-direction: column;flex-direction
 		right: 0;
 		z-index: 1000;
-		// isolation: isolate;isolation
 		max-height: 60vmin;
 		align-items: center;
 		margin: 0 auto;
 		contain: layout;
 		padding-bottom: 0.75rem;
+		// Container is click-through so the page under it stays usable; each
+		// toast opts back in below (and the has-action button was already
+		// doing this before).
 		pointer-events: none;
+
+		@media (min-width: 640px) {
+			left: auto;
+			align-items: flex-end;
+			padding-right: max(1.25rem, env(safe-area-inset-right, 0px));
+		}
 	}
 
-	// The container is click-through; an alert with a button must not be.
-	.alert.has-action {
+	// The toast itself still receives pointer events (hover/click on its own
+	// action), only the container around it is click-through.
+	.alert {
 		pointer-events: auto;
+
+		@media (min-width: 640px) {
+			max-width: 26rem;
+			width: auto;
+		}
+	}
+
+	.alert.has-action {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
