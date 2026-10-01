@@ -481,6 +481,7 @@
 				class="player-btn no-style mini-secondary"
 				href="/lyrics"
 				aria-label="Paroles"
+				data-testid="player-lyrics"
 				title="Paroles"
 				style="display:flex;align-items:center;color:#fff;"
 				on:click|preventDefault|stopPropagation={() => {

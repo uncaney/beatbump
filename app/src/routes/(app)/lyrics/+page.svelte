@@ -14,6 +14,7 @@
 	import { APIClient } from "$lib/api";
 	import EmptyState from "$components/EmptyState/EmptyState.svelte";
 	import { onDestroy, onMount, tick } from "svelte";
+	import { fullscreenStore } from "$lib/components/Player/channel";
 
 	const { currentTimeStore } = AudioPlayer;
 	const FOLLOW_RESUME_MS = 4000;
@@ -182,6 +183,8 @@
 	}
 
 	onMount(() => {
+		// Safety net (audit UX v4 TOP 1): the fullscreen player never stays over the lyrics.
+		fullscreenStore.set("closed");
 		try {
 			const s = localStorage.getItem(FONT_KEY);
 			if (s === "s" || s === "m" || s === "l") size = s;

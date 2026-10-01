@@ -21,9 +21,12 @@ export const load: PageServerLoad = async ({ params }) => {
     const response = await APIClient.fetch(
         `/api/v1/artist/`+ params?.slug,
     );
-	if (!response) throw error(500, "Failed to fetch");
+	if (!response) throw error(500, "Impossible de charger cet artiste");
+	// Audit UX v4 (regression 1): an unknown artist is a 404, not an "Internal Error";
+	// the upstream statusText never reaches the page.
+	if (response.status === 404) throw error(404, "Artiste introuvable");
+	if (!response.ok) throw error(500, "Impossible de charger cet artiste");
 	const data = await response.json();
-	if (!response.ok) throw error(500, response.statusText);
 	const page = parseResponse(data);
 
 	return Object.assign(page);

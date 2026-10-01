@@ -6,10 +6,17 @@
 	// No forced redirect any more (audit 1.14 / TOP 10 #2): the user chooses
 	// between going home and going back.
 	$: status = $page?.status ?? 404;
+	// Messages are chosen here (French, per status); a raw upstream statusText such as
+	// "Internal Error" is never shown (audit UX v4 regression 1).
+	$: raw = ($page?.error?.message || "").trim();
 	$: message =
 		status === 404
-			? "Looks like you hit a dead end!"
-			: $page?.error?.message || "Something went wrong.";
+			? /artiste/i.test(raw)
+				? "Cet artiste n'existe pas ou n'est plus disponible."
+				: "Cette page n'existe pas ou n'est plus proposée."
+			: /^(impossible|cette|ce |la |le |l')/i.test(raw)
+				? raw
+				: "Une erreur est survenue, réessaie dans un instant.";
 
 	function back() {
 		if (!browser) return;

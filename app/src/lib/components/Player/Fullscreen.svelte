@@ -125,6 +125,10 @@
 		try {
 			await goto(path);
 		} finally {
+			// Audit UX v4 TOP 1: close once more after the navigation in case a click on the
+			// `.player` container re-toggled the store while the page was changing.
+			fullscreenStore.set("closed");
+			await tick();
 			leavingTimer = setTimeout(() => (leaving = false), 1200);
 		}
 	}
@@ -454,6 +458,7 @@
 	<div
 		class="fullscreen-player-popup"
 		class:open={state === "open"}
+		data-state={state}
 		out:slideInOut={{ duration: 1400, delay: 400, easing: quartOut }}
 	>
 		<div
