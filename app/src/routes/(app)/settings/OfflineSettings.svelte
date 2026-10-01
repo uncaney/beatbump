@@ -41,6 +41,9 @@
 
 	$: customQuota = quota > 0 && !QUOTA_OPTIONS.some((o) => o.bytes === quota);
 	$: cachedTracks = entries.length;
+	// The status line shows "0 tracks": nothing to re-sync. Not when the SW
+	// did not answer ("Unknown"): Re-sync stays available as a retry.
+	$: nothingCached = !loading && !(error && !entries.length) && cachedTracks === 0;
 
 	function fmtBytes(bytes: number): string {
 		if (!(bytes > 0)) return "0 MB";
@@ -227,12 +230,17 @@
 			>Rebuilds the offline track list from what is really cached on this
 			device.</span
 		>
+		<!-- Disabled while the status shows "0 tracks": there is nothing to
+		     re-sync (audit v3 TOP 10 #10); the title says why. -->
 		<button
 			type="button"
 			id="offline-resync"
 			class="btn"
 			aria-describedby="offline-resync-desc"
-			disabled={loading || !!busy}
+			disabled={loading || !!busy || nothingCached}
+			title={nothingCached
+				? "Aucune piste en cache : rien à resynchroniser"
+				: "Reconstruit la liste hors-ligne à partir du cache de cet appareil"}
 			on:click={doResync}
 		>
 			{busy === "resync" ? "Re-syncing…" : "Re-sync list"}

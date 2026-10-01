@@ -81,7 +81,13 @@
 				</div>
 			</div>
 			<div class="setting">
-				<label>Immersive Queue</label>
+				<!-- svelte-ignore a11y-label-has-associated-control -->
+				<label
+					>Immersive Queue
+					<span class="help"
+						>Affiche la file en plein écran avec la pochette en fond</span
+					>
+				</label>
 				<input
 					type="checkbox"
 					name="immersive-queue"
@@ -97,7 +103,13 @@
 		<section>
 			<span class="h5">Playback</span>
 			<div class="setting">
-				<label>Dedupe Automix</label>
+				<!-- svelte-ignore a11y-label-has-associated-control -->
+				<label
+					>Dedupe Automix
+					<span class="help"
+						>Évite les doublons dans les mixes automatiques</span
+					>
+				</label>
 
 				<input
 					name="dedupe"
