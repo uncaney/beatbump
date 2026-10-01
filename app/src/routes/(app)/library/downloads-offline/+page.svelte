@@ -15,7 +15,17 @@
 	import AlbumCard from "$components/Offline/AlbumCard.svelte";
 	import OfflineTrackRow from "$components/Offline/OfflineTrackRow.svelte";
 	import MixtapeSheet from "$components/Offline/MixtapeSheet.svelte";
-	import { getOfflineTracks, listCachedAudio, removeOffline, reconcileOfflineList, pinOffline } from "$lib/offline";
+	import {
+		cacheTrackOffline,
+		downloadForOffline,
+		getOfflineTracks,
+		isStableAudioUrl,
+		listCachedAudio,
+		recacheEvicted,
+		removeOffline,
+		reconcileOfflineList,
+		pinOffline,
+	} from "$lib/offline";
 	import {
 		formatBytes,
 		groupByAlbum,
@@ -53,9 +63,13 @@
 	$: recent = recentlyCached(tracks, -1);
 	$: size = formatBytes(totalBytes(tracks));
 	// Only entries acknowledged by the service worker (`_cached === true`) are
-	// playable offline; `_cached === false` = download still in flight.
+	// playable offline; `_cached === false` = download still in flight, unless
+	// `_evicted` (the SW dropped it: "à retélécharger", not "en cours", G8).
 	$: readyCount = tracks.filter((t) => t?._cached === true).length;
-	$: pendingCount = tracks.filter((t) => t?._cached === false).length;
+	$: evictedCount = tracks.filter((t) => t?._evicted === true).length;
+	$: pendingCount = tracks.filter((t) => t?._cached === false && t?._evicted !== true).length;
+	// Re-download of the evicted entries (global button): 0 = idle.
+	let recaching = 0;
 	$: canPlay = readyCount > 0;
 	$: canShuffle = readyCount >= 2;
 	$: canMixtape = readyCount >= 2;
@@ -171,15 +185,99 @@
 		refresh();
 	}
 
-	// Pin: a track (toggle) or an album ({ tracks, pinned }); pinned entries are never evicted.
+	// One evicted row: re-download it (stable URL) and refresh (G8).
+	async function recacheOne(t: any) {
+		if (!t || !isStableAudioUrl(t._offlineUrl)) return notify("Ce morceau ne peut pas être retéléchargé d'ici", "error");
+		tracks = tracks.map((x) => (x.videoId === t.videoId ? { ...x, _evicted: undefined } : x));
+		const r = await cacheTrackOffline(t, t._offlineUrl);
+		await refresh();
+		if (r.ok) notify("Morceau retéléchargé", "success");
+		else notify(r.reason === "quota" ? QUOTA_MSG : "Retéléchargement impossible pour l'instant", "error");
+	}
+
+	// Every evicted entry: recacheEvicted() runs them one by one; the header
+	// counter says "N en cours" while it runs and the toast gives the tally.
+	async function recacheAll() {
+		if (recaching) return;
+		recaching = evictedCount;
+		try {
+			const r = await recacheEvicted();
+			await refresh();
+			if (!r.total) notify("Aucun morceau à retélécharger", "success");
+			else if (r.ok === r.total) notify(r.ok > 1 ? `${r.ok} morceaux retéléchargés` : "Morceau retéléchargé", "success");
+			else notify(`${r.ok} retéléchargés sur ${r.total}`, "error");
+		} finally {
+			recaching = 0;
+		}
+	}
+
+	// Toast when the SW refuses a pin because pinned bytes would exceed the quota (G7).
+	const QUOTA_MSG = "Quota atteint, augmente-le dans Réglages";
+
+	// Download a not-yet-cached track (stable /localf or /aud URL straight to the
+	// SW, otherwise through the API URL resolution), then pin it. Runs in the
+	// background: the toast announces "en cours de téléchargement" at once and
+	// the list refreshes when the download lands.
+	async function downloadThenPin(t: any): Promise<boolean> {
+		const r = isStableAudioUrl(t?._offlineUrl) ? await cacheTrackOffline(t, t._offlineUrl) : await downloadForOffline(t);
+		if (!r.ok) return false;
+		const p = await pinOffline(t, true);
+		if (!p.ok && p.reason === "quota") notify(QUOTA_MSG, "error");
+		return p.ok;
+	}
+
+	// Pin: a track (toggle) or an album ({ tracks, pinned }); pinned entries are
+	// never evicted. A track not cached yet is downloaded first, then pinned (G6);
+	// the toast is honest about partial results ("3 épinglés sur 5").
 	async function pin(d: any) {
 		const items: any[] = Array.isArray(d?.tracks) ? d.tracks : [d];
-		const pinned = Array.isArray(d?.tracks) ? !!d.pinned : !d?._pinned;
+		const album = Array.isArray(d?.tracks);
+		const pinned = album ? !!d.pinned : !d?._pinned;
 		let ok = 0;
-		for (const t of items) if (await pinOffline(t, pinned)) ok++;
+		let failed = 0;
+		let quotaHit = 0;
+		const toDownload: any[] = [];
+		for (const t of items) {
+			const r = await pinOffline(t, pinned);
+			if (r.ok) ok++;
+			else if (pinned && r.reason === "not_cached") toDownload.push(t);
+			else if (pinned && r.reason === "quota") quotaHit++;
+			else failed++;
+		}
 		await refresh();
-		if (!ok) notify("Ce morceau n'est pas encore dans le cache", "error");
-		else notify(pinned ? (ok > 1 ? `${ok} morceaux épinglés hors-ligne` : "Épinglé hors-ligne : jamais évincé") : (ok > 1 ? `${ok} morceaux désépinglés` : "Désépinglé"), "success");
+		const total = items.length;
+		// Quota refused the pin (G7): say so, with the partial count when any landed.
+		if (quotaHit) {
+			notify((ok ? `${ok} ${ok > 1 ? "épinglés" : "épinglé"} sur ${total} · ` : "") + QUOTA_MSG, "error");
+			return;
+		}
+		if (!pinned) {
+			if (!ok) notify("Impossible de désépingler ce morceau", "error");
+			else notify(ok > 1 ? (ok < total ? `${ok} désépinglés sur ${total}` : `${ok} morceaux désépinglés`) : "Désépinglé", "success");
+			return;
+		}
+		if (toDownload.length) {
+			// Background download + pin; one refresh and one toast at the end.
+			void (async () => {
+				let done = 0;
+				for (const t of toDownload) if (await downloadThenPin(t)) done++;
+				await refresh();
+				if (done === toDownload.length) notify(done > 1 ? `${done} morceaux téléchargés et épinglés` : "Téléchargé et épinglé hors-ligne", "success");
+				else notify(`${done} téléchargés et épinglés sur ${toDownload.length} ; télécharge d'abord les autres morceaux`, "error");
+			})();
+		}
+		if (ok === total) {
+			notify(ok > 1 ? `${ok} morceaux épinglés hors-ligne` : "Épinglé hors-ligne : jamais évincé", "success");
+			return;
+		}
+		if (!ok && !toDownload.length) {
+			notify(total > 1 ? "Aucun morceau épinglé : télécharge-les d'abord" : "Télécharge d'abord ce morceau", "error");
+			return;
+		}
+		const parts = [`${ok} ${ok > 1 ? "épinglés" : "épinglé"} sur ${total}`];
+		if (toDownload.length) parts.push(`${toDownload.length} en cours de téléchargement`);
+		if (failed) parts.push(`${failed} ${failed > 1 ? "impossibles" : "impossible"} à épingler`);
+		notify(parts.join(", "), ok ? "success" : "error");
 	}
 </script>
 
@@ -197,6 +295,9 @@
 					{#if albums.length}<span class="dot">·</span>{albums.length} {albums.length > 1 ? "albums" : "album"}{/if}
 					{#if pendingCount}<span class="dot">·</span><span class="pending"
 							>{pendingCount} en cours de mise en cache</span
+						>{/if}
+					{#if evictedCount}<span class="dot">·</span><span class="evicted"
+							>{evictedCount} à retélécharger</span
 						>{/if}
 				{/if}
 			</p>
@@ -299,14 +400,37 @@
 				id="offline-ready"
 				aria-live="polite"
 			>
-				{#if readyCount === 0}
+				{#if readyCount === 0 && !evictedCount}
 					Aucun morceau prêt pour l'instant : {pendingCount || tracks.length} en cours de mise en cache. Ils
 					apparaîtront ici dès qu'ils seront enregistrés.
 				{:else}
 					{readyHint}{#if pendingCount}<span class="dot">·</span>{pendingCount} en cours de mise en cache{/if}
+					{#if evictedCount}<span class="dot">·</span>{evictedCount} à retélécharger (évincés du cache){/if}
 					{#if !canShuffle}<span class="dot">·</span>aléatoire et mixtape dès 2 morceaux prêts{/if}
 				{/if}
 			</p>
+		{/if}
+		<!-- Evicted entries (F5/G8): the SW dropped them under quota pressure;
+		     one button re-downloads them all (recacheEvicted, sequential). -->
+		{#if evictedCount || recaching}
+			<div class="recache-bar">
+				<button
+					class="cta"
+					id="offline-recache"
+					type="button"
+					aria-busy={!!recaching}
+					aria-disabled={!!recaching}
+					disabled={!!recaching}
+					title="Retélécharger les morceaux que le cache a évincés"
+					on:click={recacheAll}
+				>
+					<Icon
+						name="download"
+						size="1em"
+					/>
+					{#if recaching}Retéléchargement de {recaching}…{:else}Retélécharger les évincés ({evictedCount}){/if}
+				</button>
+			</div>
 		{/if}
 
 		<nav
@@ -343,6 +467,7 @@
 						on:play={(e) => start(e.detail.tracks, e.detail.index, { shuffle: e.detail.shuffle })}
 						on:remove={(e) => remove(e.detail)}
 						on:pin={(e) => pin(e.detail)}
+						on:recache={(e) => recacheOne(e.detail)}
 					/>
 				{/each}
 			</section>
@@ -415,6 +540,7 @@
 										on:play={(e) => start(e.detail.tracks, e.detail.index, { shuffle: e.detail.shuffle })}
 										on:remove={(e) => remove(e.detail)}
 										on:pin={(e) => pin(e.detail)}
+						on:recache={(e) => recacheOne(e.detail)}
 									/>
 								{/each}
 							</div>
@@ -431,6 +557,7 @@
 						on:play={() => start(recent, i)}
 						on:remove={(e) => remove(e.detail)}
 						on:pin={(e) => pin(e.detail)}
+						on:recache={(e) => recacheOne(e.detail)}
 					/>
 				{/each}
 			</section>
@@ -466,8 +593,15 @@
 		color: #bbb;
 		font-size: 0.9rem;
 	}
-	.pending {
+	.pending,
+	.evicted {
 		color: $warn;
+	}
+	.evicted {
+		font-weight: 600;
+	}
+	.recache-bar {
+		margin: 0 0 1rem;
 	}
 	.status {
 		color: $accent;

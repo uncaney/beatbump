@@ -1,6 +1,7 @@
 /// <reference types="@sveltejs/kit" />
 // PWA service worker: precache the app shell (installable + offline app load),
-// network-first API with cache fallback (browsed library works offline), and a
+// network-first API with cache fallback (browsed library works offline; the
+// profile-scoped /api/v1/me/* answers are never cached, see G16 below), and a
 // dedicated audio cache ("ytm-offline-audio") that holds every track that was
 // played or explicitly saved, served cache-first with proper Range support so
 // the <audio> element plays it back when the device is offline.
@@ -20,13 +21,21 @@
 //   SW  -> page { type: "audio-uncached",  url, ok }
 //   page -> SW  { type: "is-cached",       videoId }
 //   SW  -> page { type: "audio-is-cached", videoId, cached, url?, bytes? }
-//   page -> SW  { type: "now-playing",     url?, videoId? }   (never evicted; no reply)
+//   page -> SW  { type: "now-playing",     url?, videoId? }   (never evicted; no reply; persisted 30 min in the meta cache)
 //   page -> SW  { type: "list-audio" }
-//   SW  -> page { type: "audio-list",      entries: [{url, videoId, bytes, at, lastAccess, contentType}], total, quota }
+//   SW  -> page { type: "audio-list",      entries: [{url, videoId, bytes, at, lastAccess, contentType, pinned}], total, pinnedBytes, quota }
 //   page -> SW  { type: "set-audio-quota", bytes }          (<= 0 => unlimited)
 //   SW  -> page { type: "audio-quota",     quota }
 //   page -> SW  { type: "get-audio-quota" }
 //   SW  -> page { type: "audio-quota",     quota }
+//   page -> SW  { type: "pin-audio",       videoId, pinned }
+//   SW  -> page { type: "audio-pinned",    videoId, pinned, ok, reason?, pinnedBytes?, quota? }
+//                 reason "not_cached" = nothing to pin yet (download it first)
+//                 reason "quota"      = pinned bytes would exceed the quota (raise it in Settings)
+//
+// A pin lives in two places so it survives a re-cache under another URL (G6):
+// the X-YTM-Pinned header of the audio entry AND `pinned` in the meta index;
+// cacheAudio carries it from the previous entry of the same videoId.
 import { build, files, version } from "$service-worker";
 
 const SHELL = `ytm-shell-${version}`;
@@ -63,10 +72,30 @@ self.addEventListener("activate", (event) => {
 		(async () => {
 			const keys = await caches.keys();
 			await Promise.all(keys.filter((k) => k.startsWith("ytm-shell-") && k !== SHELL).map((k) => caches.delete(k)));
+			await purgeProfileScopedApiCache(); // G16: entries stored by an older SW
 			await self.clients.claim();
 		})(),
 	);
 });
+
+// Profile-scoped API (favorites, follows, history, stats, mix, playlists): the
+// backend keys them by the `bbp` profile cookie. The SW cannot read that cookie
+// (no document.cookie, the Cookie header is not exposed on fetch events and
+// self.cookieStore is Chromium-only), so keying the cache by profile is not
+// reliably possible; and even keyed, the previous profile's favorites would stay
+// on the disk of a shared device. Safer option (G16): never cache these, and
+// purge any entry an older SW stored (activate). Offline, they answer
+// {"offline":true} like any uncached API call.
+const isProfileScopedApi = (u: URL) => u.pathname.startsWith("/api/v1/me/");
+async function purgeProfileScopedApiCache(): Promise<void> {
+	try {
+		const c = await caches.open(API_CACHE);
+		const keys = await c.keys();
+		await Promise.all(keys.filter((k) => isProfileScopedApi(new URL(k.url))).map((k) => c.delete(k)));
+	} catch {
+		/* best effort */
+	}
+}
 
 // Audio (and cover) endpoints served by our own origin (lane A1 makes them
 // relative: /localf?p=…, /vp?u=…, /aud/<id>, /cover?lid=…) plus the legacy
@@ -78,7 +107,7 @@ const isAudio = (u: URL) =>
 // Meta index: videoId -> {url, bytes, at, lastAccess}
 // ---------------------------------------------------------------------------
 
-type Meta = { url: string; bytes: number; at: number; lastAccess: number };
+type Meta = { url: string; bytes: number; at: number; lastAccess: number; pinned?: boolean };
 
 function metaKey(videoId: string): string {
 	return META_PREFIX + encodeURIComponent(videoId);
@@ -159,6 +188,8 @@ function touch(videoId: string, meta: Meta | null): void {
 	void (async () => {
 		const m = meta || (await getMeta(videoId));
 		if (m) await setMeta(videoId, { ...m, lastAccess: now });
+		// Still being served = still playing: keep the persisted copy fresh (G15).
+		if (nowPlaying.videoId && nowPlaying.videoId === videoId) await persistNowPlaying();
 	})();
 }
 
@@ -295,8 +326,10 @@ self.addEventListener("fetch", (event) => {
 		return;
 	}
 
-	// API GET → network-first, fall back to last cached (browsed data offline)
+	// API GET → network-first, fall back to last cached (browsed data offline).
+	// Profile-scoped answers (/api/v1/me/*) are NEVER cached nor replayed (G16).
 	if (url.pathname.startsWith("/api/")) {
+		const profileScoped = isProfileScopedApi(url);
 		event.respondWith(
 			(async () => {
 				const c = await caches.open(API_CACHE);
@@ -304,10 +337,11 @@ self.addEventListener("fetch", (event) => {
 					const res = await fetch(req);
 					// Only JSON is an API answer worth replaying offline: an HTML shell
 					// (SPA fallback for an unknown path) must never be cached as data.
-					if (res.ok && /json/i.test(res.headers.get("Content-Type") || "")) c.put(req, res.clone());
+					if (!profileScoped && res.ok && /json/i.test(res.headers.get("Content-Type") || "")) c.put(req, res.clone());
 					return res;
 				} catch {
-					return (await c.match(req)) || new Response('{"offline":true}', { headers: { "Content-Type": "application/json" } });
+					const hit = profileScoped ? undefined : await c.match(req);
+					return hit || new Response('{"offline":true}', { headers: { "Content-Type": "application/json" } });
 				}
 			})(),
 		);
@@ -391,14 +425,54 @@ async function listEntries(c: Cache): Promise<Entry[]> {
 			at: sameEntry && meta!.at ? meta!.at : at,
 			lastAccess: sameEntry && meta!.lastAccess ? meta!.lastAccess : at,
 			contentType: r.headers.get("Content-Type") || (r.type === "opaque" ? "opaque" : ""),
-			pinned: r.headers.get(H_PINNED) === "1",
+			// Header first; the meta index is the backup copy of the flag (G6).
+			pinned: r.headers.get(H_PINNED) === "1" || (sameEntry && meta!.pinned === true),
 		});
 	}
 	return out;
 }
 
-// The entry the page is currently playing (message "now-playing"): never evicted.
+// The entry the page is currently playing (message "now-playing"): never
+// evicted. Persisted in the META cache (G15/F16) so a service worker that the
+// browser stopped and restarted mid-track still protects it: the copy is
+// honoured for NOW_PLAYING_TTL_MS and refreshed every time the track is served
+// (touch), so a long track stays protected while it is actually being played.
+const NOW_PLAYING_KEY = "/__ytm_now_playing__";
+const NOW_PLAYING_TTL_MS = 30 * 60 * 1000;
 let nowPlaying: { url: string; videoId: string } = { url: "", videoId: "" };
+let nowPlayingLoaded: Promise<void> | null = null;
+function loadNowPlaying(): Promise<void> {
+	if (!nowPlayingLoaded) {
+		nowPlayingLoaded = (async () => {
+			try {
+				const m = await caches.open(META_CACHE);
+				const r = await m.match(NOW_PLAYING_KEY);
+				if (!r) return;
+				const v = await r.json();
+				const fresh = v && typeof v.at === "number" && Date.now() - v.at < NOW_PLAYING_TTL_MS;
+				// A "now-playing" message that arrived first wins over the stored copy.
+				if (fresh && !nowPlaying.url && !nowPlaying.videoId) {
+					nowPlaying = { url: typeof v.url === "string" ? v.url : "", videoId: typeof v.videoId === "string" ? v.videoId : "" };
+				}
+			} catch {
+				/* no stored copy: nothing to protect beyond pins */
+			}
+		})();
+	}
+	return nowPlayingLoaded;
+}
+async function persistNowPlaying(): Promise<void> {
+	try {
+		const m = await caches.open(META_CACHE);
+		if (!nowPlaying.url && !nowPlaying.videoId) {
+			await m.delete(NOW_PLAYING_KEY);
+			return;
+		}
+		await m.put(NOW_PLAYING_KEY, new Response(JSON.stringify({ ...nowPlaying, at: Date.now() }), { headers: { "Content-Type": "application/json" } }));
+	} catch {
+		/* best effort: the in-memory copy still protects the track until the SW stops */
+	}
+}
 function isProtected(e: { url: string; videoId: string; pinned?: boolean }, keep: string): boolean {
 	if (e.pinned) return true; // pinned by the user (X-YTM-Pinned): only an explicit uncache removes it
 	if (keep && e.url === keep) return true;
@@ -424,6 +498,7 @@ function enforceQuota(c: Cache, keep: string): Promise<void> {
 	const run = quotaLock.then(async () => {
 		const quota = await getQuota();
 		if (!(quota > 0)) return;
+		await loadNowPlaying();
 		const entries = await listEntries(c);
 		let total = entries.reduce((s, e) => s + e.bytes, 0);
 		if (total <= quota) return;
@@ -440,6 +515,7 @@ function enforceQuota(c: Cache, keep: string): Promise<void> {
 
 // Evict the `n` least recently used entries (for QuotaExceededError recovery).
 async function evictOldest(c: Cache, keep: string, n: number): Promise<number> {
+	await loadNowPlaying();
 	const entries = (await listEntries(c)).filter((e) => !isProtected(e, keep));
 	entries.sort((a, b) => a.lastAccess - b.lastAccess || a.at - b.at);
 	let freed = 0;
@@ -533,10 +609,25 @@ async function cacheAudio(rawUrl: string, videoId: string): Promise<CacheResult>
 	// One entry per videoId: drop the previous URL of this track (if any), then
 	// re-insert this URL. QuotaExceededError → evict the least recently used
 	// entries and retry once; still failing → reason "quota".
+	// The pin of the previous entry (header or meta) is carried over (G6): a
+	// rotated /vp URL, recacheEvicted() or a re-download must not unpin a track.
+	let pinned = false;
 	if (videoId) {
 		const old = await getMeta(videoId);
-		if (old && old.url !== abs) await c.delete(old.url);
+		if (old) {
+			pinned = old.pinned === true;
+			try {
+				const oldResp = await c.match(old.url);
+				if (oldResp && oldResp.headers.get(H_PINNED) === "1") pinned = true;
+			} catch {
+				/* unreadable old entry: the meta flag is all we have */
+			}
+			if (old.url !== abs) await c.delete(old.url);
+		}
 	}
+	const prevSameUrl = await c.match(abs);
+	if (prevSameUrl && prevSameUrl.headers.get(H_PINNED) === "1") pinned = true;
+	if (pinned) headers.set(H_PINNED, "1");
 	await c.delete(abs);
 	const put = () => c.put(abs, new Response(buf, { status: 200, headers }));
 	try {
@@ -551,7 +642,7 @@ async function cacheAudio(rawUrl: string, videoId: string): Promise<CacheResult>
 			return { ok: false, bytes: 0, reason: "quota" + (freed ? "" : " (nothing evictable)") };
 		}
 	}
-	if (videoId) await setMeta(videoId, { url: abs, bytes: buf.byteLength, at: now, lastAccess: now });
+	if (videoId) await setMeta(videoId, { url: abs, bytes: buf.byteLength, at: now, lastAccess: now, pinned });
 	await enforceQuota(c, abs);
 	return { ok: true, bytes: buf.byteLength, cachedUrl: abs };
 }
@@ -641,27 +732,41 @@ self.addEventListener("message", (event) => {
 			url = "";
 		}
 		nowPlaying = { url, videoId: typeof data.videoId === "string" ? data.videoId : "" };
+		nowPlayingLoaded = Promise.resolve(); // the page's word beats any stored copy
+		ev.waitUntil(persistNowPlaying());
 		if (nowPlaying.videoId) touch(nowPlaying.videoId, null);
 		return;
 	}
-	// page -> SW { type: "pin-audio", videoId, pinned }  ->  { type: "audio-pinned", videoId, pinned, ok }
-	// Re-puts the cached response with the X-YTM-Pinned header; pinned entries are never evicted.
+	// page -> SW { type: "pin-audio", videoId, pinned }  ->  { type: "audio-pinned", videoId, pinned, ok, reason? }
+	// Re-puts the cached response with the X-YTM-Pinned header and mirrors the
+	// flag in the meta index; pinned entries are never evicted.
+	// ok:false reasons: "not_cached" (download it first), "error".
 	if (data.type === "pin-audio" && typeof data.videoId === "string") {
 		const videoId = data.videoId as string;
 		const pinned = !!data.pinned;
 		ev.waitUntil(
 			(async () => {
 				const c = await caches.open(AUDIO_CACHE);
-				const e = (await listEntries(c)).find((x) => x.videoId === videoId);
+				const entries = await listEntries(c);
+				const e = entries.find((x) => x.videoId === videoId);
 				const r = e ? await c.match(e.url) : undefined;
-				if (!e || !r) return reply(ev, { type: "audio-pinned", videoId, pinned, ok: false });
+				if (!e || !r) return reply(ev, { type: "audio-pinned", videoId, pinned, ok: false, reason: "not_cached" });
+				// Pinned entries are never evicted, so their total must stay within
+				// the quota or the LRU can never bring the cache back under it (G7).
+				if (pinned && !e.pinned) {
+					const quota = await getQuota();
+					const pinnedBytes = entries.reduce((s, x) => s + (x.pinned ? x.bytes : 0), 0) + e.bytes;
+					if (quota > 0 && pinnedBytes > quota) return reply(ev, { type: "audio-pinned", videoId, pinned, ok: false, reason: "quota", pinnedBytes, quota });
+				}
 				const headers = new Headers(r.headers);
 				if (pinned) headers.set(H_PINNED, "1");
 				else headers.delete(H_PINNED);
 				const body = await r.arrayBuffer();
 				await c.put(e.url, new Response(body, { status: r.status, statusText: r.statusText, headers }));
+				const meta = await getMeta(videoId);
+				if (meta && meta.url === e.url) await setMeta(videoId, { ...meta, pinned });
 				return reply(ev, { type: "audio-pinned", videoId, pinned, ok: true });
-			})().catch(() => reply(ev, { type: "audio-pinned", videoId, pinned, ok: false })),
+			})().catch(() => reply(ev, { type: "audio-pinned", videoId, pinned, ok: false, reason: "error" })),
 		);
 		return;
 	}
@@ -671,8 +776,9 @@ self.addEventListener("message", (event) => {
 				const c = await caches.open(AUDIO_CACHE);
 				const entries = await listEntries(c);
 				const total = entries.reduce((s, e) => s + e.bytes, 0);
-				return reply(ev, { type: "audio-list", entries, total, quota: await getQuota() });
-			})().catch(() => reply(ev, { type: "audio-list", entries: [], total: 0, quota: DEFAULT_QUOTA })),
+				const pinnedBytes = entries.reduce((s, e) => s + (e.pinned ? e.bytes : 0), 0);
+				return reply(ev, { type: "audio-list", entries, total, pinnedBytes, quota: await getQuota() });
+			})().catch(() => reply(ev, { type: "audio-list", entries: [], total: 0, pinnedBytes: 0, quota: DEFAULT_QUOTA })),
 		);
 		return;
 	}
