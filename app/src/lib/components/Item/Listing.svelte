@@ -596,8 +596,14 @@
 			margin: 0;
 			pointer-events: none;
 
+			// 26px tap box on the 14px text (audit v4 TOP 8): vertical padding
+			// cancelled by a negative margin, so neither the line box nor the
+			// text position moves.
 			> span {
 				pointer-events: auto;
+				display: inline-block;
+				padding: 6px 0;
+				margin: -6px 0;
 			}
 		}
 	}
@@ -650,6 +656,12 @@
 		// max-width: calc(100% - 4.45em);max-width
 		@media screen and (min-width: 640px) {
 			padding: 0.2rem 0;
+			// Desktop (audit v4 TOP 8 / 3.2): the text column is sized to its
+			// content (capped by the row), so the kebab sits right after the
+			// text instead of 600px away at the far edge of a 1280px row.
+			grid-template-columns: minmax(0, max-content) auto;
+			justify-content: start;
+			column-gap: 0.25rem;
 		}
 	}
 
@@ -668,6 +680,11 @@
 
 		// line-height: 2;line-height
 		display: inherit;
+		// The grid column already stops at the kebab on desktop (see
+		// .innercard), so the text may use the whole column.
+		@media screen and (min-width: 640px) {
+			max-width: none;
+		}
 	}
 
 	.img-container {
