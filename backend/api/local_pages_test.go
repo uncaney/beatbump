@@ -140,3 +140,73 @@ func TestLocalArtistSeeAllLabelMatchesLoadedCount(t *testing.T) {
 		t.Fatalf("pages not bounded: %d", len(huge["pages"].([]string)))
 	}
 }
+
+// c21d leftover: a local album header carries the duration of its tracks (as
+// the "1 h 14 min" label AND the numeric durationSec) and the year as a string
+// even when the Meili document stores a number.
+func TestBuildLocalAlbumLengthAndNumericYear(t *testing.T) {
+	id := albumID("Daft Punk", "Discovery")
+	stub := &meiliStub{
+		albums: map[string]map[string]interface{}{
+			id: {"id": id, "album": "Discovery", "albumArtist": "Daft Punk", "year": 2001.0, "coverLid": "e182ccc85ad"},
+		},
+		tracks: []map[string]interface{}{
+			{"lid": "e182ccc85ad", "title": "One More Time", "artist": "Daft Punk", "albumArtist": "Daft Punk", "album": "Discovery", "track": 1.0, "durationSec": 3600.0},
+			{"lid": "f182ccc85ad", "title": "Aerodynamic", "artist": "Daft Punk", "albumArtist": "Daft Punk", "album": "Discovery", "track": 2.0, "durationSec": 840.0},
+			// a track without durationSec still counts as a song
+			{"lid": "g182ccc85ad", "title": "Digital Love", "artist": "Daft Punk", "albumArtist": "Daft Punk", "album": "Discovery", "track": 3.0},
+		},
+	}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+	t.Setenv("MEILI_URL", srv.URL)
+
+	page, ok := buildLocalAlbum(id)
+	if !ok {
+		t.Fatalf("album doc path must build")
+	}
+	sub := page["items"].(map[string]interface{})["releaseInfo"].(map[string]interface{})["subtitles"].([]map[string]interface{})[0]
+	if sub["year"] != "2001" {
+		t.Fatalf("numeric year must come back as a string, got %#v", sub["year"])
+	}
+	if sub["length"] != "1 h 14 min" || sub["durationSec"] != 4440 || sub["tracks"] != "3 songs" {
+		t.Fatalf("length from the track sum, got %#v", sub)
+	}
+	// JSON shape: the page reads `year` as a string, `durationSec` as a number.
+	raw, _ := json.Marshal(sub)
+	var back struct {
+		Year        string `json:"year"`
+		Length      string `json:"length"`
+		DurationSec int    `json:"durationSec"`
+	}
+	if err := json.Unmarshal(raw, &back); err != nil || back.Year != "2001" || back.Length != "1 h 14 min" || back.DurationSec != 4440 {
+		t.Fatalf("json shape: %s (%v)", raw, err)
+	}
+
+	// Rebuilt (doc-less) album: year from the first track, numeric too.
+	stub.albums = map[string]map[string]interface{}{}
+	stub.tracks = []map[string]interface{}{
+		{"lid": "aaaaaaaaaaa", "title": "First", "artist": "Sam Gellaitry", "album": "Assumptions", "track": 1.0, "durationSec": 1500.0, "year": 2023.0},
+		{"lid": "bbbbbbbbbbb", "title": "Second", "artist": "Sam Gellaitry", "album": "Assumptions", "track": 2.0, "durationSec": 1020.0, "year": 2023.0},
+	}
+	page, ok = buildLocalAlbum(localAlbumRef("Sam Gellaitry", "Assumptions"))
+	if !ok {
+		t.Fatalf("rebuilt album must build")
+	}
+	sub = page["items"].(map[string]interface{})["releaseInfo"].(map[string]interface{})["subtitles"].([]map[string]interface{})[0]
+	if sub["year"] != "2023" || sub["length"] != "42 min" || sub["durationSec"] != 2520 {
+		t.Fatalf("rebuilt header, got %#v", sub)
+	}
+}
+
+func TestMnumStrAndDurationLabel(t *testing.T) {
+	m := map[string]interface{}{"s": "1999", "f": 2001.0, "x": true}
+	if mnumStr(m, "s") != "1999" || mnumStr(m, "f") != "2001" || mnumStr(m, "x") != "" || mnumStr(m, "none") != "" {
+		t.Fatalf("mnumStr: %q %q %q", mnumStr(m, "s"), mnumStr(m, "f"), mnumStr(m, "x"))
+	}
+	for sec, want := range map[int]string{0: "", -5: "", 20: "1 min", 2520: "42 min", 3600: "1 h", 4440: "1 h 14 min", 7199: "2 h"} {
+		if got := durationLabel(sec); got != want {
+			t.Fatalf("durationLabel(%d) = %q, want %q", sec, got, want)
+		}
+	}
+}

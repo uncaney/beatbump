@@ -210,7 +210,7 @@ func buildLocalAlbum(ref string) (map[string]interface{}, bool) {
 	found := false
 	if a := meiliGetDoc("albums", albumId); a != nil {
 		found = true
-		album, aa, year, cover = mstr(a, "album"), mstr(a, "albumArtist"), mstr(a, "year"), mstr(a, "coverLid")
+		album, aa, year, cover = mstr(a, "album"), mstr(a, "albumArtist"), mnumStr(a, "year"), mstr(a, "coverLid")
 		tracks = albumTracks(album, aa)
 	}
 	if len(tracks) == 0 {
@@ -224,7 +224,7 @@ func buildLocalAlbum(ref string) (map[string]interface{}, bool) {
 			first := tracks[0]
 			album, aa = mstr(first, "album"), trackAlbumArtist(first)
 			if year == "" {
-				year = mstr(first, "year")
+				year = mnumStr(first, "year")
 			}
 			if cover == "" {
 				cover = mstr(first, "lid")
@@ -243,16 +243,59 @@ func buildLocalAlbum(ref string) (map[string]interface{}, bool) {
 		albumCoverStore(albumId, cover)
 	}
 	items := make([]IListItemRenderer, 0, len(tracks))
+	durationSec := 0
 	for _, t := range tracks {
 		items = append(items, localSongItem(t))
+		durationSec += mint(t, "durationSec")
 	}
 
+	// c21d leftover: the album header reads `length` (YouTube's label shape,
+	// "1 h 14 min" / "42 min") or the numeric `durationSec`, and `year` as a
+	// string even when the Meili document stores it as a number.
 	releaseInfo := map[string]interface{}{
 		"thumbnails": []Thumbnail{{URL: coverURL(cover), Width: 540, Height: 540}},
 		"artist":     []map[string]interface{}{{"name": aa, "channelId": artistID(aa)}},
 		"title":      album,
-		"subtitles":  []map[string]interface{}{{"year": year, "tracks": fmt.Sprintf("%d songs", len(items)), "length": ""}},
+		"subtitles": []map[string]interface{}{{
+			"year": year, "tracks": fmt.Sprintf("%d songs", len(items)),
+			"length": durationLabel(durationSec), "durationSec": durationSec,
+		}},
 		"playlistId": "", "autoMixId": "",
 	}
 	return map[string]interface{}{"items": map[string]interface{}{"items": items, "releaseInfo": releaseInfo}}, true
+}
+
+// mnumStr is mstr for a field the indexer may store as a number (year):
+// a JSON number comes back as float64, which mstr drops.
+func mnumStr(m map[string]interface{}, k string) string {
+	switch v := m[k].(type) {
+	case string:
+		return v
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	}
+	return ""
+}
+
+// durationLabel formats a track-sum in seconds like the album header shows
+// it ("1 h 14 min", "42 min", "1 h"); "" when nothing is known.
+func durationLabel(sec int) string {
+	if sec <= 0 {
+		return ""
+	}
+	minutes := (sec + 30) / 60
+	if minutes < 1 {
+		minutes = 1
+	}
+	h, m := minutes/60, minutes%60
+	switch {
+	case h == 0:
+		return fmt.Sprintf("%d min", m)
+	case m == 0:
+		return fmt.Sprintf("%d h", h)
+	}
+	return fmt.Sprintf("%d h %d min", h, m)
 }
