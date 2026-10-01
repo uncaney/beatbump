@@ -65,6 +65,20 @@ export function mediaSessionSeekTarget(
 	return null;
 }
 
+/** Past this many seconds, "previous" restarts the current track. */
+export const PREVIOUS_RESTART_AFTER_S = 3;
+
+/**
+ * c39c B6-8: the standard "previous" button. After 3 s into the track it
+ * restarts it; earlier it goes to the previous track, or restarts the first
+ * track of the queue (nothing before it).
+ */
+export function previousAction(currentTime: number, position: number): "restart" | "previous" {
+	const t = typeof currentTime === "number" && isFinite(currentTime) ? currentTime : 0;
+	if (t > PREVIOUS_RESTART_AFTER_S) return "restart";
+	return typeof position === "number" && position >= 1 ? "previous" : "restart";
+}
+
 const absolute = (url: string, origin: string) => {
 	try {
 		return new URL(url, origin || "http://localhost").toString();

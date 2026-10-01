@@ -30,7 +30,13 @@ import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from ".
 import { reportClientError } from "./clientLog";
 import { setWorkerInterval } from "./utils/workerTimeout";
 import { resumeKeptFor } from "./stores/resumeState";
-import { mediaArtwork, mediaSessionSeekTarget, positionState, seekTarget } from "./stores/list/mediaSession";
+import {
+	mediaArtwork,
+	mediaSessionSeekTarget,
+	positionState,
+	previousAction,
+	seekTarget,
+} from "./stores/list/mediaSession";
 
 let userSettings: UserSettings | undefined = undefined;
 
@@ -115,7 +121,7 @@ function metaDataHandler({
 			};
 		setMediaAction("seekto", onSeek("seekto"));
 		navigator.mediaSession.setActionHandler("previoustrack", () =>
-			SessionListService.previous(),
+			AudioPlayer.previousOrRestart(),
 		);
 		navigator.mediaSession.setActionHandler("nexttrack", () =>
 			SessionListService.next(),
@@ -548,6 +554,19 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		this._currentTimeStore.set(t);
 		const duration = this.duration > 0 ? this.duration : this.player.duration;
 		setPosition(t, duration, this.player.playbackRate);
+	}
+
+	/**
+	 * c39c B6-8: player button, keyboard and lock-screen "previous": restart
+	 * the track after 3 s, otherwise step back in the queue.
+	 */
+	public async previousOrRestart(): Promise<void> {
+		const t = this.player && isFinite(this.player.currentTime) ? this.player.currentTime : this.currentTime;
+		if (previousAction(t, SessionListService.position) === "restart") {
+			if (this.player) this.seekTo(0);
+			return;
+		}
+		await SessionListService.previous();
 	}
 
 	/** Media element playback rate (1 before the element exists). */

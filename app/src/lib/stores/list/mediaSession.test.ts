@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mediaArtwork, mediaSessionSeekTarget, positionState, seekTarget } from "./mediaSession";
+import { mediaArtwork, mediaSessionSeekTarget, positionState, previousAction, seekTarget } from "./mediaSession";
 
 describe("positionState", () => {
 	it("clamps the position and defaults the rate", () => {
@@ -46,6 +46,21 @@ describe("mediaSessionSeekTarget (B6-8)", () => {
 	it("null for other actions or no details", () => {
 		expect(mediaSessionSeekTarget({ action: "play" }, 40, 200)).toBeNull();
 		expect(mediaSessionSeekTarget(null, 40, 200)).toBeNull();
+	});
+});
+
+describe("previousAction (B6-8)", () => {
+	it("restarts the track after 3 s", () => {
+		expect(previousAction(40, 5)).toBe("restart");
+		expect(previousAction(3.2, 1)).toBe("restart");
+	});
+	it("goes to the previous track in the first 3 s", () => {
+		expect(previousAction(3, 5)).toBe("previous");
+		expect(previousAction(0.5, 1)).toBe("previous");
+		expect(previousAction(NaN, 2)).toBe("previous");
+	});
+	it("restarts the first track of the queue", () => {
+		expect(previousAction(1, 0)).toBe("restart");
 	});
 });
 
