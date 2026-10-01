@@ -150,6 +150,7 @@ func newServer() *echo.Echo {
 	me.GET("/stats/summary", api.MeStatsSummaryHandler)
 	me.GET("/never-played", api.MeNeverPlayedHandler)
 	me.GET("/stats/rediscover", api.MeRediscoverHandler) // c29b D3
+	me.GET("/new-in-library", api.MeNewInLibraryHandler) // c29b EQ3
 	me.POST("/acquire", api.MeAcquireHandler)
 	me.GET("/acquire", api.MeAcquireStatusHandler)
 	me.GET("/mix", api.MeMixHandler)

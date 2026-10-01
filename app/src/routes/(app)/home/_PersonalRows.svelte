@@ -32,6 +32,10 @@
 	// profile and under 6 results (buildRediscoverRow), so a fresh profile
 	// never sees it.
 	let rediscover: any[] = [];
+	// c29b EQ3: local albums added in the last 30 days by a followed artist
+	// or one of the profile's top 20 artists (GET me/new-in-library). Local
+	// only, nothing is acquired. Hidden when empty.
+	let newInLibrary: any[] = [];
 
 	// ST1: a compact weekly recap card in the Reprendre area, Mondays only
 	// (local time), until dismissed for that ISO week. Hidden when the
@@ -157,12 +161,14 @@
 		acquiredSource = "empty";
 		neverPlayed = [];
 		rediscover = [];
+		newInLibrary = [];
 		weekCard = null;
 		void loadResume();
 		void loadForYou();
 		void loadAcquired();
 		void loadNeverPlayed();
 		void loadRediscover();
+		void loadNewInLibrary();
 		void loadWeekCard();
 	}
 
@@ -320,6 +326,21 @@
 		}
 	}
 
+	const NEW_IN_LIBRARY_MAX = 12;
+	async function loadNewInLibrary() {
+		try {
+			const res = await APIClient.fetch(`/api/v1/me/new-in-library?days=30&limit=${NEW_IN_LIBRARY_MAX}`);
+			if (!res.ok) {
+				newInLibrary = [];
+				return;
+			}
+			const r = await res.json();
+			newInLibrary = capItems(r?.items, NEW_IN_LIBRARY_MAX).map(sanitizeCard);
+		} catch {
+			newInLibrary = [];
+		}
+	}
+
 	onMount(() => {
 		try {
 			saved = get(settings)?.playback?.["Remember Last Track"] === true ? readResumeState(localStorage) : null;
@@ -333,6 +354,7 @@
 		void loadAcquired();
 		void loadNeverPlayed();
 		void loadRediscover();
+		void loadNewInLibrary();
 		void loadWeekCard();
 		let unwireProfile: (() => void) | undefined;
 		if (typeof BroadcastChannel !== "undefined") {
@@ -462,6 +484,24 @@
 			<Carousel
 				items={acquired}
 				header={{ title: "Récemment acquis", subheading: "Derniers albums ajoutés à la bibliothèque" }}
+				type="trending"
+				isBrowseEndpoint={true}
+				seeAllHref="/library/albums"
+				seeAllLabel="Voir tout"
+			/>
+		</div>
+	</section>
+{/if}
+
+{#if newInLibrary.length > 0}
+	<section
+		class="home-row"
+		data-row="nouveautes-artistes"
+	>
+		<div data-testid="row-new-in-library">
+			<Carousel
+				items={newInLibrary}
+				header={{ title: "Nouveautés de tes artistes", subheading: "Albums ajoutés ces 30 derniers jours par les artistes que tu suis ou écoutes le plus" }}
 				type="trending"
 				isBrowseEndpoint={true}
 				seeAllHref="/library/albums"
