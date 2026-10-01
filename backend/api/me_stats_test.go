@@ -263,6 +263,10 @@ func TestSummary(t *testing.T) {
 	if s["plays"] != float64(6) || s["distinctTracks"] != float64(3) || s["distinctArtists"] != float64(2) {
 		t.Fatalf("summary %v", s)
 	}
+	// ST1: Song A + Song B share Album X, Song C is Album Y -> 2 distinct albums.
+	if s["distinctAlbums"] != float64(2) {
+		t.Fatalf("distinctAlbums %v, want 2", s["distinctAlbums"])
+	}
 	// 3x4:00 + 2x3.5 (estimated) + 1x2:00 = 12 + 7 + 2 = 21 min
 	if s["minutes"] != float64(21) || s["estimated"] != true {
 		t.Fatalf("minutes %v estimated %v", s["minutes"], s["estimated"])

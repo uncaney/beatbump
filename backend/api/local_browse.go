@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"beatbump-server/backend/db"
+
 	"github.com/labstack/echo/v4"
 )
 
@@ -235,4 +237,63 @@ func mintFloat(v interface{}) int {
 		return int(f)
 	}
 	return 0
+}
+
+// neverPlayedScanCap bounds how many of the most recently added albums are
+// examined (dateAdded desc) looking for `limit` never-played ones, so a large
+// library with a thin history still answers in one bounded pass instead of
+// walking every album.
+const neverPlayedScanCap = 120
+
+// albumNeverPlayed reports whether none of an album's tracks (by lid) is in
+// `played` (a profile's distinct play refs - local track refs ARE their lid,
+// me.go itemMeta/MeRecordPlayHandler). An album with no resolvable tracks is
+// never offered (nothing to confirm it was never played).
+func albumNeverPlayed(album, albumArtist string, played map[string]bool) bool {
+	tracks := albumTracks(album, albumArtist)
+	if len(tracks) == 0 {
+		return false
+	}
+	for _, t := range tracks {
+		if played[mstr(t, "lid")] {
+			return false
+		}
+	}
+	return true
+}
+
+// MeNeverPlayedHandler: GET /api/v1/me/never-played?limit=10 (D2). Local
+// albums (dateAdded desc) none of whose tracks appear anywhere in the
+// profile's play history - the set difference between the library and
+// play_events, computed here since the Meili index carries no "played"
+// field. Anonymous profiles have no history (every album qualifies); the
+// client hides the row for an anonymous profile and when the answer is
+// empty, same as the other personal rows.
+func MeNeverPlayedHandler(c echo.Context) error {
+	pid := profileID(c)
+	limit := clampLimit(c, 10, 50)
+
+	var refs []string
+	db.DB.Model(&db.PlayEvent{}).Where("profile_id = ?", pid).Distinct("ref").Pluck("ref", &refs)
+	played := make(map[string]bool, len(refs))
+	for _, r := range refs {
+		played[r] = true
+	}
+
+	candidates, _ := meiliBrowse("albums", map[string]interface{}{
+		"q": "", "offset": 0, "limit": neverPlayedScanCap, "sort": []string{"dateAdded:desc"},
+		"attributesToRetrieve": []string{"id", "album", "albumArtist", "artistId", "year", "coverLid", "trackCount"},
+	})
+	items := make([]IListItemRenderer, 0, limit)
+	for _, a := range candidates {
+		if len(items) >= limit {
+			break
+		}
+		album, aa := mstr(a, "album"), mstr(a, "albumArtist")
+		if album == "" || aa == "" || !albumNeverPlayed(album, aa, played) {
+			continue
+		}
+		items = append(items, localAlbumItem(a))
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"items": items})
 }

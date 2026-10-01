@@ -282,6 +282,7 @@ type statsSummary struct {
 	Estimated       bool    `json:"estimated"`
 	DistinctTracks  int     `json:"distinctTracks"`
 	DistinctArtists int     `json:"distinctArtists"`
+	DistinctAlbums  int     `json:"distinctAlbums"` // ST1: distinct albums played in the window
 	TopHour         int     `json:"topHour"` // -1 when there are no plays
 	Local           int     `json:"local"`
 	YouTube         int     `json:"youtube"`
@@ -294,6 +295,7 @@ type statsSummary struct {
 func summarize(rows []playRow, playedAt []time.Time, sources []string, tzOffsetMin int) statsSummary {
 	s := statsSummary{TopHour: -1}
 	artists := map[string]bool{}
+	albums := map[string]bool{}
 	for _, r := range rows {
 		s.Plays += r.Cnt
 		s.DistinctTracks++
@@ -304,6 +306,9 @@ func summarize(rows []playRow, playedAt []time.Time, sources []string, tzOffsetM
 		if name != "" {
 			artists[strings.ToLower(name)] = true
 		}
+		if album := itemAlbum(r.Data); album != "" {
+			albums[strings.ToLower(album)] = true
+		}
 		if sec := itemLengthSec(r.Data); sec > 0 {
 			s.Minutes += float64(r.Cnt) * float64(sec) / 60
 		} else {
@@ -312,6 +317,7 @@ func summarize(rows []playRow, playedAt []time.Time, sources []string, tzOffsetM
 		}
 	}
 	s.DistinctArtists = len(artists)
+	s.DistinctAlbums = len(albums)
 	s.Minutes = float64(int(s.Minutes*10+0.5)) / 10
 	loc := time.FixedZone("viewer", tzOffsetMin*60)
 	for _, t := range playedAt {

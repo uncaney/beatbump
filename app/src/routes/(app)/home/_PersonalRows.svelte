@@ -6,11 +6,12 @@
 	import { onMount } from "svelte";
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
-	import { buildForYouRow, buildResumeRow, capItems, readLastTrack, sanitizeCard } from "$lib/homeRows";
-	import { getMix, getRecent } from "$lib/me";
+	import { buildForYouRow, buildResumeRow, capItems, isoWeekKey, readLastTrack, sanitizeCard, shouldShowWeekCard, WEEK_CARD_DISMISS_KEY } from "$lib/homeRows";
+	import { peekHomeCache, clearHomeCache, writeHomeCache } from "$lib/homeCache";
+	import { getMix, getRecent, getStatsSummary, getTopBy, isAnonymousProfile, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
 	import { settings } from "$lib/stores";
 	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
-	import { clockLabel, fetchRemoteResume, restoreRemoteResume } from "$lib/stores/nowPlayingSync";
+	import { clockLabel, fetchRemoteResume, restoreRemoteResume, wireProfileChannel } from "$lib/stores/nowPlayingSync";
 	import { AudioPlayer } from "$lib/player";
 	import list from "$lib/stores/list";
 	import { get } from "svelte/store";
@@ -20,6 +21,143 @@
 	let resume: any[] = [];
 	let forYou: any[] = [];
 	let acquired: any[] = [];
+	// D2: up to 10 local albums (dateAdded desc) none of whose tracks appear
+	// in the profile's play history (GET me/never-played, server-side set
+	// difference). Hidden for an anonymous profile and when empty, same as
+	// the other personal rows; no localStorage cache (AP1 covers reprendre/
+	// pour-toi/recemment-acquis only).
+	let neverPlayed: any[] = [];
+
+	// ST1: a compact weekly recap card in the Reprendre area, Mondays only
+	// (local time), until dismissed for that ISO week. Hidden when the
+	// profile has no plays in the window (anonymous included: me/stats
+	// answers an empty summary for it).
+	interface WeekCard {
+		minutes: number;
+		topArtist: string;
+		newAlbums: number;
+	}
+	let weekCard: WeekCard | null = null;
+
+	async function loadWeekCard() {
+		weekCard = null;
+		try {
+			const dismissed = storageOrUndefined()?.getItem(WEEK_CARD_DISMISS_KEY) ?? null;
+			if (!shouldShowWeekCard(new Date(), dismissed)) return;
+			const [summary, top] = await Promise.all([getStatsSummary(7), getTopBy("artists", 7, 1)]);
+			if (!summary || !(summary.plays > 0)) return;
+			weekCard = {
+				minutes: Math.round(summary.minutes),
+				topArtist: top?.rows?.[0]?.title ?? "",
+				// me/stats/summary carries distinctAlbums (ST1); not in the
+				// StatsSummary type yet elsewhere in the app, read defensively.
+				newAlbums: Number((summary as unknown as { distinctAlbums?: number })?.distinctAlbums) || 0,
+			};
+		} catch {
+			weekCard = null;
+		}
+	}
+
+	function dismissWeekCard() {
+		try {
+			storageOrUndefined()?.setItem(WEEK_CARD_DISMISS_KEY, isoWeekKey(new Date()));
+		} catch {
+			/* no-op: worst case it shows again this session */
+		}
+		weekCard = null;
+	}
+
+	// AP1 "instant home": which source painted each row right now, for the
+	// subtle opacity cue while a cached row is shown before the live answer
+	// replaces it in place (never a layout jump: the row stays mounted,
+	// {#if x.length > 0} never flips off between the cache and live paints).
+	type RowSource = "empty" | "cache" | "live";
+	let resumeSource: RowSource = "empty";
+	let forYouSource: RowSource = "empty";
+	let acquiredSource: RowSource = "empty";
+
+	function storageOrUndefined(): Storage | undefined {
+		try {
+			return typeof localStorage === "undefined" ? undefined : localStorage;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** Best-effort snapshot of the 3 rows into the shared localStorage cache. */
+	async function persistHomeCache() {
+		try {
+			const w = await whoami();
+			if (!w?.id) return;
+			writeHomeCache(storageOrUndefined(), w.id, { reprendre: resume, pourToi: forYou, recemmentAcquis: acquired });
+		} catch {
+			/* best-effort: offline whoami, private mode, quota, ... */
+		}
+	}
+
+	/**
+	 * AP1: paint the 3 rows instantly from the cache (any profile's: the
+	 * profile id isn't known synchronously), then drop that optimistic paint
+	 * if `whoami()` turns out to belong to a different profile - the live
+	 * loads already in flight fill the rows for the right profile moments
+	 * later either way.
+	 */
+	function paintFromCache() {
+		const snap = peekHomeCache(storageOrUndefined());
+		if (!snap) return;
+		if (snap.rows.reprendre.length) {
+			resume = snap.rows.reprendre;
+			resumeSource = "cache";
+		}
+		if (snap.rows.pourToi.length) {
+			forYou = snap.rows.pourToi;
+			forYouSource = "cache";
+		}
+		if (snap.rows.recemmentAcquis.length) {
+			acquired = snap.rows.recemmentAcquis;
+			acquiredSource = "cache";
+		}
+		void validateCacheProfile(snap.profileId);
+	}
+
+	async function validateCacheProfile(cachedProfileId: string) {
+		try {
+			const w = await whoami();
+			if (w?.id === cachedProfileId) return;
+		} catch {
+			return; // offline/failed whoami: keep the optimistic paint, nothing better to show
+		}
+		if (resumeSource === "cache") {
+			resume = [];
+			resumeSource = "empty";
+		}
+		if (forYouSource === "cache") {
+			forYou = [];
+			forYouSource = "empty";
+		}
+		if (acquiredSource === "cache") {
+			acquired = [];
+			acquiredSource = "empty";
+		}
+	}
+
+	/** L13/L14-style: a login/logout (this tab or another) invalidates the cache and this profile's rows. */
+	function onProfileChanged() {
+		clearHomeCache(storageOrUndefined());
+		resume = [];
+		forYou = [];
+		acquired = [];
+		resumeSource = "empty";
+		forYouSource = "empty";
+		acquiredSource = "empty";
+		neverPlayed = [];
+		weekCard = null;
+		void loadResume();
+		void loadForYou();
+		void loadAcquired();
+		void loadNeverPlayed();
+		void loadWeekCard();
+	}
 
 	// C1: the saved queue ("Remember Last Track"), resumed where it stopped.
 	let saved: ResumeState | null = null;
@@ -107,6 +245,8 @@
 			lastTrack = null;
 		}
 		resume = buildResumeRow(lastTrack, recent, 10).map(sanitizeCard).map(stripTrailingSeparator);
+		resumeSource = resume.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
 
 	async function loadForYou() {
@@ -118,6 +258,8 @@
 		} catch {
 			forYou = [];
 		}
+		forYouSource = forYou.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
 
 	async function loadAcquired() {
@@ -129,6 +271,27 @@
 		} catch {
 			acquired = [];
 		}
+		acquiredSource = acquired.length > 0 ? "live" : "empty";
+		void persistHomeCache();
+	}
+
+	const NEVER_PLAYED_MAX = 10;
+	async function loadNeverPlayed() {
+		try {
+			if (await isAnonymousProfile()) {
+				neverPlayed = [];
+				return;
+			}
+			const res = await APIClient.fetch(`/api/v1/me/never-played?limit=${NEVER_PLAYED_MAX}`);
+			if (!res.ok) {
+				neverPlayed = [];
+				return;
+			}
+			const r = await res.json();
+			neverPlayed = capItems(r?.items, NEVER_PLAYED_MAX).map(sanitizeCard);
+		} catch {
+			neverPlayed = [];
+		}
 	}
 
 	onMount(() => {
@@ -137,18 +300,55 @@
 		} catch {
 			saved = null;
 		}
+		paintFromCache();
 		void loadResume();
 		void loadRemote();
 		void loadForYou();
 		void loadAcquired();
+		void loadNeverPlayed();
+		void loadWeekCard();
+		let unwireProfile: (() => void) | undefined;
+		if (typeof BroadcastChannel !== "undefined") {
+			const channel = new BroadcastChannel(PROFILE_CHANNEL_NAME);
+			unwireProfile = wireProfileChannel(channel, onProfileChanged);
+		}
+		return () => {
+			unwireProfile?.();
+		};
 	});
 </script>
 
-{#if resume.length > 0 || showSavedPill || remoteTrack}
+{#if resume.length > 0 || showSavedPill || remoteTrack || weekCard}
 	<section
 		class="home-row"
 		data-row="reprendre"
 	>
+		{#if weekCard}
+			<div
+				class="week-card"
+				data-testid="week-card"
+			>
+				<div class="week-card-body">
+					<p class="week-card-title">Ta semaine</p>
+					<p class="week-card-stats">
+						{weekCard.minutes} min écoutées{#if weekCard.topArtist} · artiste n°1 : {weekCard.topArtist}{/if}{#if weekCard.newAlbums > 0}
+							· {weekCard.newAlbums} nouveaux albums{/if}
+					</p>
+				</div>
+				<a
+					class="btn-reset btn-secondary week-card-link"
+					href="/library/stats">Voir mes stats</a
+				>
+				<button
+					type="button"
+					class="btn-reset week-card-dismiss"
+					aria-label="Fermer la carte Ta semaine"
+					on:click={dismissWeekCard}
+				>
+					✕
+				</button>
+			</div>
+		{/if}
 		{#if remote && remoteTrack && $paused}
 			<div class="resume-queue">
 				<button
@@ -196,12 +396,14 @@
 			</div>
 		{/if}
 		{#if resume.length > 0}
-		<Carousel
-			items={resume}
-			header={{ title: "Reprendre", subheading: "Là où tu t'es arrêté" }}
-			type="trending"
-			isBrowseEndpoint={false}
-		/>
+		<div class="row-fade" class:is-cache={resumeSource === "cache"}>
+			<Carousel
+				items={resume}
+				header={{ title: "Reprendre", subheading: "Là où tu t'es arrêté" }}
+				type="trending"
+				isBrowseEndpoint={false}
+			/>
+		</div>
 		{/if}
 	</section>
 {/if}
@@ -211,14 +413,16 @@
 		class="home-row"
 		data-row="pour-toi"
 	>
-		<Carousel
-			items={forYou}
-			header={{ title: "Pour toi", subheading: "D'après ta bibliothèque" }}
-			type="trending"
-			isBrowseEndpoint={false}
-			seeAllHref="/library/for-you"
-			seeAllLabel="Voir tout"
-		/>
+		<div class="row-fade" class:is-cache={forYouSource === "cache"}>
+			<Carousel
+				items={forYou}
+				header={{ title: "Pour toi", subheading: "D'après ta bibliothèque" }}
+				type="trending"
+				isBrowseEndpoint={false}
+				seeAllHref="/library/for-you"
+				seeAllLabel="Voir tout"
+			/>
+		</div>
 	</section>
 {/if}
 
@@ -227,9 +431,27 @@
 		class="home-row"
 		data-row="recemment-acquis"
 	>
+		<div class="row-fade" class:is-cache={acquiredSource === "cache"}>
+			<Carousel
+				items={acquired}
+				header={{ title: "Récemment acquis", subheading: "Derniers albums ajoutés à la bibliothèque" }}
+				type="trending"
+				isBrowseEndpoint={true}
+				seeAllHref="/library/albums"
+				seeAllLabel="Voir tout"
+			/>
+		</div>
+	</section>
+{/if}
+
+{#if neverPlayed.length > 0}
+	<section
+		class="home-row"
+		data-row="jamais-ecoute"
+	>
 		<Carousel
-			items={acquired}
-			header={{ title: "Récemment acquis", subheading: "Derniers albums ajoutés à la bibliothèque" }}
+			items={neverPlayed}
+			header={{ title: "Jamais écouté", subheading: "Des albums de ta bibliothèque que tu n'as jamais lancés" }}
 			type="trending"
 			isBrowseEndpoint={true}
 			seeAllHref="/library/albums"
@@ -241,6 +463,53 @@
 <style>
 	.home-row {
 		display: contents;
+	}
+	/* AP1: the row painted from the localStorage cache dims very slightly
+	   until the live answer replaces it in place (opacity only - the row
+	   itself never remounts, so there is no layout jump). */
+	.row-fade {
+		transition: opacity 220ms ease;
+	}
+	.row-fade.is-cache {
+		opacity: 0.93;
+	}
+	/* ST1: the compact weekly recap. Same 1rem gutter as .resume-queue;
+	   colours/radius/44px tap target come from .btn-secondary and
+	   .btn-reset (global/redesign/modules/_button.scss) - only the card
+	   layout itself lives here. */
+	.week-card {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin: 0.5em 1rem 0;
+		padding: 0.75rem 1rem;
+		border-radius: 0.9rem;
+		background: hsl(0deg 0% 100% / 6%);
+	}
+	.week-card-body {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.week-card-title {
+		font-weight: 600;
+		margin: 0 0 0.15em;
+	}
+	.week-card-stats {
+		margin: 0;
+		opacity: 0.85;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.week-card-link {
+		flex: 0 0 auto;
+		white-space: nowrap;
+	}
+	.week-card-dismiss {
+		flex: 0 0 auto;
+		width: 2.75rem;
+		height: 2.75rem;
+		opacity: 0.7;
 	}
 	.resume-queue {
 		/* Audit v7 TOP 6: the pill sat at x=0 on mobile while the row cards and

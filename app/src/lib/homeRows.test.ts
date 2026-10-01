@@ -13,6 +13,8 @@ import {
 	rowItemRef,
 	sanitizeCard,
 	thumbnailUrl,
+	isoWeekKey,
+	shouldShowWeekCard,
 } from "./homeRows";
 
 const song = (id: string, title = id) => ({ videoId: id, title, thumbnails: [] });
@@ -178,5 +180,33 @@ describe("diversify (audit UX v4 TOP 5)", () => {
 		];
 		expect(diversify(items, 3, 1, 2).map((i) => i.videoId)).toEqual(["a1", "a2", "a3"]);
 		expect(diversify(items, 2, 1, 2).map((i) => i.videoId)).toEqual(["a1", "a2"]);
+	});
+});
+
+describe("ST1 week card", () => {
+	it("computes the ISO week key (Monday-based, year of that week's Thursday)", () => {
+		// 2026-01-01 is a Thursday -> ISO week 1 of 2026.
+		expect(isoWeekKey(new Date(2026, 0, 1))).toBe("2026-W01");
+		// 2025-12-29 (Monday) is still ISO week 1 of 2026 (shares the same Thursday).
+		expect(isoWeekKey(new Date(2025, 11, 29))).toBe("2026-W01");
+		// 2026-12-31 (Thursday) stays in 2026's last week.
+		expect(isoWeekKey(new Date(2026, 11, 31))).toBe("2026-W53");
+	});
+	it("shows only on Monday, local time", () => {
+		const monday = new Date(2026, 0, 5); // a Monday
+		const tuesday = new Date(2026, 0, 6);
+		expect(monday.getDay()).toBe(1);
+		expect(shouldShowWeekCard(monday, null)).toBe(true);
+		expect(shouldShowWeekCard(tuesday, null)).toBe(false);
+	});
+	it("stays hidden once dismissed for THAT week, but returns the next Monday", () => {
+		const monday = new Date(2026, 0, 5);
+		const nextMonday = new Date(2026, 0, 12);
+		const thisWeek = isoWeekKey(monday);
+		expect(shouldShowWeekCard(monday, thisWeek)).toBe(false);
+		expect(shouldShowWeekCard(monday, "2025-W52")).toBe(true);
+		expect(shouldShowWeekCard(nextMonday, thisWeek)).toBe(true);
+		expect(shouldShowWeekCard(monday, null)).toBe(true);
+		expect(shouldShowWeekCard(monday, undefined)).toBe(true);
 	});
 });

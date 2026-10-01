@@ -198,3 +198,33 @@ export function diversify(items: RowItem[], max: number, perAlbum = 2, perArtist
 	}
 	return out;
 }
+
+// ---- ST1 "Ta semaine" card ----
+// localStorage key: the dismissed ISO week ("YYYY-Www"); the card shows again
+// once a new week starts even if the previous one was dismissed.
+export const WEEK_CARD_DISMISS_KEY = "ytm-week-card";
+
+/** ISO-8601 week key ("YYYY-Www", Monday-based weeks, year of the week's Thursday). */
+export function isoWeekKey(d: Date): string {
+	// Work in UTC on the LOCAL calendar date (not a UTC conversion of the
+	// instant) so the week boundary matches the viewer's own Monday.
+	const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+	const dayMon0 = (date.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
+	date.setUTCDate(date.getUTCDate() - dayMon0 + 3); // that week's Thursday
+	const year = date.getUTCFullYear();
+	const firstThursday = new Date(Date.UTC(year, 0, 4));
+	const firstDayMon0 = (firstThursday.getUTCDay() + 6) % 7;
+	firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayMon0 + 3);
+	const week = 1 + Math.round((date.getTime() - firstThursday.getTime()) / (7 * 86400000));
+	return `${year}-W${String(week).padStart(2, "0")}`;
+}
+
+/**
+ * ST1: the week card shows only on Monday, viewer's local time (`now.getDay()`,
+ * not UTC), and only until it is dismissed for THAT ISO week - a dismissal
+ * from a previous week never hides it again.
+ */
+export function shouldShowWeekCard(now: Date, dismissedWeekKey: string | null | undefined): boolean {
+	if (now.getDay() !== 1) return false;
+	return dismissedWeekKey !== isoWeekKey(now);
+}
