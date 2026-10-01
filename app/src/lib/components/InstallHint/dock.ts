@@ -31,3 +31,14 @@ export function installHintGeometry(dock: InstallHintDock, bottomNav = "0px"): I
 	}
 	return { bottom: bottomNav, safeArea: "env(safe-area-inset-bottom, 0px)" };
 }
+
+/**
+ * L10-14: room the visible strip takes over the page bottom. The page's
+ * `main` gets that much more space at its end (InstallHint sets
+ * `--install-hint-reserve` + `data-install-hint` on <html>) so the last row /
+ * button is never under the strip. null = nothing to reserve.
+ */
+export function installHintReserve(show: boolean, stripHeightPx: number): string | null {
+	if (!show || !Number.isFinite(stripHeightPx) || stripHeightPx <= 0) return null;
+	return `${Math.ceil(stripHeightPx)}px`;
+}

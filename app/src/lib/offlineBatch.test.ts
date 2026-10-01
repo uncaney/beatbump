@@ -13,7 +13,7 @@ vi.mock("$lib/offline", () => ({
 	abortCacheAudio: vi.fn(),
 }));
 
-import { CANCELLED_REASON, keepDepsWithAbort, cancelKeepJob, findKeepJob, jobMatchesKey, keepAliases, keepItemOfflineWith, keepMenuKey, KEEP_OFFLINE_MSG, KEEP_RUNNING_MSG, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
+import { compactKeepAriaLabel, CANCELLED_REASON, keepDepsWithAbort, cancelKeepJob, findKeepJob, jobMatchesKey, keepAliases, keepItemOfflineWith, keepMenuKey, KEEP_OFFLINE_MSG, KEEP_RUNNING_MSG, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
 import { get } from "svelte/store";
 
 const MB = 1024 * 1024;
@@ -405,5 +405,17 @@ describe("keepDepsWithAbort", () => {
 		expect(r?.ready).toBe(0);
 		expect(base.aborted.sort()).toEqual(["a", "b"]); // the 2 in flight; "c" never started
 		expect(get(keepJobs).has(key)).toBe(false);
+	});
+});
+
+describe("compactKeepAriaLabel (L10-13)", () => {
+	it("names the state and the card", () => {
+		expect(compactKeepAriaLabel(keepLabel(null, false), "Années 1990")).toBe("Garder hors-ligne : Années 1990");
+		expect(compactKeepAriaLabel(keepLabel({ ready: 3, failed: 0, refused: 0, total: 3 }, false), "Rock")).toBe("Prêt hors-ligne : Rock");
+		expect(compactKeepAriaLabel(keepLabel({ ready: 9, failed: 0, refused: 0, total: 14 }, true), "Daft Punk")).toBe("9/14 prêts : Daft Punk");
+	});
+	it("falls back to the state alone without a title", () => {
+		expect(compactKeepAriaLabel("Garder hors-ligne", "")).toBe("Garder hors-ligne");
+		expect(compactKeepAriaLabel("Garder hors-ligne", undefined)).toBe("Garder hors-ligne");
 	});
 });

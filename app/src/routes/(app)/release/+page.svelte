@@ -68,13 +68,13 @@
 	};
 
 	// UX7: one action row (InfoBox release-actions): "Tout lire" (play icon)
-	// then "Radio" (radio icon, aria-label "Album Radio"; only when YouTube
+	// then "Radio" (radio icon, aria-label "Radio de l'album" (L10-5); only when YouTube
 	// gave an autoMixId), then Garder hors-ligne / Partager / ⋮. Short labels
 	// on desktop, icon-only with the aria-label on phones.
 	$: headerButtons = [
 		{ text: "Tout lire", label: "Tout lire", action: () => playAlbum(), icon: "play" },
 		...(hasAutoMix
-			? [{ text: "Radio", label: "Album Radio", type: "outlined", action: () => playRadio(), icon: "radio" }]
+			? [{ text: "Radio", label: "Radio de l'album", type: "outlined", action: () => playRadio(), icon: "radio" }]
 			: []),
 		{ icon: "dots", type: "icon" },
 	] as any[];

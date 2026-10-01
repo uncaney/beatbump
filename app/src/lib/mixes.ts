@@ -115,3 +115,21 @@ export function mixCardsFrom(resp: unknown): MixCard[] {
 	}
 	return out;
 }
+
+/** L10-14: how long an artist card stays marked "Radio indisponible" (still tappable: a tap retries). */
+export const MIX_UNAVAILABLE_TTL_MS = 10 * 60 * 1000;
+
+/** The keys of `marks` (key -> time marked) still within `ttlMs` at `now`. */
+export function activeUnavailable(marks: ReadonlyMap<string, number>, now: number, ttlMs = MIX_UNAVAILABLE_TTL_MS): Set<string> {
+	const out = new Set<string>();
+	for (const [k, at] of marks) if (now - at < ttlMs) out.add(k);
+	return out;
+}
+
+/** L10-13: accessible name of a mix card, its state included (the subtitle alone was hidden by aria-label). */
+export function mixCardAriaLabel(card: Pick<MixCard, "kind" | "title">, state: "ok" | "unavailable" | "too_small" = "ok"): string {
+	const base = card.kind === "artist" ? `Lancer la radio ${card.title}` : `Lire le mix ${card.title}`;
+	if (state === "unavailable") return `${base} : radio indisponible, toucher pour réessayer`;
+	if (state === "too_small") return `${base} : pas assez d'albums`;
+	return base;
+}

@@ -348,6 +348,23 @@
 			>
 		</button>
 	</h2>
+	{#if !open && packState === "running"}
+		<!-- L10-14: folding the card during a pack keeps its "Annuler" reachable. -->
+		<div
+			class="space-folded-actions"
+			data-testid="space-folded-actions"
+		>
+			<button
+				type="button"
+				class="btn-reset btn-secondary danger"
+				data-testid="pack-cancel"
+				aria-label="Annuler le pack"
+				on:click={cancelPack}
+			>
+				Annuler
+			</button>
+		</div>
+	{/if}
 	{#if open}
 		<div
 			class="space-body"
@@ -629,5 +646,10 @@
 		margin: 0.5rem 0 0;
 		font-size: var(--text-secondary-size);
 		color: #ffb3b3;
+	}
+	.space-folded-actions {
+		display: flex;
+		justify-content: flex-end;
+		margin-top: 0.5rem;
 	}
 </style>

@@ -43,10 +43,10 @@
 		try {
 			const r = await login(name.trim());
 			current = r.name;
-			msg = `Signed in as ${r.name}. Your favourites, follows, playlists and history are now tied to this name on any device.`;
+			msg = `Connecté en tant que ${r.name}. Tes favoris, abonnements, playlists et ton historique suivent ce prénom sur tous tes appareils.`;
 			name = "";
 		} catch (e) {
-			msg = "Login failed.";
+			msg = "Connexion impossible.";
 		}
 		busy = false;
 	}
@@ -57,7 +57,7 @@
 		try {
 			await logout();
 			current = "";
-			msg = "Switched to a fresh guest profile.";
+			msg = "Tu es passé sur un nouveau profil invité.";
 		} catch (e) {
 			// L10-8: the server kept the session: the profile stays as it was.
 			console.error("logout failed", e);
@@ -69,7 +69,7 @@
 
 <main class="resp-content-width">
 	<CollectionNav active="account" />
-	<h1>Account</h1>
+	<h1>Compte</h1>
 	<!-- Audit v8 TOP 9: the card belongs to this screen, under its h1. -->
 	<a
 		class="stats-card"
@@ -82,15 +82,15 @@
 	</a>
 
 	{#if loading}
-		<p class="state">Loading…</p>
+		<p class="state">Chargement…</p>
 	{:else if offline}
 		<MeOffline text="Ton profil se lit sur le serveur : connexion et changement de profil reviennent avec le réseau." />
 	{:else}
 		<p class="who">
 			{#if current}
-				Signed in as <strong>{current}</strong>.
+				Connecté en tant que <strong>{current}</strong>.
 			{:else}
-				You're a <strong>guest</strong> (this device only). Pick a name to sync your library across devices.
+				Tu es <strong>invité</strong> (cet appareil seulement). Choisis un prénom pour retrouver ta bibliothèque sur tous tes appareils.
 			{/if}
 		</p>
 
@@ -100,7 +100,7 @@
 		>
 			<input
 				type="text"
-				placeholder="Your name (e.g. paul)"
+				placeholder="Ton prénom (ex. paul)"
 				bind:value={name}
 				autocomplete="off"
 			/>
@@ -111,22 +111,22 @@
 			<button
 				class="btn-primary"
 				type="submit"
-				disabled={busy || !name.trim()}>{current ? "Switch profile" : "Sign in"}</button
+				disabled={busy || !name.trim()}>{current ? "Changer de profil" : "C'est moi"}</button
 			>
 			{#if current}
 				<button
 					class="btn-secondary"
 					type="button"
 					on:click={doLogout}
-					disabled={busy}>Sign out</button
+					disabled={busy}>Se déconnecter</button
 				>
 			{/if}
 		</form>
 
 		{#if msg}<p class="msg">{msg}</p>{/if}
 		<p class="note">
-			Profiles are name-based (no password) · same name = same library. Anyone on the instance can use any
-			name; this is meant for a trusted/household instance.
+			Les profils reposent sur un prénom (sans mot de passe) · même prénom = même bibliothèque. Toute personne de l'instance peut
+			utiliser n'importe quel prénom : c'est fait pour une instance de confiance (la maison, les amis).
 		</p>
 	{/if}
 </main>

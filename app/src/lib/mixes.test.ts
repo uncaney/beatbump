@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { albumsLabel, artistCardsFrom, decadeLabel, mixCardUrl, mixCardsFrom, playsLabel, tracksLabel } from "./mixes";
+import { activeUnavailable, albumsLabel, artistCardsFrom, MIX_UNAVAILABLE_TTL_MS, mixCardAriaLabel, decadeLabel, mixCardUrl, mixCardsFrom, playsLabel, tracksLabel } from "./mixes";
 
 describe("mixes cards (c29b D1)", () => {
 	it("labels", () => {
@@ -60,5 +60,22 @@ describe("mixes cards (c29b D1)", () => {
 		expect(mixCardsFrom({})).toEqual([]);
 		expect(mixCardsFrom({ decades: [], genres: [] })).toEqual([]);
 		expect(mixCardsFrom("nope")).toEqual([]);
+	});
+});
+
+describe("L10-14 unavailable artist cards expire", () => {
+	it("keeps a mark for 10 minutes only", () => {
+		const marks = new Map([["artist:a", 1_000], ["artist:b", 1_000 + MIX_UNAVAILABLE_TTL_MS]]);
+		expect([...activeUnavailable(marks, 1_000 + MIX_UNAVAILABLE_TTL_MS - 1)].sort()).toEqual(["artist:a", "artist:b"]);
+		expect([...activeUnavailable(marks, 1_000 + MIX_UNAVAILABLE_TTL_MS)]).toEqual(["artist:b"]);
+		expect(MIX_UNAVAILABLE_TTL_MS).toBe(600_000);
+	});
+});
+
+describe("L10-13 mix card accessible name", () => {
+	it("carries the state", () => {
+		expect(mixCardAriaLabel({ kind: "artist", title: "Daft Punk" })).toBe("Lancer la radio Daft Punk");
+		expect(mixCardAriaLabel({ kind: "artist", title: "Daft Punk" }, "unavailable")).toBe("Lancer la radio Daft Punk : radio indisponible, toucher pour réessayer");
+		expect(mixCardAriaLabel({ kind: "decade", title: "Années 1990" }, "too_small")).toBe("Lire le mix Années 1990 : pas assez d'albums");
 	});
 });

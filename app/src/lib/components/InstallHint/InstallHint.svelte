@@ -30,7 +30,7 @@
 	import { AudioPlayer } from "$lib/player";
 	import { queue } from "$lib/stores/list";
 	import { fullscreenStore } from "$components/Player/channel";
-	import { installHintDock, installHintGeometry } from "./dock";
+	import { installHintDock, installHintGeometry, installHintReserve } from "./dock";
 
 	// Shown at most once per session: once true, stays true for the rest of
 	// this component's (= the app's) lifetime, whatever triggers next.
@@ -70,6 +70,24 @@
 		$installHintEligible &&
 		canOffer;
 
+	// L10-14: while shown, the page's main keeps the strip's height free at its
+	// end (global rule below), so the last row / button stays reachable.
+	let stripHeight = 0;
+	$: reserve = installHintReserve(show, stripHeight);
+	$: applyReserve(reserve);
+	function applyReserve(r: string | null) {
+		if (typeof document === "undefined") return;
+		const root = document.documentElement;
+		if (r) {
+			root.style.setProperty("--install-hint-reserve", r);
+			root.setAttribute("data-install-hint", "");
+		} else {
+			root.style.removeProperty("--install-hint-reserve");
+			root.removeAttribute("data-install-hint");
+		}
+	}
+	onDestroy(() => applyReserve(null));
+
 	function dismissForLonger() {
 		dismissed = true;
 		snoozeInstallHint();
@@ -91,6 +109,7 @@
 		style:--install-hint-safe-area={geometry.safeArea}
 		role="status"
 		data-testid="install-hint"
+		bind:offsetHeight={stripHeight}
 	>
 		<p class="text">
 			{#if $isIOS}
@@ -124,6 +143,14 @@
 {/if}
 
 <style lang="scss">
+	// L10-14: extra room at the end of the page while the strip is shown
+	// (additive: a spacer after the page's own bottom padding).
+	:global(html[data-install-hint] main)::after {
+		content: "";
+		display: block;
+		height: var(--install-hint-reserve, 0px);
+		pointer-events: none;
+	}
 	.install-hint {
 		position: fixed;
 		left: 0;

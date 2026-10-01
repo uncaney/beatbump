@@ -21,7 +21,7 @@
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
 	import KeepOfflineButton from "$lib/components/ListItem/KeepOfflineButton.svelte";
 	import { getTopBy } from "$lib/me";
-	import { artistCardsFrom, mixCardUrl, mixCardsFrom, type MixCard } from "$lib/mixes";
+	import { activeUnavailable, artistCardsFrom, MIX_UNAVAILABLE_TTL_MS, mixCardAriaLabel, mixCardUrl, mixCardsFrom, type MixCard } from "$lib/mixes";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 
@@ -35,11 +35,30 @@
 	let tooSmallTimer: ReturnType<typeof setTimeout> | undefined;
 	/**
 	 * L9-7: artist cards whose radio (local/related?seed=artist:) came back
-	 * empty or failed: they read "Radio indisponible" and are disabled (not
-	 * "Pas assez d'albums", which is about decade / genre mixes) until the
-	 * network comes back (window "online") or the page is reopened.
+	 * empty or failed read "Radio indisponible" (not "Pas assez d'albums",
+	 * which is about decade / genre mixes).
+	 * L10-14: the mark is no longer a dead end: the card stays tappable (a tap
+	 * retries), and the mark expires after MIX_UNAVAILABLE_TTL_MS (10 min) or
+	 * when the network comes back (window "online").
 	 */
+	let unavailableAt = new Map<string, number>();
 	let unavailable = new Set<string>();
+	let unavailableTimer: ReturnType<typeof setTimeout> | undefined;
+	function refreshUnavailable() {
+		const now = Date.now();
+		unavailable = activeUnavailable(unavailableAt, now);
+		unavailableAt = new Map([...unavailableAt].filter(([k]) => unavailable.has(k)));
+		clearTimeout(unavailableTimer);
+		if (unavailableAt.size) {
+			const next = Math.min(...unavailableAt.values()) + MIX_UNAVAILABLE_TTL_MS - now;
+			unavailableTimer = setTimeout(refreshUnavailable, Math.max(1000, next));
+		}
+	}
+	function clearUnavailable(key?: string) {
+		if (key) unavailableAt.delete(key);
+		else unavailableAt.clear();
+		refreshUnavailable();
+	}
 
 	$: decades = cards.filter((c) => c.kind === "decade");
 	$: genres = cards.filter((c) => c.kind === "genre");
@@ -64,17 +83,19 @@
 	});
 
 	onMount(() => {
-		const onOnline = () => (unavailable = new Set());
+		const onOnline = () => clearUnavailable();
 		window.addEventListener("online", onOnline);
 		return () => {
 			window.removeEventListener("online", onOnline);
 			clearTimeout(tooSmallTimer);
+			clearTimeout(unavailableTimer);
 		};
 	});
 
 	function markUnavailable(card: MixCard) {
 		if (card.kind === "artist") {
-			unavailable = new Set(unavailable).add(card.key);
+			unavailableAt.set(card.key, Date.now());
+			refreshUnavailable();
 			return;
 		}
 		tooSmallKey = card.key;
@@ -100,6 +121,7 @@
 				markUnavailable(card);
 				return;
 			}
+			if (unavailable.has(card.key)) clearUnavailable(card.key);
 			await playTracks(items, {
 				context: { kind: card.kind === "artist" ? "radio" : card.kind, title: card.title, href: "/library/mixes" },
 			});
@@ -163,8 +185,8 @@
 									data-testid="mix-card"
 									data-mix={card.key}
 									data-unavailable={unavailable.has(card.key) || undefined}
-									disabled={busyKey === card.key || unavailable.has(card.key)}
-									aria-label={card.kind === "artist" ? `Lancer la radio ${card.title}` : `Lire le mix ${card.title}`}
+									disabled={busyKey === card.key}
+									aria-label={mixCardAriaLabel(card, unavailable.has(card.key) ? "unavailable" : tooSmallKey === card.key ? "too_small" : "ok")}
 									title={card.title}
 									on:click={() => playMix(card)}
 								>
@@ -183,6 +205,7 @@
 										load={() => loadCard(card)}
 										sourceKey={`mix:${card.key}`}
 										testid="mix-keep"
+										cardTitle={card.title}
 										compact
 									/>
 								</div>

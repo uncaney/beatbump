@@ -51,7 +51,26 @@ export const FILES = [
 	"lib/offlineBatch.ts",
 	"lib/offline.ts",
 	"lib/lazyComponent.ts",
+	// L10-13 / L10-5 (audit logic v10): program screens and modules added since c31.
+	"routes/(app)/library/account/+page.svelte",
+	"lib/components/ShareLinkButton/ShareLinkButton.svelte",
+	"lib/components/EmptyState/EmptyState.svelte",
+	"lib/components/EmptyState/ErrorState.svelte",
+	"lib/mixes.ts",
+	"lib/offlineFailed.ts",
+	"lib/utils/shareLink.ts",
+	"lib/utils/retryOnce.ts",
 ] as const;
+
+/**
+ * Beatbump-origin files the program edited: only the program's own lines
+ * are checked (the original English stays until Camille's decision 1): each
+ * entry lists the exact strings that must be French.
+ */
+export const PROGRAM_STRINGS: Record<string, string[]> = {
+	"routes/(app)/release/+page.svelte": ['label: "Radio de l\'album"', '"Tout lire"'],
+	"routes/(app)/home/+page.svelte": ["Impossible de charger les suggestions YouTube", 'retryTestid="retry-home"'],
+};
 
 /** English UI words that must not show on a French program screen (case-sensitive, whole word). */
 export const DENY = [
@@ -71,6 +90,14 @@ export const DENY = [
 	"No results",
 	"Sort",
 	"Add to",
+	// L10-13: words the v9/v10 audits found on screens one tap from the French nav.
+	"Sign in",
+	"Sign out",
+	"Switch profile",
+	"Your",
+	"See All",
+	"Album Radio",
+	"Uh-Oh",
 ] as const;
 
 /** Accepted hits: `${file}::${text}` -> reason. */
@@ -157,6 +184,16 @@ describe("frenchScreens: program screens carry no English UI words", () => {
 			const texts = file.endsWith(".ts") ? scriptStrings(src) : visibleTexts(src);
 			const hits = denyHits(texts).filter((h) => !ALLOW[`${file}::${h.text}`]);
 			expect(hits).toEqual([]);
+		});
+	}
+});
+
+describe("frenchScreens: program lines of Beatbump-origin files", () => {
+	for (const [file, needles] of Object.entries(PROGRAM_STRINGS)) {
+		it(file, () => {
+			const src = readFileSync(join(SRC, file), "utf-8");
+			for (const n of needles) expect(src).toContain(n);
+			expect(src).not.toMatch(/label:\s*"Album Radio"/);
 		});
 	}
 });

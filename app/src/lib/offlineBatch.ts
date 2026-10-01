@@ -255,6 +255,17 @@ export function keepLabel(p: KeepProgress | null, running: boolean): string {
 	return "Garder hors-ligne";
 }
 
+/**
+ * L10-13: accessible name of the compact (icon-only) keep button: its state
+ * AND the card it belongs to ("Garder hors-ligne : Années 1990", "Prêt
+ * hors-ligne : Rock", "9/14 prêts : Daft Punk"); 20 identical names on
+ * /library/mixes otherwise.
+ */
+export function compactKeepAriaLabel(label: string, cardTitle?: string | null): string {
+	const t = typeof cardTitle === "string" ? cardTitle.trim() : "";
+	return t ? `${label} : ${t}` : label;
+}
+
 /** One toast for a finished batch: "N prêts hors-ligne · K refusés : quota … · F impossibles". */
 export function keepSummary(r: KeepResult): { text: string; type: "success" | "error" } {
 	if (!r.total) return { text: "Aucun morceau à garder hors-ligne", type: "error" };

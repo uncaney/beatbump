@@ -11,7 +11,7 @@
 	import { page } from "$app/stores";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { getOfflineTracks } from "$lib/offline";
-	import { cancelKeepJob, findKeepJob, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepProgress } from "$lib/offlineBatch";
+	import { cancelKeepJob, compactKeepAriaLabel, findKeepJob, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepProgress } from "$lib/offlineBatch";
 	import { notify } from "$lib/utils";
 
 	/** Tracks of the source, or a loader (album pages resolve their queue lazily). */
@@ -21,7 +21,7 @@
 	export let sourceKey: string | null = null;
 	/** data-testid of the button (HL6: "mix-keep" on a mix card). */
 	export let testid = "keep-offline";
-	/** UX2: icon-only variant (aria-label "Garder hors-ligne", status in the title). */
+	/** UX2: icon-only variant (aria-label = state + card title, L10-13). */
 	export let compact = false;
 	/**
 	 * UX7: album action row. A download icon before the label; on phones the
@@ -29,6 +29,8 @@
 	 * running "9/14 prêts" progress stays written.
 	 */
 	export let responsive = false;
+	/** L10-13: title of the card a compact button belongs to (part of its accessible name). */
+	export let cardTitle = "";
 
 	// $page (not `location`): a same-route navigation (release?id=A → B) reuses this component.
 	$: key = sourceKey || ($page?.url ? $page.url.pathname + $page.url.search : "");
@@ -86,7 +88,7 @@
 			data-state={state}
 			data-ready={progress ? progress.ready : 0}
 			data-total={progress ? progress.total : 0}
-			aria-label="Garder hors-ligne"
+			aria-label={compactKeepAriaLabel(label, cardTitle)}
 			title={label}
 			disabled={running}
 			on:click|stopPropagation={start}
@@ -108,7 +110,7 @@
 				type="button"
 				class="keep-icon icon-btn"
 				data-testid="keep-offline-cancel"
-				aria-label="Annuler"
+				aria-label={compactKeepAriaLabel("Annuler", cardTitle)}
 				title="Annuler"
 				on:click|stopPropagation={cancel}
 			>
