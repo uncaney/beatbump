@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"beatbump-server/backend/db"
+
 	"github.com/labstack/echo/v4"
 )
 
@@ -14,7 +16,15 @@ import (
 // matched against the index by its metadata). The pool is the radio pool
 // (same artist, same genre, library sample), seed excluded, one card per
 // album with the seed artist first (relatedByAlbum).
+//
+// EQ1: ?seed=album:<id>|artist:<id>|favorites builds a flat "Radio ciblée"
+// queue instead (localRelatedSeedHandler) - every track owned by that
+// album/artist, or every favourited song, extended with the regular radio
+// pool, capped at 30 tracks with at most 2 per album (radioFromSeedTracks).
 func LocalRelatedHandler(c echo.Context) error {
+	if seed := strings.TrimSpace(c.QueryParam("seed")); seed != "" {
+		return localRelatedSeedHandler(c, seed)
+	}
 	lid := strings.TrimSpace(c.QueryParam("lid"))
 	title := strings.TrimSpace(c.QueryParam("title"))
 	artist := strings.TrimSpace(c.QueryParam("artist"))
@@ -116,4 +126,109 @@ func meiliSeedByMetadata(title, artist string) map[string]interface{} {
 		}
 	}
 	return nil
+}
+
+// localRelatedSeedHandler answers ?seed=album:<id>|artist:<id>|favorites (EQ1
+// targeted radio): resolves the seed to its own tracks ("core"), then
+// radioFromSeedTracks extends it with the regular radio pool. name is the
+// human title the front shows as "Radio : <name>".
+func localRelatedSeedHandler(c echo.Context, seed string) error {
+	var core []map[string]interface{}
+	var name string
+	switch {
+	case seed == "favorites":
+		name = "Favoris"
+		core = favoriteTracks(profileID(c))
+	case strings.HasPrefix(seed, "album:"):
+		id := strings.TrimPrefix(seed, "album:")
+		a := meiliGetDoc("albums", id)
+		if a == nil {
+			return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "not_found", "items": []Item{}})
+		}
+		name = mstr(a, "album")
+		core = albumTracks(name, mstr(a, "albumArtist"))
+	case strings.HasPrefix(seed, "artist:"):
+		id := strings.TrimPrefix(seed, "artist:")
+		a := meiliGetDoc("artists", id)
+		if a == nil {
+			return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "not_found", "items": []Item{}})
+		}
+		name = mstr(a, "name")
+		core = meiliSearchIndex("tracks", map[string]interface{}{
+			"q": "", "filter": "albumArtist = \"" + escapeMeili(name) + "\"",
+			"limit": 200, "attributesToRetrieve": localTrackAttrs,
+		})
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "bad_request", "reason": "unknown seed: " + seed})
+	}
+	if len(core) == 0 {
+		return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "not_found", "items": []Item{}})
+	}
+	items := radioFromSeedTracks(core, 30, 2)
+	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "seed": seed, "name": name})
+}
+
+// favoriteTracks resolves a profile's favourited local songs (lid refs only)
+// to their Meili hits, most recently favourited first.
+func favoriteTracks(pid string) []map[string]interface{} {
+	var refs []struct{ Ref string }
+	db.DB.Model(&db.Favorite{}).Select("ref").
+		Where("profile_id = ? AND kind = ?", pid, "song").
+		Order("created_at desc").Limit(60).Scan(&refs)
+	out := make([]map[string]interface{}, 0, len(refs))
+	for _, r := range refs {
+		if !isLid(r.Ref) {
+			continue
+		}
+		if h := meiliByLid(r.Ref); h != nil {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// radioFromSeedTracks turns the seed's own tracks into a flat radio queue:
+// the seed tracks first, extended with radioPool() seeded by the first one so
+// a single-album or single-artist radio does not stop at its own tracklist,
+// deduped and capped at `maxPerAlbum` tracks per album (relatedByAlbum caps
+// at one card per album - too narrow for a from-scratch "Radio" queue, which
+// wants real tracks, not one per album).
+func radioFromSeedTracks(core []map[string]interface{}, limit, maxPerAlbum int) []Item {
+	var ext []map[string]interface{}
+	if len(core) > 0 {
+		first := core[0]
+		ext = radioPool(first, mstr(first, "lid"))
+		rand.Shuffle(len(ext), func(i, j int) { ext[i], ext[j] = ext[j], ext[i] })
+	}
+	seenLid := map[string]bool{}
+	albumCount := map[string]int{}
+	out := make([]Item, 0, limit)
+	add := func(h map[string]interface{}) {
+		l := mstr(h, "lid")
+		if l == "" || seenLid[l] {
+			return
+		}
+		albumKey, _, _ := trackAlbumKey(h)
+		if albumKey != "" && albumCount[albumKey] >= maxPerAlbum {
+			return
+		}
+		seenLid[l] = true
+		if albumKey != "" {
+			albumCount[albumKey]++
+		}
+		out = append(out, lidItem(h))
+	}
+	for _, h := range core {
+		if len(out) >= limit {
+			break
+		}
+		add(h)
+	}
+	for _, h := range ext {
+		if len(out) >= limit {
+			break
+		}
+		add(h)
+	}
+	return out
 }

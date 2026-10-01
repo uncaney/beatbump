@@ -99,6 +99,49 @@
 	let isLoading = false;
 	let hasData = false;
 
+	// EQ4: the owned-library shelf under a songs/albums/artists chip is capped
+	// at 12 by the backend search shelf (backend/api/search.go, out of lane
+	// scope). "Plus de résultats" pages past it straight against the
+	// dedicated local/* endpoint (q + offset + limit, already supported) -
+	// filter=all is untouched (harness).
+	let libraryItems: any[] = [];
+	let libraryOffset = 12;
+	let libraryLoading = false;
+	let libraryExhausted = false;
+	function libraryEndpoint(f: string): string | null {
+		if (f === "songs" || f === "") return "/api/v1/local/songs";
+		if (f === "albums") return "/api/v1/local/albums";
+		if (f === "artists") return "/api/v1/local/artists";
+		return null;
+	}
+	async function loadMoreLibrary() {
+		const ep = libraryEndpoint(filter);
+		if (!ep || libraryLoading || libraryExhausted) return;
+		libraryLoading = true;
+		try {
+			const res = await APIClient.fetch(
+				`${ep}?q=${encodeURIComponent(query)}&offset=${libraryOffset}&limit=12`,
+			);
+			const more = await res.json();
+			const items = Array.isArray(more.items) ? more.items : [];
+			libraryItems = [...libraryItems, ...items];
+			libraryOffset += items.length;
+			if (items.length < 12) libraryExhausted = true;
+		} catch (err) {
+			console.error("library-more: failed", err);
+		} finally {
+			libraryLoading = false;
+		}
+	}
+	// New shelf (query or chip changed): reset the extra page(s).
+	$: {
+		query;
+		filter;
+		libraryItems = [];
+		libraryOffset = 12;
+		libraryExhausted = false;
+	}
+
 	// export const snapshot = {
 	// 	capture() {
 	// 		return {
@@ -215,7 +258,21 @@
 						{#each shelf.contents as item}
 							<Listing data={item} />
 						{/each}
+						{#each libraryItems as item}
+							<Listing data={item} />
+						{/each}
 					</div>
+					{#if libraryEndpoint(filter) && !libraryExhausted && (shelf.contents?.length ?? 0) + libraryItems.length >= 12}
+						<button
+							type="button"
+							class="btn-reset btn-secondary library-more"
+							data-testid="library-more"
+							disabled={libraryLoading}
+							on:click={loadMoreLibrary}
+						>
+							{libraryLoading ? "Chargement…" : "Plus de résultats"}
+						</button>
+					{/if}
 				</section>
 			{/each}
 			{#if ytShelf}
@@ -401,5 +458,13 @@
 
 	.link {
 		text-transform: uppercase;
+	}
+
+	.library-more {
+		margin: 0.5em 0 0;
+		align-self: flex-start;
+	}
+	.library-more:disabled {
+		cursor: progress;
 	}
 </style>

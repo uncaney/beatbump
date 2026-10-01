@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { APIClient } from "$lib/api";
+	import Icon from "$components/Icon/Icon.svelte";
+	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 
 	let genres: { name: string; count: number }[] = [];
 	let loading = true;
 	let q = "";
+	/** Name of the genre currently loading its queue (disables its own buttons only). */
+	let busyGenre = "";
 
 	$: filtered = q
 		? genres.filter((g) => g.name.toLowerCase().includes(q.toLowerCase()))
@@ -21,6 +25,29 @@
 		}
 		loading = false;
 	});
+
+	// D4: "Lire" / "Aléatoire" on a genre row load up to 200 of its tracks
+	// (local/songs genre filter, backend/api/local_browse.go) into the queue
+	// via the shared PlayAllBar.playTracks, context "Genre : <g>" (I8).
+	async function playGenre(name: string, shuffle: boolean) {
+		if (busyGenre) return;
+		busyGenre = name;
+		try {
+			const res = await APIClient.fetch(
+				`/api/v1/local/songs?genre=${encodeURIComponent(name)}&limit=200`,
+			);
+			const data = await res.json();
+			const items = Array.isArray(data.items) ? data.items : [];
+			await playTracks(items, {
+				shuffle,
+				context: { kind: "genre", title: name, href: "/library/genres" },
+			});
+		} catch (err) {
+			console.error("genre play failed", err);
+		} finally {
+			busyGenre = "";
+		}
+	}
 </script>
 
 <main>
@@ -42,13 +69,41 @@
 	{:else}
 		<div class="chips">
 			{#each filtered as g}
-				<a
-					class="chip"
-					href={`/library/all-songs?genre=${encodeURIComponent(g.name)}`}
-				>
-					<span class="name">{g.name}</span>
-					<span class="count">{g.count}</span>
-				</a>
+				<div class="chip-row">
+					<a
+						class="chip"
+						href={`/library/all-songs?genre=${encodeURIComponent(g.name)}`}
+					>
+						<span class="name">{g.name}</span>
+						<span class="count">{g.count}</span>
+					</a>
+					<button
+						type="button"
+						class="btn-reset btn-primary genre-btn"
+						data-testid="genre-play"
+						disabled={busyGenre === g.name}
+						aria-label={`Lire ${g.name}`}
+						on:click={() => playGenre(g.name, false)}
+					>
+						<Icon
+							name="play"
+							size="1em"
+						/>
+					</button>
+					<button
+						type="button"
+						class="btn-reset btn-secondary genre-btn"
+						data-testid="genre-shuffle"
+						disabled={busyGenre === g.name}
+						aria-label={`Lecture aléatoire ${g.name}`}
+						on:click={() => playGenre(g.name, true)}
+					>
+						<Icon
+							name="shuffle"
+							size="1em"
+						/>
+					</button>
+				</div>
 			{/each}
 		</div>
 	{/if}
@@ -79,6 +134,11 @@
 		flex-wrap: wrap;
 		gap: 0.5rem;
 	}
+	.chip-row {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
 	.chip {
 		display: inline-flex;
 		align-items: center;
@@ -95,6 +155,18 @@
 	.chip .count {
 		color: #999;
 		font-size: 0.85rem;
+	}
+	.genre-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2rem;
+		height: 2rem;
+		border-radius: 50%;
+		padding: 0;
+	}
+	.genre-btn:disabled {
+		cursor: progress;
 	}
 	.state {
 		text-align: center;
