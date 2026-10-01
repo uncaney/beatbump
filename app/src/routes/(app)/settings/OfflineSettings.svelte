@@ -13,6 +13,7 @@
 		swRequest,
 		type AudioListEntry,
 	} from "$lib/offline";
+	import { notify } from "$lib/utils";
 
 	const MB = 1024 * 1024;
 	const GB = 1024 * MB;
@@ -32,6 +33,8 @@
 	let busy: "" | "quota" | "clear" | "resync" = "";
 	let entries: AudioListEntry[] = [];
 	let total = 0;
+	// Bytes held by pinned entries (never evicted, G7): the quota cannot go below.
+	let pinnedBytes = 0;
 	let quota = 0; // <= 0 = unlimited
 	let quotaValue = 2 * GB;
 	let confirmClear = false;
@@ -65,6 +68,7 @@
 			} else {
 				entries = r.entries;
 				total = r.total || 0;
+				pinnedBytes = Number(r.pinnedBytes) || 0;
 				quota = typeof r.quota === "number" ? r.quota : 0;
 				quotaValue = quota > 0 ? quota : 0;
 			}
@@ -81,7 +85,19 @@
 		error = "";
 		message = "";
 		try {
-			const r = await setAudioQuota(Number(quotaValue));
+			const requested = Number(quotaValue);
+			// Pinned entries are never evicted (G7): a quota below their total
+			// could never be met. Re-read the pinned total, then refuse.
+			const l = await listCachedAudio().catch(() => null);
+			if (l && Array.isArray(l.entries)) pinnedBytes = Number(l.pinnedBytes) || 0;
+			if (requested > 0 && pinnedBytes > requested) {
+				const msg = `Les morceaux épinglés occupent déjà ${fmtBytes(pinnedBytes)}`;
+				notify(`${msg} : choisis une limite plus haute ou désépingle des morceaux.`, "error");
+				error = `${msg}, la limite reste à ${fmtQuota(quota)}.`;
+				quotaValue = quota > 0 ? quota : 0;
+				return;
+			}
+			const r = await setAudioQuota(requested);
 			if (!r) {
 				error = SW_UNAVAILABLE;
 			} else {
@@ -220,7 +236,7 @@
 				{:else}
 					{cachedTracks} track{cachedTracks === 1 ? "" : "s"} · {fmtBytes(total)} of {fmtQuota(
 						quota,
-					)}
+					)}{#if pinnedBytes > 0}<span id="offline-pinned">, dont {fmtBytes(pinnedBytes)} épinglés</span>{/if}
 				{/if}
 			</span>
 		</label>
