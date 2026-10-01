@@ -1,5 +1,7 @@
 <script lang="ts">
+	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import { getPlaylists, createPlaylist, addToPlaylist } from "$lib/me";
+	import { meLoadOffline } from "$lib/offline";
 	import { queue } from "$lib/stores/list";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
@@ -7,18 +9,32 @@
 	let playlists: any[] = [];
 	let loading = true;
 	let busy = false;
+	// H2: server playlists live in the profile, unreachable offline.
+	let offline = false;
 
 	async function load() {
 		loading = true;
+		let r: any = null;
+		let err: unknown = undefined;
 		try {
-			const r = await getPlaylists();
-			playlists = Array.isArray(r.playlists) ? r.playlists : [];
-		} catch (err) {
-			console.error("playlists load failed", err);
+			r = await getPlaylists();
+		} catch (e) {
+			err = e;
+			console.error("playlists load failed", e);
 		}
+		offline = meLoadOffline([r], err);
+		if (offline) playlists = [];
+		else if (!err) playlists = Array.isArray(r?.playlists) ? r.playlists : [];
 		loading = false;
 	}
-	onMount(load);
+	onMount(() => {
+		void load();
+		const on = () => {
+			if (offline) void load();
+		};
+		window.addEventListener("online", on);
+		return () => window.removeEventListener("online", on);
+	});
 
 	async function newPlaylist() {
 		if (busy) return;
@@ -57,13 +73,14 @@
 			<button
 				class="btn"
 				on:click={newPlaylist}
-				disabled={busy}>New playlist</button
+				disabled={busy || offline}
+				title={offline ? "Hors connexion" : undefined}>New playlist</button
 			>
 			<button
 				class="btn"
 				on:click={saveQueue}
-				disabled={busy || !($queue && $queue.length)}
-				title="Save the current play queue as a playlist"
+				disabled={busy || offline || !($queue && $queue.length)}
+				title={offline ? "Hors connexion" : "Save the current play queue as a playlist"}
 				>Save current queue{$queue && $queue.length ? ` (${$queue.length})` : ""}</button
 			>
 		</div>
@@ -71,6 +88,8 @@
 
 	{#if loading}
 		<p class="state">Loading…</p>
+	{:else if offline}
+		<MeOffline text="Tes playlists reviendront avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
 	{:else if playlists.length === 0}
 		<p class="state">No server playlists yet.</p>
 	{:else}
