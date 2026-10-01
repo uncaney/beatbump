@@ -414,3 +414,36 @@ describe("arrangeHomeRows (c30a F1 + F2)", () => {
 		).toBe(false);
 	});
 });
+
+describe("arrangeHomeRows bonus slot (c39b Album du jour)", () => {
+	const album = (id: string) => ({ browseId: `lb-${id}`, title: `Album ${id}`, thumbnails: [], type: "album" });
+	const albums = (...ids: string[]) => ids.map(album);
+	const songs = (...ids: string[]) => ids.map((id) => song(id));
+	const keys = (rows: { key: string }[]) => rows.map((r) => r.key);
+
+	it("paints the card after Pour toi without taking one of the 4 slots", () => {
+		const { visible, more } = arrangeHomeRows([
+			{ key: "reprendre", items: songs("r1") },
+			{ key: "pour-toi", items: songs("p1", "p2") },
+			{ key: "recemment-acquis", items: albums("a", "b", "c", "d", "e") },
+			{ key: "nouveautes-artistes", items: albums("f", "g", "h", "i") },
+			{ key: "jamais-ecoute", items: albums("j", "k", "l", "m") },
+			{ key: "album-du-jour", items: albums("z"), bonusSlot: true },
+		]);
+		expect(keys(visible)).toEqual(["reprendre", "pour-toi", "album-du-jour", "recemment-acquis", "nouveautes-artistes"]);
+		expect(visible.filter((r) => r.key !== "album-du-jour")).toHaveLength(HOME_MAX_VISIBLE_ROWS);
+		expect(keys(more)).toEqual(["jamais-ecoute"]);
+	});
+
+	it("keeps its album out of the album rows (dedupe priority) and alone shows for an anonymous home", () => {
+		const out = arrangeHomeRows([
+			{ key: "recemment-acquis", items: albums("z", "a", "b", "c", "d"), minAfterDedupe: ALBUM_ROW_MIN },
+			{ key: "album-du-jour", items: albums("z"), bonusSlot: true },
+		]);
+		expect(out.visible.find((r) => r.key === "recemment-acquis")?.items.map(rowItemRef)).toEqual(["lb-a", "lb-b", "lb-c", "lb-d"]);
+		expect(out.visible.find((r) => r.key === "album-du-jour")?.items.map(rowItemRef)).toEqual(["lb-z"]);
+		const anon = arrangeHomeRows([{ key: "album-du-jour", items: albums("z"), bonusSlot: true }]);
+		expect(keys(anon.visible)).toEqual(["album-du-jour"]);
+		expect(keys(arrangeHomeRows([{ key: "album-du-jour", items: [], bonusSlot: true }]).visible)).toEqual([]);
+	});
+});

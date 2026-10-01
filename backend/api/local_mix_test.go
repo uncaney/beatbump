@@ -27,6 +27,20 @@ func (s *mixStub) match(h map[string]interface{}, filter string) bool {
 	if filter == "" {
 		return true
 	}
+	// c39b: composed filters, "(a) AND (b)" (crossovers) and the album
+	// tracks filter `album = "X" AND albumArtist = "Y"`.
+	if strings.Contains(filter, " AND ") {
+		for _, part := range strings.Split(filter, " AND ") {
+			part = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(part), "("), ")")
+			if !s.match(h, part) {
+				return false
+			}
+		}
+		return true
+	}
+	if field, val, ok := strings.Cut(filter, " = \""); ok && field != "genre" {
+		return mstr(h, field) == strings.TrimSuffix(val, "\"")
+	}
 	if strings.HasPrefix(filter, "year IN [") {
 		list := strings.TrimSuffix(strings.TrimPrefix(filter, "year IN ["), "]")
 		for _, y := range strings.Split(list, ",") {
@@ -64,20 +78,21 @@ func (s *mixStub) handler() http.Handler {
 			src = s.albums
 		}
 		resp := map[string]interface{}{}
-		if facets, ok := body["facets"].([]interface{}); ok && len(facets) > 0 {
-			dist := map[string]int{}
-			for _, h := range src {
-				if g := mstr(h, "genre"); g != "" {
-					dist[g]++
-				}
-			}
-			resp["facetDistribution"] = map[string]interface{}{"genre": dist}
-		}
 		var all []map[string]interface{}
 		for _, h := range src {
 			if s.match(h, filter) {
 				all = append(all, h)
 			}
+		}
+		// Facets over the filtered docs (c39b: genres inside a decade).
+		if facets, ok := body["facets"].([]interface{}); ok && len(facets) > 0 {
+			dist := map[string]int{}
+			for _, h := range all {
+				if g := mstr(h, "genre"); g != "" {
+					dist[g]++
+				}
+			}
+			resp["facetDistribution"] = map[string]interface{}{"genre": dist}
 		}
 		resp["estimatedTotalHits"] = len(all)
 		off, lim := stubInt(body["offset"]), stubInt(body["limit"])

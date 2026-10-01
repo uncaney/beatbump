@@ -278,6 +278,12 @@ export interface HomeRowInput {
 	 * not touch keeps its cards whatever their count (small libraries).
 	 */
 	minAfterDedupe?: number;
+	/**
+	 * c39b: a row shown above the fold whenever it has something, WITHOUT
+	 * taking one of the `maxVisible` slots (Album du jour: the cap stays
+	 * 4 personal rows + this card, it replaces nothing).
+	 */
+	bonusSlot?: boolean;
 }
 
 export interface HomeRow {
@@ -293,9 +299,9 @@ export interface ArrangedHomeRows {
 }
 
 /** Which row keeps a card present in several rows: the first key here wins. */
-export const HOME_ROW_PRIORITY = ["reprendre", "pour-toi", "redecouvrir", "nouveautes-artistes", "jamais-ecoute", "recemment-acquis"];
+export const HOME_ROW_PRIORITY = ["reprendre", "pour-toi", "album-du-jour", "redecouvrir", "nouveautes-artistes", "jamais-ecoute", "recemment-acquis"];
 /** Paint order of the personal rows on /home. */
-export const HOME_ROW_ORDER = ["reprendre", "pour-toi", "recemment-acquis", "nouveautes-artistes", "redecouvrir", "jamais-ecoute"];
+export const HOME_ROW_ORDER = ["reprendre", "pour-toi", "album-du-jour", "recemment-acquis", "nouveautes-artistes", "redecouvrir", "jamais-ecoute"];
 /** Rows that always take a visible slot when they have something to show. */
 export const HOME_PINNED_ROWS = ["reprendre", "pour-toi"];
 /** F2: personal rows painted above the first YouTube row. */
@@ -337,7 +343,7 @@ export function arrangeHomeRows(
 	const indexed = rows.map((row, i) => ({ row, i }));
 	indexed.sort((a, b) => priorityOf(a.row.key, a.i) - priorityOf(b.row.key, b.i));
 	const seen = new Set<string>();
-	const kept: { key: string; items: RowItem[]; order: number }[] = [];
+	const kept: { key: string; items: RowItem[]; order: number; bonus: boolean }[] = [];
 	for (const { row, i } of indexed) {
 		const source = Array.isArray(row.items) ? row.items : [];
 		const deduped: RowItem[] = [];
@@ -352,13 +358,14 @@ export function arrangeHomeRows(
 		const lost = source.length - deduped.length;
 		if (items.length === 0 && !row.keepEmpty) continue;
 		if (lost > 0 && typeof row.minAfterDedupe === "number" && items.length < row.minAfterDedupe) continue;
-		kept.push({ key: row.key, items, order: orderOf(row.key, i) });
+		kept.push({ key: row.key, items, order: orderOf(row.key, i), bonus: row.bonusSlot === true });
 	}
 	kept.sort((a, b) => a.order - b.order);
 
-	// 2. visible slots: pinned rows, then the best filled of the others
-	const pinned = kept.filter((r) => pinnedKeys.includes(r.key)).slice(0, maxVisible);
-	const rest = kept.filter((r) => !pinnedKeys.includes(r.key));
+	// 2. visible slots: bonus rows (no slot taken), pinned rows, then the best filled of the others
+	const capped = kept.filter((r) => !r.bonus);
+	const pinned = capped.filter((r) => pinnedKeys.includes(r.key)).slice(0, maxVisible);
+	const rest = capped.filter((r) => !pinnedKeys.includes(r.key));
 	const slots = Math.max(0, maxVisible - pinned.length);
 	const picked = new Set(
 		rest
@@ -367,7 +374,7 @@ export function arrangeHomeRows(
 			.slice(0, slots)
 			.map((r) => r.key),
 	);
-	const visible = kept.filter((r) => pinned.includes(r) || picked.has(r.key));
+	const visible = kept.filter((r) => r.bonus || pinned.includes(r) || picked.has(r.key));
 	const more = rest.filter((r) => !picked.has(r.key));
 	const strip = (r: { key: string; items: RowItem[] }): HomeRow => ({ key: r.key, items: r.items });
 	return { visible: visible.map(strip), more: more.map(strip) };
