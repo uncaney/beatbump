@@ -8,7 +8,7 @@
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
 	import { buildForYouRow, buildResumeRow, capItems, readLastTrack, sanitizeCard } from "$lib/homeRows";
 	import { peekHomeCache, clearHomeCache, writeHomeCache } from "$lib/homeCache";
-	import { getMix, getRecent, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
+	import { getMix, getRecent, isAnonymousProfile, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
 	import { settings } from "$lib/stores";
 	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
 	import { clockLabel, fetchRemoteResume, restoreRemoteResume, wireProfileChannel } from "$lib/stores/nowPlayingSync";
@@ -21,6 +21,12 @@
 	let resume: any[] = [];
 	let forYou: any[] = [];
 	let acquired: any[] = [];
+	// D2: up to 10 local albums (dateAdded desc) none of whose tracks appear
+	// in the profile's play history (GET me/never-played, server-side set
+	// difference). Hidden for an anonymous profile and when empty, same as
+	// the other personal rows; no localStorage cache (AP1 covers reprendre/
+	// pour-toi/recemment-acquis only).
+	let neverPlayed: any[] = [];
 
 	// AP1 "instant home": which source painted each row right now, for the
 	// subtle opacity cue while a cached row is shown before the live answer
@@ -105,9 +111,11 @@
 		resumeSource = "empty";
 		forYouSource = "empty";
 		acquiredSource = "empty";
+		neverPlayed = [];
 		void loadResume();
 		void loadForYou();
 		void loadAcquired();
+		void loadNeverPlayed();
 	}
 
 	// C1: the saved queue ("Remember Last Track"), resumed where it stopped.
@@ -226,6 +234,25 @@
 		void persistHomeCache();
 	}
 
+	const NEVER_PLAYED_MAX = 10;
+	async function loadNeverPlayed() {
+		try {
+			if (await isAnonymousProfile()) {
+				neverPlayed = [];
+				return;
+			}
+			const res = await APIClient.fetch(`/api/v1/me/never-played?limit=${NEVER_PLAYED_MAX}`);
+			if (!res.ok) {
+				neverPlayed = [];
+				return;
+			}
+			const r = await res.json();
+			neverPlayed = capItems(r?.items, NEVER_PLAYED_MAX).map(sanitizeCard);
+		} catch {
+			neverPlayed = [];
+		}
+	}
+
 	onMount(() => {
 		try {
 			saved = get(settings)?.playback?.["Remember Last Track"] === true ? readResumeState(localStorage) : null;
@@ -237,6 +264,7 @@
 		void loadRemote();
 		void loadForYou();
 		void loadAcquired();
+		void loadNeverPlayed();
 		let unwireProfile: (() => void) | undefined;
 		if (typeof BroadcastChannel !== "undefined") {
 			const channel = new BroadcastChannel(PROFILE_CHANNEL_NAME);
@@ -345,6 +373,22 @@
 				seeAllLabel="Voir tout"
 			/>
 		</div>
+	</section>
+{/if}
+
+{#if neverPlayed.length > 0}
+	<section
+		class="home-row"
+		data-row="jamais-ecoute"
+	>
+		<Carousel
+			items={neverPlayed}
+			header={{ title: "Jamais écouté", subheading: "Des albums de ta bibliothèque que tu n'as jamais lancés" }}
+			type="trending"
+			isBrowseEndpoint={true}
+			seeAllHref="/library/albums"
+			seeAllLabel="Voir tout"
+		/>
 	</section>
 {/if}
 
