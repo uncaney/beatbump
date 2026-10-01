@@ -1,13 +1,14 @@
 <script lang="ts">
-	// One cached track. Click = play (event "play"), ✕ = remove (event "remove"),
-	// pin (event "pin"), "Retélécharger" on an evicted entry (event "recache").
+	// One cached track. Click = play (event "play"), ✕ = remove (event "remove";
+	// a pinned track asks for an inline confirmation first, G20), pin (event
+	// "pin"), "Retélécharger" on an evicted entry (event "recache").
 	// Deliberately not Item/Listing: its click path calls the network mix API,
 	// while this row must start playback from the cached copy only.
 	// States: ready (default), pending (`_cached === false`, download in flight)
 	// and evicted (`_evicted`, F5/G8: the SW dropped the entry, re-downloadable).
 	import Icon from "$components/Icon/Icon.svelte";
 	import { artistName, thumbnailOf } from "$lib/offlineQueue";
-	import { createEventDispatcher } from "svelte";
+	import { createEventDispatcher, tick } from "svelte";
 
 	export let track: any;
 	export let active = false;
@@ -23,6 +24,30 @@
 	$: pending = track?._cached === false && !evicted;
 	$: title = track?.title || track?.videoId;
 	let imgBroken = false;
+
+	// Removing a pinned track asks for an inline confirmation (G20), same
+	// pattern as Settings > Offline "Clear offline cache": the ✕ turns into a
+	// "Retirer ? Oui / Annuler" group, focus moves to the confirm button and
+	// back to the ✕ on cancel. Unpinned tracks are removed at once (re-cached
+	// on the next play anyway).
+	let confirmRemove = false;
+	let removeButton: HTMLButtonElement | null = null;
+	let confirmButton: HTMLButtonElement | null = null;
+	async function askRemove() {
+		if (!track?._pinned) return dispatch("remove", track);
+		confirmRemove = true;
+		await tick();
+		confirmButton?.focus();
+	}
+	async function cancelRemove() {
+		confirmRemove = false;
+		await tick();
+		removeButton?.focus();
+	}
+	function doRemove() {
+		confirmRemove = false;
+		dispatch("remove", track);
+	}
 </script>
 
 <div
@@ -98,13 +123,39 @@
 		on:click|stopPropagation={() => dispatch("pin", track)}>
 		<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill={track._pinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="2"><path d="M16 3l5 5-4 1-5 5 1 5-3 3-4-6-4 4-1-1 4-4-6-4 3-3 5 1 5-5z"/></svg>
 	</button>
-	<button
-		class="rm"
-		type="button"
-		title="Retirer du cache"
-		aria-label="Retirer du cache"
-		on:click|stopPropagation={() => dispatch("remove", track)}>✕</button
-	>
+	{#if confirmRemove}
+		<span
+			class="confirm"
+			role="group"
+			aria-label="Confirmer le retrait d'un morceau épinglé"
+		>
+			<span class="confirm-text">Épinglé : retirer quand même ?</span>
+			<button
+				class="btn confirm-yes"
+				type="button"
+				aria-label="Confirmer le retrait"
+				bind:this={confirmButton}
+				on:keydown|stopPropagation
+				on:click|stopPropagation={doRemove}>Retirer</button
+			>
+			<button
+				class="btn confirm-no"
+				type="button"
+				aria-label="Annuler le retrait"
+				on:keydown|stopPropagation
+				on:click|stopPropagation={cancelRemove}>Annuler</button
+			>
+		</span>
+	{:else}
+		<button
+			class="rm"
+			type="button"
+			title={track?._pinned ? "Retirer du cache (épinglé : confirmation demandée)" : "Retirer du cache"}
+			aria-label="Retirer du cache"
+			bind:this={removeButton}
+			on:click|stopPropagation={askRemove}>✕</button
+		>
+	{/if}
 </div>
 
 <style lang="scss">
@@ -218,7 +269,9 @@
 	// unpinned pin look "active"). Pinned = green border + icon.
 	.pin,
 	.rm,
-	.recache {
+	.recache,
+	.confirm-yes,
+	.confirm-no {
 		flex: 0 0 auto;
 		box-sizing: border-box;
 		min-width: 2.75rem; // 44px
@@ -254,6 +307,39 @@
 			outline: 2px solid $accent;
 			outline-offset: 2px;
 		}
+	}
+	// Inline remove confirmation (G20): red-tinted group like Settings > Offline.
+	.confirm {
+		flex: 0 0 auto;
+		display: inline-flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.3rem 0.5rem;
+		border-radius: 0.5rem;
+		background: rgb(220 53 69 / 12%);
+		border: 1px solid rgb(220 53 69 / 45%);
+		font-size: 0.85rem;
+		line-height: 1.3;
+	}
+	.confirm-text {
+		color: $text;
+	}
+	.confirm-yes,
+	.confirm-no {
+		width: auto;
+		min-width: 2.75rem;
+		padding: 0 0.6rem;
+		font-size: 0.85rem;
+		font-weight: 600;
+	}
+	.confirm-yes,
+	.confirm-yes:hover,
+	.confirm-yes:focus,
+	.confirm-yes:focus-within,
+	.confirm-yes:active {
+		color: #ffb3b3 !important;
+		border-color: rgb(220 53 69 / 70%) !important;
 	}
 	.recache,
 	.recache:hover,
