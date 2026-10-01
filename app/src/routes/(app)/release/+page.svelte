@@ -100,11 +100,17 @@
 		subtitles={releaseInfo.subtitles}
 		type="release"
 		on:shuffle={playShuffle}
-	/>
-	{#if !notFound && items.length}
-		<!-- O8: download the missing tracks then pin the whole album. -->
-		<div class="keep-row"><KeepOfflineButton tracks={items} /></div>
-	{/if}
+	>
+		<!-- O8: download the missing tracks then pin the whole album.
+		     Audit v7 TOP 3: its own row inside the header grid, under
+		     Play Album / Album Radio (was a bare div after the InfoBox:
+		     x=0 on phones, under the cover on desktop). -->
+		<svelte:fragment slot="actions">
+			{#if !notFound && items.length}
+				<KeepOfflineButton tracks={items} />
+			{/if}
+		</svelte:fragment>
+	</InfoBox>
 	{#if notFound}
 		<p class="release-missing">Cet album n'est plus dans la bibliothèque.</p>
 	{/if}
@@ -116,9 +122,3 @@
 		/>
 	{/each}
 </main>
-
-<style>
-	.keep-row {
-		margin: 0 0 0.75rem;
-	}
-</style>

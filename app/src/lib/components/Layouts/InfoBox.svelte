@@ -264,6 +264,14 @@
 			{/if}
 		{/each}
 	</div>
+	{#if $$slots.actions}
+		<!-- Audit v7 TOP 3: a second action row (Keep offline) that stays in the
+		     header grid: under Play Album / Album Radio, in the content column on
+		     desktop (not under the cover), at the 16 px gutter on phones. -->
+		<div class="actions-row">
+			<slot name="actions" />
+		</div>
+	{/if}
 </div>
 
 <style lang="scss">
@@ -293,6 +301,44 @@
 		min-height: 40px;
 		@media only screen and (max-width: 719px) {
 			min-height: max(2.75rem, 44px);
+		}
+	}
+	/* Audit v7 TOP 3: fourth grid row for the actions slot. Same breakpoints
+	   as listPages.scss `.box`; on desktop the row sits in the right column
+	   under the buttons (never under the cover), on phones it spans the box
+	   (16 px gutter from .resp-content-width) and starts at the left edge
+	   like the content below, so it reads as part of the album header. */
+	.box {
+		grid-template-areas:
+			"img"
+			"metadata"
+			"buttons"
+			"actions";
+		@media screen and (min-width: 286px) and (max-width: 512px) {
+			grid-template-areas:
+				"img img"
+				"metadata metadata"
+				"buttons buttons"
+				"actions actions";
+		}
+		@media screen and (min-width: 512px) {
+			grid-template-areas:
+				"img metadata"
+				"img buttons"
+				"img actions";
+		}
+	}
+	.actions-row {
+		grid-area: actions;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		justify-self: stretch;
+		justify-content: flex-start;
+		min-width: 0;
+		@media screen and (max-width: 512px) {
+			justify-content: center;
 		}
 	}
 </style>
