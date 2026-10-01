@@ -22,14 +22,15 @@
 //   SW  -> page { type: "audio-is-cached", videoId, cached, url?, bytes? }
 //   page -> SW  { type: "now-playing",     url?, videoId? }   (never evicted; no reply)
 //   page -> SW  { type: "list-audio" }
-//   SW  -> page { type: "audio-list",      entries: [{url, videoId, bytes, at, lastAccess, contentType}], total, quota }
+//   SW  -> page { type: "audio-list",      entries: [{url, videoId, bytes, at, lastAccess, contentType, pinned}], total, pinnedBytes, quota }
 //   page -> SW  { type: "set-audio-quota", bytes }          (<= 0 => unlimited)
 //   SW  -> page { type: "audio-quota",     quota }
 //   page -> SW  { type: "get-audio-quota" }
 //   SW  -> page { type: "audio-quota",     quota }
 //   page -> SW  { type: "pin-audio",       videoId, pinned }
-//   SW  -> page { type: "audio-pinned",    videoId, pinned, ok, reason? }
+//   SW  -> page { type: "audio-pinned",    videoId, pinned, ok, reason?, pinnedBytes?, quota? }
 //                 reason "not_cached" = nothing to pin yet (download it first)
+//                 reason "quota"      = pinned bytes would exceed the quota (raise it in Settings)
 //
 // A pin lives in two places so it survives a re-cache under another URL (G6):
 // the X-YTM-Pinned header of the audio entry AND `pinned` in the meta index;
@@ -677,9 +678,17 @@ self.addEventListener("message", (event) => {
 		ev.waitUntil(
 			(async () => {
 				const c = await caches.open(AUDIO_CACHE);
-				const e = (await listEntries(c)).find((x) => x.videoId === videoId);
+				const entries = await listEntries(c);
+				const e = entries.find((x) => x.videoId === videoId);
 				const r = e ? await c.match(e.url) : undefined;
 				if (!e || !r) return reply(ev, { type: "audio-pinned", videoId, pinned, ok: false, reason: "not_cached" });
+				// Pinned entries are never evicted, so their total must stay within
+				// the quota or the LRU can never bring the cache back under it (G7).
+				if (pinned && !e.pinned) {
+					const quota = await getQuota();
+					const pinnedBytes = entries.reduce((s, x) => s + (x.pinned ? x.bytes : 0), 0) + e.bytes;
+					if (quota > 0 && pinnedBytes > quota) return reply(ev, { type: "audio-pinned", videoId, pinned, ok: false, reason: "quota", pinnedBytes, quota });
+				}
 				const headers = new Headers(r.headers);
 				if (pinned) headers.set(H_PINNED, "1");
 				else headers.delete(H_PINNED);
@@ -698,8 +707,9 @@ self.addEventListener("message", (event) => {
 				const c = await caches.open(AUDIO_CACHE);
 				const entries = await listEntries(c);
 				const total = entries.reduce((s, e) => s + e.bytes, 0);
-				return reply(ev, { type: "audio-list", entries, total, quota: await getQuota() });
-			})().catch(() => reply(ev, { type: "audio-list", entries: [], total: 0, quota: DEFAULT_QUOTA })),
+				const pinnedBytes = entries.reduce((s, e) => s + (e.pinned ? e.bytes : 0), 0);
+				return reply(ev, { type: "audio-list", entries, total, pinnedBytes, quota: await getQuota() });
+			})().catch(() => reply(ev, { type: "audio-list", entries: [], total: 0, pinnedBytes: 0, quota: DEFAULT_QUOTA })),
 		);
 		return;
 	}

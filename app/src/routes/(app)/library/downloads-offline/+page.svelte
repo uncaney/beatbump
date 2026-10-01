@@ -180,6 +180,9 @@
 		refresh();
 	}
 
+	// Toast when the SW refuses a pin because pinned bytes would exceed the quota (G7).
+	const QUOTA_MSG = "Quota atteint, augmente-le dans Réglages";
+
 	// Download a not-yet-cached track (stable /localf or /aud URL straight to the
 	// SW, otherwise through the API URL resolution), then pin it. Runs in the
 	// background: the toast announces "en cours de téléchargement" at once and
@@ -188,6 +191,7 @@
 		const r = isStableAudioUrl(t?._offlineUrl) ? await cacheTrackOffline(t, t._offlineUrl) : await downloadForOffline(t);
 		if (!r.ok) return false;
 		const p = await pinOffline(t, true);
+		if (!p.ok && p.reason === "quota") notify(QUOTA_MSG, "error");
 		return p.ok;
 	}
 
@@ -200,15 +204,22 @@
 		const pinned = album ? !!d.pinned : !d?._pinned;
 		let ok = 0;
 		let failed = 0;
+		let quotaHit = 0;
 		const toDownload: any[] = [];
 		for (const t of items) {
 			const r = await pinOffline(t, pinned);
 			if (r.ok) ok++;
 			else if (pinned && r.reason === "not_cached") toDownload.push(t);
+			else if (pinned && r.reason === "quota") quotaHit++;
 			else failed++;
 		}
 		await refresh();
 		const total = items.length;
+		// Quota refused the pin (G7): say so, with the partial count when any landed.
+		if (quotaHit) {
+			notify((ok ? `${ok} ${ok > 1 ? "épinglés" : "épinglé"} sur ${total} · ` : "") + QUOTA_MSG, "error");
+			return;
+		}
 		if (!pinned) {
 			if (!ok) notify("Impossible de désépingler ce morceau", "error");
 			else notify(ok > 1 ? (ok < total ? `${ok} désépinglés sur ${total}` : `${ok} morceaux désépinglés`) : "Désépinglé", "success");

@@ -240,15 +240,16 @@ export async function swRequest<T = any>(msg: Record<string, unknown>, replyType
 }
 export type AudioListEntry = { url: string; videoId: string; bytes: number; at: number; lastAccess?: number; contentType: string; pinned?: boolean };
 export function listCachedAudio() {
-	return swRequest<{ type: "audio-list"; entries: AudioListEntry[]; total: number; quota: number }>({ type: "list-audio" }, "audio-list");
+	return swRequest<{ type: "audio-list"; entries: AudioListEntry[]; total: number; pinnedBytes?: number; quota: number }>({ type: "list-audio" }, "audio-list");
 }
 /**
  * Pin (or unpin) a cached track: the service worker stamps X-YTM-Pinned on the
  * entry (and its meta index) and never evicts it; the local list mirrors the
  * flag (`_pinned`). `reason` when not ok: "not_cached" (download it first),
+ * "quota" (pinned bytes would exceed the quota: raise it in Settings),
  * "no_sw" (no service worker / no answer), "error".
  */
-export type PinResult = { ok: boolean; reason?: "not_cached" | "no_sw" | "error" | string };
+export type PinResult = { ok: boolean; reason?: "not_cached" | "quota" | "no_sw" | "error" | string };
 export async function pinOffline(item: { videoId?: string }, pinned: boolean): Promise<PinResult> {
 	const videoId = item && item.videoId ? String(item.videoId) : "";
 	if (!videoId) return { ok: false, reason: "error" };
