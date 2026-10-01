@@ -91,6 +91,34 @@ describe("shellCachesToDelete (DS1: keep the previous shell cache)", () => {
 		const { shellCachesToDelete } = await import("./service-worker");
 		expect(shellCachesToDelete(["ytm-shell-400", "ytm-shell-300", "ytm-shell-200"], "ytm-shell-300")).toEqual(["ytm-shell-200"]);
 	});
+	it("L10-3: keeps the last ACTIVE shell, not the highest build number (N, N+1, rollback N, N+2)", async () => {
+		const { shellCachesToDelete } = await import("./service-worker");
+		// Simulate the activate sequence: each SW reads the last active shell, then records its own.
+		const N = "ytm-shell-100", N1 = "ytm-shell-200", N2 = "ytm-shell-300";
+		let caches = [N];
+		let last: string | null = null;
+		const activate = (current: string) => {
+			if (!caches.includes(current)) caches.push(current);
+			const del = shellCachesToDelete(caches, current, last);
+			caches = caches.filter((k) => !del.includes(k));
+			last = current;
+			return del;
+		};
+		expect(activate(N)).toEqual([]);
+		expect(activate(N1)).toEqual([]); // upgrade: N kept for the tabs still on N
+		expect(activate(N)).toEqual([]); // rollback: N+1 kept for the tabs opened on N+1
+		expect(caches.sort()).toEqual([N, N1]);
+		expect(activate(N2)).toEqual([N1]); // tabs run N (since the rollback): N kept, N+1 dropped
+		expect(caches.sort()).toEqual([N, N2]);
+	});
+	it("L10-3: falls back to the highest number when the recorded shell is unknown, gone or the current one", async () => {
+		const { shellCachesToDelete } = await import("./service-worker");
+		const keys = ["ytm-shell-100", "ytm-shell-200", "ytm-shell-300"];
+		expect(shellCachesToDelete(keys, "ytm-shell-300", null)).toEqual(["ytm-shell-100"]);
+		expect(shellCachesToDelete(keys, "ytm-shell-300", "ytm-shell-050")).toEqual(["ytm-shell-100"]);
+		expect(shellCachesToDelete(keys, "ytm-shell-300", "ytm-shell-300")).toEqual(["ytm-shell-100"]);
+		expect(shellCachesToDelete(keys, "ytm-shell-300", "ytm-shell-100")).toEqual(["ytm-shell-200"]);
+	});
 });
 
 describe("isHtmlForAsset (L10-4: the shell fallback is never stored as a chunk)", () => {

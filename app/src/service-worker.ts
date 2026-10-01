@@ -96,22 +96,44 @@ export function staticPrecacheList(all: readonly string[]): string[] {
 	return all.filter(wanted);
 }
 
-// PF3-5: a deploy gives the SW a new SHELL cache name; hashed immutable
-// assets whose path is unchanged are byte-identical, so they are copied from
-// the previous ytm-shell-* cache instead of being downloaded again. Pure:
-// which paths of an old cache to carry into the new one.
 /**
  * DS1: shell caches to delete at activate: every `ytm-shell-*` except the current one
- * and the most recent previous one (highest numeric version suffix), so pages of the
- * other build keep resolving their chunks during an upgrade or a rollback.
+ * and ONE previous one, so pages of the other build keep resolving their chunks during
+ * an upgrade or a rollback.
+ * L10-3: the previous one kept is the shell that was ACTIVE before this activation
+ * (`lastActive`, recorded by every SW at its own activation), i.e. the build the open
+ * tabs are running. Build timestamps are not the deploy order: after N -> N+1 -> rollback
+ * N -> N+2, the highest number is N+1 (no tab runs it) while the tabs run N. The highest
+ * numeric version is only the fallback when nothing (or nothing usable) was recorded.
  */
-export function shellCachesToDelete(keys: readonly string[], current: string): string[] {
+export function shellCachesToDelete(keys: readonly string[], current: string, lastActive?: string | null): string[] {
 	const others = keys.filter((k) => k.startsWith("ytm-shell-") && k !== current);
+	if (lastActive && lastActive !== current && others.includes(lastActive)) return others.filter((k) => k !== lastActive);
 	const ver = (k: string) => Number(k.slice("ytm-shell-".length)) || 0;
 	others.sort((a, b) => ver(b) - ver(a));
 	return others.slice(1);
 }
 
+// L10-3: name of the shell cache of the last SW that activated (META_CACHE, outside
+// META_PREFIX so the offline index ignores it).
+const LAST_SHELL_KEY = "/__ytm_last_shell__";
+async function swapLastActiveShell(): Promise<string | null> {
+	try {
+		const m = await caches.open(META_CACHE);
+		let prev: string | null = null;
+		const r = await m.match(LAST_SHELL_KEY);
+		if (r) prev = (await r.text()).trim() || null;
+		await m.put(LAST_SHELL_KEY, new Response(SHELL, { headers: { "Content-Type": "text/plain" } }));
+		return prev;
+	} catch {
+		return null;
+	}
+}
+
+// PF3-5: a deploy gives the SW a new SHELL cache name; hashed immutable
+// assets whose path is unchanged are byte-identical, so they are copied from
+// the previous ytm-shell-* cache instead of being downloaded again. Pure:
+// which paths of an old cache to carry into the new one.
 /**
  * L10-4: a missing build file used to come back as the SPA shell (200 text/html,
  * immutable for a year). An HTML body is never a valid answer for a script,
@@ -303,12 +325,14 @@ self.addEventListener("activate", (event) => {
 		(async () => {
 			// PF3-5: entries the old SW cached after this one installed.
 			await carryOverShell();
-			// DS1 (deploy survives): keep the most recent PREVIOUS shell cache. A page of the
+			// DS1 (deploy survives): keep the PREVIOUS shell cache. A page of the
 			// other build can still be open (upgrade: old page alive while this SW activates;
 			// rollback: new page alive while the old SW comes back) and its lazy chunks are
 			// not on the server any more: they must keep resolving from that cache.
+			// L10-3: "previous" = the shell of the SW that was active before this one.
+			const lastActive = await swapLastActiveShell();
 			const keys = await caches.keys();
-			await Promise.all(shellCachesToDelete(keys, SHELL).map((k) => caches.delete(k)));
+			await Promise.all(shellCachesToDelete(keys, SHELL, lastActive).map((k) => caches.delete(k)));
 			await purgeProfileScopedApiCache(); // G16: entries stored by an older SW
 			await self.clients.claim();
 			// K3: the rest of the build, in batches, without delaying activation
