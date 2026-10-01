@@ -62,6 +62,20 @@
 		remote = await fetchRemoteResume();
 	}
 
+	// Audit v7 TOP 10 (finishing lot): a restored queue loses the year run of a
+	// card subtitle but keeps the trailing " • " separator, so the resume cards
+	// read "Daft Punk • One More Time •". sanitizeCard keeps it (its trim is
+	// non-empty), so drop any trailing separator-only run here, always leaving at
+	// least one run. Items are not mutated.
+	function stripTrailingSeparator<T extends { subtitle?: any[] }>(item: T): T {
+		if (!Array.isArray(item?.subtitle)) return item;
+		const sub = item.subtitle.slice();
+		while (sub.length > 1 && typeof sub[sub.length - 1]?.text === "string" && /^[\s•·|]+$/.test(sub[sub.length - 1].text)) {
+			sub.pop();
+		}
+		return sub.length === item.subtitle.length ? item : { ...item, subtitle: sub };
+	}
+
 	async function loadResume() {
 		let recent: any[] = [];
 		try {
@@ -76,7 +90,7 @@
 		} catch {
 			lastTrack = null;
 		}
-		resume = buildResumeRow(lastTrack, recent, 10).map(sanitizeCard);
+		resume = buildResumeRow(lastTrack, recent, 10).map(sanitizeCard).map(stripTrailingSeparator);
 	}
 
 	async function loadForYou() {
