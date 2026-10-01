@@ -62,9 +62,20 @@ func MeLoginHandler(c echo.Context) error {
 	}
 	h := sha1.Sum([]byte(strings.ToLower(name)))
 	id := "u-" + hex.EncodeToString(h[:])[:16]
+	// 39A: the anonymous profile this device used so far (if any) is moved
+	// onto the named one. Never from a named profile (two people), never for
+	// the e2e harness (unless YTM_STATS_INCLUDE_HARNESS=1).
+	from := ""
+	if ck, err := c.Cookie("bbp"); err == nil {
+		from = ck.Value
+	}
+	merge := !harnessRequest(c.Request()) && mergeableSource(from, id)
+	moved, err := loginAndMerge(from, id, name, merge)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "login failed"})
+	}
 	setProfileCookie(c, id)
-	db.DB.Where("id = ?", id).Assign(db.Profile{ID: id, Name: name, CreatedAt: time.Now()}).FirstOrCreate(&db.Profile{})
-	return c.JSON(http.StatusOK, map[string]interface{}{"id": id, "name": name})
+	return c.JSON(http.StatusOK, map[string]interface{}{"id": id, "name": name, "migrated": moved})
 }
 
 func MeWhoamiHandler(c echo.Context) error {
