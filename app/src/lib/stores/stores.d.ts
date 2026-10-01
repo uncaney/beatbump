@@ -1,5 +1,5 @@
 interface Alert {
 	msg: string;
 	type: "success" | "error";
-	action: string;
+	action?: string | { label: string; run: () => void };
 }

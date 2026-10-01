@@ -6,9 +6,13 @@ import { settings } from "./settings";
 export const ctxKey = {};
 export const currentTitle = writable(undefined);
 
+/** Button rendered inside an alert; the alert stays until clicked (or 20 s). */
+export type AlertAction = { label: string; run: () => void };
+
 export type Alert = {
 	msg?: string;
-	action?: string;
+	/** A string (legacy metadata such as "getNextTrack") renders nothing. */
+	action?: string | AlertAction;
 	type?: string;
 	id?: number;
 };

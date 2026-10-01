@@ -1,20 +1,24 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { alertHandler } from "$lib/stores/stores";
+import type { AlertAction } from "$lib/stores/stores";
 import type { Song } from "$lib/types";
 import { objectKeys } from "./collections/objects";
 import { normalizeURIEncoding } from "./strings/strings";
 import {APIClient} from "$lib/api";
 
 // notifications
+// `action` may be an `{label, run}` object (rendered as a button; the alert
+// stays until clicked or 20 s), a bare callback (button labelled "OK"), or a
+// legacy string such as "getNextTrack" (kept as metadata, renders nothing).
 export const notify = (
 	msg: string,
 	type: "success" | "error",
-	action?: string,
+	action?: string | AlertAction | (() => void),
 ): void => {
 	alertHandler.add({
 		msg: msg,
 		type: type,
-		action,
+		action: typeof action === "function" ? { label: "OK", run: action } : action,
 	});
 };
 
