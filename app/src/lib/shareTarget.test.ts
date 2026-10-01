@@ -157,3 +157,24 @@ describe("L10-2 listenStartTime (/listen?id=&t=)", () => {
 		expect(listenStartTime(q("t=43200"))).toBe(43200);
 	});
 });
+
+describe("L10-12 our own local album links", () => {
+	it("routes /release?id=lb-… (with or without the hint) to the local album page", () => {
+		expect(parseSharedLink({ url: "https://music.ekaii.fr/release?id=lb-0123456789ab" })).toEqual({ kind: "album", id: "lb-0123456789ab", href: "/release?id=lb-0123456789ab" });
+		expect(parseSharedLink({ text: "Écoute ça https://music.ekaii.fr/release?id=lb-0123456789ab.RGFmdA" })?.href).toBe("/release?id=lb-0123456789ab.RGFmdA");
+	});
+	it("rejects malformed local ids and lb- outside /release", () => {
+		expect(parseSharedLink({ url: "https://music.ekaii.fr/release?id=lb-x/../keys" })).toBeNull();
+		expect(parseSharedLink({ url: "https://music.ekaii.fr/release?id=lb-0123456789AB" })).toBeNull();
+		expect(idsFromUrl("https://music.youtube.com/browse/lb-0123456789ab").album).toBeUndefined();
+	});
+	it("a local album is never looked up again, and a // href is refused", async () => {
+		let asked = 0;
+		const deps = { albumInfo: async () => (asked++, { artist: "A", title: "T" }), findOwned: async () => ({ href: "//evil.example/x" }) };
+		const local = { kind: "album", id: "lb-0123456789ab", href: "/release?id=lb-0123456789ab" } as const;
+		expect(await resolveShareHref(local, deps)).toEqual({ href: local.href, owned: false });
+		expect(asked).toBe(0);
+		const yt = { kind: "album", id: "MPREb_4pL8gzRtw1p", href: "/release?id=MPREb_4pL8gzRtw1p" } as const;
+		expect(await resolveShareHref(yt, deps)).toEqual({ href: yt.href, owned: false });
+	});
+});

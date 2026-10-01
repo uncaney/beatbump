@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"beatbump-server/backend/db"
+
+	"github.com/labstack/echo/v4"
 )
 
 // BI4: GET /local/albums?filter=added-30d|never-played, the lists behind the
@@ -196,5 +198,56 @@ func TestLocalAlbumsNeverPlayedPagingCostIsFlat(t *testing.T) {
 	c, rec := ctxFor(http.MethodGet, "/api/v1/local/albums?filter=never-played&offset=2001", "", nil)
 	if err := LocalAlbumsHandler(c); err != nil || rec.Code != http.StatusBadRequest {
 		t.Fatalf("offset cap: err %v code %d", err, rec.Code)
+	}
+}
+
+// L10-6: a request without the bbp cookie gets a fresh random profile id, so
+// its never-played scan is never asked again: it must not enter the memo
+// (128 entries of ~1000 decoded docs pinned 60 s by a curl loop). With the
+// cookie the second page still comes from the memo.
+func TestNeverPlayedMemoOnlyWithProfileCookie(t *testing.T) {
+	useTestDB(t)
+	resetNeverPlayedMemo()
+	t.Cleanup(resetNeverPlayedMemo)
+	stub := &neverPlayedStub{}
+	for i := 0; i < 30; i++ {
+		lid := fmt.Sprintf("lida%07d", i)
+		a := map[string]interface{}{"id": fmt.Sprintf("lb-a%03d", i), "album": fmt.Sprintf("Anon %03d", i), "albumArtist": "Artist", "coverLid": lid, "dateAdded": float64(1_700_000_000 - i)}
+		stub.albums = append(stub.albums, a)
+		stub.tracks = append(stub.tracks, map[string]interface{}{"lid": lid, "title": "t", "album": a["album"], "albumArtist": "Artist", "artist": "Artist", "track": 1.0})
+	}
+	srv := httptest.NewServer(stub.handler())
+	t.Cleanup(srv.Close)
+	t.Setenv("MEILI_URL", srv.URL)
+	memoLen := func() int {
+		neverPlayedMemoMu.Lock()
+		defer neverPlayedMemoMu.Unlock()
+		return len(neverPlayedMemo)
+	}
+	anon := func() {
+		e := echo.New()
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/api/v1/local/albums?filter=never-played&limit=10", nil), rec)
+		if err := LocalAlbumsHandler(c); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("anonymous never-played: err %v code %d", err, rec.Code)
+		}
+	}
+	a0 := stub.albumCalls
+	anon()
+	anon()
+	if got := stub.albumCalls - a0; got != 2 {
+		t.Fatalf("anonymous requests: %d album scans, want 2 (no memo)", got)
+	}
+	if n := memoLen(); n != 0 {
+		t.Fatalf("anonymous requests left %d memo entries", n)
+	}
+	a1 := stub.albumCalls
+	getJSON(t, LocalAlbumsHandler, "/api/v1/local/albums?filter=never-played&limit=10")
+	getJSON(t, LocalAlbumsHandler, "/api/v1/local/albums?filter=never-played&offset=10&limit=10")
+	if got := stub.albumCalls - a1; got != 1 {
+		t.Fatalf("profile requests: %d album scans, want 1 (memo)", got)
+	}
+	if n := memoLen(); n != 1 {
+		t.Fatalf("profile requests: %d memo entries, want 1", n)
 	}
 }

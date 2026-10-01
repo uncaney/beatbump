@@ -27,6 +27,13 @@ func randID() string {
 	return hex.EncodeToString(b)
 }
 
+// hasProfileCookie reports whether the request carried a bbp profile cookie
+// (profileID mints a fresh random id for every request without one).
+func hasProfileCookie(c echo.Context) bool {
+	ck, err := c.Cookie("bbp")
+	return err == nil && ck.Value != ""
+}
+
 func profileID(c echo.Context) string {
 	if ck, err := c.Cookie("bbp"); err == nil && ck.Value != "" {
 		return ck.Value

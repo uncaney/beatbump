@@ -282,7 +282,10 @@ func localAlbumsFiltered(c echo.Context, filter string, off, lim int, sortBy str
 		if off > neverPlayedMaxOffset {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": "offset too large"})
 		}
-		scan := neverPlayedScanFor(profileID(c), c.QueryParam("q"), c.QueryParam("artistId"), sortBy)
+		// L10-6: a request without the bbp cookie gets a fresh random profile id
+		// (profileID): its scan is never asked again, so it is not memoised.
+		memo := hasProfileCookie(c)
+		scan := neverPlayedScanFor(profileID(c), c.QueryParam("q"), c.QueryParam("artistId"), sortBy, memo)
 		var next int
 		items, next = neverPlayedWindow(scan.candidates, scan.refs, off, lim)
 		return c.JSON(http.StatusOK, map[string]interface{}{
@@ -333,15 +336,19 @@ func resetNeverPlayedMemo() {
 // neverPlayedScanFor returns the memoised candidate scan of a profile's
 // never-played listing, computing it on a miss or after neverPlayedMemoTTL.
 // When the map is full, expired entries are dropped first, then the oldest.
-func neverPlayedScanFor(pid, q, artistId, sortBy string) *neverPlayedScan {
+// memo=false (anonymous request, L10-6) computes the scan without reading or
+// storing the memo.
+func neverPlayedScanFor(pid, q, artistId, sortBy string, memo bool) *neverPlayedScan {
 	key := pid + "\x00" + q + "\x00" + artistId + "\x00" + sortBy
 	now := time.Now()
-	neverPlayedMemoMu.Lock()
-	if s, ok := neverPlayedMemo[key]; ok && now.Sub(s.at) < neverPlayedMemoTTL {
+	if memo {
+		neverPlayedMemoMu.Lock()
+		if s, ok := neverPlayedMemo[key]; ok && now.Sub(s.at) < neverPlayedMemoTTL {
+			neverPlayedMemoMu.Unlock()
+			return s
+		}
 		neverPlayedMemoMu.Unlock()
-		return s
 	}
-	neverPlayedMemoMu.Unlock()
 
 	docs := recentAlbumDocs(q, artistId, 0)
 	sortAlbumDocs(docs, sortBy)
@@ -353,6 +360,9 @@ func neverPlayedScanFor(pid, q, artistId, sortBy string) *neverPlayedScan {
 		}
 	}
 	s := &neverPlayedScan{candidates: cands, refs: played.refs, at: now}
+	if !memo {
+		return s
+	}
 
 	neverPlayedMemoMu.Lock()
 	defer neverPlayedMemoMu.Unlock()

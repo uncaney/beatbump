@@ -21,6 +21,8 @@ export type SharedTarget =
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const LIST_ID = /^[A-Za-z0-9_-]{10,}$/;
 const ALBUM_ID = /^MPREb_[A-Za-z0-9_-]{5,}$/;
+/** L10-12: our own local album ids (shareLink "Partager" of a local album: /release?id=lb-…); same regex as og_preview.go. */
+const LOCAL_ALBUM_ID = /^lb-[0-9a-f]{12}(\.[A-Za-z0-9_-]+)?$/;
 const URL_RE = /https?:\/\/[^\s<>"']+/gi;
 /** YouTube links shared without a scheme ("music.youtube.com/playlist?list=…"). */
 const BARE_YT_RE = /(?:^|[\s(«"'])((?:[\w-]+\.)*(?:youtube\.com|youtu\.be|youtube-nocookie\.com)\/[^\s<>"'»)]+)/gi;
@@ -102,6 +104,7 @@ export function idsFromUrl(raw: string): { v?: string; list?: string; album?: st
 	// Album: music.youtube.com/browse/MPREb_…, or our own /release?id=MPREb_….
 	const browse = segs[0] === "browse" && segs[1] ? segs[1] : segs[0] === "release" ? q.get("id") || "" : "";
 	if (ALBUM_ID.test(browse)) out.album = browse;
+	else if (segs[0] === "release" && LOCAL_ALBUM_ID.test(browse)) out.album = browse;
 	if (out.v) {
 		const hashT = /(?:^#|&)t=([^&]+)/.exec(u.hash)?.[1];
 		const t = parseStartTime(q.get("t") || q.get("start") || hashT);
@@ -227,12 +230,13 @@ export type ShareResolveDeps = {
  */
 export async function resolveShareHref(target: SharedTarget, deps: ShareResolveDeps): Promise<{ href: string; owned: boolean }> {
 	const fallback = { href: target.href, owned: false };
-	if (target.kind !== "album") return fallback;
+	// A local album id (lb-…) is already the library page: nothing to look up.
+	if (target.kind !== "album" || target.id.startsWith("lb-")) return fallback;
 	const lookup = (async () => {
 		const info = await deps.albumInfo(target.id);
 		if (!info) return fallback;
 		const owned = await deps.findOwned(info.artist, info.title);
-		return owned && typeof owned.href === "string" && owned.href.startsWith("/") ? { href: owned.href, owned: true } : fallback;
+		return owned && typeof owned.href === "string" && owned.href.startsWith("/") && !owned.href.startsWith("//") ? { href: owned.href, owned: true } : fallback;
 	})().catch(() => fallback);
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const timeout = new Promise<typeof fallback>((r) => (timer = setTimeout(() => r(fallback), deps.timeoutMs ?? 4000)));

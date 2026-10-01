@@ -71,6 +71,23 @@
 	// L8-8: the last seek gave up (page budget spent before the letter).
 	let tooFar = false;
 
+	function rowKey(it: any): string {
+		return (it && (it.browseId || it.id || it.videoId || it.lid)) || "";
+	}
+	function appendUnique(have: any[], more: any[]): any[] {
+		const seen = new Set(have.map(rowKey).filter(Boolean));
+		return [
+			...have,
+			...more.filter((it) => {
+				const k = rowKey(it);
+				if (!k) return true;
+				if (seen.has(k)) return false;
+				seen.add(k);
+				return true;
+			}),
+		];
+	}
+
 	async function load(reset = false, pageSize = limit) {
 		if (loading) return;
 		loading = true;
@@ -89,7 +106,10 @@
 			const res = await APIClient.fetch(url);
 			const data = await res.json();
 			const got = Array.isArray(data.items) ? data.items : [];
-			items = reset ? got : [...items, ...got];
+			// L10-6: the never-played offsets are candidate indexes of a scan
+			// memoised 60 s; a rescan between two pages can shift them, so a
+			// row already on screen (same browseId / id) is not appended twice.
+			items = reset ? got : appendUnique(items, got);
 			total = data.total ?? items.length;
 			// L9-2: the never-played list pages over candidates and says where
 			// to continue (nextOffset); the other lists page by row count.
