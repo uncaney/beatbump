@@ -12,6 +12,8 @@
 	import Icon from "$components/Icon/Icon.svelte";
 	import type { AlbumGroup } from "$lib/offlineQueue";
 	import { formatBytes } from "$lib/offlineQueue";
+	import { keepOffline } from "$lib/offlineBatch";
+	import { notify } from "$lib/utils";
 	import { createEventDispatcher, tick } from "svelte";
 	import OfflineTrackRow from "./OfflineTrackRow.svelte";
 
@@ -27,6 +29,8 @@
 		remove: any;
 		pin: any;
 		recache: any;
+		/** HL1: one or more missing tracks were just downloaded + pinned; ask the page to refresh its list. */
+		complete: { album: AlbumGroup };
 	}>();
 
 	let imgBroken = false;
@@ -35,6 +39,30 @@
 	$: size = formatBytes(album.bytes);
 	$: isActive = !!activeId && album.tracks.some((t) => t.videoId === activeId);
 	$: toggleLabel = open ? "Replier l'album" : "Déplier l'album";
+
+	// HL1: per-album readiness. `_cached` is set per track by the offline list
+	// (offlineQueue.ts); "ready" tracks are already downloaded whether or not
+	// they are pinned. "Compléter" downloads + pins only the missing ones via
+	// the existing keep-offline batch (offlineBatch.keepOffline), same engine
+	// as KeepOfflineButton.
+	$: readyCount = album.tracks.filter((t: any) => !!t._cached).length;
+	$: missingTracks = album.tracks.filter((t: any) => !t._cached);
+	let completing = false;
+	async function completeAlbum() {
+		if (completing || !missingTracks.length) return;
+		completing = true;
+		try {
+			const r = await keepOffline(missingTracks);
+			dispatch("complete", { album });
+			if (r.cancelled) return;
+			if (r.refused) notify("Quota atteint, augmente-le dans Réglages", "error");
+			else if (r.failed && !r.ready) notify("Impossible de compléter l'album pour l'instant", "error");
+			else if (r.failed) notify(`${r.ready} sur ${r.total} pistes complétées`, "error");
+			else notify(r.ready > 1 ? `${r.ready} pistes complétées` : "Piste complétée", "success");
+		} finally {
+			completing = false;
+		}
+	}
 
 	// Kebab menu (secondary actions). Closes on Escape, outside click and after
 	// a choice; focus goes to the first item on open and back to the kebab.
@@ -214,6 +242,23 @@
 			</div>
 		</div>
 	</div>
+	{#if count > 0}
+		<div class="readiness">
+			<span class="ready" data-testid="album-ready">{readyCount}/{count} prêts</span>
+			{#if readyCount < count}
+				<button
+					type="button"
+					class="btn-secondary complete"
+					data-testid="album-complete"
+					disabled={completing}
+					aria-busy={completing}
+					on:click={completeAlbum}
+				>
+					{completing ? "Téléchargement…" : "Compléter"}
+				</button>
+			{/if}
+		</div>
+	{/if}
 	{#if open}
 		<div class="tracks">
 			{#each album.tracks as t, i (t.videoId)}
@@ -463,6 +508,24 @@
 	.tracks {
 		padding: 0 0.4rem 0.5rem;
 		border-top: 1px solid rgba(255, 255, 255, 0.06);
+	}
+	// HL1: readiness line under the head row; the pill button is full-size
+	// (.btn-secondary) so it stays outside the cramped icon-button row.
+	.readiness {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		padding: 0 0.6rem 0.5rem;
+	}
+	.ready {
+		font-size: 0.85rem;
+		color: $muted;
+	}
+	.complete {
+		font-size: 0.85rem;
+		min-height: 2rem;
+		padding: 0.3rem 0.9rem;
 	}
 	@media (max-width: 420px) {
 		.head {

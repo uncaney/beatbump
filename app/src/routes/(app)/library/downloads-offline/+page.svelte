@@ -508,6 +508,7 @@
 						on:remove={(e) => remove(e.detail)}
 						on:pin={(e) => pin(e.detail)}
 						on:recache={(e) => recacheOne(e.detail)}
+						on:complete={refresh}
 					/>
 				{/each}
 			</section>
