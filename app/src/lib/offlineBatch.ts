@@ -16,6 +16,7 @@ import {
 	type OfflineResult,
 	type PinResult,
 } from "$lib/offline";
+import { get, writable, type Readable } from "svelte/store";
 
 /** Toast shown when the SW refuses a pin because pinned bytes would exceed the quota (G7). */
 export const QUOTA_MSG = "Quota atteint, augmente-le dans Réglages";
@@ -227,3 +228,73 @@ export function rowOfflineState(videoId: string | null | undefined, cached: Set<
 	if (cached && cached.has(videoId)) return "ready";
 	return offline ? "unavailable" : "";
 }
+
+/* ------------------------------------------------------------------------ */
+/* I12: running batches live in a module store keyed by source, so leaving  */
+/* the page no longer cancels them; only "Annuler" (cancelKeepJob) does.    */
+/* A reopened page finds its job and shows its progress.                    */
+/* ------------------------------------------------------------------------ */
+
+export type KeepJob = { key: string; progress: KeepProgress | null; ctrl: AbortController; done: Promise<KeepResult | null> };
+const _keepJobs = writable<Map<string, KeepJob>>(new Map());
+export const keepJobs: Readable<Map<string, KeepJob>> = { subscribe: _keepJobs.subscribe };
+
+function patchJob(key: string, fn: (j: KeepJob) => KeepJob | null): void {
+	_keepJobs.update((m) => {
+		const cur = m.get(key);
+		if (!cur) return m;
+		const next = new Map(m);
+		const j = fn(cur);
+		if (j) next.set(key, j);
+		else next.delete(key);
+		return next;
+	});
+}
+
+/**
+ * Start (or join) the batch of `key`: `getTracks` resolves the source's
+ * tracks (lazy album queues), `onDone` gets the result (toast) even when the
+ * page that started it is gone. A second start while running returns the
+ * running job's promise.
+ */
+export function startKeepJob(
+	key: string,
+	getTracks: () => Promise<any[]> | any[],
+	opts: { onDone?: (r: KeepResult) => void; deps?: KeepDeps } = {},
+): Promise<KeepResult | null> {
+	const running = get(_keepJobs).get(key);
+	if (running) return running.done;
+	const ctrl = new AbortController();
+	let resolveDone: (r: KeepResult | null) => void = () => {};
+	const done = new Promise<KeepResult | null>((r) => (resolveDone = r));
+	_keepJobs.update((m) => new Map(m).set(key, { key, progress: null, ctrl, done }));
+	void (async () => {
+		let result: KeepResult | null = null;
+		try {
+			const list = keepableTracks(await Promise.resolve(getTracks()).catch(() => []));
+			patchJob(key, (j) => ({ ...j, progress: { ready: 0, failed: 0, refused: 0, total: list.length } }));
+			result = await keepOffline(
+				list,
+				{ signal: ctrl.signal, onProgress: (p) => patchJob(key, (j) => ({ ...j, progress: p })) },
+				opts.deps ?? defaultDeps,
+			);
+			try {
+				opts.onDone?.(result);
+			} catch {
+				/* a UI callback must not break the store */
+			}
+		} catch {
+			result = null;
+		} finally {
+			patchJob(key, () => null);
+			resolveDone(result);
+		}
+	})();
+	return done;
+}
+
+/** "Annuler": abort the batch of `key` (the downloads in flight finish). */
+export function cancelKeepJob(key: string): void {
+	get(_keepJobs).get(key)?.ctrl.abort();
+}
+

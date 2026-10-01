@@ -2,18 +2,26 @@
 	// O8: "Garder hors-ligne" for a whole source (album, server playlist,
 	// favourites). Labels: "Garder hors-ligne" → "9/14 prêts" (+ "Annuler")
 	// → "Prêt hors-ligne". Engine: $lib/offlineBatch keepOffline().
+	// I12: the batch runs in the module store `keepJobs` (keyed by source):
+	// leaving the page does not cancel it, only "Annuler" does, and the
+	// button shows the running batch again when the page is reopened.
+	import { page } from "$app/stores";
 	import { getOfflineTracks } from "$lib/offline";
-	import { keepLabel, keepOffline, keepSummary, keepableTracks, type KeepProgress } from "$lib/offlineBatch";
+	import { cancelKeepJob, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepProgress } from "$lib/offlineBatch";
 	import { notify } from "$lib/utils";
-	import { onDestroy } from "svelte";
 
 	/** Tracks of the source, or a loader (album pages resolve their queue lazily). */
 	export let tracks: any[] = [];
 	export let load: (() => Promise<any[]>) | null = null;
+	/** Identity of the source (defaults to the page URL: one source button per page). */
+	export let sourceKey: string | null = null;
 
-	let running = false;
+	// $page (not `location`): a same-route navigation (release?id=A → B) reuses this component.
+	$: key = sourceKey || ($page?.url ? $page.url.pathname + $page.url.search : "");
+	$: job = key ? $keepJobs.get(key) : undefined;
+	$: running = !!job;
+
 	let progress: KeepProgress | null = null;
-	let ctrl: AbortController | null = null;
 
 	function allPinned(list: any[]): boolean {
 		const ks = keepableTracks(list);
@@ -26,6 +34,7 @@
 		}
 	}
 
+	$: if (job) progress = job.progress;
 	$: if (!running) {
 		const n = keepableTracks(tracks).length;
 		progress = n && allPinned(tracks) ? { ready: n, failed: 0, refused: 0, total: n } : null;
@@ -33,28 +42,24 @@
 	$: label = keepLabel(progress, running);
 	$: state = running ? "running" : progress && progress.total && progress.ready === progress.total ? "ready" : "idle";
 
-	async function start() {
-		if (running) return;
-		running = true;
-		ctrl = new AbortController();
-		try {
-			let list = tracks;
-			if (load && !keepableTracks(list).length) list = await load().catch(() => []);
-			const ks = keepableTracks(list);
-			progress = { ready: 0, failed: 0, refused: 0, total: ks.length };
-			const r = await keepOffline(ks, { signal: ctrl.signal, onProgress: (p) => (progress = p) });
-			progress = r;
-			const s = keepSummary(r);
-			notify(s.text, s.type);
-		} finally {
-			running = false;
-			ctrl = null;
-		}
+	function start() {
+		if (running || !key) return;
+		const list = tracks;
+		const loader = load;
+		void startKeepJob(
+			key,
+			async () => (loader && !keepableTracks(list).length ? await loader().catch(() => []) : list),
+			{
+				onDone: (r) => {
+					const s = keepSummary(r);
+					notify(s.text, s.type);
+				},
+			},
+		);
 	}
 	function cancel() {
-		ctrl?.abort();
+		if (key) cancelKeepJob(key);
 	}
-	onDestroy(() => ctrl?.abort());
 </script>
 
 <span class="keep-offline">

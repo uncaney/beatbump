@@ -11,7 +11,8 @@ vi.mock("$lib/offline", () => ({
 	requestPersistentStorage: vi.fn(),
 }));
 
-import { keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, type KeepDeps } from "./offlineBatch";
+import { cancelKeepJob, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
+import { get } from "svelte/store";
 
 const MB = 1024 * 1024;
 const tr = (id: string, extra: Record<string, unknown> = {}) => ({ videoId: id, title: "T " + id, ...extra });
@@ -147,5 +148,31 @@ describe("rowOfflineState", () => {
 	});
 	it("no videoId (album, artist): nothing", () => {
 		expect(rowOfflineState(undefined, cached, true)).toBe("");
+	});
+});
+
+describe("keepJobs (I12)", () => {
+	it("runs outside the component, joins a running job, clears at the end", async () => {
+		const { deps, downloads } = fakeDeps({});
+		const seen: Array<number | undefined> = [];
+		const unsub = keepJobs.subscribe((m) => seen.push(m.get("/album/x")?.progress?.ready));
+		let done: KeepResult | null = null;
+		const p1 = startKeepJob("/album/x", () => [tr("a"), tr("b")], { deps, onDone: (r) => (done = r) });
+		const p2 = startKeepJob("/album/x", () => [tr("zzz")], { deps });
+		expect(get(keepJobs).has("/album/x")).toBe(true);
+		const r = await p1;
+		expect(await p2).toBe(r);
+		expect(r?.ready).toBe(2);
+		expect(done).toEqual(r);
+		expect(downloads.sort()).toEqual(["a", "b"]);
+		expect(get(keepJobs).has("/album/x")).toBe(false);
+		unsub();
+	});
+	it("only cancelKeepJob stops it", async () => {
+		const { deps } = fakeDeps({});
+		const p = startKeepJob("/album/y", () => [tr("a"), tr("b"), tr("c"), tr("d"), tr("e")], { deps });
+		cancelKeepJob("/album/y");
+		const r = await p;
+		expect(r?.cancelled).toBe(true);
 	});
 });
