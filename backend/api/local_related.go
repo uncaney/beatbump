@@ -55,6 +55,9 @@ func LocalRelatedHandler(c echo.Context) error {
 // each group the pool order is shuffled so the row varies between tracks.
 func relatedByAlbum(seed map[string]interface{}, seedLid string, pool []map[string]interface{}, limit int) []Item {
 	rand.Shuffle(len(pool), func(i, j int) { pool[i], pool[j] = pool[j], pool[i] })
+	// c41b B6-19: one copy per normalised (artist, title), the suggested
+	// album's when the song exists in several copies.
+	pool = collapseLibraryDuplicates(pool)
 	seedArtists := map[string]bool{}
 	for _, a := range []string{mArtist(seed), mstr(seed, "albumArtist")} {
 		if a = strings.ToLower(strings.TrimSpace(a)); a != "" {
@@ -206,6 +209,12 @@ func radioFromSeedTracks(core []map[string]interface{}, limit, maxPerAlbum int, 
 		ext = withoutRefs(radioPool(first, mstr(first, "lid")), ex)
 		rand.Shuffle(len(ext), func(i, j int) { ext[i], ext[j] = ext[j], ext[i] })
 	}
+	// c41b B6-19: one copy per normalised (artist, title), across the seed
+	// tracks and the extension.
+	preferred := duplicatePreferred()
+	core = collapseDuplicates(core, preferred)
+	ext = collapseDuplicates(ext, preferred)
+	seenKey := map[string]bool{}
 	seenLid := map[string]bool{}
 	albumCount := map[string]int{}
 	out := make([]Item, 0, limit)
@@ -217,6 +226,13 @@ func radioFromSeedTracks(core []map[string]interface{}, limit, maxPerAlbum int, 
 		albumKey, _, _ := trackAlbumKey(h)
 		if albumKey != "" && albumCount[albumKey] >= maxPerAlbum {
 			return
+		}
+		k := dupTrackKey(h)
+		if k != "" && seenKey[k] {
+			return
+		}
+		if k != "" {
+			seenKey[k] = true
 		}
 		seenLid[l] = true
 		if albumKey != "" {

@@ -531,7 +531,10 @@ func localRadio(seed map[string]interface{}, seedLid string) []Item {
 // We read small windows at `sampleWindows` random offsets instead.
 func randomLibrarySample(n int) []IListItemRenderer {
 	const perWindow = 4
-	windows := n / perWindow
+	// c41b B6-19: a few more windows than n needs, then one copy per
+	// normalised (artist, title) (collapseLibraryDuplicates).
+	want := dupOversample(n)
+	windows := want / perWindow
 	if windows < 1 {
 		windows = 1
 	}
@@ -555,7 +558,7 @@ func randomLibrarySample(n int) []IListItemRenderer {
 	seen := map[string]bool{}
 	var hits []map[string]interface{}
 	for _, page := range pages {
-		if len(hits) >= n {
+		if len(hits) >= want {
 			break
 		}
 		for _, h := range page {
@@ -566,6 +569,10 @@ func randomLibrarySample(n int) []IListItemRenderer {
 			seen[lid] = true
 			hits = append(hits, h)
 		}
+	}
+	hits = collapseLibraryDuplicates(hits)
+	if len(hits) > n {
+		hits = hits[:n]
 	}
 	return localSongItemsWithCovers(hits)
 }

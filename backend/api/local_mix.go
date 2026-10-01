@@ -255,6 +255,11 @@ func mixSample(filter string, total, n int) []IListItemRenderer {
 	if total <= 0 {
 		return []IListItemRenderer{}
 	}
+	// c41b B6-19: draw a few more than n, then keep one copy per
+	// normalised (artist, title) (collapseLibraryDuplicates): the lidarr and
+	// soulseek copies of one album no longer give the same song twice.
+	final := n
+	n = dupOversample(n)
 	windows := n / mixPerWindow
 	if windows < 1 {
 		windows = 1
@@ -292,18 +297,16 @@ func mixSample(filter string, total, n int) []IListItemRenderer {
 			hits = append(hits, h)
 		}
 	}
+	hits = collapseLibraryDuplicates(hits)
 	// Small slices: the random windows overlap and leave the mix short; top
 	// it up from the head of the slice (still deduped) so a 60-track genre
 	// gives a full 40 and not 25.
-	if len(hits) < n && total > len(hits) {
+	if len(hits) < final && total > len(hits) {
 		more := meiliSearchIndex("tracks", map[string]interface{}{
 			"q": "", "filter": filter, "offset": 0, "limit": n * 2, "sort": []string{"dateAdded:desc"},
 			"attributesToRetrieve": mixTrackAttrs,
 		})
 		for _, h := range more {
-			if len(hits) >= n {
-				break
-			}
 			lid := mstr(h, "lid")
 			if lid == "" || seen[lid] {
 				continue
@@ -311,9 +314,10 @@ func mixSample(filter string, total, n int) []IListItemRenderer {
 			seen[lid] = true
 			hits = append(hits, h)
 		}
+		hits = collapseLibraryDuplicates(hits)
 	}
-	if len(hits) > n {
-		hits = hits[:n]
+	if len(hits) > final {
+		hits = hits[:final]
 	}
 	rand.Shuffle(len(hits), func(i, j int) { hits[i], hits[j] = hits[j], hits[i] })
 	return localSongItemsWithCovers(hits)

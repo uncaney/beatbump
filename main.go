@@ -19,6 +19,9 @@ var version = "dev"
 func main() {
 	db.InitDB()
 	downloader.StartWorker()
+	// c41b B6-19: first duplicate-albums scan in the background, so mixes
+	// know the suggested copies (refreshed every 10 min on demand).
+	api.WarmDuplicates()
 
 	e := newServer()
 	e.Logger.Fatal(e.Start(":8080"))
@@ -155,6 +158,8 @@ func newServer() *echo.Echo {
 	// c39b B6-1: album of the day (same for every profile, memoised per UTC date).
 	e.GET("/api/v1/local/album-of-day", api.LocalAlbumOfDayHandler)
 	e.GET("/api/v1/local/album-of-the-day", api.LocalAlbumOfDayHandler)
+	// c41b B6-19: possible duplicate albums (read-only report, memoised 10 min).
+	e.GET("/api/v1/local/duplicates", api.LocalDuplicatesHandler)
 
 	// Per-profile server state: favorites, follows, playlists (named or anonymous cookie)
 	me := e.Group("/api/v1/me")
