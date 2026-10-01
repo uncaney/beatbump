@@ -715,14 +715,38 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		});
 
 		this.onEvent("error", () => {
-			if (
-				this.player?.error?.message.includes("Empty src") ||
-				!this.player?.error?.message
-			) return;
-
-			console.error(this.player.error);
-
-            handleError(this.player.error.message+" (ensure you have updated cookie/oauth details)");
+			// Map HTMLMediaElement.error.code onto the structured PlayerRequestError
+			// so the toast + guarded auto-skip (playerFailStreak) behave like the
+			// /player.json contract instead of surfacing raw Chromium strings such as
+			// "PIPELINE_ERROR_READ: FFmpegDemuxer: data source error". Never throws.
+			try {
+				const mediaError = this.player?.error;
+				if (!mediaError) return;
+				const code = mediaError.code;
+				const message = String(mediaError.message || "");
+				// 1 = MEDIA_ERR_ABORTED: user/app-initiated (src swap, stop), not a failure.
+				if (code === 1) return;
+				// Chromium fires code 4 "Empty src attribute" when src is reset on purpose.
+				if (message.includes("Empty src")) return;
+				console.error("[player] media element error", code, message);
+				let err: PlayerRequestError;
+				switch (code) {
+					case 2: // MEDIA_ERR_NETWORK: stream fetch aborted mid-way (throttle, offline)
+						err = new PlayerRequestError(0, "network", "MEDIA_ERR_NETWORK", "");
+						break;
+					case 3: // MEDIA_ERR_DECODE: data arrived but the browser cannot decode it
+						err = new PlayerRequestError(0, "unplayable", "MEDIA_ERR_DECODE", "Format audio non supporté par ce navigateur");
+						break;
+					case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED: container/MIME rejected or 4xx/5xx on the source
+						err = new PlayerRequestError(0, "unplayable", "MEDIA_ERR_SRC_NOT_SUPPORTED", "Source audio illisible");
+						break;
+					default:
+						err = new PlayerRequestError(0, "unknown", "MEDIA_ERR_" + String(code), message);
+				}
+				handleError(err);
+			} catch (e) {
+				console.error("[player] media error handler failed", e);
+			}
 		});
 
 
