@@ -2,12 +2,15 @@ package api
 
 // ST2 "À propos / État": size of the self-hosted library + the server build.
 //
-//   GET /api/v1/stats/library -> {tracks, albums, artists, lastAdded, version}
+//   GET /api/v1/stats/library -> {tracks, albums, artists, lastAdded, version, reportEmail?}
 //
 // Counts come from the Meili indexes (one 1-hit query each, the total is the
 // estimate Meili returns); lastAdded is the dateAdded of the most recent
 // track, RFC 3339 UTC when it parses as a timestamp (seconds or ms), else
 // the raw value ("" when the index is empty or Meili is down).
+// F13: reportEmail is the YTM_REPORT_EMAIL env (the /about "Signaler un
+// problème" mailto recipient); omitted when unset, and /about then offers
+// "Copier le diagnostic" instead of an empty composer.
 
 import (
 	"net/http"
@@ -52,11 +55,23 @@ func currentVersion() string {
 }
 
 type libraryStats struct {
-	Tracks    int    `json:"tracks"`
-	Albums    int    `json:"albums"`
-	Artists   int    `json:"artists"`
-	LastAdded string `json:"lastAdded"`
-	Version   string `json:"version"`
+	Tracks      int    `json:"tracks"`
+	Albums      int    `json:"albums"`
+	Artists     int    `json:"artists"`
+	LastAdded   string `json:"lastAdded"`
+	Version     string `json:"version"`
+	ReportEmail string `json:"reportEmail,omitempty"`
+}
+
+// reportEmail is YTM_REPORT_EMAIL when it looks like one address
+// (`local@domain`, no spaces, no line breaks), else "".
+func reportEmail(env string) string {
+	v := strings.TrimSpace(env)
+	at := strings.IndexByte(v, '@')
+	if at <= 0 || at == len(v)-1 || strings.ContainsAny(v, " \t\r\n,;<>\"") || strings.Count(v, "@") != 1 {
+		return ""
+	}
+	return v
 }
 
 // formatDateAdded renders a Meili dateAdded value: unix seconds / ms numbers
@@ -89,7 +104,7 @@ func countIndex(index string, sort []string, attrs []string) ([]map[string]inter
 
 // LibraryStatsHandler: GET /api/v1/stats/library.
 func LibraryStatsHandler(c echo.Context) error {
-	out := libraryStats{Version: currentVersion()}
+	out := libraryStats{Version: currentVersion(), ReportEmail: reportEmail(os.Getenv("YTM_REPORT_EMAIL"))}
 	hits, total := countIndex("tracks", []string{"dateAdded:desc"}, []string{"dateAdded"})
 	out.Tracks = total
 	if len(hits) > 0 {

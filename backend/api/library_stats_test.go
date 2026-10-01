@@ -64,6 +64,7 @@ func TestLibraryStats(t *testing.T) {
 
 func TestLibraryStatsMeiliDown(t *testing.T) {
 	t.Setenv("MEILI_URL", "http://127.0.0.1:1") // nothing listens
+	t.Setenv("YTM_REPORT_EMAIL", "")
 	SetVersion("")
 	c, rec := ctxFor(http.MethodGet, "/api/v1/stats/library", "", nil)
 	if err := LibraryStatsHandler(c); err != nil {
@@ -73,6 +74,40 @@ func TestLibraryStatsMeiliDown(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if rec.Code != http.StatusOK || out.Tracks != 0 || out.LastAdded != "" || out.Version != "dev" {
 		t.Fatalf("status %d out %+v, want zeros + dev", rec.Code, out)
+	}
+	// F13: no recipient configured -> the key is absent (not ""), so the SPA
+	// shows "Copier le diagnostic" instead of an empty mailto.
+	if strings.Contains(rec.Body.String(), "reportEmail") {
+		t.Fatalf("reportEmail present without YTM_REPORT_EMAIL: %s", rec.Body.String())
+	}
+}
+
+// F13: YTM_REPORT_EMAIL is exposed as reportEmail when it is one address.
+func TestLibraryStatsReportEmail(t *testing.T) {
+	t.Setenv("MEILI_URL", "http://127.0.0.1:1")
+	t.Setenv("YTM_REPORT_EMAIL", " musique@ekaii.fr ")
+	c, rec := ctxFor(http.MethodGet, "/api/v1/stats/library", "", nil)
+	if err := LibraryStatsHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	var out libraryStats
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if out.ReportEmail != "musique@ekaii.fr" {
+		t.Fatalf("reportEmail %q", out.ReportEmail)
+	}
+	for in, want := range map[string]string{
+		"a@b.c":          "a@b.c",
+		"":               "",
+		"not-an-email":   "",
+		"@x":             "",
+		"x@":             "",
+		"a@b, c@d":       "",
+		"a@b\nBcc: c@d":  "",
+		"\"Me\" <a@b.c>": "",
+	} {
+		if got := reportEmail(in); got != want {
+			t.Errorf("reportEmail(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
