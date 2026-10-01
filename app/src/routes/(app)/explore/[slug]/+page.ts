@@ -1,15 +1,17 @@
-import type { ExploreSlugResponse } from "../[slug].json/+server.js";
-import {APIClient} from "$lib/api";
+import { error } from "@sveltejs/kit";
+import { APIClient } from "$lib/api";
 
-export const load = async ({ url, params, fetch }) => {
-	const response = await APIClient.fetch<Awaited<ExploreSlugResponse>>(
-        `/api/v1/explore/${params.slug}`,
-	).then((response) => response.json());
-
+export const load = async ({ url, params }) => {
+	const res = await APIClient.fetch(`/api/v1/explore/${params.slug}`);
 	const path = url.pathname;
-	// console.log(routeId, params, path, sections, header, type);
-	return {
-		response,
-		path,
-	} as const;
+	// Unknown category: the API answers 404 JSON (audit v3 F22/G19) and the
+	// page shows "Catégorie introuvable" with a link back to Explorer.
+	if (res.status === 404) {
+		return { response: null as any, notFound: true, path };
+	}
+	if (!res.ok) {
+		throw error(500, "Explorer est indisponible pour le moment.");
+	}
+	const response: any = await res.json();
+	return { response, notFound: false, path };
 };
