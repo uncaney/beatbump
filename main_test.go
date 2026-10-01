@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v4"
 )
 
 // F15: unknown /api/* paths used to get the 200 HTML shell from the SPA static
@@ -73,5 +75,38 @@ func TestCachedRoutesCarryXYtmCache(t *testing.T) {
 	}
 	if got := get("/api/v1/player.json").Header().Get("X-Ytm-Cache"); got != "" {
 		t.Fatalf("player.json must stay uncached, got X-Ytm-Cache %q", got)
+	}
+}
+
+// K10: every HTML answer (SPA fallback for /home, /search/x, the 404 shell) is
+// revalidated, not only "/"; non-HTML files, immutable assets and the API keep
+// their own policy.
+func TestHTMLAnswersAreNoCache(t *testing.T) {
+	e := echo.New()
+	e.Use(cacheControlMiddleware)
+	e.GET("/_app/immutable/a.js", func(c echo.Context) error { return c.Blob(http.StatusOK, "application/javascript", []byte("1")) })
+	e.GET("/api/v1/x", func(c echo.Context) error { return c.JSON(http.StatusOK, map[string]int{"a": 1}) })
+	e.GET("/favicon.png", func(c echo.Context) error { return c.Blob(http.StatusOK, "image/png", []byte("p")) })
+	e.GET("/*", func(c echo.Context) error {
+		if c.Request().URL.Path == "/nope" {
+			c.Response().Header().Set("Cache-Control", "no-cache")
+			return c.HTMLBlob(http.StatusNotFound, []byte("<html>404</html>"))
+		}
+		return c.HTML(http.StatusOK, "<html>shell</html>")
+	})
+	for target, want := range map[string]string{
+		"/":                    "no-cache",
+		"/home":                "no-cache",
+		"/search/abba":         "no-cache",
+		"/nope":                "no-cache",
+		"/favicon.png":         "",
+		"/_app/immutable/a.js": "public, max-age=31536000, immutable",
+		"/api/v1/x":            "no-store",
+	} {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if got := rec.Header().Get("Cache-Control"); got != want {
+			t.Fatalf("%s: Cache-Control %q, want %q", target, got, want)
+		}
 	}
 }

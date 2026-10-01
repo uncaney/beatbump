@@ -30,11 +30,15 @@ func apiNotFound(c echo.Context) error {
 
 // cacheControlMiddleware is the browser cache policy: hashed immutable assets
 // are cached forever, the shell / service worker / manifest are always
-// revalidated, API responses are never stored by the browser.
+// revalidated, API responses are never stored by the browser. K10: any other
+// answer that turns out to be HTML (the SPA fallback for /home, /search/...,
+// the 404 shell) is revalidated too; the Content-Type is only known when the
+// static handler writes the headers, hence the Before hook.
 func cacheControlMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		p := c.Request().URL.Path
-		h := c.Response().Header()
+		res := c.Response()
+		h := res.Header()
 		switch {
 		case strings.HasPrefix(p, "/_app/immutable/"):
 			h.Set("Cache-Control", "public, max-age=31536000, immutable")
@@ -42,6 +46,12 @@ func cacheControlMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			h.Set("Cache-Control", "no-cache")
 		case strings.HasPrefix(p, "/api/"):
 			h.Set("Cache-Control", "no-store")
+		default:
+			res.Before(func() {
+				if h.Get("Cache-Control") == "" && strings.HasPrefix(h.Get(echo.HeaderContentType), echo.MIMETextHTML) {
+					h.Set("Cache-Control", "no-cache")
+				}
+			})
 		}
 		return next(c)
 	}
