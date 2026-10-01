@@ -131,11 +131,19 @@ export async function login(name: string): Promise<{ id: string; name: string }>
 	announceProfileChange();
 	return r;
 }
-export async function logout() {
+/**
+ * L10-8: the server call first, then the local purge and the announcement to
+ * the other tabs (they reload their rows: with the old cookie still set they
+ * repainted the old profile). A failure (network, non-2xx) throws and keeps
+ * the session as it was; the caller tells the user.
+ */
+export async function logout(): Promise<Response> {
+	const r: Response = await APIClient.post(`/api/v1/me/logout`, {});
+	if (!r || !r.ok) throw new Error(`logout ${r ? r.status : "failed"}`);
 	forgetWhoami();
 	clearHomeCache(typeof localStorage === "undefined" ? undefined : localStorage);
 	announceProfileChange();
-	return APIClient.post(`/api/v1/me/logout`, {});
+	return r;
 }
 
 // ---- favorites ----

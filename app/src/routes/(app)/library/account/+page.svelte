@@ -2,6 +2,7 @@
 	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import { whoami, login, logout } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
+	import { notify } from "$lib/utils/utils";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 
@@ -51,10 +52,17 @@
 	}
 
 	async function doLogout() {
+		if (busy) return;
 		busy = true;
-		await logout();
-		current = "";
-		msg = "Switched to a fresh guest profile.";
+		try {
+			await logout();
+			current = "";
+			msg = "Switched to a fresh guest profile.";
+		} catch (e) {
+			// L10-8: the server kept the session: the profile stays as it was.
+			console.error("logout failed", e);
+			notify("Déconnexion impossible : vérifie le réseau et réessaie.", "error");
+		}
 		busy = false;
 	}
 </script>
