@@ -8,6 +8,8 @@
 //   window.dispatchEvent(new CustomEvent("ytm:prefetched", { detail: { item, url } }))
 //   -> cacheTrackOffline(item, url)
 import { APIClient, PREFETCH_INIT } from "$lib/api";
+import { settings } from "$lib/stores/settings";
+import { get } from "svelte/store";
 
 const KEY = "ytm-offline-tracks";
 const ACK_TIMEOUT_MS = 120_000; // a full track fetch on a slow link can take a while
@@ -89,6 +91,18 @@ export function isLocalUrl(url: string | undefined): boolean {
 // Signed /vp URLs rotate and must not be kept once they fell out of the cache.
 export function isStableAudioUrl(url: string | undefined): boolean {
 	return !!url && /\/(localf|aud)\b/.test(url);
+}
+
+/**
+ * settings.offline.autoCache: default on, only an explicit `false` disables
+ * automatic offline caching (played tracks in player.ts, prefetched +1/+2 here).
+ */
+export function autoCacheEnabled(): boolean {
+	try {
+		return get(settings)?.offline?.autoCache !== false;
+	} catch {
+		return true;
+	}
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -393,6 +407,9 @@ export function installPrefetchHook() {
 	if (prefetchHooked || typeof window === "undefined" || typeof document === "undefined") return;
 	prefetchHooked = true;
 	window.addEventListener("ytm:prefetched", (ev: Event) => {
+		// Auto-cache OFF: the prefetched URL still serves next(), but nothing is
+		// stored or listed (F7). Explicit saves go through downloadForOffline.
+		if (!autoCacheEnabled()) return;
 		const d = (ev as CustomEvent).detail || {};
 		if (d && d.item && typeof d.url === "string") void cacheTrackOffline(d.item, d.url);
 	});
