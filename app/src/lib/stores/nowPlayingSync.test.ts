@@ -9,6 +9,7 @@ import {
 	fitResumeState,
 	getDeviceId,
 	makeNowPlayingPusher,
+	type NowPlayingBody,
 	type NowPlayingPusherDeps,
 	remoteResumeOffer,
 	restoreRemoteResume,
@@ -179,7 +180,7 @@ describe("fitResumeState", () => {
 
 describe("restoreRemoteResume", () => {
 	const offer = () => ({ state: stateOf(3, 1), deviceId: "other", updatedAt: 777, deviceName: "iPhone" });
-	const makeDeps = (over: Partial<RestoreRemoteDeps> = {}) => {
+	const makeDeps = (over: Partial<Omit<RestoreRemoteDeps, "storage">> = {}) => {
 		const storage = memStorage();
 		const calls: string[] = [];
 		const deps: RestoreRemoteDeps & { storage: ReturnType<typeof memStorage>; calls: string[] } = {
@@ -255,7 +256,7 @@ describe("restoreRemoteResume", () => {
 
 describe("makeNowPlayingPusher", () => {
 	const mk = (over: Partial<NowPlayingPusherDeps> = {}) => {
-		const put = vi.fn(async () => 200);
+		const put = vi.fn(async (_body: NowPlayingBody, _keepalive: boolean) => 200);
 		let snap: ReturnType<NowPlayingPusherDeps["snapshot"]> = {
 			list: { mix: [track(0), track(1), { ...track(2), localUrl: "/aud/x" }], position: 0, currentMixType: "local" },
 			currentTime: 0,
@@ -275,10 +276,8 @@ describe("makeNowPlayingPusher", () => {
 		expect(await push()).toBe("sent");
 		expect(await push()).toBe("skipped");
 		expect(put).toHaveBeenCalledTimes(1);
-		const body = put.mock.calls[0][0];
-		expect(body.deviceId).toBe("me");
-		expect(body.position).toBe(0);
-		expect(JSON.stringify(body)).not.toMatch(/localUrl/);
+		expect(put).toHaveBeenCalledWith(expect.objectContaining({ deviceId: "me", deviceName: "Mac", position: 0 }), false);
+		expect(JSON.stringify(put.mock.calls)).not.toMatch(/localUrl/);
 	});
 	it("pushes again only when the position moved more than 10 s", async () => {
 		const { push, put, set } = mk();
@@ -288,7 +287,7 @@ describe("makeNowPlayingPusher", () => {
 		set({ currentTime: 10.5 });
 		expect(await push()).toBe("sent");
 		expect(put).toHaveBeenCalledTimes(2);
-		expect(put.mock.calls[1][0].position).toBe(10.5);
+		expect(put).toHaveBeenLastCalledWith(expect.objectContaining({ position: 10.5 }), false);
 	});
 	it("pushes on a queue / cursor change at the same position", async () => {
 		const { push, put, set } = mk();
@@ -298,7 +297,7 @@ describe("makeNowPlayingPusher", () => {
 		expect(put).toHaveBeenCalledTimes(2);
 	});
 	it("retries at the next push after a failed PUT", async () => {
-		const put = vi.fn(async () => 0);
+		const put = vi.fn(async (_body: NowPlayingBody, _keepalive: boolean) => 0);
 		const { push } = mk({ put });
 		expect(await push()).toBe("skipped");
 		put.mockResolvedValue(200);
@@ -321,7 +320,7 @@ describe("makeNowPlayingPusher", () => {
 	it("uses keepalive for a hidden page", async () => {
 		const { push, put } = mk();
 		await push(true);
-		expect(put.mock.calls[0][1]).toBe(true);
+		expect(put).toHaveBeenCalledWith(expect.anything(), true);
 	});
 });
 
