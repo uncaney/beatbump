@@ -1,6 +1,7 @@
 // Client helpers for the server-side profile state (favorites / follows / playlists).
 // The bbp profile cookie is set + carried automatically (credentials:'same-origin').
 import { APIClient } from "$lib/api";
+import { enqueuePlay, flushOutbox, installHistoryOutbox, readOutbox, statusResult, type SendResult } from "$lib/historyOutbox";
 
 function itemRef(item: any): string {
 	return item?.videoId || item?.endpoint?.browseId || item?.browseId || "";
@@ -52,10 +53,30 @@ export async function unfollow(artistId: string) {
 }
 
 // ---- play history + stats ----
+// O9: one POST with the client playedAt (ms); a failure (network, 5xx) queues
+// the play in the outbox ($lib/historyOutbox), replayed on `online` and at
+// startup. Offline the POST is not even tried.
+async function postPlay(item: any, playedAt: number): Promise<SendResult> {
+	try {
+		const r = await APIClient.post(`/api/v1/me/history`, { ...item, playedAt });
+		return statusResult(Number(r?.status) || 0);
+	} catch {
+		return "retry";
+	}
+}
 export function recordHistory(item: any) {
 	if (!item || !itemRef(item)) return;
-	return APIClient.post(`/api/v1/me/history`, item).catch(() => {});
+	const playedAt = Date.now();
+	if (typeof navigator !== "undefined" && navigator.onLine === false) {
+		enqueuePlay(item, playedAt);
+		return Promise.resolve();
+	}
+	return postPlay(item, playedAt).then((r) => {
+		if (r === "retry") enqueuePlay(item, playedAt);
+		else if (r === "ok" && readOutbox().length) void flushOutbox(postPlay);
+	});
 }
+if (typeof window !== "undefined") installHistoryOutbox(postPlay);
 export async function getRecent(limit = 50): Promise<{ items: any[] }> {
 	return (await APIClient.fetch(`/api/v1/me/stats/recent?limit=${limit}`)).json();
 }
