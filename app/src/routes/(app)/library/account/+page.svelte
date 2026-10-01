@@ -42,6 +42,15 @@
 
 <main class="resp-content-width">
 	<CollectionNav active="account" />
+	<a
+		class="stats-card"
+		href="/library/stats"
+		data-testid="account-stats-link"
+	>
+		<span class="stats-title">Ton mois</span>
+		<span class="stats-sub">Écoutes, minutes, top titres / artistes / albums sur 7, 30 ou 365 jours</span>
+		<span class="stats-go" aria-hidden="true">›</span>
+	</a>
 	<h1>Account</h1>
 
 	{#if loading}
@@ -101,6 +110,39 @@
 	.who {
 		margin: 0.5rem 0 1rem;
 		font-size: 1.05rem;
+	}
+	.stats-card {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-areas: "title go" "sub go";
+		align-items: center;
+		column-gap: 0.75rem;
+		min-height: 44px;
+		padding: 0.8rem 1rem;
+		margin: 0 0 1.25rem;
+		border-radius: 0.6rem;
+		background: rgba(30, 215, 96, 0.12);
+		border: 1px solid rgba(30, 215, 96, 0.35);
+		color: inherit;
+		text-decoration: none;
+	}
+	.stats-card:hover {
+		background: rgba(30, 215, 96, 0.2);
+	}
+	.stats-title {
+		grid-area: title;
+		font-weight: 700;
+		font-size: 1.1rem;
+	}
+	.stats-sub {
+		grid-area: sub;
+		color: #bbb;
+		font-size: 0.85rem;
+	}
+	.stats-go {
+		grid-area: go;
+		font-size: 1.6rem;
+		color: var(--accent, #1ed760);
 	}
 	.row {
 		display: flex;

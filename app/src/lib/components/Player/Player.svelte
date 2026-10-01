@@ -145,13 +145,34 @@
 
 	$: isPlaying = $paused;
 
-	// Record a play event whenever the current track changes (server-side history
-	// → recently/most-played + taste). Deduped per videoId so radio auto-advance,
-	// clicks and queue moves each count once.
-	let _lastHistory = "";
-	$: if (browser && $currentTrack?.videoId && $currentTrack.videoId !== _lastHistory) {
-		_lastHistory = $currentTrack.videoId;
+	// S2 "historique honnête": a play is recorded (server-side history →
+	// recently/most-played + taste + stats) only once the track has really
+	// played HISTORY_MIN_SECONDS (or half of a track shorter than 60 s), not on
+	// track change. One event per track playback: the flag resets when the
+	// videoId changes, so seeks / pauses never double-count and skips < 30 s
+	// are never counted. Payload unchanged (the full current item).
+	const HISTORY_MIN_SECONDS = 30;
+	const { currentTimeStore: historyTime, durationStore: historyDuration } = AudioPlayer;
+	let _historyId = "";
+	let _historySent = false;
+	$: if (browser && ($currentTrack?.videoId ?? "") !== _historyId) {
+		_historyId = $currentTrack?.videoId ?? "";
+		_historySent = false;
+	}
+	$: if (
+		browser &&
+		_historyId &&
+		!_historySent &&
+		$historyTime >= historyThreshold($historyDuration) &&
+		$currentTrack?.videoId === _historyId
+	) {
+		_historySent = true;
 		recordHistory($currentTrack);
+	}
+
+	/** Seconds of playback after which a play counts (30 s, or 50 % of a short track). */
+	function historyThreshold(duration: number): number {
+		return duration > 0 && duration < 2 * HISTORY_MIN_SECONDS ? duration / 2 : HISTORY_MIN_SECONDS;
 	}
 
 	// F2: favourite state of the playing track (mini-bar + fullscreen hearts).

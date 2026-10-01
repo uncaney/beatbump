@@ -11,6 +11,7 @@
 		{ key: "saved", label: "Saved", href: "/library/saved" },
 		{ key: "my-playlists", label: "My Playlists", href: "/library/playlists-srv" },
 		{ key: "recent", label: "Listening", href: "/library/recent" },
+		{ key: "stats", label: "Ton mois", href: "/library/stats" },
 		{ key: "downloads-offline", label: "Hors-ligne", href: "/library/downloads-offline" },
 		{ key: "account", label: "Account", href: "/library/account" },
 	];
