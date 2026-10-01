@@ -379,6 +379,14 @@
 
 	let isHovering = false;
 
+	// Keyboard activation of the labelled thumbnail ("Lire {title}").
+	function thumbKeydown(e: KeyboardEvent) {
+		if (e.key !== "Enter" && e.key !== " ") return;
+		e.preventDefault();
+		e.stopPropagation();
+		void handleClick(e as unknown as MouseEvent);
+	}
+
 	async function handleClick(event: MouseEvent) {
 		const target = event.target as HTMLElement;
 		// The subtitle link's text is a span inside the <a>: look up, not at the target.
@@ -512,12 +520,7 @@
 				role="button"
 				tabindex="0"
 				aria-label={`Lire ${item.title ?? ""}`}
-				on:keydown={(e) => {
-					if (e.key !== "Enter" && e.key !== " ") return;
-					e.preventDefault();
-					e.stopPropagation();
-					void handleClick(e as unknown as MouseEvent);
-				}}
+				on:keydown={thumbKeydown}
 			>
 				<img
 					decoding="async"
