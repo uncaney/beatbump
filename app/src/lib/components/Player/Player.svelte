@@ -330,6 +330,11 @@
 				aria-label="Paroles"
 				title="Paroles"
 				style="display:flex;align-items:center;color:#fff;"
+				on:click|stopPropagation={() => {
+					// The bar's own click toggles the fullscreen player: without this the lyrics
+					// page opened underneath the fullscreen overlay on phones.
+					fullscreenStore.set("closed");
+				}}
 			>
 				<Icon
 					color="#fff"
