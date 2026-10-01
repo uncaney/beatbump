@@ -19,7 +19,7 @@
 //   SW  -> page { type: "audio-cached",    url, videoId, ok, bytes, reason?, already?, cachedUrl? }
 //                 reason "quota" = could not fit even after evicting the oldest entries
 //                 reason "cancelled" = aborted by abort-audio (HL3 pack "Annuler")
-//   page -> SW  { type: "abort-audio",     videoId?, url? }   (aborts the in-flight cache-audio fetch)
+//   page -> SW  { type: "abort-audio",     videoId?, url? }   (withdraws the sender's cache-audio; the fetch stops with its last waiter, L8-16)
 //   SW  -> page { type: "audio-aborted",   videoId, url, ok }
 //   page -> SW  { type: "uncache-audio",   url, videoId? }
 //   SW  -> page { type: "audio-uncached",  url, ok }
@@ -41,6 +41,7 @@
 // the X-YTM-Pinned header of the audio entry AND `pinned` in the meta index;
 // cacheAudio carries it from the previous entry of the same videoId.
 import { build, files, version } from "$service-worker";
+import { SharedJobs } from "$lib/utils/sharedJobs";
 
 const SHELL = `ytm-shell-${version}`;
 const API_CACHE = "ytm-api";
@@ -1129,9 +1130,10 @@ async function cacheAudio(rawUrl: string, videoId: string, pinNow = false, signa
 }
 
 // In-flight dedup: one download per videoId (or per URL when no videoId).
-const inflight = new Map<string, Promise<CacheResult>>();
-// HL3: the AbortController of each in-flight download, for `abort-audio`.
-const inflightAbort = new Map<string, AbortController>();
+// L8-16: each cache-audio message is one waiter of the shared download
+// (SharedJobs); abort-audio withdraws the sender's waiter only, and the
+// fetch itself is aborted when no waiter is left.
+const inflight = new SharedJobs<CacheResult>(() => ({ ok: false, bytes: 0, reason: "cancelled" }));
 function inflightKey(rawUrl: string, videoId: string): string {
 	try {
 		return videoId ? "id:" + videoId : "url:" + new URL(rawUrl, self.location.href).href;
@@ -1139,25 +1141,17 @@ function inflightKey(rawUrl: string, videoId: string): string {
 		return "url:" + rawUrl;
 	}
 }
-function cacheAudioDeduped(rawUrl: string, videoId: string, pinNow = false): Promise<CacheResult> {
-	const key = inflightKey(rawUrl, videoId);
-	const running = inflight.get(key);
-	if (running) return running;
-	const ctrl = new AbortController();
-	inflightAbort.set(key, ctrl);
-	const p = cacheAudio(rawUrl, videoId, pinNow, ctrl.signal).finally(() => {
-		if (inflight.get(key) === p) inflight.delete(key);
-		if (inflightAbort.get(key) === ctrl) inflightAbort.delete(key);
-	});
-	inflight.set(key, p);
-	return p;
+/** The id of the page that sent a message ("" when unknown). */
+function senderId(event: ExtendableMessageEvent): string {
+	const src = event.source as Client | null;
+	return (src && typeof src.id === "string" && src.id) || "";
 }
-/** HL3: abort the in-flight download of `videoId` / `url`; false when none runs. */
-function abortCacheAudio(rawUrl: string, videoId: string): boolean {
-	const ctrl = inflightAbort.get(inflightKey(rawUrl, videoId));
-	if (!ctrl) return false;
-	ctrl.abort();
-	return true;
+function cacheAudioDeduped(rawUrl: string, videoId: string, pinNow: boolean, owner: string): Promise<CacheResult> {
+	return inflight.join(inflightKey(rawUrl, videoId), owner, (signal) => cacheAudio(rawUrl, videoId, pinNow, signal));
+}
+/** HL3: withdraw `owner`'s wait on the download of `videoId` / `url`; false when it has none. */
+function abortCacheAudio(rawUrl: string, videoId: string, owner: string): boolean {
+	return inflight.cancel(inflightKey(rawUrl, videoId), owner);
 }
 
 function reply(event: ExtendableMessageEvent, msg: Record<string, unknown>): Promise<void> {
@@ -1178,7 +1172,7 @@ self.addEventListener("message", (event) => {
 		const videoId = typeof data.videoId === "string" ? data.videoId : "";
 		const pinNow = data.pinned === true;
 		ev.waitUntil(
-			cacheAudioDeduped(data.url, videoId, pinNow)
+			cacheAudioDeduped(data.url, videoId, pinNow, senderId(ev))
 				.catch((e) => ({ ok: false, bytes: 0, reason: isQuotaError(e) ? "quota" : String((e && e.message) || e || "error") }))
 				.then((r) => reply(ev, { type: "audio-cached", url: data.url, videoId, ...r }))
 				.then(() => quotaSettled()), // K9: stay alive for the debounced LRU pass
@@ -1187,10 +1181,12 @@ self.addEventListener("message", (event) => {
 	}
 	// HL3: page -> SW { type: "abort-audio", videoId?, url? } -> { type: "audio-aborted", videoId, url, ok }
 	// The aborted cache-audio answers its own "audio-cached" with reason "cancelled".
+	// L8-16: only the sender's own cache-audio is withdrawn; another page
+	// waiting on the same download keeps it (the fetch stops with its last waiter).
 	if (data.type === "abort-audio" && (typeof data.url === "string" || typeof data.videoId === "string")) {
 		const videoId = typeof data.videoId === "string" ? data.videoId : "";
 		const rawUrl = typeof data.url === "string" ? data.url : "";
-		ev.waitUntil(reply(ev, { type: "audio-aborted", videoId, url: rawUrl, ok: abortCacheAudio(rawUrl, videoId) }));
+		ev.waitUntil(reply(ev, { type: "audio-aborted", videoId, url: rawUrl, ok: abortCacheAudio(rawUrl, videoId, senderId(ev)) }));
 		return;
 	}
 	if (data.type === "uncache-audio" && (typeof data.url === "string" || typeof data.videoId === "string")) {
