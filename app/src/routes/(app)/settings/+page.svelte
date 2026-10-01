@@ -353,6 +353,27 @@
 				{/if}
 			</div>
 		</section>
+		<section
+			id="settings-about"
+			aria-labelledby="about-heading"
+		>
+			<span
+				class="h5"
+				id="about-heading">À propos</span
+			>
+			<div class="setting">
+				<!-- svelte-ignore a11y-label-has-associated-control -->
+				<label>
+					État de l'application
+					<span class="help">Taille de la bibliothèque, version, service worker, stockage persistant</span>
+				</label>
+				<a
+					class="btn"
+					href="/about"
+					data-testid="settings-about">À propos / État</a
+				>
+			</div>
+		</section>
 	</main>
 {/if}
 

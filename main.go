@@ -12,6 +12,10 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
+// version is the server build reported by /api/v1/stats/library (ST2). Set
+// with `-ldflags "-X main.version=<tag>"`, else YTM_VERSION, else "dev".
+var version = "dev"
+
 func main() {
 	db.InitDB()
 	downloader.StartWorker()
@@ -61,6 +65,7 @@ func cacheControlMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 // listeners, no DB side effects) so tests can exercise the routing table.
 func newServer() *echo.Echo {
 	e := echo.New()
+	api.SetVersion(version)
 
 	e.Use(middleware.CORS())
 	e.Use(middleware.Logger())
@@ -148,6 +153,8 @@ func newServer() *echo.Echo {
 	me.GET("/stats/recent", api.MeRecentHandler)
 	me.GET("/stats/top", api.MeTopHandler)
 	me.GET("/stats/summary", api.MeStatsSummaryHandler)
+	// BI3: RFC 4180 export of the profile history (last 10 000 plays).
+	me.GET("/stats/export.csv", api.MeStatsExportCSVHandler)
 	me.GET("/never-played", api.MeNeverPlayedHandler)
 	me.GET("/stats/rediscover", api.MeRediscoverHandler) // c29b D3
 	me.GET("/new-in-library", api.MeNewInLibraryHandler) // c29b EQ3
@@ -156,6 +163,12 @@ func newServer() *echo.Echo {
 	me.GET("/mix", api.MeMixHandler)
 	me.PUT("/nowplaying", api.MeNowPlayingPutHandler)
 	me.GET("/nowplaying", api.MeNowPlayingGetHandler)
+
+	// ST2 "A propos / Etat": library size + build version (no profile data).
+	e.GET("/api/v1/stats/library", api.LibraryStatsHandler)
+	// ST3: client error reports, in-memory ring of 500 (no profile data).
+	e.POST("/api/v1/client-log", api.ClientLogPostHandler)
+	e.GET("/api/v1/client-log", api.ClientLogGetHandler)
 
 	// Download & Settings
 	e.GET("/api/v1/download/playlist", api.DownloadPlaylistHandler)

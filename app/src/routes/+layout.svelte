@@ -24,6 +24,7 @@
     import {SessionListService} from "$stores/list/sessionList";
     import {restoreResumeState, resumeShortcutClaimed, startResumePersistence} from "$lib/stores/resumeState";
     import {startNowPlayingSync} from "$lib/stores/nowPlayingSync";
+    import {initClientLog} from "$lib/clientLog";
     import {onDestroy, onMount} from "svelte";
     import {get} from "svelte/store";
 
@@ -187,6 +188,9 @@
     onDestroy(() => stopNowPlayingSync?.());
 
     let scrollTop = 0;
+    // ST3: uncaught errors / unhandled rejections -> POST /api/v1/client-log
+    // (once per distinct message per session; media errors report from player.ts).
+    onMount(() => initClientLog());
     // Offline banner: the service worker answers API calls with {"offline":true}
     // when the network is gone, which leaves pages empty without explanation.
     let online = true;

@@ -139,10 +139,10 @@ export class GroupSession
 	private _once = false;
 	private _peerIds: Set<ClientID> = new Set<ClientID>([]);
 	private _peerJsPromise: Promise<typeof Peer> | undefined;
-	private _rtc: Peer;
+	private _rtc: Peer | undefined;
 	private _settings: Settings;
-	private _type: "host" | "guest";
-	private _unsubscriber: () => void;
+	private _type: "host" | "guest" | undefined;
+	private _unsubscriber: (() => void) | undefined;
 	private _lock: Mutex;
 	private _resolver: { resolve: () => void; cb: () => void }[] = [];
 	// #endregion Properties (15)
@@ -174,8 +174,18 @@ export class GroupSession
 
 		// Listen to the connectionStates store for
 		// keeping accurate track of state
+		this.watchConnectionStates();
+	}
+
+	/**
+	 * F11: the all-can-play watcher. disconnect() unsubscribes it; init()
+	 * re-arms it, so a second session on the same page behaves like the
+	 * first one (before, the watcher was gone for good after a disconnect).
+	 */
+	private watchConnectionStates(): void {
+		if (this._unsubscriber) return;
 		this._unsubscriber = this._connectionStates.subscribe(async (value) => {
-			const entries = Object.values(value);
+			const entries = Object.values(value ?? {});
 
 			if (
 				!this._once &&
@@ -222,7 +232,7 @@ export class GroupSession
 	}
 
 	public get rtc(): Peer {
-		return this._rtc;
+		return this._rtc as Peer;
 	}
 
 	public get settings(): Settings {
@@ -230,7 +240,7 @@ export class GroupSession
 	}
 
 	public get type(): "host" | "guest" {
-		return this._type;
+		return this._type as "host" | "guest";
 	}
 
 	// #endregion Public Accessors (9)
@@ -319,10 +329,20 @@ export class GroupSession
 		});
 
 		this._rtc?.destroy();
-		this._unsubscriber();
+		this._unsubscriber?.();
+		this._unsubscriber = undefined;
 		this._hasActiveSession.set(false);
 		this._initialized = false;
-		this._connectionStates.set(null);
+		// F11: a clean slate so init() can start a new session on this page:
+		// no stale (closed) connections to send to, no old peer, no leftover
+		// client states, and the all-can-play latch reset.
+		this._connections = [];
+		this._connection = undefined;
+		this._rtc = undefined;
+		this._type = undefined;
+		this._once = false;
+		this._allCanPlay = false;
+		this._connectionStates.set({});
 	}
 
 	public expAutoMix(items: ISessionListProvider): void {
@@ -338,6 +358,8 @@ export class GroupSession
 	): void {
 		if (this.initialized) return;
 		this._initialized = true;
+		this._type = type || "guest";
+		this.watchConnectionStates(); // F11: re-armed after a disconnect()
 		this._settings = settings;
 		const clientId = "bbgs_" + generateId(9, "alternative");
 
@@ -592,7 +614,9 @@ export class GroupSession
 		}));
 
 		// Listen for new connections from guest clients
-		this._rtc.on("connection", (conn) => {
+		const rtc = this._rtc;
+		if (!rtc) return; // disconnected while PeerJS was opening
+		rtc.on("connection", (conn) => {
 			// Push the incoming connection into connection pool
 			this._connections.push(conn);
 
@@ -690,7 +714,7 @@ export class GroupSession
 					processed.data as string[],
 					(id) => id !== this.client.clientId,
 				);
-				const ids = Object.keys(this._rtc.connections);
+				const ids = Object.keys(this._rtc?.connections ?? {});
 
 				iter(_ids, (item) => {
 					if (!ids.includes(item)) {

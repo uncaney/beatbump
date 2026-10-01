@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { APIParams } from "$lib/constants";
 // eslint-disable-next-line import/no-cycle
-import { getSrc, updateGroupPosition, updatePlayerSrc } from "$lib/player";
+import { AudioPlayer, getSrc, updateGroupPosition, updatePlayerSrc } from "$lib/player";
 import type {
     Artist,
     ArtistInfo,
@@ -28,7 +28,7 @@ import { derived, get } from "svelte/store";
 import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
-import { applyMixOp, planInsert, planReorder, removeAt } from "./queueOps";
+import { applyMixOp, planInsert, planReorder, removalAutoplay, removeAt } from "./queueOps";
 import {
     continuedContext,
     describeContext,
@@ -979,8 +979,11 @@ export class ListService {
         syncTabs.updateSessionList(this._$.value);
         if (plan.replay) {
             const track = plan.mix[plan.position];
+            // H13: paused stays paused. The replacement row is loaded (the
+            // player bar shows it) and only starts when playback was running.
+            const autoplay = removalAutoplay(plan.replay, get(AudioPlayer.paused));
             void Promise.resolve(
-                getSrc(track?.videoId, track?.playlistId, undefined, true),
+                getSrc(track?.videoId, track?.playlistId, undefined, autoplay, { prefetch: false }),
             ).catch(() => {});
         }
     }

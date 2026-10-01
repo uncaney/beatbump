@@ -27,6 +27,7 @@ import { syncTabs } from "./tabSync";
 import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
 import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from "./utils/mediaRetry";
+import { reportClientError } from "./clientLog";
 import { setWorkerInterval } from "./utils/workerTimeout";
 import { resumeKeptFor } from "./stores/resumeState";
 import { MEDIA_SEEK_OFFSET_S, mediaArtwork, positionState, seekTarget } from "./stores/list/mediaSession";
@@ -1254,6 +1255,12 @@ let playerFailStreak = 0;
 function handleError(err: PlayerRequestError | string | undefined) {
 	const e = typeof err === "string" || !err ? new PlayerRequestError(0, "unknown", "UNKNOWN", typeof err === "string" ? err : "") : err;
 	console.error("[player] source error", e.code, e.kind, e.status, e.reason);
+	// ST3: one report per distinct failure per session (media element errors
+	// and player.json failures both end here), no profile data.
+	reportClientError(
+		String(e.status).startsWith("MEDIA_ERR") ? "media" : "player",
+		`${e.kind}/${e.status}${e.code ? " " + e.code : ""}${e.reason ? ": " + e.reason : ""}`,
+	);
 	let message: string;
 	switch (e.kind) {
 		case "unplayable":
