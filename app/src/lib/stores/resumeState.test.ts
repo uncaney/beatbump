@@ -5,6 +5,7 @@ import {
 	REMEMBER_MIGRATED_KEY,
 	buildResumeState,
 	migrateRememberLastTrack,
+	resumeAction,
 	resumeKeptFor,
 	parseResumeState,
 	readResumeState,
@@ -161,5 +162,19 @@ describe("resumeKeptFor (I2)", () => {
 	});
 	it("is false without a pending restore", () => {
 		expect(resumeKeptFor(null, "aaaaaaaaaaa")).toBe(false);
+	});
+});
+
+describe("resumeAction (I4)", () => {
+	const state = { mix: [{ videoId: "aaaaaaaaaaa" }, { videoId: "bbbbbbbbbbb" }], position: 1 };
+	it("only plays when the restored track holds a source", () => {
+		expect(resumeAction({ videoId: "bbbbbbbbbbb" }, state, true)).toBe("play");
+	});
+	it("restores again when the startup restore left no source", () => {
+		expect(resumeAction({ videoId: "bbbbbbbbbbb" }, state, false)).toBe("restore");
+	});
+	it("restores when another track (or none) is under the cursor", () => {
+		expect(resumeAction({ videoId: "aaaaaaaaaaa" }, state, true)).toBe("restore");
+		expect(resumeAction(undefined, state, true)).toBe("restore");
 	});
 });

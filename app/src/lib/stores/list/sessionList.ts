@@ -674,6 +674,9 @@ export class ListService {
      */
     private async continueLocalQueue(): Promise<boolean> {
         if (!get(continueAfterQueue)) return false;
+        // I9: offline, the SW would answer from a stale `ytm-api` entry with
+        // uncached library tracks that cannot play: the queue just ends.
+        if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
         const before = this._state.mix;
         const qs = relatedQuery(before[before.length - 1]);
         if (!qs) return false;
