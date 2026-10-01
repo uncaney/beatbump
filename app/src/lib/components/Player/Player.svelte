@@ -336,7 +336,9 @@
     letter-spacing: -0.02em;"
 			>
 				<span class="now-playing-title">{$currentTrack?.title}</span>
-				{#if $currentTrack?.artistInfo?.artist?.[0]?.browseId}
+				<!-- On mobile the whole text block is the "open the player" target, so the
+				     artist is plain text there (the fullscreen keeps the artist link). -->
+				{#if $currentTrack?.artistInfo?.artist?.[0]?.browseId && !$isMobileMQ}
 					<a class="now-playing-artist" style="color:inherit;text-decoration:none"
 						href={`/artist/${$currentTrack.artistInfo.artist[0].browseId}`}
 						on:click|preventDefault|stopPropagation={(e) => {
