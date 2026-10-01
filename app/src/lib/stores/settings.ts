@@ -57,7 +57,7 @@ let list: UserSettings = {
 	playback: {
 		"Dedupe Automix": false,
 		Quality: "Normal",
-		"Remember Last Track": false,
+		"Remember Last Track": true, // C1 exact resume (cycle 18) builds on it
 		"Prefer WebM Audio": false,
 		Stream: "HTTP",
 		"Playback Updates URL": false,

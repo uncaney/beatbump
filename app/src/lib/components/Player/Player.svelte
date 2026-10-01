@@ -159,20 +159,26 @@
 	const { currentTimeStore: historyTime, durationStore: historyDuration } = AudioPlayer;
 	let _historyId = "";
 	let _historySent = false;
+	// C1 (cycle 18): a session restored at 40 s must not count a play again; the play
+	// is "armed" only once the time has been seen below the threshold for this playback.
+	let _historyArmed = false;
 	$: if (browser && ($currentTrack?.videoId ?? "") !== _historyId) {
 		_historyId = $currentTrack?.videoId ?? "";
 		_historySent = false;
+		_historyArmed = false;
 	}
 	let _historyPrevTime = 0;
 	$: if (browser) {
 		const t = $historyTime;
 		if (_historySent && isLoopRestart(_historyPrevTime, t, $historyDuration)) _historySent = false;
+		if (t < historyThreshold($historyDuration)) _historyArmed = true;
 		_historyPrevTime = t;
 	}
 	$: if (
 		browser &&
 		_historyId &&
 		!_historySent &&
+		_historyArmed &&
 		$historyTime >= historyThreshold($historyDuration) &&
 		$currentTrack?.videoId === _historyId
 	) {

@@ -163,8 +163,8 @@
                 </div>
             </div>-->
 
-			<!-- <div class="setting">
-                <label>Remember Last Track</label>
+			<div class="setting">
+                <label for="lasttrack">Remember Last Track</label>
                 <input
                     name="lasttrack"
                     id="lasttrack"
@@ -175,7 +175,8 @@
                     for="lasttrack"
                     class="switch"
                 />
-            </div>-->
+            </div>
+            <p class="help">À la réouverture, la file et la position reviennent telles quelles, en pause.</p>
 			<!-- <div class="setting">
                 <label for="stream">Stream </label>
                 <div class="select">
