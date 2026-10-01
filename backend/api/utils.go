@@ -73,12 +73,17 @@ type IListItemRenderer struct {
 	Length              string     `json:"length,omitempty"`
 	VideoId             *string    `json:"videoId,omitempty"`
 	PlaylistId          *string    `json:"playlistId,omitempty"`
-	LoggingContext      struct {
-		VssLoggingContext VssLoggingContext `json:"vssLoggingContext"`
-	} `json:"loggingContext,omitempty"`
-	Thumbnails []Thumbnail `json:"thumbnails"`
-	Type       string      `json:"type,omitempty"`
-	BrowseId   string      `json:"browseId,omitempty"`
+	// Pointer so an empty context serialises nothing (a struct value ignored
+	// omitempty and every item carried an empty loggingContext, K11).
+	LoggingContext *ItemLoggingContext `json:"loggingContext,omitempty"`
+	Thumbnails     []Thumbnail         `json:"thumbnails"`
+	Type           string              `json:"type,omitempty"`
+	BrowseId       string              `json:"browseId,omitempty"`
+}
+
+// ItemLoggingContext is the YouTube logging context attached to an item.
+type ItemLoggingContext struct {
+	VssLoggingContext VssLoggingContext `json:"vssLoggingContext"`
 }
 
 // VssLoggingContext represents the logging context
@@ -167,10 +172,12 @@ func parseMusicResponsiveListItemRenderer(itemRender _youtube.MusicResponsiveLis
 			}
 		}
 
-		if itemRender.Overlay.MusicItemThumbnailOverlayRenderer.Content.MusicPlayButtonRenderer.PlayNavigationEndpoint.WatchEndpoint.LoggingContext.VssLoggingContext.SerializedContextData != "" {
-			item.LoggingContext.VssLoggingContext = itemRender.Overlay.MusicItemThumbnailOverlayRenderer.Content.MusicPlayButtonRenderer.PlayNavigationEndpoint.WatchEndpoint.LoggingContext.VssLoggingContext
-		} else {
-			item.LoggingContext.VssLoggingContext = itemRender.NavigationEndpoint.WatchEndpoint.LoggingContext.VssLoggingContext
+		vss := itemRender.Overlay.MusicItemThumbnailOverlayRenderer.Content.MusicPlayButtonRenderer.PlayNavigationEndpoint.WatchEndpoint.LoggingContext.VssLoggingContext
+		if vss.SerializedContextData == "" {
+			vss = itemRender.NavigationEndpoint.WatchEndpoint.LoggingContext.VssLoggingContext
+		}
+		if vss.SerializedContextData != "" {
+			item.LoggingContext = &ItemLoggingContext{VssLoggingContext: vss}
 		}
 
 		if (item.PlaylistId == nil || *item.PlaylistId == "") && len(itemRender.Menu.MenuRenderer.Items) > 0 {

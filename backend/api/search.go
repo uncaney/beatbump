@@ -85,6 +85,13 @@ func SearchEndpointHandler(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
 	}
 
+	// K11: 605 KB raw search.json parsed on the main thread; the tracking blobs
+	// of every item are never read by the front (historyOutbox drops them too).
+	slimSearchItems(continuationResponse)
+	for i := range regularResponse {
+		slimSearchItems(regularResponse[i].Contents)
+	}
+
 	if continuationResponse != nil {
 		r := struct {
 			ContinuationResults []IListItemRenderer            `json:"results"`
@@ -196,6 +203,18 @@ func parseResponse(content []_youtube.SectionListRendererContents) ([]MusicShelf
 	}
 
 	return response, nil
+}
+
+// slimSearchItems drops, in place, the YouTube tracking payloads of search
+// results (K11): loggingContext, clickTrackingParams, playerParams. The front
+// reads videoId, playlistId, title, subtitle, thumbnails, artistInfo, explicit,
+// endpoint, length and musicVideoType, which stay.
+func slimSearchItems(items []IListItemRenderer) {
+	for i := range items {
+		items[i].LoggingContext = nil
+		items[i].ClickTrackingParams = ""
+		items[i].PlayerParams = ""
+	}
 }
 
 // SearchCorrection surfaces YT Music's spelling-correction hints (already parsed
