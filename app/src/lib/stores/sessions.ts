@@ -128,7 +128,7 @@ export class GroupSession
 
 	private _allCanPlay = false;
 	private _client: Client;
-	private _connection: DataConnection;
+	private _connection: DataConnection | undefined;
 	private _connectionStates: WritableStore<ConnectionStates> =
 		new WritableStore({});
 	private _connections: DataConnection[] = [];
@@ -201,7 +201,7 @@ export class GroupSession
 		return this._client;
 	}
 
-	public get connection(): DataConnection {
+	public get connection(): DataConnection | undefined {
 		return this._connection;
 	}
 
@@ -290,6 +290,7 @@ export class GroupSession
 		});
 
 		this._peerIds.add(id);
+		this._connection = connection; // the guest's link to the host (read by disconnect())
 		this._connections.push(connection);
 
 		this.listenToConnection(connection);
@@ -307,12 +308,14 @@ export class GroupSession
 		this._peerIds.clear();
 
 		if (this.type === "guest") {
-			this._connection.close();
+			// _connection is only set once connect() ran: a guest leaving before that
+			// (or after a failed connect) must not throw here.
+			try { this._connection?.close(); } catch { /* already closed */ }
 			this._rtc?.destroy();
 		}
 
 		iter(this._connections, (connection) => {
-			connection.close();
+			try { connection.close(); } catch { /* already closed */ }
 		});
 
 		this._rtc?.destroy();
