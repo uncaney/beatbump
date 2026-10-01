@@ -98,3 +98,22 @@ describe("crossover cards (c39b B6-2)", () => {
 		expect(crossoverLabel(2000, "Pop")).toBe("Pop des années 2000");
 	});
 });
+
+describe("year cards (c39b B6-3)", () => {
+	it("builds release-year cards after the crossovers", () => {
+		const cards = mixCardsFrom({
+			decades: [{ decade: 1990, albums: 600 }],
+			crossovers: [{ decade: 1990, genre: "Rock", albums: 22 }],
+			years: [
+				{ year: 2001, albums: 40 },
+				{ year: 1997, albums: 31 },
+				{ year: 97, albums: 30 },
+				{ year: 1998, albums: 0 },
+				{ year: "x", albums: 9 },
+			],
+		});
+		expect(cards.map((c) => c.key)).toEqual(["decade:1990", "decade:1990|genre:Rock", "year:2001", "year:1997"]);
+		expect(cards[3]).toMatchObject({ kind: "year", title: "1997", subtitle: "31 albums", query: "year=1997" });
+		expect(mixCardUrl(cards[3])).toBe("/api/v1/local/mix?year=1997");
+	});
+});

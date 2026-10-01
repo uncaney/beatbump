@@ -166,8 +166,8 @@ func TestParseDecade(t *testing.T) {
 
 func TestLocalMixParamValidation(t *testing.T) {
 	newMixStub(t)
-	// c39b: decade + genre is allowed now.
-	for _, q := range []string{"", "decade=1995", "decade=abc"} {
+	// c39b: decade + genre and year + genre are allowed now; decade + year is not.
+	for _, q := range []string{"", "decade=1990&year=1994", "decade=1995", "decade=abc", "year=97", "year=abcd", "year=1850"} {
 		c, rec := ctxFor(http.MethodGet, "/api/v1/local/mix?"+q, "", nil)
 		if err := LocalMixHandler(c); err != nil {
 			t.Fatal(err)
@@ -413,6 +413,15 @@ func TestMixFilterComposition(t *testing.T) {
 	if got := crossFilter(1990, "Rock"); got != want {
 		t.Fatalf("crossFilter = %s", got)
 	}
+	if yearFilter(1997) != "year IN [1997]" {
+		t.Fatalf("yearFilter = %s", yearFilter(1997))
+	}
+	for raw, want := range map[string]int{"1997": 1997, "2026": 2026, "199": 0, "19977": 0, "abcd": 0, "1850": 0} {
+		got, ok := parseYear(raw)
+		if got != want || ok != (want != 0) {
+			t.Errorf("parseYear(%q) = (%d,%v)", raw, got, ok)
+		}
+	}
 }
 
 func TestLocalMixDecadeAndGenre(t *testing.T) {
@@ -445,9 +454,36 @@ func TestLocalMixDecadeAndGenre(t *testing.T) {
 	}
 }
 
+func TestLocalMixYear(t *testing.T) {
+	newMixStubCross(t)
+	resp := getJSON(t, LocalMixHandler, "/api/v1/local/mix?year=1997")
+	items, _ := resp["items"].([]interface{})
+	if len(items) != 40 || resp["year"] != 1997.0 || resp["albums"] != 17.0 {
+		t.Fatalf("1997: %d items, %v", len(items), resp)
+	}
+	for _, it := range items {
+		title := it.(map[string]interface{})["title"].(string)
+		if !strings.HasPrefix(title, "P97 ") && !strings.HasPrefix(title, "R90 7 ") && !strings.HasPrefix(title, "R90 17 ") {
+			t.Fatalf("track outside 1997: %s", title)
+		}
+	}
+	small := getJSON(t, LocalMixHandler, "/api/v1/local/mix?year=1995")
+	if small["reason"] != "too_small" || small["albums"] != 7.0 {
+		t.Fatalf("1995 should be too_small (7 albums): %v", small)
+	}
+	both := getJSON(t, LocalMixHandler, "/api/v1/local/mix?year=1997&genre=Pop")
+	if both["albums"] != 15.0 || both["genre"] != "Pop" {
+		t.Fatalf("1997 Pop: %v", both)
+	}
+}
+
 func TestLocalMixesYearsAndCrossovers(t *testing.T) {
 	stub := newMixStubCross(t)
 	resp := getJSON(t, LocalMixesHandler, "/api/v1/local/mixes")
+	years, _ := resp["years"].([]interface{})
+	if len(years) != 1 || years[0].(map[string]interface{})["year"] != 1997.0 || years[0].(map[string]interface{})["albums"] != 17.0 {
+		t.Fatalf("years = %v", years)
+	}
 	cross, _ := resp["crossovers"].([]interface{})
 	var got []string
 	for _, c := range cross {

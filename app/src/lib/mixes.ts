@@ -3,11 +3,11 @@
 // No Svelte or store import so the page logic is unit-testable.
 
 export interface MixCard {
-	/** "decade:1990" | "genre:Rock" | "decade:1990|genre:Rock" | "artist:la-…" (the data-mix attribute of the card). */
+	/** "decade:1990" | "genre:Rock" | "decade:1990|genre:Rock" | "year:1997" | "artist:la-…" (the data-mix attribute of the card). */
 	key: string;
-	/** c39b: "crossover" = a decade x genre mix (local/mix?decade=&genre=). */
-	kind: "decade" | "genre" | "crossover" | "artist";
-	/** "Années 1990" | "Rock" | "Rock des années 1990" | "Daft Punk" */
+	/** c39b: "crossover" = a decade x genre mix (local/mix?decade=&genre=), "year" = a release-year mix (local/mix?year=). */
+	kind: "decade" | "genre" | "crossover" | "year" | "artist";
+	/** "Années 1990" | "Rock" | "Rock des années 1990" | "1997" | "Daft Punk" */
 	title: string;
 	/** "52 albums" | "1 234 titres · 20 albums" (genre albums since L8-6) | "12 écoutes" */
 	subtitle: string;
@@ -82,12 +82,13 @@ export function tracksLabel(n: number): string {
 
 /**
  * Cards from the local/mixes answer: decades first (as listed, newest first),
- * then genres, then (c39b) the decade x genre crossovers. Malformed rows are
- * dropped; unknown shapes give no card.
+ * then genres, then (c39b) the decade x genre crossovers and the release
+ * years (as listed, newest first). Malformed rows are dropped; unknown
+ * shapes give no card.
  */
 export function mixCardsFrom(resp: unknown): MixCard[] {
 	if (!resp || typeof resp !== "object") return [];
-	const r = resp as { decades?: unknown; genres?: unknown; crossovers?: unknown };
+	const r = resp as { decades?: unknown; genres?: unknown; crossovers?: unknown; years?: unknown };
 	const out: MixCard[] = [];
 	if (Array.isArray(r.decades)) {
 		for (const d of r.decades) {
@@ -132,6 +133,20 @@ export function mixCardsFrom(resp: unknown): MixCard[] {
 				title: crossoverLabel(decade, genre),
 				subtitle: albumsLabel(albums),
 				query: `decade=${decade}&genre=${encodeURIComponent(genre)}`,
+			});
+		}
+	}
+	if (Array.isArray(r.years)) {
+		for (const y of r.years) {
+			const year = Number((y as { year?: unknown })?.year);
+			const albums = Number((y as { albums?: unknown })?.albums);
+			if (!Number.isInteger(year) || year < 1900 || year > 2099 || !(albums > 0)) continue;
+			out.push({
+				key: `year:${year}`,
+				kind: "year",
+				title: String(year),
+				subtitle: albumsLabel(albums),
+				query: `year=${year}`,
 			});
 		}
 	}
