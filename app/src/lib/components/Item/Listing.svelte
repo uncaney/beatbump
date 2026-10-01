@@ -23,7 +23,7 @@
 	import { browser } from "$app/environment";
 	import { goto } from "$app/navigation";
 	import { resolveArtistId, entityHref } from "$lib/local";
-	import { addFavorite, removeFavoriteItem } from "$lib/me";
+	import { saveFavourite, removeFavourite } from "$lib/favourites";
 	import { downloadToDevice } from "$lib/offline";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { mobileLongPress } from "$lib/actions/longtouch";
@@ -32,7 +32,6 @@
 	import list, { queue, queuePosition } from "$lib/stores/list";
 	import type { Item } from "$lib/types";
 	import { IsoBase64, Logger, filter, notify } from "$lib/utils";
-	import { IDBService } from "$lib/workers/db/service";
 	import {
 		showAddToPlaylistPopper,
 		showGroupSessionCreator,
@@ -122,12 +121,10 @@
 			action: async () => {
 				if (!browser) return;
 				if (!isLibrary) {
-					IDBService.sendMessage("create", "favorite", data);
-					addFavorite(data).catch(() => {});
+					saveFavourite(data);
 				}
 				if (isLibrary) {
-					await IDBService.sendMessage("delete", "favorite", data);
-					removeFavoriteItem(data).catch(() => {});
+					await removeFavourite(data);
 					dispatch("update");
 				}
 			},

@@ -237,7 +237,7 @@
 				notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
 			})
 			.add("Favorite", () => {
-				IDBService.sendMessage("create", "favorite", item);
+				saveFavourite(item);
 			})
 			.add(
 				page === "queue" ? "Remove from Queue" : undefined,
@@ -317,7 +317,7 @@
 	} from "$lib/stores/list/types.list";
 	import type { PageContext } from "$lib/types/allContexts";
 	import type { BuildMenuParams } from "$lib/types/common";
-	import { IDBService } from "$lib/workers/db/service";
+	import { saveFavourite } from "$lib/favourites";
 	import list from "$stores/list/sessionList";
 	import { AudioPlayer, getSrc } from "$lib/player";
 	import { get } from "svelte/store";
