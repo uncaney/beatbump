@@ -375,7 +375,30 @@ func MeRecentHandler(c echo.Context) error {
 		Select("ref, max(data) as data, max(played_at) as played_at").
 		Where("profile_id = ?", pid).
 		Group("ref").Order("played_at desc").Limit(n).Scan(&rows)
-	return c.JSON(http.StatusOK, map[string]interface{}{"items": rehydrate(rows)})
+	items := rehydrate(rows)
+	// S3: last play time of each item (epoch ms, aligned with items) so
+	// /library/recent can group the history by day.
+	refs := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.Data != "" {
+			refs = append(refs, r.Ref)
+		}
+	}
+	last := map[string]int64{}
+	if len(refs) > 0 {
+		var evs []db.PlayEvent
+		db.DB.Select("ref, played_at").Where("profile_id = ? AND ref IN ?", pid, refs).Find(&evs)
+		for _, e := range evs {
+			if ms := e.PlayedAt.UnixMilli(); ms > last[e.Ref] {
+				last[e.Ref] = ms
+			}
+		}
+	}
+	playedAt := make([]int64, len(refs))
+	for i, ref := range refs {
+		playedAt[i] = last[ref]
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "playedAt": playedAt})
 }
 
 // MeMixHandler — "Made for you": a personalized library mix seeded by the
