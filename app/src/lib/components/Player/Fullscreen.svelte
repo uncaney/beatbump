@@ -32,7 +32,7 @@
 	import SessionListService from "$stores/list/sessionList";
 	import { SITE_ORIGIN_URL, playbackURLStateUpdater } from "$stores/url";
 	import { windowWidth } from "$stores/window";
-	import { onMount } from "svelte";
+	import { onMount, tick } from "svelte";
 	import { cubicOut, quartIn, quartOut } from "svelte/easing";
 	import { tweened } from "svelte/motion";
 	import {
@@ -81,9 +81,27 @@
 	}
 	async function mobileViewArtist() {
 		const aid = await resolveArtistId($currentTrack);
-		if (aid) {
-			fullscreenStore.set("closed");
-			goto(`/artist/${aid}`);
+		if (aid) navigateAway(`/artist/${aid}`);
+	}
+	// Leave the fullscreen player for a page (lyrics, artist). On mobile the
+	// backdrop normally fades out over 800 ms after an 800 ms delay, so the
+	// destination stayed hidden under the overlay (coordinator probe, 390x844).
+	// `leaving` drops that transition, the queue sheet is closed, the store is
+	// closed before the navigation starts, and the flag is kept long enough for
+	// the layout's deferred `state = "closed"` (setTimeout 0) to land.
+	let leaving = false;
+	let leavingTimer: ReturnType<typeof setTimeout> | undefined;
+	async function navigateAway(path: string) {
+		leaving = true;
+		if (leavingTimer) clearTimeout(leavingTimer);
+		sheetOpen = false;
+		if ($isMobileMQ) motion.set(-28, { duration: 0 });
+		fullscreenStore.set("closed");
+		await tick();
+		try {
+			await goto(path);
+		} finally {
+			leavingTimer = setTimeout(() => (leaving = false), 1200);
 		}
 	}
 	$: heightCalc = -windowHeight + 120;
@@ -376,6 +394,7 @@
 	class="backdrop"
 	class:mobile={$isMobileMQ}
 	class:open={state === "open"}
+	class:leaving
 	style:pointer-events={state === "open" ? "all" : "none"}
 	bind:clientHeight={windowHeight}
 	out:slideInOut={{ delay: 400, duration: 800, easing: quartOut }}
@@ -461,10 +480,7 @@
 							title="Paroles"
 							class="no-style"
 							style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
-							on:click={() => {
-								fullscreenStore.set("closed");
-								goto("/lyrics");
-							}}
+							on:click|stopPropagation={() => navigateAway("/lyrics")}
 						>
 							<Icon
 								name="music"
@@ -1236,6 +1252,15 @@
         opacity: 1;
         overscroll-behavior: contain !important; /* CRITICAL: Locks background scroll when player is open */
         transition: opacity 400ms cubic-bezier(0.25, 0.46, 0.45, 0.94) 0ms;
+    }
+
+    /* Navigating away (lyrics / artist): hide at once instead of the 1.6 s fade,
+       so the destination page is visible on mobile. */
+    &.leaving:not(.open) {
+        transition: none !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
     }
 }
 
