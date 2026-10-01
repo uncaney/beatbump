@@ -272,6 +272,8 @@
 	// unpinned pin look "active"). Pinned = green border + icon.
 	// The minima carry a px floor (audit v4 TOP 3): the mobile root font is
 	// 12px, so 2.75rem alone collapsed to 33x27.
+	// Audit v6 TOP 7: 44x44 minimum (36 px tall was a phone tap-target
+	// regression) and round like the header play / shuffle circles.
 	.pin,
 	.rm,
 	.recache,
@@ -280,7 +282,7 @@
 		flex: 0 0 auto;
 		box-sizing: border-box;
 		min-width: max(2.75rem, 44px);
-		min-height: max(2.25rem, 36px);
+		min-height: max(2.75rem, 44px);
 		width: auto;
 		height: auto;
 		padding: 0;
@@ -291,7 +293,7 @@
 		border: 1px solid rgba(255, 255, 255, 0.35) !important;
 		box-shadow: none !important;
 		color: $text !important;
-		border-radius: 0.5rem;
+		border-radius: 999px;
 		font: inherit;
 		font-size: 1rem;
 		line-height: 1;
