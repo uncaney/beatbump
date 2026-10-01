@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from "$app/environment";
 	import { navigating } from "$app/stores";
 	import { goto } from "$app/navigation";
 	import Icon from "$components/Icon/Icon.svelte";
@@ -138,7 +139,32 @@
 	// The Related tab is only shown when the backend returned a browseId
 	// (`MPTRt_…`) for the current track; previously the tab was always there
 	// and its click was silently ignored when the id was empty (audit F10).
-	$: hasRelated = !!$SessionListService.related?.browseId;
+	// "Dans ta bibliothèque": owned tracks related to the current one (idea P8),
+	// fetched per track; the Related tab shows when either source has content.
+	let localRelated: any[] = [];
+	let localRelatedFor = "";
+	$: loadLocalRelated($currentTrack);
+	async function loadLocalRelated(track: any) {
+		if (!browser || !track?.videoId) return;
+		const key = String(track.videoId);
+		if (key === localRelatedFor) return;
+		localRelatedFor = key;
+		localRelated = [];
+		try {
+			const isLidId = /^[0-9a-f]{11}$/.test(key);
+			const artist = track?.artistInfo?.artist?.[0]?.text || (typeof track?.artist === "string" ? track.artist : "") || "";
+			const qs = isLidId
+				? "lid=" + encodeURIComponent(key)
+				: "title=" + encodeURIComponent(track?.title || "") + "&artist=" + encodeURIComponent(artist);
+			const r = await fetch("/api/v1/local/related?" + qs);
+			if (!r.ok || localRelatedFor !== key) return;
+			const j = await r.json();
+			localRelated = Array.isArray(j?.items) ? j.items.slice(0, 20) : [];
+		} catch {
+			localRelated = [];
+		}
+	}
+	$: hasRelated = !!$SessionListService.related?.browseId || localRelated.length > 0;
 	$: tabs = hasRelated ? [upNextTab, relatedTab] : [upNextTab];
 	$: if (!hasRelated && active === "Related") active = "UpNext";
 
@@ -809,7 +835,17 @@
 					{:else if isActive}
 						<div class="scroller">
 							<div class="pad">
-								{#if $related.description.description}
+								{#if localRelated.length}
+									<section data-row="related-local" class="mb-2">
+										<Carousel
+											items={localRelated}
+											header={{ title: "Dans ta bibliothèque", subheading: "Du même artiste, du même genre, chez toi" }}
+											type="trending"
+											isBrowseEndpoint={false}
+										/>
+									</section>
+								{/if}
+								{#if $related?.description?.description}
 									<div class="mb-2">
 										<span class="h2">{$related?.description?.header}</span>
 										<Description

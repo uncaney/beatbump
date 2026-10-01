@@ -102,6 +102,7 @@ func newServer() *echo.Echo {
 	e.GET("/api/v1/local/artists", api.LocalArtistsHandler)
 	e.GET("/api/v1/local/albums", api.LocalAlbumsHandler)
 	e.GET("/api/v1/local/songs", api.LocalSongsHandler)
+	e.GET("/api/v1/local/related", api.CacheResponse(5*time.Minute, api.LocalRelatedHandler))
 	e.GET("/api/v1/local/genres", api.LocalGenresHandler)
 
 	// Per-profile server state: favorites, follows, playlists (named or anonymous cookie)
