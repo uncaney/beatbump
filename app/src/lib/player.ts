@@ -30,7 +30,7 @@ import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from ".
 import { reportClientError } from "./clientLog";
 import { setWorkerInterval } from "./utils/workerTimeout";
 import { resumeKeptFor } from "./stores/resumeState";
-import { MEDIA_SEEK_OFFSET_S, mediaArtwork, positionState, seekTarget } from "./stores/list/mediaSession";
+import { mediaArtwork, mediaSessionSeekTarget, positionState, seekTarget } from "./stores/list/mediaSession";
 
 let userSettings: UserSettings | undefined = undefined;
 
@@ -101,22 +101,19 @@ function metaDataHandler({
 			AudioPlayer.play();
 		});
 		navigator.mediaSession.setActionHandler("pause", () => AudioPlayer.pause());
-		navigator.mediaSession.setActionHandler("seekto", (session) => {
-			if (session.fastSeek && "fastSeek" in AudioPlayer) {
-				session.seekTime && AudioPlayer.fastSeek(session.seekTime);
-				setPosition(
-					session.seekTime ?? AudioPlayer.currentTime,
+		// c39c B6-8: seekto 0 is a real seek; the action name is set here so a
+		// handler called with a bare `{ seekTime }` still resolves.
+		const onSeek = (action: "seekto" | "seekbackward" | "seekforward") =>
+			(details?: MediaSessionActionDetails) => {
+				const target = mediaSessionSeekTarget(
+					{ ...(details ?? {}), action },
+					AudioPlayer.currentTime,
 					AudioPlayer.duration,
 				);
-				return;
-			}
-			session.seekTime && AudioPlayer.seek(session.seekTime);
-
-			setPosition(
-				session.seekTime ?? AudioPlayer.currentTime,
-				AudioPlayer.duration,
-			);
-		});
+				if (target === null) return;
+				AudioPlayer.seekTo(target, action === "seekto" && details?.fastSeek === true);
+			};
+		setMediaAction("seekto", onSeek("seekto"));
 		navigator.mediaSession.setActionHandler("previoustrack", () =>
 			SessionListService.previous(),
 		);
@@ -124,13 +121,9 @@ function metaDataHandler({
 			SessionListService.next(),
 		);
 		// C3: headset / lock screen ±10 s.
-		setMediaAction("seekbackward", (details) =>
-			AudioPlayer.seekBy(-(details?.seekOffset || MEDIA_SEEK_OFFSET_S)),
-		);
-		setMediaAction("seekforward", (details) =>
-			AudioPlayer.seekBy(details?.seekOffset || MEDIA_SEEK_OFFSET_S),
-		);
-		setPosition(currentTime, duration);
+		setMediaAction("seekbackward", onSeek("seekbackward"));
+		setMediaAction("seekforward", onSeek("seekforward"));
+		setPosition(currentTime, duration, AudioPlayer.playbackRate);
 	}
 }
 
@@ -535,9 +528,31 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		if (!this.player) return;
 		const duration = this.duration > 0 ? this.duration : this.player.duration;
 		const target = seekTarget(this.currentTime || this.player.currentTime || 0, delta, duration);
-		this.seek(target);
-		this._currentTimeStore.set(target);
-		this.updatePositionState();
+		this.seekTo(target);
+	}
+
+	/**
+	 * c39c B6-8: absolute seek from the lock screen / headset (0 included);
+	 * the time store and the Media Session position follow at once.
+	 */
+	public seekTo(target: number, fast = false) {
+		if (!this.player || !isFinite(target)) return;
+		const t = Math.max(0, target);
+		if (fast && typeof this.player.fastSeek === "function") {
+			if (t < this.durationStore.value / 2) this.setStaleTimeout();
+			this.player.fastSeek(t);
+			this._progress.set(t, { duration: 10 });
+		} else {
+			this.seek(t);
+		}
+		this._currentTimeStore.set(t);
+		const duration = this.duration > 0 ? this.duration : this.player.duration;
+		setPosition(t, duration, this.player.playbackRate);
+	}
+
+	/** Media element playback rate (1 before the element exists). */
+	public get playbackRate(): number {
+		return this.player ? this.player.playbackRate : 1;
 	}
 
 	/** C3: refresh the lock-screen position (seeked / ratechange / durationchange). */

@@ -33,6 +33,38 @@ export function seekTarget(currentTime: number, delta: number, duration: number)
 	return Math.min(Math.max(0, t), max);
 }
 
+export interface MediaSeekDetails {
+	action?: string;
+	seekTime?: unknown;
+	seekOffset?: unknown;
+}
+
+/**
+ * c39c B6-8: absolute target of a Media Session seek action, or null when the
+ * action carries nothing usable. `seekto` accepts 0 (the old `seekTime &&`
+ * guard dropped "back to the start"); `seekbackward` / `seekforward` default
+ * to MEDIA_SEEK_OFFSET_S when the browser sends no (or a bad) offset.
+ */
+export function mediaSessionSeekTarget(
+	details: MediaSeekDetails | null | undefined,
+	current: number,
+	duration: number,
+): number | null {
+	if (!details) return null;
+	const max = isFinite(duration) && duration > 0 ? duration : Infinity;
+	if (details.action === "seekto") {
+		const t = details.seekTime;
+		if (typeof t !== "number" || !isFinite(t)) return null;
+		return Math.min(Math.max(0, t), max);
+	}
+	if (details.action === "seekbackward" || details.action === "seekforward") {
+		const o = details.seekOffset;
+		const offset = typeof o === "number" && isFinite(o) && o > 0 ? o : MEDIA_SEEK_OFFSET_S;
+		return seekTarget(current, details.action === "seekbackward" ? -offset : offset, duration);
+	}
+	return null;
+}
+
 const absolute = (url: string, origin: string) => {
 	try {
 		return new URL(url, origin || "http://localhost").toString();

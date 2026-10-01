@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mediaArtwork, positionState, seekTarget } from "./mediaSession";
+import { mediaArtwork, mediaSessionSeekTarget, positionState, seekTarget } from "./mediaSession";
 
 describe("positionState", () => {
 	it("clamps the position and defaults the rate", () => {
@@ -20,6 +20,32 @@ describe("seekTarget (±10 s)", () => {
 		expect(seekTarget(5, -10, 200)).toBe(0);
 		expect(seekTarget(195, 10, 200)).toBe(200);
 		expect(seekTarget(40, 10, NaN)).toBe(50);
+	});
+});
+
+describe("mediaSessionSeekTarget (B6-8)", () => {
+	it("seekto 0 seeks to the start", () => {
+		expect(mediaSessionSeekTarget({ action: "seekto", seekTime: 0 }, 40, 200)).toBe(0);
+	});
+	it("seekto clamps and ignores a missing or bad time", () => {
+		expect(mediaSessionSeekTarget({ action: "seekto", seekTime: 250 }, 40, 200)).toBe(200);
+		expect(mediaSessionSeekTarget({ action: "seekto", seekTime: -2 }, 40, 200)).toBe(0);
+		expect(mediaSessionSeekTarget({ action: "seekto" }, 40, 200)).toBeNull();
+		expect(mediaSessionSeekTarget({ action: "seekto", seekTime: NaN }, 40, 200)).toBeNull();
+		expect(mediaSessionSeekTarget({ action: "seekto", seekTime: "3" }, 40, 200)).toBeNull();
+		expect(mediaSessionSeekTarget({ action: "seekto", seekTime: 90 }, 40, NaN)).toBe(90);
+	});
+	it("seekbackward / seekforward default to 10 s", () => {
+		expect(mediaSessionSeekTarget({ action: "seekbackward" }, 40, 200)).toBe(30);
+		expect(mediaSessionSeekTarget({ action: "seekforward" }, 40, 200)).toBe(50);
+		expect(mediaSessionSeekTarget({ action: "seekforward", seekOffset: 0 }, 40, 200)).toBe(50);
+		expect(mediaSessionSeekTarget({ action: "seekbackward", seekOffset: 30 }, 40, 200)).toBe(10);
+		expect(mediaSessionSeekTarget({ action: "seekbackward" }, 4, 200)).toBe(0);
+		expect(mediaSessionSeekTarget({ action: "seekforward" }, 195, 200)).toBe(200);
+	});
+	it("null for other actions or no details", () => {
+		expect(mediaSessionSeekTarget({ action: "play" }, 40, 200)).toBeNull();
+		expect(mediaSessionSeekTarget(null, 40, 200)).toBeNull();
 	});
 });
 
