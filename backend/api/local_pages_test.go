@@ -115,3 +115,28 @@ func TestLocalArtistSeeAllTotalFallsBackToHits(t *testing.T) {
 		t.Fatalf("songsTotal = %v, want 2 (hits returned)", resp["songsTotal"])
 	}
 }
+
+// I19: an artist with more titles than one songs page: the label counts what
+// the seeAll link loads, the real count and the remaining pages ride along.
+func TestLocalArtistSeeAllLabelMatchesLoadedCount(t *testing.T) {
+	see := localArtistSeeAll("Big Artist", 350)
+	if see["title"] != "Voir les 200 titres" || see["total"] != 200 || see["artistTotal"] != 350 {
+		t.Fatalf("seeAll = %+v", see)
+	}
+	pages, _ := see["pages"].([]string)
+	if len(pages) != 2 || pages[0] != see["url"] {
+		t.Fatalf("pages = %v", pages)
+	}
+	u, _ := url.Parse(pages[1])
+	if u.Query().Get("offset") != "200" || u.Query().Get("limit") != "200" || see["next"] != pages[1] {
+		t.Fatalf("second page = %v next = %v", pages[1], see["next"])
+	}
+	small := localArtistSeeAll("Small", 30)
+	if small["title"] != "Voir les 30 titres" || small["next"] != nil || len(small["pages"].([]string)) != 1 {
+		t.Fatalf("small seeAll = %+v", small)
+	}
+	huge := localArtistSeeAll("Huge", 5000)
+	if len(huge["pages"].([]string)) != localArtistSeeAllPages {
+		t.Fatalf("pages not bounded: %d", len(huge["pages"].([]string)))
+	}
+}
