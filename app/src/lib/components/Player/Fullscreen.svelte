@@ -810,8 +810,8 @@
 						queueOpen ? 55 : 93
 				  }vw, 0px, 0) !important;`}
 		>
-			<!-- Mobile only (display:none from 720px): the labelled handle plus the
-			     "Vider la file" button on the same row, above the fold when closed. -->
+			<!-- Mobile only (display:none from 720px): the labelled handle, the
+			     only thing visible while the sheet is closed. -->
 			<div class="sheet-head">
 			<div
 				use:draggable
@@ -863,31 +863,6 @@
 					{/if}
 				</span>
 			</div>
-			{#if $isMobileMQ}
-				<!-- Mobile: "Vider la file" sits in the handle row so it stays above
-				     the fold while the sheet is closed (the in-list toolbar was cut by
-				     the bottom of the screen). Events are stopped so the sheet's drag /
-				     tap-to-toggle / keydown handlers never see them. -->
-				<button
-					type="button"
-					class="queue-clear queue-clear-head"
-					data-testid="queue-clear"
-					aria-label="Vider la file d'attente (garder le morceau en cours)"
-					title="Vider la file d'attente (garder le morceau en cours)"
-					disabled={$queue.length <= 1}
-					on:pointerdown|stopPropagation={() => {}}
-					on:touchstart|stopPropagation={() => {}}
-					on:keydown|stopPropagation={() => {}}
-					on:click|stopPropagation={clearQueue}
-				>
-					<Icon
-						name="trash"
-						size="1em"
-						color="currentColor"
-					/>
-					<span>Vider la file</span>
-				</button>
-			{/if}
 			</div>
 			<Tabs
 				{tabs}
@@ -904,13 +879,21 @@
 								class="scroller queue-scroller"
 								on:touchstart|stopPropagation={null}
 							>
-								{#if !$isMobileMQ}
-									<!-- desktop toolbar; on mobile the count + button live in the sheet handle row -->
-									<div class="queue-toolbar">
+								<!-- Header of the open list. Phones (audit v4 3.7): the closed
+								     sheet shows only the handle + "File d'attente · N morceaux";
+								     "Vider la file" lives here, inside the open drawer, so a thumb
+								     dragging the handle can no longer land on it. The count is
+								     already in the handle there. -->
+								<div
+									class="queue-toolbar"
+									class:mobile-toolbar={$isMobileMQ}
+								>
+									{#if !$isMobileMQ}
 										<span class="queue-count" aria-live="polite">
 											{$queue.length}
 											{$queue.length > 1 ? "morceaux" : "morceau"}
 										</span>
+									{/if}
 										<button
 											type="button"
 											class="queue-clear"
@@ -928,7 +911,6 @@
 											<span>Vider la file</span>
 										</button>
 									</div>
-								{/if}
 								<DraggableList
 									items={$queue}
 									swipeToRemove
@@ -1146,7 +1128,8 @@
 			outline-offset: 2px;
 		}
 	}
-	// Mobile sheet head: [grip + "File d'attente · N morceaux"] ... [Vider la file]
+	// Mobile sheet head: [grip + "File d'attente · N morceaux"], nothing else
+	// (Vider la file is in the open list header, .mobile-toolbar).
 	.sheet-head {
 		display: flex;
 		align-items: center;
@@ -1159,9 +1142,9 @@
 			display: none !important;
 		}
 	}
-	.queue-clear-head {
-		flex: 0 0 auto;
-		margin-inline-end: 1rem;
+	.queue-toolbar.mobile-toolbar {
+		justify-content: flex-end;
+		padding-block: 0.5em;
 	}
 	// Closed sheet on phones (audit v3 3.6): only the handle row shows above
 	// the fold. The tab bar ("UP NEXT / RELATED", rendered by Tabs as a sibling
