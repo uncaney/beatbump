@@ -87,6 +87,15 @@
 		? "Mixtape : enchaîne les morceaux prêts en variant les artistes"
 		: `Il faut au moins 2 morceaux prêts pour une mixtape (${readyHint})`;
 	$: activeId = $currentTrack?.videoId || "";
+	// Header counter (audit v5 3.7): parts joined by " · " (one space each side),
+	// rendered on one line so the template adds no stray whitespace.
+	$: statParts = [
+		{ text: `${tracks.length} ${tracks.length > 1 ? "morceaux" : "morceau"}`, cls: "" },
+		{ text: size, cls: "" },
+		{ text: albums.length ? `${albums.length} ${albums.length > 1 ? "albums" : "album"}` : "", cls: "" },
+		{ text: pendingCount ? `${pendingCount} en cours de mise en cache` : "", cls: "pending" },
+		{ text: evictedCount ? `${evictedCount} à retélécharger` : "", cls: "evicted" },
+	].filter((p) => p.text);
 
 	function refresh() {
 		tracks = getOfflineTracks();
@@ -319,17 +328,7 @@
 			<!-- No counter on an empty cache (audit v4 3.6): the EmptyState below
 			     already says it, "Aucun morceau en cache" was the same message twice. -->
 			{#if tracks.length > 0}
-				<p class="stats">
-					{tracks.length} {tracks.length > 1 ? "morceaux" : "morceau"}
-					{#if size}<span class="dot">·</span>{size}{/if}
-					{#if albums.length}<span class="dot">·</span>{albums.length} {albums.length > 1 ? "albums" : "album"}{/if}
-					{#if pendingCount}<span class="dot">·</span><span class="pending"
-							>{pendingCount} en cours de mise en cache</span
-						>{/if}
-					{#if evictedCount}<span class="dot">·</span><span class="evicted"
-							>{evictedCount} à retélécharger</span
-						>{/if}
-				</p>
+				<p class="stats">{#each statParts as part, i}{#if i}{" · "}{/if}<span class={part.cls || undefined}>{part.text}</span>{/each}</p>
 			{/if}
 		</div>
 		<!-- Only the offline state is worth a badge (audit v4 3.6): "● En ligne"

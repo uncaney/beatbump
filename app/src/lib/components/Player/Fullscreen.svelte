@@ -1327,6 +1327,25 @@
 	.tracklist {
 		box-shadow: 0px 5px 32px -10px #000;
 	}
+	// Desktop panel tabs (audit v5 3.6 / TOP 10): the active tab is styled from
+	// its `.active` state (Tab.svelte), not from hover / :active, so UP NEXT is
+	// visibly selected on first display and after a RELATED round trip: light
+	// fill + 2px underline; inactive tabs keep a transparent background.
+	@media screen and (min-width: 720px) {
+		.tracklist :global(.tab-bar .tab) {
+			box-shadow: inset 0 -2px 0 transparent;
+			transition:
+				background-color 120ms ease,
+				box-shadow 120ms ease;
+		}
+		.tracklist :global(.tab-bar .tab.active),
+		.tracklist :global(.tab-bar .tab.active:hover),
+		.tracklist :global(.tab-bar .tab.active:active) {
+			color: #fff;
+			background-color: rgba(255, 255, 255, 0.1);
+			box-shadow: inset 0 -2px 0 #fff;
+		}
+	}
 	.fullscreen-player-popup {
 		position: absolute;
 		top: 0;
