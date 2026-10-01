@@ -93,7 +93,8 @@ func newServer() *echo.Echo {
 	e.GET("/api/v1/related.json", api.CacheResponse(5*time.Minute, api.RelatedEndpointHandler))
 	e.GET("/api/v1/main.json", api.CacheResponse(5*time.Minute, api.AlbumEndpointHandler))
 	e.GET("/api/v1/get_queue.json", api.GetQueueHandler)
-	e.GET("/api/v1/get_search_suggestions.json", api.GetSearchSuggstionsHandler)
+	// K5: one YouTube round trip (~200 ms) per keystroke; the answer only depends on q.
+	e.GET("/api/v1/get_search_suggestions.json", api.CacheResponse(10*time.Minute, api.GetSearchSuggstionsHandler))
 
 	e.GET("/api/v1/home.json", api.CacheResponse(2*time.Minute, api.HomeEndpointHandler))
 	e.GET("/api/v1/explore/:category", api.CacheResponse(5*time.Minute, api.ExploreEndpointHandler))

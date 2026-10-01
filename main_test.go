@@ -49,7 +49,7 @@ func TestAPIWildcardDoesNotShadowRoutes(t *testing.T) {
 	}
 }
 
-// K6: next.json and related.json go through the
+// K5/K6: next.json, related.json and the search suggestions go through the
 // TTL response cache (X-Ytm-Cache header); player.json never does (signed
 // stream URLs). YTM_API_CACHE=0 keeps the wrapper in BYPASS so the test does
 // not populate the process-wide cache, and the requests are built so every
@@ -65,6 +65,7 @@ func TestCachedRoutesCarryXYtmCache(t *testing.T) {
 	for _, target := range []string{
 		"/api/v1/next.json",
 		"/api/v1/related.json?browseId=",
+		"/api/v1/get_search_suggestions.json",
 	} {
 		if got := get(target).Header().Get("X-Ytm-Cache"); got != "BYPASS" {
 			t.Fatalf("%s: X-Ytm-Cache %q, want BYPASS (route not wrapped by CacheResponse)", target, got)
