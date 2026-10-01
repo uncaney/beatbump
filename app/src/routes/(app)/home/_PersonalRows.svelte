@@ -195,7 +195,10 @@
 		display: contents;
 	}
 	.resume-queue {
-		padding: 0.5em 0 0;
+		/* Audit v7 TOP 6: the pill sat at x=0 on mobile while the row cards and
+		   headers start at a 16px gutter. Match it (1rem) so the button reads as
+		   part of the "Reprendre" row, not floating against the edge. */
+		padding: 0.5em 1rem 0;
 	}
 	/* btn-reset: the pill keeps its own white colour (it was black-on-dark under
 	   the global button rule), plain case, and a 44px touch target on phones. */
