@@ -504,13 +504,16 @@
 						aria-label="Fermer le lecteur"
 						title="Fermer le lecteur"
 						class="no-style"
-						style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
+						style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;min-width:44px;min-height:44px;filter:drop-shadow(0 1px 2px rgb(0 0 0 / 60%));"
 						on:click={() => fullscreenStore.set("closed")}
 					>
+						<!-- `--stroke`: the svg stroke otherwise resolves to currentColor,
+						     which the global button rule forces to #0f0f0f (grey on the cover). -->
 						<Icon
 							name="chevron-left"
 							size="1.8em"
 							color="#fff"
+							--stroke="#fff"
 						/>
 					</button>
 					<div style="display:flex;align-items:center;gap:0.4em;">
@@ -693,7 +696,7 @@
 					<!-- Desktop (audit v4 3.7): title / artist / heart under the cover;
 					     before, the left panel showed the artwork alone and the track
 					     was only named in the mini bar. -->
-					<div class="now-playing-meta">
+					<div class="now-playing-meta text-shadow">
 						<div class="np-text">
 							<h2
 								class="np-title"
@@ -1180,6 +1183,21 @@
 		color: hsla(0, 0%, 100%, 0.85);
 	}
 
+	// Related "Dans ta bibliotheque" (audit v6 TOP 6): fixed 160px cards (the
+	// carousel article is `flex: 0 1` and shrank to 139px in the panel) and a
+	// right gutter so the scroll arrow sits beside the last card, not on it.
+	section[data-row="related-local"] {
+		:global(.section) {
+			padding-inline-end: 2rem;
+		}
+		:global(.scroll) {
+			scroll-padding-inline-end: 40px;
+		}
+		:global(.scroll article) {
+			flex: 0 0 var(--column-width, 160px);
+		}
+	}
+
 	.text-shadow {
 		text-shadow: 0.1em 0.1em 0.2em rgb(0 0 0 / 69.2%),
 			-0.1em -0.1em 0.2em rgb(0 0 0 / 41.8%);
@@ -1210,9 +1228,11 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.5em;
-		padding: 0.35em 0.75em;
+		padding: 0.5em 0.75em;
 		// keeps the button inside the panel (desktop panel edge)
 		padding-inline-end: 1rem;
+		box-sizing: border-box;
+		max-width: 100%;
 	}
 	.queue-count {
 		font-size: 0.8em;
@@ -1222,6 +1242,13 @@
 	// (`color: #0f0f0f !important`, capitalize, light hover/focus/disabled
 	// backgrounds): it rendered "Vider La File" dark-on-grey at 1.05:1.
 	.queue-clear {
+		// The component-wide `button { position: absolute; top: 0; right: 0 }`
+		// pinned it to the scroller corner: it hung off the panel edge and over
+		// the first queue row. Keep it in the toolbar flow.
+		position: static;
+		z-index: auto;
+		flex: 0 0 auto;
+		margin-inline-end: 12px;
 		display: inline-flex;
 		align-items: center;
 		gap: 0.4em;
@@ -1764,6 +1791,16 @@
 		width: min(360px, 42vh);
 		max-width: calc(100% - 4em);
 		margin-top: 1.25rem;
+		// Readable on a light blurred cover (audit v6 TOP 5): dark band behind
+		// the text + .text-shadow on the block. border-box keeps the cover width.
+		box-sizing: border-box;
+		padding: 0.6em 0.8em;
+		border-radius: 0.75rem;
+		background: linear-gradient(
+			to bottom,
+			rgb(0 0 0 / 28%),
+			rgb(0 0 0 / 45%)
+		);
 	}
 	.np-text {
 		display: flex;
@@ -1790,7 +1827,7 @@
 		align-self: flex-start;
 		max-width: 100%;
 		font-size: 1rem;
-		color: hsla(0, 0%, 100%, 0.72);
+		color: hsla(0, 0%, 100%, 0.85);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;

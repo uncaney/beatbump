@@ -225,6 +225,8 @@
 			<h1>{$currentTrack.title}</h1>
 			<span class="sub">{$currentTrack?.artistInfo?.artist?.[0]?.text || $currentTrack?.subtitle?.[0]?.text || ""}</span>
 		</header>
+		<!-- No lyrics: the single message below is enough; no mode label, no A-/A+. -->
+		{#if loading || lyrics?.found}
 		<div
 			class="toolbar"
 			role="toolbar"
@@ -237,8 +239,6 @@
 			>
 				{#if loading}
 					Chargement…
-				{:else if !lyrics?.found}
-					Pas de paroles
 				{:else if hasSynced}
 					Paroles synchronisées
 				{:else}
@@ -246,6 +246,7 @@
 				{/if}
 				{#if fromCache && lyrics?.found}<span class="dot">·</span>hors-ligne{/if}
 			</span>
+			{#if lyrics?.found}
 			<div
 				class="font"
 				role="group"
@@ -270,7 +271,9 @@
 					on:click={() => step(1)}>A+</button
 				>
 			</div>
+			{/if}
 		</div>
+		{/if}
 	{/if}
 
 	{#if loading}
@@ -470,10 +473,17 @@
 		&.past {
 			color: #a8a8a8 !important;
 		}
+		/* The global `button.active` rule (_button.scss) paints a light grey
+		   background with !important; `.line.active.svelte-x` outranks it, so the
+		   current line keeps accent text on a dark band. */
 		&.active,
+		&.active:hover,
 		&.active:focus,
+		&.active:focus-within,
 		&.active:active {
-			color: #fff !important;
+			background: rgba(0, 0, 0, 0.35) !important;
+			border-color: transparent !important;
+			color: $accent !important;
 			font-weight: 700;
 			transform: scale(1.04);
 		}
