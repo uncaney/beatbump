@@ -4,6 +4,7 @@ import {
 	artistName,
 	buildForYouRow,
 	buildResumeRow,
+	diversify,
 	capItems,
 	hasCoverAndArtist,
 	readLastTrack,
@@ -115,5 +116,35 @@ describe("buildResumeRow", () => {
 	it("is empty when nothing is known", () => {
 		expect(buildResumeRow(null, undefined)).toEqual([]);
 		expect(buildResumeRow(null, { items: [] })).toEqual([]);
+	});
+});
+
+describe("diversify (audit UX v4 TOP 5)", () => {
+	const card = (id: string, album: string, artist: string, cover: string) => ({
+		videoId: id,
+		title: id,
+		album: { browseId: album },
+		artistInfo: { artist: [{ browseId: artist }] },
+		thumbnails: [{ url: cover }],
+	});
+	it("never shows the same cover twice and caps one card per album", () => {
+		const items = [
+			card("a1", "al1", "ar1", "https://x/c1=w60-h60"),
+			card("a2", "al1", "ar1", "https://x/c1=w120-h120"),
+			card("b1", "al2", "ar2", "https://x/c2"),
+			card("b2", "al3", "ar2", "https://x/c2"),
+			card("c1", "al4", "ar3", "https://x/c3"),
+		];
+		const out = diversify(items, 10, 1, 2);
+		expect(out.map((i) => i.videoId)).toEqual(["a1", "b1", "c1"]);
+	});
+	it("fills a short row from the skipped items when the pool is small", () => {
+		const items = [
+			card("a1", "al1", "ar1", "https://x/c1"),
+			card("a2", "al1", "ar1", "https://x/c2"),
+			card("a3", "al1", "ar1", "https://x/c3"),
+		];
+		expect(diversify(items, 3, 1, 2).map((i) => i.videoId)).toEqual(["a1", "a2", "a3"]);
+		expect(diversify(items, 2, 1, 2).map((i) => i.videoId)).toEqual(["a1", "a2"]);
 	});
 });

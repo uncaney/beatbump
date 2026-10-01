@@ -113,24 +113,45 @@ export function sanitizeCard(item: RowItem): RowItem {
 /** "Pour toi": cards with a cover and an artist, varied, capped to `max`, subtitles sanitized. */
 export function buildForYouRow(items: unknown, max: number): RowItem[] {
 	if (!Array.isArray(items)) return [];
-	return diversify(capItems(items.filter(hasCoverAndArtist), max * 4), max).map(sanitizeCard);
+	return diversify(capItems(items.filter(hasCoverAndArtist), max * 4), max, 1, 2).map(sanitizeCard);
 }
 
-/** Keep a row varied: at most `perAlbum` items of the same album and `perArtist` of the same artist. */
+/**
+ * Keep a row varied: at most `perAlbum` items of the same album, `perArtist` of the same
+ * artist, and never the same cover twice (audit UX v4 TOP 5: tracks of one album share a
+ * cover even when the album key is missing). Items beyond the caps are kept in a second pass
+ * only when the row would otherwise stay short, so a small pool still fills the row.
+ */
 export function diversify(items: RowItem[], max: number, perAlbum = 2, perArtist = 3): RowItem[] {
 	const albums = new Map<string, number>();
 	const artists = new Map<string, number>();
+	const covers = new Set<string>();
 	const out: RowItem[] = [];
+	const skipped: RowItem[] = [];
 	const key = (v: any) => (typeof v === "string" ? v : v?.browseId || v?.text || v?.name || "").toString().toLowerCase();
+	const coverKey = (it: RowItem) => thumbnailUrl(it).replace(/=w\d+-h\d+.*$/, "").toLowerCase();
 	for (const it of items) {
+		if (out.length >= max) break;
 		const al = key(it.album) || key(it.albumName);
 		const ar = key(it.artistInfo?.artist?.[0]) || key(it.artist) || key(it.subtitle?.find?.((s: any) => /ARTIST/.test(s?.pageType || ""))?.text);
-		if (al && (albums.get(al) || 0) >= perAlbum) continue;
-		if (ar && (artists.get(ar) || 0) >= perArtist) continue;
+		const cv = coverKey(it);
+		if (cv && covers.has(cv)) continue;
+		if ((al && (albums.get(al) || 0) >= perAlbum) || (ar && (artists.get(ar) || 0) >= perArtist)) {
+			skipped.push(it);
+			continue;
+		}
 		if (al) albums.set(al, (albums.get(al) || 0) + 1);
 		if (ar) artists.set(ar, (artists.get(ar) || 0) + 1);
+		if (cv) covers.add(cv);
 		out.push(it);
+	}
+	// Second pass: a small pool fills the row with the items the caps skipped (distinct covers only).
+	for (const it of skipped) {
 		if (out.length >= max) break;
+		const cv = coverKey(it);
+		if (cv && covers.has(cv)) continue;
+		if (cv) covers.add(cv);
+		out.push(it);
 	}
 	return out;
 }
