@@ -303,6 +303,9 @@
 		text-align: left;
 		color: inherit;
 		background: linear-gradient(160deg, hsl(0deg 0% 100% / 12%), hsl(0deg 0% 100% / 5%));
+		/* U12-2: the card is a button element, so the UA border showed on the three other
+		   sides (regression c35). Only the coloured left edge is wanted. */
+		border: 0;
 		border-left: 0.35rem solid hsl(210deg 70% 60%);
 		cursor: pointer;
 		transition: background 120ms ease;
