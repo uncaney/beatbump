@@ -12,6 +12,16 @@ const config: UserConfig = {
 	build: {
 		minify: "esbuild",
 		cssTarget: ["chrome58", "edge16", "firefox57", "safari11"],
+		rollupOptions: {
+			output: {
+				// hls.js (~400 KB raw) is statically imported by $lib/player.ts and
+				// used to make up ~87% of the shared "window" chunk, so every app
+				// change re-downloaded it. Keep it in its own long-lived chunk.
+				manualChunks(id) {
+					if (id.includes("/node_modules/hls.js/")) return "hls";
+				},
+			},
+		},
 	},
 	define: {
 		"process.env.APP_VERSION": JSON.stringify(version_fmt),
