@@ -338,12 +338,18 @@ export interface NowPlayingRow {
 	position: number; // seconds
 	payload: any; // C1 resume state (slim)
 	updatedAt: number; // unix ms (server clock)
+	takenBy?: string; // 40A: device that pressed "Continuer ici"
+	takenAt?: number; // unix ms (server clock)
 }
-/** Upsert this device's resume state; resolves the HTTP status (0 = network error). */
+/**
+ * Upsert this device's resume state; resolves the HTTP status (0 = network
+ * error). 40A: `takenBy` (= deviceId) takes the playback over; a 409 answer
+ * carries the device that holds it (`takenBy`, `deviceName`).
+ */
 export async function putNowPlaying(
-	body: { deviceId: string; deviceName: string; position: number; payload: unknown },
+	body: { deviceId: string; deviceName: string; position: number; payload: unknown; takenBy?: string; takenAt?: number },
 	keepalive = false,
-): Promise<number> {
+): Promise<{ status: number; takenBy?: string; deviceName?: string }> {
 	try {
 		const r = await APIClient.fetch(`/api/v1/me/nowplaying`, {
 			method: "PUT",
@@ -351,9 +357,16 @@ export async function putNowPlaying(
 			body: JSON.stringify(body),
 			keepalive,
 		});
-		return Number(r?.status) || 0;
+		const status = Number(r?.status) || 0;
+		if (status !== 409) return { status };
+		const j = await r.json().catch(() => null);
+		return {
+			status,
+			takenBy: typeof j?.takenBy === "string" ? j.takenBy : undefined,
+			deviceName: typeof j?.deviceName === "string" ? j.deviceName : undefined,
+		};
 	} catch {
-		return 0;
+		return { status: 0 };
 	}
 }
 /** The profile's last resume state from any device; null when none (404) or on error. */

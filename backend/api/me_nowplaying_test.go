@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"beatbump-server/backend/db"
 )
@@ -129,5 +130,87 @@ func TestNowPlayingIgnoresHarness(t *testing.T) {
 	}
 	if code, out := getNowPlaying(t); code != http.StatusOK || out.DeviceID != "dev-h" {
 		t.Fatalf("opt-in row missing: %d %+v", code, out)
+	}
+}
+
+func npTakeBody(device string, pos float64) string {
+	b, _ := json.Marshal(map[string]interface{}{
+		"deviceId": device, "deviceName": "iPhone de Camille", "position": pos, "takenBy": device, "takenAt": 1,
+		"payload": map[string]interface{}{"v": 1, "index": 0, "type": "local", "currentTime": pos, "savedAt": 1, "rows": []interface{}{}},
+	})
+	return string(b)
+}
+
+func TestNowPlayingTakeOver(t *testing.T) {
+	useNowPlayingDB(t)
+	if code, b := putNowPlaying(t, npBody("dev-a", 1, 30), chromeUA); code != http.StatusOK || strings.Contains(b, "takenBy") {
+		t.Fatalf("put a: %d %s", code, b)
+	}
+	// B takes the playback over.
+	if code, b := putNowPlaying(t, npTakeBody("dev-b", 31), chromeUA); code != http.StatusOK || !strings.Contains(b, `"takenBy":"dev-b"`) {
+		t.Fatalf("take b: %d %s", code, b)
+	}
+	code, out := getNowPlaying(t)
+	if code != http.StatusOK || out.DeviceID != "dev-b" || out.TakenBy != "dev-b" || out.TakenAt == 0 {
+		t.Fatalf("after take: %d %+v", code, out)
+	}
+	// A's next plain push is refused and names the taker.
+	code, b := putNowPlaying(t, npBody("dev-a", 1, 45), chromeUA)
+	if code != http.StatusConflict || !strings.Contains(b, `"takenBy":"dev-b"`) || !strings.Contains(b, `"deviceName":"iPhone de Camille"`) {
+		t.Fatalf("a after take: %d %s", code, b)
+	}
+	if _, out := getNowPlaying(t); out.DeviceID != "dev-b" || out.Position != 31 {
+		t.Fatalf("refused push overwrote the row: %+v", out)
+	}
+	// The taker's own plain pushes keep the take.
+	if code, b := putNowPlaying(t, npBody("dev-b", 1, 50), chromeUA); code != http.StatusOK || !strings.Contains(b, `"takenBy":"dev-b"`) {
+		t.Fatalf("b push: %d %s", code, b)
+	}
+	// A presses play again: a take back.
+	if code, b := putNowPlaying(t, npTakeBody("dev-a", 46), chromeUA); code != http.StatusOK {
+		t.Fatalf("a take back: %d %s", code, b)
+	}
+	if code, _ := putNowPlaying(t, npBody("dev-b", 1, 65), chromeUA); code != http.StatusConflict {
+		t.Fatalf("b after take back: %d, want 409", code)
+	}
+}
+
+func TestNowPlayingTakeRules(t *testing.T) {
+	useNowPlayingDB(t)
+	bad := `{"deviceId":"dev-a","takenBy":"dev-b","payload":{"v":1}}`
+	if code, _ := putNowPlaying(t, bad, chromeUA); code != http.StatusBadRequest {
+		t.Fatalf("takenBy for another device: %d, want 400", code)
+	}
+	if code, _ := putNowPlaying(t, npTakeBody("dev-b", 10), chromeUA); code != http.StatusOK {
+		t.Fatalf("take: %d", code)
+	}
+	// A stale take (taker silent past the guard) no longer blocks anyone.
+	old := time.Now().Add(-nowPlayingTakeGuard - time.Minute)
+	db.DB.Model(&db.NowPlaying{}).Where("profile_id = ?", "p-test").Updates(map[string]interface{}{"updated_at": old, "taken_at": old})
+	if code, b := putNowPlaying(t, npBody("dev-a", 1, 20), chromeUA); code != http.StatusOK || strings.Contains(b, "takenBy") {
+		t.Fatalf("after stale take: %d %s", code, b)
+	}
+	if _, out := getNowPlaying(t); out.DeviceID != "dev-a" || out.TakenBy != "" || out.TakenAt != 0 {
+		t.Fatalf("stale take not cleared: %+v", out)
+	}
+}
+
+func TestNowPlayingMigratesOldTable(t *testing.T) {
+	useTestDB(t)
+	// A table from before 40A (no taken_* columns) with a row in it.
+	if err := db.DB.Exec(`CREATE TABLE now_playings (profile_id text PRIMARY KEY, device_id text, device_name text, payload text, position real, updated_at datetime)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.Exec(`INSERT INTO now_playings VALUES ('p-test','dev-a','Mac','{"v":1}',12,?)`, time.Now()).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.AutoMigrate(&db.NowPlaying{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if code, out := getNowPlaying(t); code != http.StatusOK || out.DeviceID != "dev-a" || out.TakenBy != "" {
+		t.Fatalf("old row after migration: %d %+v", code, out)
+	}
+	if code, b := putNowPlaying(t, npBody("dev-b", 1, 5), chromeUA); code != http.StatusOK {
+		t.Fatalf("put after migration: %d %s", code, b)
 	}
 }

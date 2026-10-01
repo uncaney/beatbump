@@ -12,6 +12,7 @@
  * The top half is pure (unit-tested); the runtime half loads the player,
  * the session list and the API client lazily.
  */
+import { get } from "svelte/store";
 import {
 	RESUME_KEY,
 	buildResumeState,
@@ -156,6 +157,30 @@ export interface RemoteNowPlaying {
 	position: number;
 	payload: unknown;
 	updatedAt: number;
+	/** 40A: the device that took the playback over ("Continuer ici"). */
+	takenBy?: string;
+	takenAt?: number;
+}
+
+/** 40A: a take older than this no longer pauses anyone (server guard: 10 min). */
+export const TAKE_GUARD_MS = 10 * 60 * 1000;
+
+/** The device that holds the playback away from `localDeviceId`, from a GET row; else null. */
+export function takenAway(
+	row: RemoteNowPlaying | null | undefined,
+	localDeviceId: string,
+	now: number,
+): { deviceId: string; deviceName: string } | null {
+	if (!row || typeof row !== "object" || !row.takenBy || row.takenBy === localDeviceId) return null;
+	const at = Number(row.takenAt);
+	if (!isFinite(at) || at <= 0 || now - at > TAKE_GUARD_MS) return null;
+	return { deviceId: row.takenBy, deviceName: row.deviceId === row.takenBy ? row.deviceName : "" };
+}
+
+/** The toast on the device that lost the playback. */
+export function takenToast(deviceName: string | null | undefined): string {
+	const n = String(deviceName ?? "").trim();
+	return `Lecture reprise sur ${n || "un autre appareil"}`;
 }
 
 /** J3: the `ytm-remote-consumed` value, per device: "<deviceId>|<updatedAt>". */
@@ -292,16 +317,43 @@ export interface NowPlayingBody {
 	deviceName: string;
 	position: number;
 	payload: ResumeState;
+	/** 40A: this device takes the playback over (always its own deviceId). */
+	takenBy?: string;
+	takenAt?: number;
 }
 
+/** The PUT answer: 409 carries the device that holds the row (40A). */
+export interface NowPlayingPutResult {
+	status: number;
+	takenBy?: string;
+	deviceName?: string;
+}
+
+type DeviceInfo = { deviceId: string; deviceName: string };
+
 export interface NowPlayingPusherDeps {
-	device: { deviceId: string; deviceName: string };
+	/** Read at each push (the name may be edited meanwhile, 40A item 3). */
+	device: DeviceInfo | (() => DeviceInfo);
 	/** The session list and player time, read at each push. */
 	snapshot: () => { list: Parameters<typeof buildResumeState>[0]; currentTime: number; duration: number };
 	loggedIn: () => Promise<boolean>;
-	/** The PUT; resolves the HTTP status (0 = network error). */
-	put: (body: NowPlayingBody, keepalive: boolean) => Promise<number>;
+	/** The PUT; resolves the HTTP status (0 = network error) or the full answer. */
+	put: (body: NowPlayingBody, keepalive: boolean) => Promise<number | NowPlayingPutResult>;
 	online?: () => boolean;
+	/** 40A: another device took the playback over (409): pause here, toast. */
+	onTaken?: (by: DeviceInfo) => void;
+	now?: () => number;
+}
+
+export type NowPlayingPusher = ((hidden?: boolean) => Promise<"sent" | "skipped" | "taken">) & {
+	/** 40A: the next push takes the row (the user pressed play here again). */
+	claim(): void;
+	/** The device that took the playback away from this one, until `claim`. */
+	lostTo(): DeviceInfo | null;
+	/** Mark the playback as lost without a PUT (seen on a GET). */
+	markLost(by: DeviceInfo): void;
+	/** This device took the row by itself ("Continuer ici"): not lost any more. */
+	markOwner(): void;
 }
 
 /**
@@ -311,25 +363,54 @@ export interface NowPlayingPusherDeps {
  * changed since the last PUT that succeeded; a paused or stalled player
  * stops rewriting the same row every 15 s. A failed PUT keeps the last
  * sent snapshot so the next tick retries. One push in flight at a time.
+ *
+ * 40A: a 409 means another device took the playback over: `onTaken` runs
+ * once and nothing more is sent (the row is not ours to overwrite) until
+ * `claim()` (the user pressed play here), whose push carries `takenBy` and
+ * takes the row back, even without progress.
  */
-export function makeNowPlayingPusher(deps: NowPlayingPusherDeps): (hidden?: boolean) => Promise<"sent" | "skipped"> {
+export function makeNowPlayingPusher(deps: NowPlayingPusherDeps): NowPlayingPusher {
 	let inflight = false;
 	let last: { sig: string; t: number } | null = null;
-	return async (hidden = false) => {
+	let lost: DeviceInfo | null = null;
+	let claiming = false;
+	const device = () => (typeof deps.device === "function" ? deps.device() : deps.device);
+	const push = async (hidden = false): Promise<"sent" | "skipped" | "taken"> => {
 		if (inflight) return "skipped";
+		if (lost && !claiming) return "skipped";
 		if (deps.online && !deps.online()) return "skipped";
 		inflight = true;
 		try {
 			const { list, currentTime, duration } = deps.snapshot();
 			const sig = resumeSignature(list);
-			if (!shouldSaveResume(last, sig, currentTime, NOWPLAYING_MIN_TIME_DELTA)) return "skipped";
+			if (!claiming && !shouldSaveResume(last, sig, currentTime, NOWPLAYING_MIN_TIME_DELTA)) return "skipped";
 			if (!(await deps.loggedIn())) return "skipped";
 			const state = fitResumeState(buildResumeState(list, currentTime, duration));
 			if (!state) return "skipped";
-			const body: NowPlayingBody = { ...deps.device, position: state.currentTime, payload: state };
+			const me = device();
+			const body: NowPlayingBody = { ...me, position: state.currentTime, payload: state };
+			const take = claiming;
+			if (take) {
+				body.takenBy = me.deviceId;
+				body.takenAt = (deps.now ?? Date.now)();
+			}
 			const keepalive = hidden && JSON.stringify(body).length <= KEEPALIVE_MAX_BYTES;
-			const status = await deps.put(body, keepalive);
-			if (status < 200 || status >= 300) return "skipped";
+			const res = await deps.put(body, keepalive);
+			const r: NowPlayingPutResult = typeof res === "number" ? { status: res } : res;
+			if (r.status === 409 && !take) {
+				lost = { deviceId: String(r.takenBy ?? ""), deviceName: String(r.deviceName ?? "") };
+				try {
+					deps.onTaken?.(lost);
+				} catch {
+					/* best-effort */
+				}
+				return "taken";
+			}
+			if (r.status < 200 || r.status >= 300) return "skipped";
+			if (take) {
+				claiming = false;
+				lost = null;
+			}
 			last = { sig, t: state.currentTime };
 			return "sent";
 		} catch {
@@ -338,6 +419,25 @@ export function makeNowPlayingPusher(deps: NowPlayingPusherDeps): (hidden?: bool
 			inflight = false;
 		}
 	};
+	return Object.assign(push, {
+		claim: () => {
+			claiming = true;
+		},
+		lostTo: () => lost,
+		markLost: (by: DeviceInfo) => {
+			if (lost) return;
+			lost = by;
+			try {
+				deps.onTaken?.(by);
+			} catch {
+				/* best-effort */
+			}
+		},
+		markOwner: () => {
+			lost = null;
+			claiming = false;
+		},
+	});
 }
 
 /** "m:ss" for the card. */
@@ -374,6 +474,9 @@ const loadRuntime = () =>
 		([list, player, me]) => ({ SessionListService: list.SessionListService, AudioPlayer: player.AudioPlayer, me }),
 	);
 
+/** The running pusher (startNowPlayingSync), for "Continuer ici". */
+let activePusher: NowPlayingPusher | null = null;
+
 /**
  * Push the resume state every NOWPLAYING_SYNC_MS while playing, on pause
  * and when the page is hidden; only for a named profile, only online.
@@ -398,7 +501,7 @@ export function startNowPlayingSync(): () => void {
 			return named;
 		};
 		const pusher = makeNowPlayingPusher({
-			device: localDevice(),
+			device: localDevice,
 			snapshot: () => ({
 				list: SessionListService.value,
 				currentTime: AudioPlayer.currentTime,
@@ -407,6 +510,15 @@ export function startNowPlayingSync(): () => void {
 			loggedIn,
 			put: (body, keepalive) => me.putNowPlaying(body, keepalive),
 			online: () => typeof navigator === "undefined" || navigator.onLine !== false,
+			// 40A: another device pressed "Continuer ici": pause here, no auto-resume.
+			onTaken: (by) => {
+				if (!get(AudioPlayer.paused)) AudioPlayer.pause();
+				void import("$lib/utils").then((u) => u.notify(takenToast(by.deviceName), "success"));
+			},
+		});
+		activePusher = pusher;
+		cleanups.push(() => {
+			if (activePusher === pusher) activePusher = null;
 		});
 		const push = async (hidden = false) => {
 			if (!stopped) await pusher(hidden);
@@ -420,9 +532,24 @@ export function startNowPlayingSync(): () => void {
 					first = false;
 					return;
 				}
-				if (paused) void push();
+				if (paused) {
+					void push();
+					return;
+				}
+				// 40A: play pressed here after a take elsewhere: take it back now.
+				if (pusher.lostTo()) {
+					pusher.claim();
+					void push();
+				}
 			}),
 		);
+		// 40A: on the ytm-profile channel, a playing device checks at once
+		// whether another one took the playback over (else: next push, 15 s).
+		const checkTaken = async () => {
+			if (stopped || !playing || pusher.lostTo() || !(await loggedIn())) return;
+			const by = takenAway(await me.getNowPlaying(), localDevice().deviceId, Date.now());
+			if (by && playing) pusher.markLost(by);
+		};
 		const timer = setInterval(() => {
 			if (playing) void push();
 		}, NOWPLAYING_SYNC_MS);
@@ -436,12 +563,19 @@ export function startNowPlayingSync(): () => void {
 		// L14: the shared profile channel (me.ts, L13) catches it immediately -
 		// another tab, or this tab's own Account-page login without a reload -
 		// instead of waiting for this tab to regain focus.
-		const reset = () => (named = null);
+		const reset = () => {
+			named = null;
+		};
 		window.addEventListener("focus", reset);
 		cleanups.push(() => window.removeEventListener("focus", reset));
 		if (typeof BroadcastChannel !== "undefined") {
 			const channel = new BroadcastChannel(me.PROFILE_CHANNEL_NAME);
-			cleanups.push(wireProfileChannel(channel, reset));
+			cleanups.push(
+				wireProfileChannel(channel, () => {
+					reset();
+					void checkTaken();
+				}),
+			);
 		}
 	});
 	return () => {
@@ -518,6 +652,7 @@ const runtimeRestoreDeps = async (): Promise<RestoreRemoteDeps> => {
 export async function restoreRemoteResume(
 	offer: { state: ResumeState; deviceId: string; updatedAt: number; deviceName?: string },
 	deps?: RestoreRemoteDeps,
+	opts: { autoplay?: boolean } = {},
 ): Promise<boolean> {
 	const d = deps ?? (await runtimeRestoreDeps());
 	const inflight = d.restoreInFlight();
@@ -543,7 +678,7 @@ export async function restoreRemoteResume(
 	if (!writeResumeState(storage, state)) return fail();
 	let ok = false;
 	try {
-		ok = await d.restoreResumeState({ autoplay: false });
+		ok = await d.restoreResumeState({ autoplay: !!opts.autoplay });
 	} catch {
 		ok = false;
 	}
@@ -552,6 +687,53 @@ export async function restoreRemoteResume(
 		storage?.setItem(REMOTE_CONSUMED_KEY, consumedMarker(offer.deviceId, offer.updatedAt));
 	} catch {
 		/* best-effort */
+	}
+	return true;
+}
+
+/** What `takeRemoteResume` needs from the runtime (injected by the tests). */
+export interface TakeRemoteDeps {
+	restore: (opts: { autoplay: boolean }) => Promise<boolean>;
+	device: () => DeviceInfo;
+	put: (body: NowPlayingBody) => Promise<number | NowPlayingPutResult>;
+	/** The running pusher: this device owns the row now. */
+	markOwner?: () => void;
+	now?: () => number;
+}
+
+/**
+ * 40A "Continuer ici": restore the remote queue at its position and PLAY
+ * here (a), then mark the server row as taken by this device (b) so the
+ * other one pauses on its next push (c). The take PUT carries the offer's
+ * own state (the local player may not have reached the position yet).
+ * Resolves false when the restoration failed (toast by restoreRemoteResume,
+ * nothing taken); a failed take PUT is best-effort (playback stays here).
+ */
+export async function takeRemoteResume(
+	offer: { state: ResumeState; deviceId: string; updatedAt: number; deviceName?: string },
+	deps?: TakeRemoteDeps,
+): Promise<boolean> {
+	const d: TakeRemoteDeps = deps ?? {
+		restore: (o) => restoreRemoteResume(offer, undefined, o),
+		device: localDevice,
+		put: async (body) => (await import("$lib/me")).putNowPlaying(body),
+		markOwner: () => activePusher?.markOwner(),
+	};
+	if (!(await d.restore({ autoplay: true }))) return false;
+	d.markOwner?.();
+	const payload = fitResumeState(offer.state);
+	if (!payload) return true;
+	const me = d.device();
+	try {
+		await d.put({
+			...me,
+			position: payload.currentTime,
+			payload,
+			takenBy: me.deviceId,
+			takenAt: (d.now ?? Date.now)(),
+		});
+	} catch {
+		/* best-effort: the next push of this device writes the row anyway */
 	}
 	return true;
 }

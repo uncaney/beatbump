@@ -86,4 +86,9 @@ type NowPlaying struct {
 	Payload    string    `json:"-"`        // C1 resume state JSON
 	Position   float64   `json:"position"` // seconds
 	UpdatedAt  time.Time `json:"updatedAt"`
+	// 40A "Continuer ici": the device that took the playback over (nil when
+	// nobody did). Nullable columns, so AutoMigrate adds them to an existing
+	// table without a default; old rows read back as nil.
+	TakenBy *string    `gorm:"size:64" json:"takenBy,omitempty"`
+	TakenAt *time.Time `json:"takenAt,omitempty"`
 }

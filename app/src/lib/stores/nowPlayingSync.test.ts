@@ -13,6 +13,10 @@ import {
 	makeNowPlayingPusher,
 	makeRemoteRefresher,
 	shouldOfferRemote,
+	TAKE_GUARD_MS,
+	takeRemoteResume,
+	takenAway,
+	takenToast,
 	wireForegroundRefresh,
 	type NowPlayingBody,
 	type NowPlayingPusherDeps,
@@ -408,6 +412,140 @@ describe("makeNowPlayingPusher", () => {
 		const { push, put } = mk();
 		await push(true);
 		expect(put).toHaveBeenCalledWith(expect.anything(), true);
+	});
+});
+
+describe("Continuer ici (40A)", () => {
+	const snapOf = (t: number) => ({
+		list: { mix: [track(0), track(1)], position: 0, currentMixType: "local" as const },
+		currentTime: t,
+		duration: 200,
+	});
+	it("a 409 pauses once (onTaken) and stops overwriting the row", async () => {
+		let t = 0;
+		const put = vi.fn(async (_b: NowPlayingBody, _k: boolean) => ({ status: 409, takenBy: "phone", deviceName: "iPhone de Camille" }));
+		const onTaken = vi.fn();
+		const push = makeNowPlayingPusher({
+			device: { deviceId: "mac", deviceName: "Mac" },
+			snapshot: () => snapOf(t),
+			loggedIn: async () => true,
+			put,
+			onTaken,
+		});
+		expect(await push()).toBe("taken");
+		expect(onTaken).toHaveBeenCalledWith({ deviceId: "phone", deviceName: "iPhone de Camille" });
+		expect(push.lostTo()).toEqual({ deviceId: "phone", deviceName: "iPhone de Camille" });
+		t = 60;
+		expect(await push()).toBe("skipped");
+		expect(put).toHaveBeenCalledTimes(1);
+		expect(onTaken).toHaveBeenCalledTimes(1);
+	});
+	it("claim (play pressed here again) takes the row back with takenBy, even without progress", async () => {
+		const put = vi.fn(async (_b: NowPlayingBody, _k: boolean): Promise<number | { status: number }> => ({ status: 409 }));
+		const push = makeNowPlayingPusher({
+			device: () => ({ deviceId: "mac", deviceName: "Mac" }),
+			snapshot: () => snapOf(30),
+			loggedIn: async () => true,
+			put,
+			now: () => 1234,
+		});
+		await push();
+		expect(push.lostTo()).not.toBeNull();
+		put.mockResolvedValue(200);
+		push.claim();
+		expect(await push()).toBe("sent");
+		expect(put).toHaveBeenLastCalledWith(expect.objectContaining({ deviceId: "mac", takenBy: "mac", takenAt: 1234 }), false);
+		expect(push.lostTo()).toBeNull();
+		// back to plain pushes: no takenBy, J6 dedupe again
+		expect(await push()).toBe("skipped");
+	});
+	it("a plain push never carries takenBy; markLost / markOwner", async () => {
+		const put = vi.fn(async (_b: NowPlayingBody, _k: boolean) => 200);
+		const onTaken = vi.fn();
+		const push = makeNowPlayingPusher({
+			device: { deviceId: "mac", deviceName: "Mac" },
+			snapshot: () => snapOf(0),
+			loggedIn: async () => true,
+			put,
+			onTaken,
+		});
+		await push();
+		expect(put.mock.calls[0][0].takenBy).toBeUndefined();
+		push.markLost({ deviceId: "phone", deviceName: "iPhone" });
+		push.markLost({ deviceId: "phone", deviceName: "iPhone" });
+		expect(onTaken).toHaveBeenCalledTimes(1);
+		push.markOwner();
+		expect(push.lostTo()).toBeNull();
+	});
+	it("takenAway: another device's live take only", () => {
+		const now = 100_000_000;
+		const row = (over: Record<string, unknown> = {}) => ({
+			deviceId: "phone",
+			deviceName: "iPhone de Camille",
+			position: 1,
+			payload: {},
+			updatedAt: now,
+			takenBy: "phone",
+			takenAt: now - 1000,
+			...over,
+		});
+		expect(takenAway(row(), "mac", now)).toEqual({ deviceId: "phone", deviceName: "iPhone de Camille" });
+		expect(takenAway(row(), "phone", now)).toBeNull();
+		expect(takenAway(row({ takenBy: undefined }), "mac", now)).toBeNull();
+		expect(takenAway(row({ takenAt: now - TAKE_GUARD_MS - 1 }), "mac", now)).toBeNull();
+		expect(takenAway(null, "mac", now)).toBeNull();
+	});
+	it("takenToast names the device in French", () => {
+		expect(takenToast("iPhone de Camille")).toBe("Lecture reprise sur iPhone de Camille");
+		expect(takenToast("  ")).toBe("Lecture reprise sur un autre appareil");
+	});
+	it("takeRemoteResume plays the restored queue, then PUTs the take with the offer state", async () => {
+		const calls: string[] = [];
+		const put = vi.fn(async (_b: NowPlayingBody) => {
+			calls.push("put");
+			return 200;
+		});
+		const offer = { state: { ...stateOf(3, 1), currentTime: 77 }, deviceId: "mac", updatedAt: 5, deviceName: "Mac" };
+		const ok = await takeRemoteResume(offer, {
+			restore: async (o) => {
+				calls.push("restore:" + o.autoplay);
+				return true;
+			},
+			device: () => ({ deviceId: "phone", deviceName: "iPhone de Camille" }),
+			put,
+			markOwner: () => calls.push("owner"),
+			now: () => 999,
+		});
+		expect(ok).toBe(true);
+		expect(calls).toEqual(["restore:true", "owner", "put"]);
+		expect(put).toHaveBeenCalledWith(
+			expect.objectContaining({ deviceId: "phone", deviceName: "iPhone de Camille", takenBy: "phone", takenAt: 999, position: 77 }),
+		);
+	});
+	it("takeRemoteResume takes nothing when the restoration failed", async () => {
+		const put = vi.fn(async () => 200);
+		const ok = await takeRemoteResume(
+			{ state: stateOf(2, 0), deviceId: "mac", updatedAt: 5 },
+			{ restore: async () => false, device: () => ({ deviceId: "phone", deviceName: "x" }), put },
+		);
+		expect(ok).toBe(false);
+		expect(put).not.toHaveBeenCalled();
+	});
+	it("restoreRemoteResume forwards autoplay (paused by default)", async () => {
+		const seen: Array<boolean | undefined> = [];
+		const deps = (): RestoreRemoteDeps => ({
+			storage: memStorage(),
+			restoreInFlight: () => null,
+			restoreResumeState: async (o) => {
+				seen.push(o.autoplay);
+				return true;
+			},
+			notify: vi.fn(),
+		});
+		const offer = { state: stateOf(2, 0), deviceId: "mac", updatedAt: 5 };
+		await restoreRemoteResume(offer, deps());
+		await restoreRemoteResume(offer, deps(), { autoplay: true });
+		expect(seen).toEqual([false, true]);
 	});
 });
 

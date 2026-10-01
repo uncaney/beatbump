@@ -42,6 +42,7 @@
 		fetchRemoteResume,
 		makeRemoteRefresher,
 		restoreRemoteResume,
+		takeRemoteResume,
 		wireForegroundRefresh,
 		wireProfileChannel,
 	} from "$lib/stores/nowPlayingSync";
@@ -349,6 +350,19 @@
 			restoringRemote = false;
 		}
 	}
+	// 40A "Continuer ici": restore AND play here, and take the server row so
+	// the other device pauses on its next push (within 15 s).
+	async function takeRemote() {
+		if (!remote || restoringRemote) return;
+		restoringRemote = true;
+		const offer = remote;
+		try {
+			if (!(await takeRemoteResume(offer))) return;
+			remote = null;
+		} finally {
+			restoringRemote = false;
+		}
+	}
 	async function loadRemote() {
 		// K12: fetchRemoteResume short-circuits for an anonymous profile (memoised
 		// whoami, no me/nowplaying GET); nothing to offer then.
@@ -646,7 +660,7 @@
 			</div>
 		{/if}
 		{#if remote && remoteTrack && $paused}
-			<div class="resume-queue">
+			<div class="resume-queue resume-remote-row">
 				<button
 					type="button"
 					class="btn-reset btn-secondary resume-remote"
@@ -673,6 +687,16 @@
 					<span class="rr-text"
 						>Reprendre depuis {remote.deviceName} : {remoteTrack.title ?? "morceau"} à {clockLabel(remote.state.currentTime)}</span
 					>
+				</button>
+				<button
+					type="button"
+					class="btn-reset btn-primary resume-remote-take"
+					data-testid="resume-remote-take"
+					disabled={restoringRemote}
+					aria-label="Continuer ici la lecture de {remote.deviceName}"
+					on:click={takeRemote}
+				>
+					Continuer ici
 				</button>
 			</div>
 		{/if}
@@ -1003,6 +1027,20 @@
 		gap: 0.5rem;
 		border-radius: 0.9rem;
 		font-weight: 500;
+	}
+	/* 40A: "Continuer ici" sits next to the card (its own tap target, so a tap
+	   on the card keeps the paused hand-off). */
+	.resume-remote-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.resume-remote-row .resume-remote {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.resume-queue button.resume-remote-take {
+		flex: 0 0 auto;
 	}
 	.resume-remote .rr-device {
 		flex: 0 0 auto;
