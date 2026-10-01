@@ -262,12 +262,6 @@
 			color: hsla(0, 0%, 100%, 0.7);
 			line-height: 1.1;
 		}
-
-		@media screen and (min-width: 40em) {
-			~ :last-child {
-				margin-left: auto;
-			}
-		}
 	}
 
 	section {
@@ -280,13 +274,28 @@
 		}
 	}
 
+	// U11-12 (audit UX v11): the control sits on the line of its label on
+	// every width, as desktop already did; mobile stacked it under the help
+	// text (~60px of air per row, five rows per screen). The label flexes and
+	// shrinks, the control keeps its size and only wraps under the label when
+	// it is too wide for the line (a long button on a narrow phone).
 	.setting {
-		display: inline-flex;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
 		color: inherit;
-		vertical-align: top;
-		gap: 1em;
-		flex-direction: column;
+		gap: 0.5em 1em;
 		margin-block: 1em;
+
+		> label:first-child {
+			flex: 1 1 12rem;
+			min-width: 0;
+		}
+		> :last-child:not(:first-child) {
+			margin-left: auto;
+			flex-shrink: 0;
+			max-width: 100%;
+		}
 
 		&:first-of-type {
 			margin-block-start: 0;
@@ -294,11 +303,6 @@
 
 		&:last-of-type {
 			margin-block-end: 2em;
-		}
-
-		@media screen and (min-width: 40em) {
-			align-items: center;
-			flex-direction: row;
 		}
 	}
 

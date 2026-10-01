@@ -436,25 +436,29 @@
 		border-bottom: 0.01em solid rgb(218 218 218 / 8.2%);
 	}
 
+	// U11-12 (audit UX v11): control on the line of its label on every width
+	// (see settings/+page.svelte .setting); a wide control (the clear
+	// confirmation, a long button) wraps under the label on narrow phones.
 	.setting {
-		display: inline-flex;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
 		color: inherit;
-		vertical-align: top;
-		gap: 1em;
-		flex-direction: column;
+		gap: 0.5em 1em;
 		margin-block: 1em;
+
+		> label:first-child {
+			flex: 1 1 12rem;
+			min-width: 0;
+		}
+		> :last-child:not(:first-child) {
+			margin-left: auto;
+			flex-shrink: 0;
+			max-width: 100%;
+		}
 
 		&:first-of-type {
 			margin-block-start: 0;
-		}
-
-		@media screen and (min-width: 40em) {
-			align-items: center;
-			flex-direction: row;
-
-			> :last-child:not(label) {
-				margin-left: auto;
-			}
 		}
 	}
 
