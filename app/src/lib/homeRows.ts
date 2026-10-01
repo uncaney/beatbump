@@ -45,13 +45,14 @@ export function readLastTrack(storage: { getItem(key: string): string | null } |
 
 /**
  * "Reprendre": the last played track first, then the last `max` distinct plays.
- * `recent` is the profile history (me/stats/recent, most recent first); when it
- * is empty (call failed, offline, fresh profile) the current session queue is the
- * local fallback. The last track is never repeated inside the list.
+ * `recent` is the profile history (me/stats/recent, most recent first). When it
+ * is empty (call failed, offline, fresh profile) only the last track is shown:
+ * the current session queue is NOT a resume (audit v3 G17), so the row stays
+ * hidden on a fresh profile. The last track is never repeated inside the list.
  */
-export function buildResumeRow(last: RowItem | null, recent: unknown, queue: unknown, max = 10): RowItem[] {
+export function buildResumeRow(last: RowItem | null, recent: unknown, max = 10): RowItem[] {
 	const head = last && isRenderable(last) ? [last] : [];
-	const source = Array.isArray(recent) && recent.length > 0 ? recent : Array.isArray(queue) ? queue : [];
+	const source = Array.isArray(recent) ? recent : [];
 	const rest = capItems(source, max + head.length);
 	const lastRef = head.length ? rowItemRef(head[0]) : "";
 	return [...head, ...rest.filter((it) => rowItemRef(it) !== lastRef).slice(0, max)];

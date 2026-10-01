@@ -4,12 +4,10 @@
 	// parallel, renders nothing while loading and stays hidden when its source
 	// is empty or fails, so the YouTube rows below never wait on it.
 	import { onMount } from "svelte";
-	import { get } from "svelte/store";
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
 	import { buildForYouRow, buildResumeRow, capItems, readLastTrack, sanitizeCard } from "$lib/homeRows";
 	import { getMix, getRecent } from "$lib/me";
-	import { queue } from "$lib/stores/list";
 
 	const MAX = 20;
 
@@ -31,7 +29,7 @@
 		} catch {
 			lastTrack = null;
 		}
-		resume = buildResumeRow(lastTrack, recent, get(queue), 10).map(sanitizeCard);
+		resume = buildResumeRow(lastTrack, recent, 10).map(sanitizeCard);
 	}
 
 	async function loadForYou() {
