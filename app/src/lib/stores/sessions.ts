@@ -1,4 +1,3 @@
-import { browser } from "$app/environment";
 import type { Item, JSON, Nullable } from "$lib/types";
 import { every, filter, iter } from "$lib/utils/collections";
 import { Logger } from "$lib/utils/logger";
@@ -139,7 +138,7 @@ export class GroupSession
 	private _initialized = false;
 	private _once = false;
 	private _peerIds: Set<ClientID> = new Set<ClientID>([]);
-	private _peerJs: typeof Peer;
+	private _peerJsPromise: Promise<typeof Peer> | undefined;
 	private _rtc: Peer;
 	private _settings: Settings;
 	private _type: "host" | "guest";
@@ -172,14 +171,6 @@ export class GroupSession
 	constructor() {
 		super({});
 		this._lock = new Mutex();
-
-		// Import PeerJS here since importing it normally would
-		// crash during SSR
-		if (browser) {
-			import("peerjs").then((module) => {
-				this._peerJs = module.default;
-			});
-		}
 
 		// Listen to the connectionStates store for
 		// keeping accurate track of state
@@ -317,14 +308,14 @@ export class GroupSession
 
 		if (this.type === "guest") {
 			this._connection.close();
-			this._rtc.destroy();
+			this._rtc?.destroy();
 		}
 
 		iter(this._connections, (connection) => {
 			connection.close();
 		});
 
-		this._rtc.destroy();
+		this._rtc?.destroy();
 		this._unsubscriber();
 		this._hasActiveSession.set(false);
 		this._initialized = false;
@@ -352,8 +343,6 @@ export class GroupSession
 			displayName: displayName,
 			role: type || "guest",
 		};
-		this._rtc = new this._peerJs(clientId, { debug: 3 });
-
 		if (!this._hasActiveSession.value) this._hasActiveSession.set(true);
 		this._connectionStates.update((u) => ({
 			...u,
@@ -366,11 +355,19 @@ export class GroupSession
 			},
 		}));
 
-		this._rtc.on("open", (id) => {
-			if (type === "host") {
-				this.initSession();
-			}
-			this.dispatch("init");
+		// PeerJS (+ webrtc-adapter, ~140 KB) is only fetched once a group
+		// session is actually started instead of on every page load.
+		this.loadPeerJs().then((PeerJs) => {
+			// disconnect() was called before PeerJS finished loading
+			if (!this._initialized) return;
+			this._rtc = new PeerJs(clientId, { debug: 3 });
+			this._rtc.on("open", (id) => {
+				if (type === "host") {
+					this.initSession();
+				}
+				this.dispatch("init");
+			});
+			this.callSubs();
 		});
 		this.callSubs();
 	}
@@ -566,6 +563,14 @@ export class GroupSession
 	// #endregion Public Methods (13)
 
 	// #region Private Methods (3)
+
+	/** Lazily import PeerJS (heavy, and not SSR-safe) the first time it is needed */
+	private loadPeerJs(): Promise<typeof Peer> {
+		if (!this._peerJsPromise) {
+			this._peerJsPromise = import("peerjs").then((module) => module.default);
+		}
+		return this._peerJsPromise;
+	}
 
 	private initSession(): void {
 		notify("Started Host Session", "success");
