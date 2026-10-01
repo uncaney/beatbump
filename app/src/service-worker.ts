@@ -20,7 +20,7 @@
 //   SW  -> page { type: "audio-uncached",  url, ok }
 //   page -> SW  { type: "is-cached",       videoId }
 //   SW  -> page { type: "audio-is-cached", videoId, cached, url?, bytes? }
-//   page -> SW  { type: "now-playing",     url?, videoId? }   (never evicted; no reply)
+//   page -> SW  { type: "now-playing",     url?, videoId? }   (never evicted; no reply; persisted 30 min in the meta cache)
 //   page -> SW  { type: "list-audio" }
 //   SW  -> page { type: "audio-list",      entries: [{url, videoId, bytes, at, lastAccess, contentType, pinned}], total, pinnedBytes, quota }
 //   page -> SW  { type: "set-audio-quota", bytes }          (<= 0 => unlimited)
@@ -167,6 +167,8 @@ function touch(videoId: string, meta: Meta | null): void {
 	void (async () => {
 		const m = meta || (await getMeta(videoId));
 		if (m) await setMeta(videoId, { ...m, lastAccess: now });
+		// Still being served = still playing: keep the persisted copy fresh (G15).
+		if (nowPlaying.videoId && nowPlaying.videoId === videoId) await persistNowPlaying();
 	})();
 }
 
@@ -406,8 +408,47 @@ async function listEntries(c: Cache): Promise<Entry[]> {
 	return out;
 }
 
-// The entry the page is currently playing (message "now-playing"): never evicted.
+// The entry the page is currently playing (message "now-playing"): never
+// evicted. Persisted in the META cache (G15/F16) so a service worker that the
+// browser stopped and restarted mid-track still protects it: the copy is
+// honoured for NOW_PLAYING_TTL_MS and refreshed every time the track is served
+// (touch), so a long track stays protected while it is actually being played.
+const NOW_PLAYING_KEY = "/__ytm_now_playing__";
+const NOW_PLAYING_TTL_MS = 30 * 60 * 1000;
 let nowPlaying: { url: string; videoId: string } = { url: "", videoId: "" };
+let nowPlayingLoaded: Promise<void> | null = null;
+function loadNowPlaying(): Promise<void> {
+	if (!nowPlayingLoaded) {
+		nowPlayingLoaded = (async () => {
+			try {
+				const m = await caches.open(META_CACHE);
+				const r = await m.match(NOW_PLAYING_KEY);
+				if (!r) return;
+				const v = await r.json();
+				const fresh = v && typeof v.at === "number" && Date.now() - v.at < NOW_PLAYING_TTL_MS;
+				// A "now-playing" message that arrived first wins over the stored copy.
+				if (fresh && !nowPlaying.url && !nowPlaying.videoId) {
+					nowPlaying = { url: typeof v.url === "string" ? v.url : "", videoId: typeof v.videoId === "string" ? v.videoId : "" };
+				}
+			} catch {
+				/* no stored copy: nothing to protect beyond pins */
+			}
+		})();
+	}
+	return nowPlayingLoaded;
+}
+async function persistNowPlaying(): Promise<void> {
+	try {
+		const m = await caches.open(META_CACHE);
+		if (!nowPlaying.url && !nowPlaying.videoId) {
+			await m.delete(NOW_PLAYING_KEY);
+			return;
+		}
+		await m.put(NOW_PLAYING_KEY, new Response(JSON.stringify({ ...nowPlaying, at: Date.now() }), { headers: { "Content-Type": "application/json" } }));
+	} catch {
+		/* best effort: the in-memory copy still protects the track until the SW stops */
+	}
+}
 function isProtected(e: { url: string; videoId: string; pinned?: boolean }, keep: string): boolean {
 	if (e.pinned) return true; // pinned by the user (X-YTM-Pinned): only an explicit uncache removes it
 	if (keep && e.url === keep) return true;
@@ -433,6 +474,7 @@ function enforceQuota(c: Cache, keep: string): Promise<void> {
 	const run = quotaLock.then(async () => {
 		const quota = await getQuota();
 		if (!(quota > 0)) return;
+		await loadNowPlaying();
 		const entries = await listEntries(c);
 		let total = entries.reduce((s, e) => s + e.bytes, 0);
 		if (total <= quota) return;
@@ -449,6 +491,7 @@ function enforceQuota(c: Cache, keep: string): Promise<void> {
 
 // Evict the `n` least recently used entries (for QuotaExceededError recovery).
 async function evictOldest(c: Cache, keep: string, n: number): Promise<number> {
+	await loadNowPlaying();
 	const entries = (await listEntries(c)).filter((e) => !isProtected(e, keep));
 	entries.sort((a, b) => a.lastAccess - b.lastAccess || a.at - b.at);
 	let freed = 0;
@@ -665,6 +708,8 @@ self.addEventListener("message", (event) => {
 			url = "";
 		}
 		nowPlaying = { url, videoId: typeof data.videoId === "string" ? data.videoId : "" };
+		nowPlayingLoaded = Promise.resolve(); // the page's word beats any stored copy
+		ev.waitUntil(persistNowPlaying());
 		if (nowPlaying.videoId) touch(nowPlaying.videoId, null);
 		return;
 	}
