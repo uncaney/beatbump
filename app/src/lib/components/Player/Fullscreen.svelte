@@ -1142,9 +1142,12 @@
 	.playback-context {
 		margin: 0.35em auto 0;
 		max-width: 85vw;
-		font-size: 0.8125rem;
+		// Audit v7 TOP 5: 0.8125rem = 9.75px at the 12px mobile root; floor at
+		// 12px so the context line ("File · 2/50") is legible, and raise the
+		// opacity to 0.85 for contrast on the band / blurred cover.
+		font-size: max(0.8125rem, 12px);
 		line-height: 1.3;
-		color: hsla(0, 0%, 100%, 0.7);
+		color: hsla(0, 0%, 100%, 0.85);
 		text-align: center;
 		display: flex;
 		flex-wrap: wrap;
@@ -1170,7 +1173,7 @@
 		margin-inline: 0;
 	}
 	.context-return {
-		font-size: 0.75rem;
+		font-size: max(0.75rem, 11px);
 		padding: 0.2em 0.7em;
 		border-radius: 999px;
 		border: 1px solid hsla(0, 0%, 100%, 0.35) !important;
