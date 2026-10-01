@@ -2,7 +2,8 @@
 import { browser } from "$app/environment";
 import { SessionListService } from "$stores/list/sessionList";
 import type { UserSettings } from "$stores/settings";
-import Hls, { type HlsConfig } from "hls.js";
+import type HlsType from "hls.js";
+import type { HlsConfig } from "hls.js";
 import { tick } from "svelte";
 import { tweened } from "svelte/motion";
 import { writable } from "svelte/store";
@@ -196,9 +197,13 @@ class EventEmitter<Events> {
 	}
 }
 
+// hls.js (398 KB raw / 123 KB gzip) is only needed when the Stream setting is HLS:
+// load it on demand instead of shipping it with the player on every page.
+let hlsModule: Promise<typeof HlsType> | undefined;
+const loadHlsModule = () => (hlsModule ??= import("hls.js").then((m) => m.default));
+
 const loadAndAttachHLS = async () => {
-	const hls = await import("hls.js");
-	const Hls = hls.default;
+	const Hls = await loadHlsModule();
 	if (Hls.isSupported() === false) return null;
 	const hlsjsConfig: Partial<HlsConfig> = {
 		lowLatencyMode: true,
@@ -252,7 +257,7 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		name: keyof AudioPlayerImpl,
 		args: [...rest: unknown[]],
 	][] = [];
-	private hls: Hls | undefined;
+	private hls: HlsType | undefined;
 	private _videoUrl = new WritableStore<string | undefined>(undefined);
 	private audioNodeListeners: Record<string, () => void> = {};
 	private invalidationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -267,6 +272,7 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		}
 		// console.log(type);
 		if (type === "HLS") {
+			const Hls = await loadHlsModule();
 			this.playerKind = Hls.isSupported() ? "hls" : "html5";
 			if (this.playerKind !== "hls") return;
 			if (!this.hls) {
@@ -521,6 +527,7 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		const hls = await loadAndAttachHLS();
 		if (!hls) return;
 		this.hls = hls;
+		const Hls = await loadHlsModule();
 
 		this.hls.attachMedia(this.player);
 
