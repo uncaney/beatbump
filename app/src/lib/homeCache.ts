@@ -171,7 +171,13 @@ export interface PersistScheduler {
 export function createPersistScheduler(
 	write: () => void,
 	delayMs: number = HOME_CACHE_PERSIST_DELAY_MS,
-	timers: { set: typeof setTimeout; clear: typeof clearTimeout } = { set: setTimeout, clear: clearTimeout },
+	// Wrapped, not referenced: calling `timers.set(...)` would invoke window.setTimeout with
+	// `this === timers`, which browsers reject with "Illegal invocation" (chain 35: 42 page
+	// errors on /home). Node (vitest) does not care, which is why the test passed.
+	timers: { set: typeof setTimeout; clear: typeof clearTimeout } = {
+		set: ((fn: TimerHandler, ms?: number) => setTimeout(fn, ms)) as typeof setTimeout,
+		clear: ((t?: ReturnType<typeof setTimeout>) => clearTimeout(t)) as typeof clearTimeout,
+	},
 ): PersistScheduler {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const run = () => {
