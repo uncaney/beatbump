@@ -123,6 +123,9 @@ func newServer() *echo.Echo {
 	e.GET("/api/v1/local/songs", api.LocalSongsHandler)
 	e.GET("/api/v1/local/related", api.CacheResponse(5*time.Minute, api.LocalRelatedHandler))
 	e.GET("/api/v1/local/genres", api.LocalGenresHandler)
+	// c29b D1: decade / genre mixes (user-independent, cached like local/related).
+	e.GET("/api/v1/local/mix", api.LocalMixHandler)
+	e.GET("/api/v1/local/mixes", api.CacheResponse(5*time.Minute, api.LocalMixesHandler))
 
 	// Per-profile server state: favorites, follows, playlists (named or anonymous cookie)
 	me := e.Group("/api/v1/me")

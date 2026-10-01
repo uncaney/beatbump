@@ -37,6 +37,7 @@
 		{ key: "albums", label: "Albums", href: "/library/albums" },
 		{ key: "songs", label: "Songs", href: "/library/all-songs" },
 		{ key: "genres", label: "Genres", href: "/library/genres" },
+		{ key: "mixes", label: "Mixes", href: "/library/mixes" },
 		{ key: "saved", label: "Saved", href: "/library/saved" },
 		{ key: "my-playlists", label: "My Playlists", href: "/library/playlists-srv" },
 		{ key: "recent", label: "Listening", href: "/library/recent" },

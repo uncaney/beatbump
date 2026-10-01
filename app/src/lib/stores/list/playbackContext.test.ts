@@ -26,6 +26,16 @@ describe("makeContext / normalizeContext", () => {
 	});
 });
 
+describe("decade kind (c29b D1)", () => {
+	it("is a known kind with its own label", () => {
+		const c = makeContext({ kind: "decade", title: "Années 1990", href: "/library/mixes" }, album);
+		expect(c?.kind).toBe("decade");
+		expect(normalizeContext({ kind: "decade", title: "Années 1990", href: "/library/mixes", ids: ["a1"] })?.kind).toBe("decade");
+		expect(describeContext(c, album, 0)?.label).toBe("Décennie : Années 1990 · 1/4");
+		expect(describeContext(c, album, 0)?.href).toBe("/library/mixes");
+	});
+});
+
 describe("describeContext", () => {
 	const ctx = makeContext({ kind: "album", title: "Discovery", href: "/release?id=x" }, album);
 
