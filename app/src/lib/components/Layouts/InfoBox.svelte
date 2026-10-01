@@ -91,7 +91,8 @@
 	];
 
 	// Release header: every artist (the old `artist.slice(1, -2)` dropped a lone
-	// artist), then "Album · 12 titres · 2013". The backend sends
+	// artist), then "Album · 12 titres · 2013 · 1 h 14 min" (audit v6 TOP 9:
+	// year whenever known, duration in French). The backend sends
 	// { year, tracks: "12 songs", length } with no `type` and no rating, so build
 	// the line from what is present and only show the explicit icon when rated.
 	const TYPE_LABELS: Record<string, string> = {
@@ -123,8 +124,44 @@
 				: parseInt(String(rawTracks ?? "").replace(/[^\d]+/g, " ").trim(), 10);
 		const tracks =
 			Number.isFinite(n) && n > 0 ? `${n} ${n > 1 ? "titres" : "titre"}` : "";
-		const year = String(sub.year ?? "").trim();
-		return [typeLabel, tracks, year].filter(Boolean).join(" · ");
+		const yearMatch = String(sub.year ?? "").match(/\b(\d{4})\b/);
+		const year = yearMatch ? yearMatch[1] : "";
+		const duration = formatReleaseDuration(sub.length ?? sub.durationSec);
+		return [typeLabel, tracks, year, duration].filter(Boolean).join(" · ");
+	}
+
+	/**
+	 * "12 min" / "1 h 14 min" from seconds (number), "hh:mm:ss" / "mm:ss", or
+	 * the YouTube English label ("1 hour, 14 minutes", "12 minutes",
+	 * "45 seconds"). Empty when nothing usable.
+	 */
+	function formatReleaseDuration(raw: unknown): string {
+		let total = 0;
+		if (typeof raw === "number" && Number.isFinite(raw)) {
+			total = raw;
+		} else {
+			const str = String(raw ?? "").trim().toLowerCase();
+			if (!str) return "";
+			if (/^\d+(:\d{1,2}){1,2}$/.test(str)) {
+				total = str.split(":").reduce((acc, part) => acc * 60 + Number(part), 0);
+			} else {
+				const unit = (re: RegExp) => {
+					const m = str.match(re);
+					return m ? Number(m[1]) : 0;
+				};
+				total =
+					unit(/(\d+)\s*(?:hours?|hrs?|h)\b/) * 3600 +
+					unit(/(\d+)\s*(?:minutes?|mins?|m)\b/) * 60 +
+					unit(/(\d+)\s*(?:seconds?|secs?|s)\b/);
+				if (!total && /^\d+$/.test(str)) total = Number(str);
+			}
+		}
+		if (!(total > 0)) return "";
+		const minutes = Math.max(1, Math.round(total / 60));
+		const h = Math.floor(minutes / 60);
+		const m = minutes % 60;
+		if (h === 0) return `${m} min`;
+		return m ? `${h} h ${m} min` : `${h} h`;
 	}
 
 	const dispatch = createEventDispatcher<{
@@ -239,6 +276,15 @@
 	p.secondary {
 		letter-spacing: -0.01em;
 		max-width: 40ch;
+	}
+	/* Audit v6 TOP 9: below 513 px the title is centred (listPages.scss) but
+	   the 40ch meta block started at the left edge, so artist + info line sat
+	   41 px left of the title centre. Centre the block itself. */
+	@media screen and (max-width: 512.98px) {
+		p.release-meta {
+			margin-inline: auto;
+			text-align: center;
+		}
 	}
 	/* Play Album / Album Radio were 32px tall from rem (audit v5 TOP 5):
 	   40px on desktop, 44px floor on phones. */
