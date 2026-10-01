@@ -137,6 +137,7 @@ func MeDecadesHandler(c echo.Context) error {
 type yearResp struct {
 	Year            int         `json:"year"`
 	TZ              int         `json:"tz"`
+	Zone            string      `json:"zone,omitempty"`
 	Months          [12]float64 `json:"months"` // minutes, January first
 	Plays           int         `json:"plays"`
 	Minutes         float64     `json:"minutes"`
@@ -161,11 +162,10 @@ func rowArtist(r playRow) string {
 
 // computeYear folds the whole history (evs, all time, oldest first; rows =
 // one per ref with its latest item) into the year view of `year`.
-func computeYear(evs []statEvent, rows []playRow, year, tzOffsetMin int) yearResp {
-	loc := time.FixedZone("viewer", tzOffsetMin*60)
+func computeYear(evs []statEvent, rows []playRow, year int, loc *time.Location) yearResp {
 	from := time.Date(year, 1, 1, 0, 0, 0, 0, loc)
 	to := from.AddDate(1, 0, 0)
-	out := yearResp{Year: year, TZ: tzOffsetMin, NewArtistNames: []string{}}
+	out := yearResp{Year: year, TZ: tzOffsetMin(loc, time.Now()), Zone: zoneName(loc), NewArtistNames: []string{}}
 	byRef := make(map[string]playRow, len(rows))
 	for _, r := range rows {
 		byRef[r.Ref] = r
@@ -238,15 +238,18 @@ func statsYear(c echo.Context, now time.Time) (int, error) {
 	return y, nil
 }
 
-// MeYearHandler: GET /api/v1/me/stats/year?year=2026&tz=<minutes>.
+// MeYearHandler: GET /api/v1/me/stats/year?year=2026&tz=<zone|minutes>.
 func MeYearHandler(c echo.Context) error {
 	pid := profileID(c)
-	tz := statsTZ(c)
-	now := time.Now().In(time.FixedZone("viewer", tz*60))
+	loc := statsZone(c)
+	now := time.Now().In(loc)
 	year, err := statsYear(c, now)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": err.Error()})
 	}
-	evs := profileEvents(pid, time.Time{}) // all time: "new artists" needs each first play
-	return c.JSON(http.StatusOK, computeYear(evs, windowRows(pid, 0), year, tz))
+	out := statsTimeCached(pid, statsTimeKey("year", pid, loc, strconv.Itoa(year)), func() interface{} {
+		evs := profileEvents(pid, time.Time{}) // all time: "new artists" needs each first play
+		return computeYear(evs, windowRows(pid, 0), year, loc)
+	})
+	return c.JSON(http.StatusOK, out)
 }

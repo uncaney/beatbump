@@ -11,18 +11,27 @@ package api
 // track under 60 s), so ">= 1 play of >= 30 s" is ">= 1 row". Harness plays
 // are never written (harnessRequest) unless YTM_STATS_INCLUDE_HARNESS=1.
 //
-// Days and hours are in the VIEWER's local time: ?tz= is the client offset in
-// minutes east of UTC (JS -new Date().getTimezoneOffset(), the same parameter
-// as me/stats/summary), applied as one fixed offset to every event; without
-// it the server answers in UTC. A DST change inside the window shifts the
-// events of the other side by one hour (accepted: same rule as summary.hours).
+// Days and hours are in the VIEWER's local time. L12-11 (audit logic v12):
+// ?tz= is preferably an IANA zone name (tz=Europe/Paris, the browser's
+// Intl.DateTimeFormat().resolvedOptions().timeZone): each event is then placed
+// with the zone's offset AT THAT EVENT, so a DST change inside the window
+// (2026-10-25 in Europe) moves no play to the wrong day. The older form, the
+// client offset in minutes east of UTC (tz=120, JS
+// -new Date().getTimezoneOffset()), is still accepted as a fixed offset; a
+// zone name the server does not know falls back to ?tzo=<minutes>, then UTC.
+// Answers carry `tz` (the zone's offset now, minutes) and `zone` (its name).
+// Streaks, clock and year answers are memoised per (profile, zone, params)
+// for statsTimeMemoTTL; a new play or a login merge drops the profile's
+// entries.
 
 import (
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	_ "time/tzdata" // IANA zones even without /usr/share/zoneinfo in the image
 
 	"beatbump-server/backend/db"
 
@@ -74,13 +83,137 @@ func playMinutes(m map[string]float64, ref string) float64 {
 	return estimatedTrackMinutes
 }
 
-// statsTZ parses ?tz= (minutes east of UTC, clamped to +-14 h, else 0).
-func statsTZ(c echo.Context) int {
-	tz, _ := strconv.Atoi(strings.TrimSpace(c.QueryParam("tz")))
-	if tz < -14*60 || tz > 14*60 {
-		return 0
+// fixedTZ is the fixed-offset zone of `min` minutes east of UTC (the
+// legacy ?tz=<minutes> form).
+func fixedTZ(min int) *time.Location {
+	return time.FixedZone("viewer", min*60)
+}
+
+// parseStatsTZ reads one tz value: minutes east of UTC (clamped to +-14 h,
+// else 0) or an IANA zone name; nil when it is neither.
+func parseStatsTZ(raw string) *time.Location {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
 	}
-	return tz
+	if n, err := strconv.Atoi(raw); err == nil {
+		if n < -14*60 || n > 14*60 {
+			n = 0
+		}
+		return fixedTZ(n)
+	}
+	if len(raw) > 64 || raw == "Local" {
+		return nil
+	}
+	for _, r := range raw {
+		ok := r == '/' || r == '_' || r == '-' || r == '+' ||
+			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+		if !ok {
+			return nil
+		}
+	}
+	loc, err := time.LoadLocation(raw)
+	if err != nil {
+		return nil
+	}
+	return loc
+}
+
+// statsZone is the viewer's zone: ?tz= (name or minutes), else ?tzo=
+// (minutes), else UTC.
+func statsZone(c echo.Context) *time.Location {
+	if loc := parseStatsTZ(c.QueryParam("tz")); loc != nil {
+		return loc
+	}
+	if raw := strings.TrimSpace(c.QueryParam("tzo")); raw != "" {
+		if _, err := strconv.Atoi(raw); err == nil {
+			return parseStatsTZ(raw)
+		}
+	}
+	return time.UTC
+}
+
+// tzOffsetMin is the offset of loc at t, minutes east of UTC.
+func tzOffsetMin(loc *time.Location, t time.Time) int {
+	_, off := t.In(loc).Zone()
+	return off / 60
+}
+
+// zoneName is loc's IANA name, "" for a fixed offset.
+func zoneName(loc *time.Location) string {
+	if n := loc.String(); n != "viewer" {
+		return n
+	}
+	return ""
+}
+
+// ---- per-profile memo of the time views (L12-11) ----
+
+const (
+	statsTimeMemoTTL = 5 * time.Minute
+	statsTimeMemoMax = 512
+)
+
+type statsTimeEntry struct {
+	pid string
+	at  time.Time
+	val interface{}
+}
+
+var (
+	statsTimeMu   sync.Mutex
+	statsTimeMemo = map[string]statsTimeEntry{}
+	// statsTimeNow is swapped by tests.
+	statsTimeNow = time.Now
+)
+
+// statsTimeCached answers key from the memo, else computes and stores it.
+func statsTimeCached(pid, key string, compute func() interface{}) interface{} {
+	now := statsTimeNow()
+	statsTimeMu.Lock()
+	if e, ok := statsTimeMemo[key]; ok && now.Sub(e.at) < statsTimeMemoTTL {
+		statsTimeMu.Unlock()
+		return e.val
+	}
+	statsTimeMu.Unlock()
+	val := compute()
+	statsTimeMu.Lock()
+	defer statsTimeMu.Unlock()
+	if len(statsTimeMemo) >= statsTimeMemoMax {
+		for k, e := range statsTimeMemo {
+			if now.Sub(e.at) >= statsTimeMemoTTL {
+				delete(statsTimeMemo, k)
+			}
+		}
+		if len(statsTimeMemo) >= statsTimeMemoMax {
+			statsTimeMemo = map[string]statsTimeEntry{}
+		}
+	}
+	statsTimeMemo[key] = statsTimeEntry{pid: pid, at: now, val: val}
+	return val
+}
+
+// resetStatsTimeMemo empties the memo (tests).
+func resetStatsTimeMemo() {
+	statsTimeMu.Lock()
+	statsTimeMemo = map[string]statsTimeEntry{}
+	statsTimeMu.Unlock()
+}
+
+// invalidateStatsTimeMemo drops the memoised time views of a profile.
+func invalidateStatsTimeMemo(pid string) {
+	statsTimeMu.Lock()
+	defer statsTimeMu.Unlock()
+	for k, e := range statsTimeMemo {
+		if e.pid == pid {
+			delete(statsTimeMemo, k)
+		}
+	}
+}
+
+// statsTimeKey builds a memo key; the profile id goes first.
+func statsTimeKey(kind, pid string, loc *time.Location, extra string) string {
+	return kind + "\x00" + pid + "\x00" + loc.String() + "\x00" + strconv.Itoa(tzOffsetMin(loc, statsTimeNow())) + "\x00" + extra
 }
 
 func round1(v float64) float64 { return float64(int(v*10+0.5)) / 10 }
@@ -96,7 +229,8 @@ type streaksResp struct {
 	Current int         `json:"current"`
 	Longest int         `json:"longest"`
 	LastDay string      `json:"lastDay"` // "" when the profile never played
-	TZ      int         `json:"tz"`
+	TZ      int         `json:"tz"`             // offset now, minutes east of UTC
+	Zone    string      `json:"zone,omitempty"` // IANA name when ?tz= gave one
 	Days    []streakDay `json:"days"` // streakWindowDays entries, oldest first, ending today
 }
 
@@ -112,8 +246,7 @@ func localDay(t time.Time, loc *time.Location) time.Time {
 // what "today" is. The current streak stays alive through a today without
 // play as long as yesterday had one (the day is not over); it is 0 once a
 // whole day passed without listening. Longest is over the whole history.
-func computeStreaks(evs []statEvent, mins map[string]float64, now time.Time, tzOffsetMin int) streaksResp {
-	loc := time.FixedZone("viewer", tzOffsetMin*60)
+func computeStreaks(evs []statEvent, mins map[string]float64, now time.Time, loc *time.Location) streaksResp {
 	played := map[string]bool{}
 	perDay := map[string]float64{}
 	var ordered []time.Time // distinct local days, ascending (evs are sorted)
@@ -128,7 +261,7 @@ func computeStreaks(evs []statEvent, mins map[string]float64, now time.Time, tzO
 	}
 	// evs come oldest first, but be robust to an unsorted input.
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Before(ordered[j]) })
-	out := streaksResp{TZ: tzOffsetMin, Days: make([]streakDay, 0, streakWindowDays)}
+	out := streaksResp{TZ: tzOffsetMin(loc, now), Zone: zoneName(loc), Days: make([]streakDay, 0, streakWindowDays)}
 	run := 0
 	var prev time.Time
 	for i, d := range ordered {
@@ -160,13 +293,16 @@ func computeStreaks(evs []statEvent, mins map[string]float64, now time.Time, tzO
 	return out
 }
 
-// MeStreaksHandler: GET /api/v1/me/stats/streaks?tz=<minutes>.
+// MeStreaksHandler: GET /api/v1/me/stats/streaks?tz=<zone|minutes>.
 func MeStreaksHandler(c echo.Context) error {
 	pid := profileID(c)
-	tz := statsTZ(c)
-	evs := profileEvents(pid, time.Time{}) // all time: the record needs the whole history
-	mins := refMinutes(windowRows(pid, streakWindowDays+1))
-	return c.JSON(http.StatusOK, computeStreaks(evs, mins, time.Now(), tz))
+	loc := statsZone(c)
+	out := statsTimeCached(pid, statsTimeKey("streaks", pid, loc, ""), func() interface{} {
+		evs := profileEvents(pid, time.Time{}) // all time: the record needs the whole history
+		mins := refMinutes(windowRows(pid, streakWindowDays+1))
+		return computeStreaks(evs, mins, time.Now(), loc)
+	})
+	return c.JSON(http.StatusOK, out)
 }
 
 // clockResp is the payload of me/stats/clock: minutes listened per weekday
@@ -174,6 +310,7 @@ func MeStreaksHandler(c echo.Context) error {
 type clockResp struct {
 	Days    int            `json:"days"`
 	TZ      int            `json:"tz"`
+	Zone    string         `json:"zone,omitempty"`
 	Minutes [7][24]float64 `json:"minutes"`
 	Total   float64        `json:"total"`
 	TopDay  int            `json:"topDay"`  // -1 without plays
@@ -181,9 +318,8 @@ type clockResp struct {
 }
 
 // computeClock folds plays into the weekday x hour matrix (viewer local).
-func computeClock(evs []statEvent, mins map[string]float64, tzOffsetMin int) clockResp {
-	loc := time.FixedZone("viewer", tzOffsetMin*60)
-	out := clockResp{TZ: tzOffsetMin, TopDay: -1, TopHour: -1}
+func computeClock(evs []statEvent, mins map[string]float64, loc *time.Location) clockResp {
+	out := clockResp{TZ: tzOffsetMin(loc, time.Now()), Zone: zoneName(loc), TopDay: -1, TopHour: -1}
 	var perDay [7]float64
 	var perHour [24]float64
 	for _, e := range evs {
@@ -216,11 +352,11 @@ func computeClock(evs []statEvent, mins map[string]float64, tzOffsetMin int) clo
 	return out
 }
 
-// MeClockHandler: GET /api/v1/me/stats/clock?tz=<minutes>&days=90 (days
-// clamped to 1..365, default 90).
+// MeClockHandler: GET /api/v1/me/stats/clock?tz=<zone|minutes>&days=90
+// (days clamped to 1..365, default 90).
 func MeClockHandler(c echo.Context) error {
 	pid := profileID(c)
-	tz := statsTZ(c)
+	loc := statsZone(c)
 	days := 90
 	if n, err := strconv.Atoi(strings.TrimSpace(c.QueryParam("days"))); err == nil && n > 0 {
 		days = n
@@ -228,8 +364,11 @@ func MeClockHandler(c echo.Context) error {
 			days = 365
 		}
 	}
-	evs := profileEvents(pid, time.Now().Add(-time.Duration(days)*24*time.Hour))
-	out := computeClock(evs, refMinutes(windowRows(pid, days)), tz)
-	out.Days = days
+	out := statsTimeCached(pid, statsTimeKey("clock", pid, loc, strconv.Itoa(days)), func() interface{} {
+		evs := profileEvents(pid, time.Now().Add(-time.Duration(days)*24*time.Hour))
+		r := computeClock(evs, refMinutes(windowRows(pid, days)), loc)
+		r.Days = days
+		return r
+	})
 	return c.JSON(http.StatusOK, out)
 }

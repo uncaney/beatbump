@@ -184,6 +184,8 @@ func loginAndMerge(from, to, name string, merge bool) (*migratedCounts, error) {
 		invalidateMixCache(to)
 		dropNeverPlayedMemoFor(from)
 		dropNeverPlayedMemoFor(to)
+		invalidateStatsTimeMemo(from)
+		invalidateStatsTimeMemo(to)
 	}
 	return moved, nil
 }

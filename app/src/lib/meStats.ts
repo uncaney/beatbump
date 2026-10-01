@@ -1,6 +1,7 @@
 // 41A (B6-22): Ton mois extras (série, grille jour x heure, décennies, Ton
-// année) and their French wording. API calls pass the viewer's offset (?tz=,
-// minutes east of UTC) so days and hours are local, like me/stats/summary.
+// année) and their French wording. API calls pass the viewer's IANA zone
+// (?tz=Europe/Paris, L12-11: DST-safe day boundaries) plus the current offset
+// as a fallback (?tzo=, minutes east of UTC) so days and hours are local.
 // Pure helpers are exported for vitest.
 import { APIClient } from "$lib/api";
 import { getStatsSummary, getTopBy, type TopRow } from "$lib/me";
@@ -19,10 +20,30 @@ export interface Streaks {
 	days: StreakDay[]; // last 90 days, oldest first, ending today
 }
 
-const tzParam = () => -new Date().getTimezoneOffset();
+/** The browser's IANA zone ("Europe/Paris"), "" when Intl cannot tell. */
+export function browserTimeZone(): string {
+	try {
+		const z = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		return typeof z === "string" ? z : "";
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Query fragment for the time views: `tz=<zone>&tzo=<minutes>` (the offset
+ * stays the server's fallback for a zone it does not know), `tz=<minutes>`
+ * without a zone name.
+ */
+export function tzQuery(zone: string = browserTimeZone(), offsetMin: number = -new Date().getTimezoneOffset()): string {
+	const off = Number.isFinite(offsetMin) ? Math.round(offsetMin) : 0;
+	const z = typeof zone === "string" ? zone.trim() : "";
+	if (z && z.length <= 64 && /^[A-Za-z0-9_+\/-]+$/.test(z)) return `tz=${encodeURIComponent(z)}&tzo=${off}`;
+	return `tz=${off}`;
+}
 
 export async function getStreaks(): Promise<Streaks> {
-	return (await APIClient.fetch(`/api/v1/me/stats/streaks?tz=${tzParam()}`)).json();
+	return (await APIClient.fetch(`/api/v1/me/stats/streaks?${tzQuery()}`)).json();
 }
 
 /** YYYY-MM-DD of `d` in the browser's local time. */
@@ -57,7 +78,7 @@ export interface Clock {
 }
 
 export async function getClock(days = 90): Promise<Clock> {
-	return (await APIClient.fetch(`/api/v1/me/stats/clock?days=${days}&tz=${tzParam()}`)).json();
+	return (await APIClient.fetch(`/api/v1/me/stats/clock?days=${days}&${tzQuery()}`)).json();
 }
 
 /** Monday first, like the API. */
@@ -135,7 +156,7 @@ export interface YearView {
 }
 export async function getYear(year?: number): Promise<YearView> {
 	const y = year ? `year=${year}&` : "";
-	return (await APIClient.fetch(`/api/v1/me/stats/year?${y}tz=${tzParam()}`)).json();
+	return (await APIClient.fetch(`/api/v1/me/stats/year?${y}${tzQuery()}`)).json();
 }
 
 export const MONTHS_FR = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."] as const;
