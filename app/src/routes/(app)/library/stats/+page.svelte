@@ -106,6 +106,13 @@
 				>
 			{/each}
 		</div>
+		<a
+			class="btn-secondary export"
+			data-testid="export-csv"
+			href="/api/v1/me/stats/export.csv"
+			download="ecoutes.csv"
+			title="Tout l'historique d'écoute (10 000 dernières écoutes), format CSV">Exporter en CSV</a
+		>
 	</header>
 
 	{#if error}
@@ -321,6 +328,9 @@
 	}
 	.periods button:hover {
 		opacity: 1;
+	}
+	a.export {
+		text-decoration: none;
 	}
 	.periods button.active {
 		opacity: 1;

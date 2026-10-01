@@ -145,6 +145,8 @@ func newServer() *echo.Echo {
 	me.GET("/stats/recent", api.MeRecentHandler)
 	me.GET("/stats/top", api.MeTopHandler)
 	me.GET("/stats/summary", api.MeStatsSummaryHandler)
+	// BI3: RFC 4180 export of the profile history (last 10 000 plays).
+	me.GET("/stats/export.csv", api.MeStatsExportCSVHandler)
 	me.GET("/never-played", api.MeNeverPlayedHandler)
 	me.POST("/acquire", api.MeAcquireHandler)
 	me.GET("/acquire", api.MeAcquireStatusHandler)
