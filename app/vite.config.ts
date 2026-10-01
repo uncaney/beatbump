@@ -1,4 +1,5 @@
 import { sveltekit } from "@sveltejs/kit/vite";
+import type { ConfigEnv } from "vite";
 import type { UserConfig } from "vitest/config";
 
 const version = new Date(Date.now());
@@ -54,4 +55,13 @@ const config: UserConfig = {
 		},
 	},
 };
-export default config;
+// PF3-12 (audit perf v3): 66 console.log sites ship to production (one of
+// them reactive on /home). In a production build the console.log / debug /
+// info / trace calls are marked pure so the minifier removes them, and
+// `debugger` statements are dropped; console.error / console.warn (Logger.err,
+// clientLog, the SW warnings) are kept. Dev server and vitest are untouched.
+const PROD_PURE_CONSOLE = ["console.log", "console.debug", "console.info", "console.trace"];
+export default ({ command }: ConfigEnv): UserConfig =>
+	command === "build"
+		? { ...config, esbuild: { ...config.esbuild, drop: ["debugger"], pure: PROD_PURE_CONSOLE } }
+		: config;

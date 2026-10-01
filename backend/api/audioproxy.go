@@ -151,6 +151,10 @@ var (
 const (
 	coverProxyPath    = "/cover"
 	coverCacheControl = "public, max-age=604800, immutable"
+	// PF3-1: a lid without embedded art answers 404 and used to be asked
+	// again on every view (0.5-6 s upstream each time); it may gain art when
+	// the file is retagged, hence one hour only.
+	coverMissCacheControl = "public, max-age=3600"
 )
 
 // audioProxyFor returns a (cached) streaming reverse proxy for an upstream
@@ -200,11 +204,17 @@ func audioProxyFor(base string) (*httputil.ReverseProxy, error) {
 			pr.SetXForwarded()
 		},
 		// K2: a cover is addressed by a stable lid, so a 200 can live a week in
-		// the browser / SW cache (22 x ~500 ms per home load before). Audio
+		// the browser / SW cache (22 x ~500 ms per home load before), a 404
+		// one hour (PF3-1). Audio
 		// streams keep the upstream headers untouched (signed URLs, Range).
 		ModifyResponse: func(resp *http.Response) error {
-			if resp.StatusCode == http.StatusOK && resp.Request != nil && resp.Request.URL.Path == basePath+coverProxyPath {
-				resp.Header.Set("Cache-Control", coverCacheControl)
+			if resp.Request != nil && resp.Request.URL.Path == basePath+coverProxyPath {
+				switch resp.StatusCode {
+				case http.StatusOK:
+					resp.Header.Set("Cache-Control", coverCacheControl)
+				case http.StatusNotFound:
+					resp.Header.Set("Cache-Control", coverMissCacheControl)
+				}
 			}
 			return nil
 		},

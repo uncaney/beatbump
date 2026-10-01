@@ -112,28 +112,10 @@ func artistCovers(arts []map[string]interface{}) map[string]string {
 	ids := make([]string, 0, len(arts))
 	for _, a := range arts {
 		if id := mstr(a, "id"); id != "" {
-			ids = append(ids, "\""+id+"\"")
+			ids = append(ids, id)
 		}
 	}
-	m := map[string]string{}
-	if len(ids) == 0 {
-		return m
-	}
-	hits := meiliSearchIndex("albums", map[string]interface{}{
-		"q": "", "filter": "artistId IN [" + strings.Join(ids, ",") + "]",
-		"limit": 2000, "sort": []string{"year:desc"},
-		"attributesToRetrieve": []string{"artistId", "coverLid"},
-	})
-	for _, h := range hits {
-		aid := mstr(h, "artistId")
-		if aid == "" {
-			continue
-		}
-		if _, seen := m[aid]; !seen {
-			m[aid] = mstr(h, "coverLid")
-		}
-	}
-	return m
+	return artistCoverLids(ids) // PF3-8: bounded query, local_search.go
 }
 
 func LocalArtistsHandler(c echo.Context) error {

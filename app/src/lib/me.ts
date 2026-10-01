@@ -28,6 +28,9 @@ const WHOAMI_TTL_MS = 5 * 60 * 1000;
 export const PROFILE_CHANNEL_NAME = "ytm-profile";
 const WHOAMI_VISIBLE_REFRESH_MS = 60 * 1000;
 type Who = { id: string; name: string };
+// PF3-6: getRecent memo (declared before anything that may call forgetWhoami).
+type RecentMemo = { at: number; limit: number; promise: Promise<{ items: any[] }> };
+let recentMemo: RecentMemo | null = null;
 function readWhoamiMemo(): Who | null {
 	try {
 		const raw = sessionStorage.getItem(WHOAMI_KEY);
@@ -62,6 +65,7 @@ function writeWhoamiMemo(w: Who | null): void {
 /** Drop the memoised whoami (next call asks the server). */
 export function forgetWhoami(): void {
 	writeWhoamiMemo(null);
+	forgetRecent(); // another profile: its history is not this one's
 }
 
 let profileChannel: BroadcastChannel | undefined;
@@ -185,6 +189,7 @@ async function postPlay(item: any, playedAt?: number): Promise<SendResult> {
 }
 export function recordHistory(item: any) {
 	if (!item || !itemRef(item)) return;
+	forgetRecent();
 	const playedAt = Date.now();
 	if (typeof navigator !== "undefined" && navigator.onLine === false) {
 		enqueuePlay(item, playedAt);
@@ -196,8 +201,33 @@ export function recordHistory(item: any) {
 	});
 }
 if (typeof window !== "undefined") installHistoryOutbox(postPlay);
+// PF3-6 (audit perf v3): a cold /home asked me/stats/recent twice
+// (FirstRun limit 1, PersonalRows limit 30), three times with the search
+// overlay. One request is shared for RECENT_MEMO_MS by every caller whose
+// limit fits; small limits are fetched as RECENT_MIN_FETCH so the first
+// caller's request also serves the bigger ones. recordHistory and a profile
+// change drop the memo.
+export const RECENT_MEMO_MS = 5000;
+export const RECENT_MIN_FETCH = 30;
+export function forgetRecent(): void {
+	recentMemo = null;
+}
 export async function getRecent(limit = 50): Promise<{ items: any[] }> {
-	return (await APIClient.fetch(`/api/v1/me/stats/recent?limit=${limit}`)).json();
+	const now = Date.now();
+	let memo = recentMemo;
+	if (!memo || now - memo.at > RECENT_MEMO_MS || memo.limit < limit) {
+		const fetchLimit = Math.max(limit, RECENT_MIN_FETCH);
+		const promise: Promise<{ items: any[] }> = APIClient.fetch(`/api/v1/me/stats/recent?limit=${fetchLimit}`).then((r) => r.json());
+		const mine: RecentMemo = { at: now, limit: fetchLimit, promise };
+		memo = mine;
+		recentMemo = mine;
+		promise.catch(() => {
+			if (recentMemo === mine) recentMemo = null; // never memoise a failure
+		});
+	}
+	const r = await memo.promise;
+	if (r && Array.isArray(r.items) && r.items.length > limit) return { ...r, items: r.items.slice(0, limit) };
+	return r;
 }
 export async function getTop(limit = 50): Promise<{ items: any[]; counts: any[] }> {
 	return (await APIClient.fetch(`/api/v1/me/stats/top?limit=${limit}`)).json();

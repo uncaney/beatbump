@@ -66,6 +66,80 @@ const IMMUTABLE = "/_app/immutable/";
 const PRECACHE_BATCH = 10;
 const PRECACHE_BATCH_DELAY_MS = 2000;
 const BUILD_SET = new Set<string>(build);
+const FILES_SET = new Set<string>(files);
+
+// PF3-5 (audit perf v3): chunks loaded on demand only, never worth a
+// background download: hls.js (~400 KB, imported lazily by player.ts for HLS
+// streams) and the non-Latin Commissioner subsets (the French UI only uses
+// the latin one; the browser fetches the others through unicode-range when a
+// title needs them). They are still cached on the way by the fetch handler.
+export function isOnDemandOnly(path: string): boolean {
+	return (
+		/^\/_app\/immutable\/chunks\/hls\.[^/]+\.js$/.test(path) ||
+		/^\/_app\/immutable\/assets\/commissioner-(?:cyrillic|cyrillic-ext|greek|greek-ext|vietnamese|latin-ext)-[^/]*\.woff2?$/.test(path)
+	);
+}
+
+// PF3-7: the install used to precache all ~35 static files (285 KB: every
+// apple-touch / mstile / launcher size, duplicated favicons). Only what an
+// offline boot or the PWA install prompt needs is taken now: the manifest,
+// the favicons the shell HTML links, the logo the nav paints and the icons
+// the manifest lists. The rest is cached on demand by the fetch handler.
+export function staticPrecacheList(all: readonly string[]): string[] {
+	const wanted = (f: string) =>
+		f === "/manifest.json" ||
+		f === "/favicon.ico" ||
+		f === "/logo.svg" ||
+		/^\/assets\/favicon-\d+x\d+\.png$/.test(f) ||
+		/^\/android\/android-launchericon-\d+-\d+\.png$/.test(f) ||
+		/^\/maskable-icon-\d+x\d+\.png$/.test(f);
+	return all.filter(wanted);
+}
+
+// PF3-5: a deploy gives the SW a new SHELL cache name; hashed immutable
+// assets whose path is unchanged are byte-identical, so they are copied from
+// the previous ytm-shell-* cache instead of being downloaded again. Pure:
+// which paths of an old cache to carry into the new one.
+export function carryOverPaths(oldPaths: Iterable<string>, buildSet: ReadonlySet<string>, have: ReadonlySet<string>): string[] {
+	const out = new Set<string>();
+	for (const p of oldPaths) {
+		if (!p.startsWith(IMMUTABLE)) continue; // "/" and static files are not content-hashed
+		if (!buildSet.has(p) || have.has(p)) continue;
+		out.add(p);
+	}
+	return [...out];
+}
+
+// Copy the still-valid hashed entries of every older ytm-shell-* cache into
+// SHELL (best effort, never throws).
+async function carryOverShell(): Promise<number> {
+	let copied = 0;
+	try {
+		const names = (await caches.keys()).filter((k) => k.startsWith("ytm-shell-") && k !== SHELL);
+		if (!names.length) return 0;
+		const c = await caches.open(SHELL);
+		const have = new Set((await c.keys()).map((k) => new URL(k.url).pathname));
+		for (const name of names) {
+			const old = await caches.open(name);
+			const byPath = new Map<string, Request>();
+			for (const k of await old.keys()) byPath.set(new URL(k.url).pathname, k);
+			for (const p of carryOverPaths(byPath.keys(), BUILD_SET, have)) {
+				try {
+					const res = await old.match(byPath.get(p)!);
+					if (!res || !res.ok) continue;
+					await c.put(p, res);
+					have.add(p);
+					copied++;
+				} catch {
+					/* skip this entry */
+				}
+			}
+		}
+	} catch {
+		/* best effort */
+	}
+	return copied;
+}
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -152,7 +226,7 @@ function precacheRest(): Promise<void> {
 		restPrecache = (async () => {
 			const c = await caches.open(SHELL);
 			const have = new Set((await c.keys()).map((k) => new URL(k.url).pathname));
-			const todo = build.filter((p) => !have.has(p));
+			const todo = build.filter((p) => !have.has(p) && !isOnDemandOnly(p));
 			let allOk = true;
 			for (let i = 0; i < todo.length; i += PRECACHE_BATCH) {
 				if (i) await sleep(PRECACHE_BATCH_DELAY_MS);
@@ -186,10 +260,13 @@ declare const self: ServiceWorkerGlobalScope;
 self.addEventListener("install", (event) => {
 	event.waitUntil(
 		caches.open(SHELL).then(async (c) => {
-			// Shell only (K3): "/", the static files and the build assets the
-			// shell / root layout / home route need; each cached independently.
+			// PF3-5: unchanged hashed assets come from the previous shell cache.
+			await carryOverShell();
+			// Shell only (K3): "/", the static files an offline boot needs
+			// (PF3-7) and the build assets the shell / root layout / home route
+			// need; each cached independently.
 			const shell = await shellBuildAssets(c);
-			await Promise.all([...new Set<string>(["/", ...files, ...shell])].map((a) => addIfMissing(c, a)));
+			await Promise.all([...new Set<string>(["/", ...staticPrecacheList(files), ...shell])].map((a) => addIfMissing(c, a)));
 			await self.skipWaiting();
 		}).catch(() => {}),
 	);
@@ -198,6 +275,8 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
 	event.waitUntil(
 		(async () => {
+			// PF3-5: entries the old SW cached after this one installed.
+			await carryOverShell();
 			const keys = await caches.keys();
 			await Promise.all(keys.filter((k) => k.startsWith("ytm-shell-") && k !== SHELL).map((k) => caches.delete(k)));
 			await purgeProfileScopedApiCache(); // G16: entries stored by an older SW
@@ -549,6 +628,21 @@ const isCover = (u: URL) => u.origin === location.origin && u.pathname === "/cov
 const COVER_TOUCH_THROTTLE_MS = 10 * 60 * 1000;
 const coverLastHit = new Map<string, number>();
 
+// PF3-11: trimCoverCache enumerates the whole cache (keys() + sort); it ran
+// after every put (15-22 per cold home). Now on the first put of each SW
+// lifetime (Android restarts the SW often, so an in-memory counter alone
+// would let the cache grow) and then every COVER_TRIM_EVERY puts; COVER_MAX
+// may be exceeded by at most COVER_TRIM_EVERY - 1 entries in between.
+const COVER_TRIM_EVERY = 25;
+let coverPuts = 0;
+export function coverTrimDue(putsSoFar: number, every = COVER_TRIM_EVERY): boolean {
+	return putsSoFar === 1 || (putsSoFar > 1 && putsSoFar % every === 0);
+}
+function shouldTrimCovers(): boolean {
+	coverPuts++;
+	return coverTrimDue(coverPuts);
+}
+
 async function trimCoverCache(c: Cache): Promise<void> {
 	try {
 		const keys = await c.keys();
@@ -563,6 +657,47 @@ async function trimCoverCache(c: Cache): Promise<void> {
 		/* best effort */
 	}
 }
+
+// PF3-1: a lid without embedded art answers 404 after 0.5-6 s upstream and
+// was asked again on every view. Its URL is remembered COVER_MISS_TTL_MS in a
+// bounded in-memory set and answered locally meanwhile (the Go proxy also
+// stamps those 404s cacheable for an hour). Pure, unit-tested.
+const COVER_MISS_TTL_MS = 60 * 60 * 1000;
+const COVER_MISS_MAX = 500;
+export function createCoverMissSet(max = COVER_MISS_MAX, ttlMs = COVER_MISS_TTL_MS) {
+	const until = new Map<string, number>(); // insertion order = oldest first
+	return {
+		has(url: string, now = Date.now()): boolean {
+			const t = until.get(url);
+			if (t === undefined) return false;
+			if (now >= t) {
+				until.delete(url);
+				return false;
+			}
+			return true;
+		},
+		add(url: string, now = Date.now()): void {
+			until.delete(url);
+			until.set(url, now + ttlMs);
+			while (until.size > max) {
+				const oldest = until.keys().next().value as string;
+				until.delete(oldest);
+			}
+		},
+		delete(url: string): void {
+			until.delete(url);
+		},
+		get size(): number {
+			return until.size;
+		},
+	};
+}
+const coverMisses = createCoverMissSet();
+const coverMissResponse = () =>
+	new Response("no art", {
+		status: 404,
+		headers: { "Content-Type": "text/plain", "Cache-Control": "public, max-age=3600", "X-Ytm-Cover": "sw-miss" },
+	});
 
 async function coverFetch(req: Request): Promise<Response> {
 	let c: Cache | null = null;
@@ -586,12 +721,14 @@ async function coverFetch(req: Request): Promise<Response> {
 	} catch {
 		c = null;
 	}
+	if (coverMisses.has(req.url)) return coverMissResponse();
 	const res = await fetch(req);
+	if (res.status === 404) coverMisses.add(req.url);
 	if (c && res.ok && res.status === 200 && req.method === "GET") {
 		coverLastHit.set(req.url, Date.now());
 		const copy = res.clone();
 		c.put(req.url, copy)
-			.then(() => trimCoverCache(c!))
+			.then(() => (shouldTrimCovers() ? trimCoverCache(c!) : undefined))
 			.catch(() => {});
 	}
 	return res;
@@ -643,13 +780,15 @@ self.addEventListener("fetch", (event) => {
 
 	// app-shell assets → cache-first; a miss (not yet precached, K3) is fetched
 	// and stored on the way so the next offline boot has it.
-	if (url.origin === location.origin && (BUILD_SET.has(url.pathname) || files.includes(url.pathname))) {
+	if (url.origin === location.origin && (BUILD_SET.has(url.pathname) || FILES_SET.has(url.pathname))) {
 		event.respondWith(
 			(async () => {
 				const hit = await caches.match(req);
 				if (hit) return hit;
 				const res = await fetch(req);
-				if (res.ok && BUILD_SET.has(url.pathname)) {
+				// PF3-7: static files are no longer all precached; keep the ones
+				// fetched so the next offline boot has them.
+				if (res.ok && res.status === 200) {
 					const copy = res.clone();
 					event.waitUntil(caches.open(SHELL).then((c) => c.put(req, copy)).catch(() => {}));
 				}

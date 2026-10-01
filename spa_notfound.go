@@ -64,10 +64,12 @@ func spaNotFound(buildDir string) echo.MiddlewareFunc {
 				return next(c)
 			}
 			clean := path.Clean("/" + p)
-			if st, err := os.Stat(filepath.Join(buildDir, filepath.FromSlash(clean))); err == nil && !st.IsDir() {
+			// PF3-9: build assets (every /_app/ request) never fall back to
+			// the shell, so they skip the os.Stat below.
+			if strings.HasPrefix(clean, "/_app/") {
 				return next(c)
 			}
-			if strings.HasPrefix(clean, "/_app/") {
+			if st, err := os.Stat(filepath.Join(buildDir, filepath.FromSlash(clean))); err == nil && !st.IsDir() {
 				return next(c)
 			}
 			b := load()

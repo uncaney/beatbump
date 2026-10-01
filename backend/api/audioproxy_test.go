@@ -308,14 +308,19 @@ func TestIsAudioProxyPath(t *testing.T) {
 	}
 }
 
-// K2: /cover 200s carry a one-week immutable Cache-Control (a lid is stable);
-// every other status / route keeps the upstream headers untouched.
+// K2: /cover 200s carry a one-week immutable Cache-Control (a lid is stable),
+// 404s one hour (PF3-1); every other status / route keeps the upstream
+// headers untouched.
 func TestAudioProxy_CoverCacheControl(t *testing.T) {
 	up := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "private, max-age=3600")
 		w.Header().Set("Content-Type", "image/jpeg")
 		if r.URL.Query().Get("lid") == "missing" {
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Query().Get("lid") == "broken" {
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -335,8 +340,12 @@ func TestAudioProxy_CoverCacheControl(t *testing.T) {
 		if rec := get("/cover?lid=0123456789a"); rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != coverCacheControl {
 			t.Fatalf("base %q: cover 200: status %d cc %q, want 200 %q", base, rec.Code, rec.Header().Get("Cache-Control"), coverCacheControl)
 		}
-		if rec := get("/cover?lid=missing"); rec.Code != http.StatusNotFound || rec.Header().Get("Cache-Control") != "private, max-age=3600" {
-			t.Fatalf("base %q: cover 404: status %d cc %q, want upstream header untouched", base, rec.Code, rec.Header().Get("Cache-Control"))
+		// PF3-1: a cover 404 (no embedded art) is cacheable for an hour.
+		if rec := get("/cover?lid=missing"); rec.Code != http.StatusNotFound || rec.Header().Get("Cache-Control") != coverMissCacheControl {
+			t.Fatalf("base %q: cover 404: status %d cc %q, want %q", base, rec.Code, rec.Header().Get("Cache-Control"), coverMissCacheControl)
+		}
+		if rec := get("/cover?lid=broken"); rec.Code != http.StatusInternalServerError || rec.Header().Get("Cache-Control") != "private, max-age=3600" {
+			t.Fatalf("base %q: cover 500: status %d cc %q, want upstream header untouched", base, rec.Code, rec.Header().Get("Cache-Control"))
 		}
 		if rec := get("/localf?p=%2Fa.mp3"); rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "private, max-age=3600" {
 			t.Fatalf("base %q: localf: status %d cc %q, want upstream header untouched", base, rec.Code, rec.Header().Get("Cache-Control"))

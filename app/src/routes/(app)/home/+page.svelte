@@ -20,15 +20,41 @@
 
 	export let data: PageData;
 
-	$: ({
-		carousels,
-		chips,
-		params,
-		headerThumbnail,
-		continuations,
-		visitorData,
-		path,
-	} = data);
+	$: ({ params, path } = data);
+
+	// PF3-2: the YouTube part of the page arrives through a streamed promise
+	// so FirstRun / PersonalRows paint without waiting for home.json. The
+	// previous rows stay on screen while a chip reload is in flight.
+	let carousels: any[] = [];
+	let chips: any[] = [];
+	let headerThumbnail: any[] = [];
+	let continuations: Record<string, any> = {};
+	let visitorData: string | undefined;
+	let homeReady = false;
+	let homeToken = 0;
+	$: applyHome(data.streamed?.home);
+	function applyHome(p: Promise<any> | undefined) {
+		const token = ++homeToken;
+		if (!p) return;
+		p.then(
+			(d) => {
+				if (token !== homeToken) return;
+				carousels = Array.isArray(d?.carousels) ? d.carousels : [];
+				chips = Array.isArray(d?.chips) ? d.chips : [];
+				headerThumbnail = Array.isArray(d?.headerThumbnail) ? d.headerThumbnail : [];
+				continuations = d?.continuations && typeof d.continuations === "object" ? d.continuations : {};
+				visitorData = d?.visitorData;
+				loading = false;
+				hasData = false;
+				homeReady = true;
+			},
+			(err) => {
+				if (token !== homeToken) return;
+				console.error("home.json failed", err);
+				homeReady = true;
+			},
+		);
+	}
 
 	// W6: icon shortcuts land on /home with a one-shot action:
 	// ?search=1 opens the search overlay (the Nav search button, the same
@@ -93,8 +119,7 @@
 
 	let loading = false;
 	let hasData = false;
-	$: console.log(data, carousels);
-	homeChipContext.set({ params });
+	homeChipContext.set({ params: data.params ?? "" });
 </script>
 
 <svelte:head>
@@ -154,6 +179,20 @@
 	/>
 	<FirstRun />
 	<PersonalRows />
+	{#if !homeReady}
+		<div
+			class="yt-skeleton resp-content-width"
+			aria-hidden="true"
+			data-testid="home-yt-skeleton"
+		>
+			<div class="yt-skeleton__title" />
+			<div class="yt-skeleton__row">
+				{#each Array(5) as _}
+					<div class="yt-skeleton__card" />
+				{/each}
+			</div>
+		</div>
+	{/if}
 	{#each carousels as carousel (carousel.items)}
 		<Carousel
 			items={carousel.items}
@@ -234,6 +273,32 @@
 		margin: 0 auto;
 		padding-block: 2.5rem;
 		will-change: visibility;
+	}
+
+	.yt-skeleton {
+		padding-block: 1rem;
+		opacity: 0.5;
+	}
+
+	.yt-skeleton__title {
+		width: 12rem;
+		height: 1.25rem;
+		border-radius: 0.25rem;
+		background: hsl(0deg 0% 100% / 8%);
+		margin-bottom: 0.75rem;
+	}
+
+	.yt-skeleton__row {
+		display: flex;
+		gap: 1rem;
+		overflow: hidden;
+	}
+
+	.yt-skeleton__card {
+		flex: 0 0 10rem;
+		height: 10rem;
+		border-radius: 0.5rem;
+		background: hsl(0deg 0% 100% / 6%);
 	}
 
 	.immersive-thumbnail {

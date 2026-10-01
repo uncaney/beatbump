@@ -154,6 +154,64 @@ func meiliSearchIndex(index string, payload map[string]interface{}) []map[string
 	return res
 }
 
+// artistCoverRounds caps the follow-up queries of artistCoverLids.
+const artistCoverRounds = 3
+
+// artistCoverLids maps each artist id to the coverLid of its newest album.
+// PF3-8 (audit perf v3): it used to ask Meili for up to 2000 albums of the
+// page's artists (20 on /library/artists, 3 per keystroke in the search
+// overlay) and keep one per artist: 60-96 ms. A round now asks for
+// 2*len(pending) albums (artistId + coverLid only); when that limit is
+// filled (an artist with many albums crowding the others out) the artists
+// still without a hit get another round, filtered on them only. A round
+// that returns fewer hits than its limit has seen every album of its
+// artists, so the remaining ones have none.
+func artistCoverLids(ids []string) map[string]string {
+	m := map[string]string{}
+	pending := make([]string, 0, len(ids))
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			pending = append(pending, id)
+		}
+	}
+	for round := 0; round < artistCoverRounds && len(pending) > 0; round++ {
+		quoted := make([]string, len(pending))
+		want := make(map[string]bool, len(pending))
+		for i, id := range pending {
+			quoted[i] = "\"" + id + "\""
+			want[id] = true
+		}
+		limit := 2 * len(pending)
+		hits := meiliSearchIndex("albums", map[string]interface{}{
+			"q": "", "filter": "artistId IN [" + strings.Join(quoted, ",") + "]",
+			"limit": limit, "sort": []string{"year:desc"},
+			"attributesToRetrieve": []string{"artistId", "coverLid"},
+		})
+		for _, h := range hits {
+			aid := mstr(h, "artistId")
+			if aid == "" || !want[aid] {
+				continue
+			}
+			if _, done := m[aid]; !done {
+				m[aid] = mstr(h, "coverLid")
+			}
+		}
+		if len(hits) < limit {
+			break
+		}
+		next := pending[:0:0]
+		for _, id := range pending {
+			if _, done := m[id]; !done {
+				next = append(next, id)
+			}
+		}
+		pending = next
+	}
+	return m
+}
+
 func meiliGetDoc(index, id string) map[string]interface{} {
 	out, err := meiliReq("GET", "/indexes/"+index+"/documents/"+id, nil)
 	if err != nil {
