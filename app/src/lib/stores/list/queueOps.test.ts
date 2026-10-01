@@ -228,6 +228,99 @@ describe("planDragCommit / rebaseMove (H4, queue changed during a drag)", () => 
 	});
 });
 
+/**
+ * QR5: the `queue_reorder_next` harness flake (BACKLOG P2). Prod run
+ * 20261001-135757: autoplay queue of 50, row 0 playing, row 2 dragged
+ * before row 1, "suivant" played the row that sat at index 3. Replays the
+ * exact drop sequence of DraggableList (moveIndex on the private copy ->
+ * planDragCommit against the fresh queue -> planReorder re-anchor) and
+ * the `next()` arithmetic (position + 1), plus the two ways the sequence
+ * can be perturbed in the real component: a continuation appended during
+ * the drag (fresh queue longer than the base) and `dragend` delivered
+ * twice (pointerup + pointercancel both call syncCursor).
+ */
+describe("QR5 queue_reorder_next: drag row 2 before row 1 on a 50-row autoplay queue, then next", () => {
+	// Distinct videoIds, like a YouTube automix (no Dedupe Automix duplicates).
+	const autoplay = () => Array.from({ length: 50 }, (_, i) => ({ videoId: `vid${String(i).padStart(2, "0")}`, title: `Track ${i}` }));
+	const moveIndex = <T,>(list: readonly T[], from: number, to: number): T[] => {
+		// dragGesture.moveIndex, copied: a single row moved, never a swap.
+		const next = list.slice();
+		const [row] = next.splice(from, 1);
+		next.splice(to, 0, row);
+		return next;
+	};
+
+	it("reorders [0,1,2,...] into [0,2,1,...], keeps the cursor on row 0 and next() lands on the moved row", () => {
+		const base = autoplay();
+		const position = 0;
+		// DraggableList.captureCurrent: private copy; the drag crosses one row.
+		const dragItems = moveIndex(base, 2, 1);
+		// drop: queue unchanged during the drag
+		const commit = planDragCommit(base, dragItems, base[2], base);
+		expect(commit.kind).toBe("apply");
+		if (commit.kind !== "apply") return;
+		expect(commit.rebased).toBe(false);
+		const plan = planReorder(base, position, commit.mix);
+		expect(plan).not.toBeNull();
+		expect(ids(plan!.mix).slice(0, 4)).toEqual(["vid00", "vid02", "vid01", "vid03"]);
+		expect(plan!.mix.length).toBe(50);
+		expect(plan!.position).toBe(0);
+		// ListService.next(): nextTrack = mix[position + 1]
+		const next = plan!.mix[plan!.position + 1];
+		expect(next.videoId).toBe("vid02");
+		expect(next).toBe(base[2]);
+		expect(plan!.mix[3]).toBe(base[3]); // the row the prod run played instead
+	});
+
+	it("same drop while a continuation appended rows during the drag (rebased), still next = moved row", () => {
+		const base = autoplay();
+		const dragItems = moveIndex(base, 2, 1);
+		const fresh = [...base, { videoId: "vid50", title: "Track 50" }, { videoId: "vid51", title: "Track 51" }];
+		const commit = planDragCommit(base, dragItems, base[2], fresh);
+		expect(commit.kind).toBe("apply");
+		if (commit.kind !== "apply") return;
+		expect(commit.rebased).toBe(true);
+		const plan = planReorder(fresh, 0, commit.mix);
+		expect(plan).not.toBeNull();
+		expect(ids(plan!.mix).slice(0, 4)).toEqual(["vid00", "vid02", "vid01", "vid03"]);
+		expect(plan!.mix.length).toBe(52);
+		expect(plan!.position).toBe(0);
+		expect(plan!.mix[1]).toBe(base[2]);
+	});
+
+	it("dragend delivered twice (pointerup then pointercancel): the second commit is a noop, not a second move", () => {
+		const base = autoplay();
+		const dragItems = moveIndex(base, 2, 1);
+		const first = planDragCommit(base, dragItems, base[2], base);
+		expect(first.kind).toBe("apply");
+		const applied = first.kind === "apply" ? planReorder(base, 0, first.mix)!.mix : base;
+		// DraggableList.syncCursor resets dragBase / dragItems after the first
+		// commit; a second syncCursor sees an identical copy and queue.
+		expect(planDragCommit(applied, applied, null, applied).kind).toBe("noop");
+		// Even a stale second drop (old copy vs the already-reordered queue)
+		// is a noop, since the single move re-applied lands on the same order.
+		const stale = planDragCommit(base, dragItems, base[2], applied);
+		if (stale.kind === "apply") {
+			expect(ids(stale.mix).slice(0, 4)).toEqual(["vid00", "vid02", "vid01", "vid03"]);
+			expect(planReorder(applied, 0, stale.mix)!.position).toBe(0);
+		} else {
+			expect(stale.kind).toBe("noop");
+		}
+	});
+
+	it("the playing row itself dragged (row 1 playing, moved to 3): cursor follows it, next = old row 4", () => {
+		const base = autoplay();
+		const dragItems = moveIndex(base, 1, 3);
+		const commit = planDragCommit(base, dragItems, base[1], base);
+		expect(commit.kind).toBe("apply");
+		if (commit.kind !== "apply") return;
+		const plan = planReorder(base, 1, commit.mix)!;
+		expect(ids(plan.mix).slice(0, 5)).toEqual(["vid00", "vid02", "vid03", "vid01", "vid04"]);
+		expect(plan.position).toBe(3);
+		expect(plan.mix[plan.position + 1].videoId).toBe("vid04");
+	});
+});
+
 describe("I20: playAllMixType / isLibraryRow", () => {
 	const yt = { videoId: "dQw4w9WgXcQ" };
 	const lib = { videoId: "0123456789a" };
