@@ -1013,6 +1013,38 @@ export class ListService {
         return true;
     }
 
+    /**
+     * C1 exact resume: put a saved queue back as it was (rows, cursor, type,
+     * context) without fetching anything; the caller loads the track.
+     * Resolves to the restored cursor.
+     */
+    public async restoreSession(saved: {
+        mix: Item[];
+        position: number;
+        type: "auto" | "playlist" | "local" | null;
+        context?: PlaybackContext | null;
+        currentMixId?: string;
+        visitorData?: string;
+    }): Promise<number> {
+        this.invalidatePrefetch();
+        const mix = Array.isArray(saved.mix) ? saved.mix.slice() : [];
+        const position = Math.min(Math.max(0, saved.position | 0), Math.max(0, mix.length - 1));
+        await this.lockedSet({
+            clickTrackingParams: "",
+            continuation: "",
+            currentMixId: saved.currentMixId ?? "",
+            currentMixType: saved.type ?? null,
+            visitorData: saved.visitorData ?? "",
+            mix,
+            position,
+            related: null,
+            context: saved.context ?? null,
+        });
+        this.isLocal = saved.type === "local";
+        this.schedulePrefetch(position);
+        return position;
+    }
+
     /** The page on screen offers its playlist as the context of a session started on it (P2). */
     public offerContext(playlistId: string | undefined | null, ctx: PlaybackContextInput | null) {
         this._offeredContext = playlistId && ctx ? { playlistId: normPlaylistId(playlistId), ctx } : null;

@@ -311,6 +311,9 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	// the track so the (still satisfied) end-of-track test does not auto-advance
 	// on the trailing timeupdate; cleared by the next play().
 	private _sleepHold = false;
+	// C1 exact resume: the next loadedmetadata seeks here and, unless
+	// `autoplay`, stays paused (the restored queue waits for the user).
+	private _resumeAt: { time: number; duration: number; autoplay: boolean } | null = null;
 	private playerKind: "hls" | "html5" = "html5";
 	private declare unsubscriber: () => void;
 	constructor() {
@@ -461,6 +464,9 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	public play() {
 		this._sleepHold = false;
 		this.paused.set(false);
+		// A restored (paused) track: the user asked to play, keep the seek.
+		if (this._resumeAt) this._resumeAt.autoplay = true;
+		if (this.player && !this.player.autoplay) this.player.autoplay = true;
 		if (!this.player) {
 			this.addTaskToTaskQueue("play");
 			return;
@@ -502,6 +508,24 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	public setNextTrackPrefetchedUrl(trackUrl: string) {
 		this.nextSrc.url = trackUrl;
 		this.nextSrc.stale = false;
+	}
+
+	/**
+	 * C1: the source about to be loaded is a restored track. Seek it to
+	 * `time` on loadedmetadata and stay paused unless `autoplay`. Call before
+	 * getSrc() so the flag is set when the metadata arrives.
+	 */
+	public primeResume(time: number, duration: number, autoplay = false) {
+		if (!this.player) this.createAudioNode();
+		const t = isFinite(time) && time > 0 ? time : 0;
+		const d = isFinite(duration) && duration > 0 ? duration : 0;
+		this._resumeAt = { time: t, duration: d, autoplay };
+		if (!autoplay) {
+			this.player.autoplay = false;
+			this._paused.set(true);
+		}
+		this._currentTimeStore.set(t);
+		if (d) this._durationStore.set(d);
 	}
 
 	/** Used when sync'ing a 'leech' tab */
@@ -644,6 +668,31 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 
 
 		this.onEvent("loadedmetadata", async () => {
+			const resume = this._resumeAt;
+			this._resumeAt = null;
+			if (resume) {
+				const d = this.player.duration;
+				if (resume.time > 0 && (!isFinite(d) || resume.time < d - 2)) {
+					try {
+						this.player.currentTime = resume.time;
+					} catch {
+						/* not seekable yet: starts at 0 */
+					}
+				}
+				if (!resume.autoplay) {
+					if (this._durationStore.value === 0) {
+						this._durationStore.set(isFinite(d) && d > 0 ? d : resume.duration);
+					}
+					this._currentTimeStore.set(this.player.currentTime || resume.time);
+					this._paused.set(true);
+					metaDataHandler({
+						duration: this.duration,
+						currentTime: this.player.currentTime,
+						sessionList: SessionListService.$.value,
+					});
+					return;
+				}
+			}
 			this._paused.set(false);
 			if (this.videoNode)
 				await loadVideo(this.videoNode).then(async () => {
@@ -660,7 +709,8 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 
 			this.setStaleTimeout();
 			this.nextSrc.url = undefined;
-			this._currentTimeStore.set(0);
+			// 0 for a new track; the resume seek above otherwise.
+			this._currentTimeStore.set(this.player.currentTime || 0);
 
 			/*const duration = isAppleMobileDevice
 				? this.player.duration / 2

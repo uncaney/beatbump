@@ -8,12 +8,30 @@
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
 	import { buildForYouRow, buildResumeRow, capItems, readLastTrack, sanitizeCard } from "$lib/homeRows";
 	import { getMix, getRecent } from "$lib/me";
+	import { settings } from "$lib/stores";
+	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
+	import { get } from "svelte/store";
 
 	const MAX = 20;
 
 	let resume: any[] = [];
 	let forYou: any[] = [];
 	let acquired: any[] = [];
+
+	// C1: the saved queue ("Remember Last Track"), resumed where it stopped.
+	let saved: ResumeState | null = null;
+	$: savedTrack = saved ? saved.mix[saved.position] : null;
+	const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+	let resuming = false;
+	async function resumeQueue() {
+		if (resuming) return;
+		resuming = true;
+		try {
+			await resumePlayback();
+		} finally {
+			resuming = false;
+		}
+	}
 
 	async function loadResume() {
 		let recent: any[] = [];
@@ -55,23 +73,44 @@
 	}
 
 	onMount(() => {
+		try {
+			saved = get(settings)?.playback?.["Remember Last Track"] === true ? readResumeState(localStorage) : null;
+		} catch {
+			saved = null;
+		}
 		void loadResume();
 		void loadForYou();
 		void loadAcquired();
 	});
 </script>
 
-{#if resume.length > 0}
+{#if resume.length > 0 || savedTrack}
 	<section
 		class="home-row"
 		data-row="reprendre"
 	>
+		{#if savedTrack}
+			<div class="resume-queue">
+				<button
+					type="button"
+					data-testid="resume-queue"
+					disabled={resuming}
+					on:click={resumeQueue}
+				>
+					Reprendre la file : {savedTrack.title ?? "morceau"}{saved && saved.currentTime > 0
+						? ` · ${clock(saved.currentTime)}`
+						: ""}{saved && saved.mix.length > 1 ? ` (${saved.position + 1}/${saved.mix.length})` : ""}
+				</button>
+			</div>
+		{/if}
+		{#if resume.length > 0}
 		<Carousel
 			items={resume}
 			header={{ title: "Reprendre", subheading: "Là où tu t'es arrêté" }}
 			type="trending"
 			isBrowseEndpoint={false}
 		/>
+		{/if}
 	</section>
 {/if}
 
@@ -110,5 +149,17 @@
 <style>
 	.home-row {
 		display: contents;
+	}
+	.resume-queue {
+		padding: 0.5em 0 0;
+	}
+	.resume-queue button {
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		padding: 0.55em 1.1em;
+		border-radius: 999px;
+		cursor: pointer;
 	}
 </style>
