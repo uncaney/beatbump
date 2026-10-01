@@ -33,11 +33,11 @@ func ArtistEndpointHandler(c echo.Context) error {
 	responseBytes, err = api.Browse(browseId, api.PageType_MusicPageTypeArtist, qparams, nil, nil, nil, api.WebMusic)
 
 	if err != nil {
-		var use *api.UpstreamStatusError
-		if errors.As(err, &use) && (use.StatusCode == http.StatusNotFound || use.StatusCode == http.StatusBadRequest) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found", "reason": "unknown artist"})
+		status, body := artistUpstreamError(err)
+		if status != http.StatusNotFound {
+			c.Logger().Warnf("artist %s: upstream browse failed: %v", browseId, err)
 		}
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "upstream", "reason": err.Error()})
+		return c.JSON(status, body)
 	}
 
 	/*if category == "" {
@@ -307,6 +307,19 @@ func parseArtist(homeResponse _youtube.HomeResponse) interface{} {
 
 	return response
 
+}
+
+// artistUpstreamError maps a failed upstream browse to our JSON answer. Only an
+// upstream 404 means "unknown artist": YouTube also answers 400 ("invalid argument")
+// when OUR request is malformed (stale client version or params), which would turn
+// every artist into "Cet artiste n'existe pas" and hide the incident (audit v4 H9),
+// so a 400 is a retryable 502 like any other upstream failure.
+func artistUpstreamError(err error) (int, map[string]string) {
+	var use *api.UpstreamStatusError
+	if errors.As(err, &use) && use.StatusCode == http.StatusNotFound {
+		return http.StatusNotFound, map[string]string{"error": "not_found", "reason": "unknown artist"}
+	}
+	return http.StatusBadGateway, map[string]string{"error": "upstream", "reason": err.Error()}
 }
 
 // artistUnknown reports an upstream answer that carries no artist at all (no header

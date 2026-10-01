@@ -80,7 +80,8 @@
 	onMount(() => {
 		if (browser) {
 			recentSearches = readRecentSearches();
-			showRecentSearches = true;
+			// A pre-filled box (H7) must not open on the empty-box rows.
+			showRecentSearches = !query.trim();
 			scheduleResume();
 		}
 	});
@@ -477,6 +478,22 @@
 
 		return false;
 	}
+	/**
+	 * Audit v4 H7: refocusing a box that still holds a query shows the
+	 * suggestions of THAT query (library + YouTube), not the empty-box rows
+	 * ("Reprendre", recent searches, Tendances). The lookups are re-run because
+	 * a submit / close aborted any in-flight one (results may be for a prefix);
+	 * the previous rows stay visible until the fresh answers land.
+	 */
+	function handleFocus() {
+		if (!query.trim()) {
+			showRecentSearches = true;
+			return;
+		}
+		scheduleLocal();
+		typeahead();
+	}
+
 	const typeahead = debounce(async () => {
 		cancelYt();
 		if (!query) {
@@ -549,9 +566,7 @@
 					if (e.shiftKey && e.ctrlKey && e.repeat) return;
 					typeahead();
 				}}
-				on:focus={() => {
-					showRecentSearches = true;
-				}}
+				on:focus={handleFocus}
 				bind:value={query}
 			/>
 		</div>

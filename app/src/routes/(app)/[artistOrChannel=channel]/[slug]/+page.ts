@@ -21,11 +21,14 @@ export const load: PageServerLoad = async ({ params }) => {
     const response = await APIClient.fetch(
         `/api/v1/artist/`+ params?.slug,
     );
-	if (!response) throw error(500, "Impossible de charger cet artiste");
+	// "fr:" marks our own French message for +error.svelte (audit v4 H10).
+	if (!response) throw error(502, "fr:Impossible de charger cet artiste.");
 	// Audit UX v4 (regression 1): an unknown artist is a 404, not an "Internal Error";
-	// the upstream statusText never reaches the page.
-	if (response.status === 404) throw error(404, "Artiste introuvable");
-	if (!response.ok) throw error(500, "Impossible de charger cet artiste");
+	// the upstream statusText never reaches the page. Only a real 404 (unknown id or
+	// empty upstream answer) is "introuvable"; an upstream 400/5xx comes back as a
+	// 502 from the API and stays a retryable error (audit v4 H9).
+	if (response.status === 404) throw error(404, "fr:Artiste introuvable");
+	if (!response.ok) throw error(502, "fr:Impossible de charger cet artiste.");
 	const data = await response.json();
 	const page = parseResponse(data);
 

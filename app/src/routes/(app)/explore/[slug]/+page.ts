@@ -10,7 +10,8 @@ export const load = async ({ url, params }) => {
 		return { response: null as any, notFound: true, path };
 	}
 	if (!res.ok) {
-		throw error(500, "Explorer est indisponible pour le moment.");
+		// "fr:" marks our own message so +error.svelte shows it (audit v4 H10).
+		throw error(502, "fr:Explorer est indisponible pour le moment.");
 	}
 	const response: any = await res.json();
 	return { response, notFound: false, path };

@@ -8,13 +8,21 @@
 	$: status = $page?.status ?? 404;
 	// Messages are chosen here (French, per status); a raw upstream statusText such as
 	// "Internal Error" is never shown (audit UX v4 regression 1).
-	$: raw = ($page?.error?.message || "").trim();
+	// Our own messages carry the "fr:" marker (`error(500, "fr:Explorer est
+	// indisponible...")`) and are shown whatever their first word (audit v4 H10);
+	// the word whitelist only remains for older unmarked messages of other routes.
+	const OURS = "fr:";
+	$: rawMsg = ($page?.error?.message || "").trim();
+	$: ours = rawMsg.startsWith(OURS);
+	$: raw = ours ? rawMsg.slice(OURS.length).trim() : rawMsg;
 	$: message =
 		status === 404
 			? /artiste/i.test(raw)
 				? "Cet artiste n'existe pas ou n'est plus disponible."
-				: "Cette page n'existe pas ou n'est plus proposée."
-			: /^(impossible|cette|ce |la |le |l')/i.test(raw)
+				: ours && raw
+					? raw
+					: "Cette page n'existe pas ou n'est plus proposée."
+			: (ours && raw) || /^(impossible|cette|ce |la |le |l')/i.test(raw)
 				? raw
 				: "Une erreur est survenue, réessaie dans un instant.";
 
