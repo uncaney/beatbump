@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EXPLORE_GENRES_MAX, genreHref, isJunkGenre, localGenreLinks, normalizeGenreList } from "./localGenres";
+import { EXPLORE_GENRES_MAX, genreHref, isJunkGenre, isSoundtrackGenre, localGenreLinks, normalizeGenreList, splitGenreValue } from "./localGenres";
 
 describe("Explore local genres (c29b EQ2)", () => {
 	it("links to the all-songs genre view", () => {
@@ -53,6 +53,7 @@ describe("Genres page list (U12-5)", () => {
 		];
 		expect(normalizeGenreList({ genres })).toEqual([
 			{ name: "Rock", count: 15 },
+			{ name: "Bande originale", count: 14 },
 			{ name: "bossa nova", count: 4 },
 			{ name: "samba", count: 4 },
 			{ name: "Acoustic Rock", count: 3 },
@@ -60,6 +61,23 @@ describe("Genres page list (U12-5)", () => {
 		]);
 		expect(normalizeGenreList(null)).toEqual([]);
 		expect(normalizeGenreList({ genres: "x" })).toEqual([]);
+	});
+
+	it("L11-6: slash names stay whole, commas split, soundtracks grouped", () => {
+		expect(splitGenreValue("Singer/Songwriter")).toEqual(["Singer/Songwriter"]);
+		expect(splitGenreValue("AC/DC")).toEqual(["AC/DC"]);
+		expect(splitGenreValue("Rock/Pop")).toEqual(["Rock/Pop"]);
+		expect(splitGenreValue("Electronic/House")).toEqual(["Electronic", "House"]);
+		expect(splitGenreValue("Rock, Britpop")).toEqual(["Rock", "Britpop"]);
+		expect(splitGenreValue("Soundtrack, Classical")).toEqual(["Bande originale", "Classical"]);
+		for (const v of ["B.O.", "BSO", "OST", "O.S.T", "score", "Soundtrack", "_Soundtrack", "Bande originale", "Original Score"]) {
+			expect(isSoundtrackGenre(v)).toBe(true);
+		}
+		for (const v of ["CORE", "Rock", "Hardcore"]) expect(isSoundtrackGenre(v)).toBe(false);
+		expect(normalizeGenreList({ genres: [{ name: "Bande originale", count: 5 }, { name: "Singer/Songwriter", count: 3 }] })).toEqual([
+			{ name: "Bande originale", count: 5 },
+			{ name: "Singer/Songwriter", count: 3 },
+		]);
 	});
 
 	it("keeps junk out of the Explore chips", () => {

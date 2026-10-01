@@ -22,17 +22,48 @@ export function isJunkGenre(name: string): boolean {
 	return [...n].length < 2 || n.startsWith("_") || /^(\p{L}\.)+\p{L}?\.?$/u.test(n);
 }
 
-/** Split one raw tag value ("Rock;Blues Rock", "samba/bossa nova") into clean names. */
+/** L11-6: the one display name of every soundtrack spelling (same as the backend). */
+export const SOUNDTRACK_GENRE = "Bande originale";
+const SOUNDTRACK_KEY =
+	/^(?:(?:original|originele|film|movie|motion picture|game|video game|tv) )?(?:sound ?tracks?(?: score)?|score|ost|bso|bof?|bande originale(?: de film)?|banda sonora(?: original)?|colonna sonora)(?: \(.*\))?$/;
+/** "B.O.", "BSO", "OST", "Score", "_Soundtrack", "Bande originale"… */
+export function isSoundtrackGenre(name: string): boolean {
+	const k = name.trim().replace(/^_+/, "").toLowerCase().replace(/\./g, "").replace(/-/g, " ").replace(/\s+/g, " ").trim();
+	return k !== "" && SOUNDTRACK_KEY.test(k);
+}
+/** Slash names that are ONE genre (lowercase). */
+const SLASH_WHOLE = new Set(["singer/songwriter", "ac/dc", "r&b/soul", "hip-hop/rap", "hip hop/rap"]);
+const SLASH_MIN_SIDE = 4;
+const clean = (p: string) => p.trim().replace(/\s+/g, " ");
+
+/**
+ * Split one raw tag value ("Rock;Blues Rock", "Rock, Britpop", "samba/bossa
+ * nova") into clean names, with the backend rules (local_genres.go): ";", ","
+ * and "|" always split; "/" only when every side has 4+ characters and the
+ * value is not a known slash name ("Singer/Songwriter", "AC/DC"); soundtrack
+ * spellings become "Bande originale".
+ */
 export function splitGenreValue(raw: string): string[] {
-	return raw
-		.split(/[;/]/)
-		.map((p) => p.trim().replace(/\s+/g, " "))
-		.filter((p) => !isJunkGenre(p));
+	const out: string[] = [];
+	for (const s of raw.split(/[;,|]/)) {
+		const seg = clean(s);
+		if (!seg) continue;
+		let parts = [seg];
+		if (seg.includes("/") && !SLASH_WHOLE.has(seg.toLowerCase())) {
+			const sides = seg.split("/").map(clean);
+			if (sides.every((x) => [...x].length >= SLASH_MIN_SIDE)) parts = sides;
+		}
+		for (const p of parts) {
+			if (isSoundtrackGenre(p)) out.push(SOUNDTRACK_GENRE);
+			else if (!isJunkGenre(p)) out.push(p);
+		}
+	}
+	return out;
 }
 
 /**
- * U12-5: the /library/genres list, tolerant of a raw answer: names split on
- * ";" and "/", junk dropped, case variants merged (first spelling kept,
+ * U12-5: the /library/genres list, tolerant of a raw answer: names split as
+ * splitGenreValue does, junk dropped, case variants merged (first spelling kept,
  * counts summed), most tracks first then name.
  */
 export function normalizeGenreList(resp: unknown): { name: string; count: number }[] {
