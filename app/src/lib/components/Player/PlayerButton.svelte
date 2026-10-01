@@ -21,10 +21,12 @@
 	}
 </script>
 
-<!-- Native <button>: Enter/Space trigger click natively (no duplicate keydown handler). -->
+<!-- Native <button>: Enter/Space trigger click natively (no duplicate keydown handler).
+     `icon-btn` opts out of the global %button-base (white background, dark text,
+     !important colours) so the control is a plain white glyph on a round 48 px hit area. -->
 <button
 	type="button"
-	class="player-btn player-title"
+	class="player-btn player-title icon-btn"
 	aria-label={label}
 	title={label}
 	aria-busy={$playerLoading ? true : undefined}
@@ -36,16 +38,21 @@
 			class:fade-out={$playerLoading ? true : false}
 		/>
 	{:else if isPaused}
+		<!-- Solid glyphs: the sprite's `play` / `pause` symbols are outlines, and with
+		     the default 1 px stroke the pause bars read as three faint grey lines
+		     (audit 1.11, mobile-16 / desktop-16). fill=white gives a filled icon. -->
 		<Icon
 			color="white"
+			fill="white"
 			name="play"
-			size={"24px"}
+			size={"26px"}
 		/>
 	{:else}
 		<Icon
 			color="white"
+			fill="white"
 			name="pause"
-			size={"1.625rem"}
+			size={"26px"}
 		/>
 	{/if}
 </button>
@@ -54,16 +61,32 @@
 	@import "../../../global/stylesheet/components/_player.scss";
 
 	.player-btn {
-		background: none;
+		background: rgba(255, 255, 255, 0.12);
 		border: none;
-		color: inherit;
+		color: #fff;
+		opacity: 1;
 		font: inherit;
 		align-items: center;
 		justify-content: center;
-		min-width: 44px;
-		min-height: 44px;
+		width: 48px;
+		height: 48px;
+		min-width: 48px;
+		min-height: 48px;
+		max-width: 48px;
+		max-height: 48px;
+		padding: 0;
+		margin: 0 0.1em;
 		border-radius: 50%;
+		cursor: pointer;
 
+		@media (hover: hover) {
+			&:hover {
+				background: rgba(255, 255, 255, 0.2);
+			}
+		}
+		&:active {
+			background: rgba(255, 255, 255, 0.28);
+		}
 		&:focus-visible {
 			outline: 2px solid #fff;
 			outline-offset: 2px;
