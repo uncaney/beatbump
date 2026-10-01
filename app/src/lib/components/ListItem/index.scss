@@ -174,22 +174,25 @@ overflow:hidden;
 	}
 }
 
-/* Touch screens have no hover: show a permanent 40px round play badge on the
+/* Touch screens have no hover: show a permanent round play badge on the
    row thumbnail (audit 2.5) so a tap on the row reads as "play". Pure CSS,
-   pointer-events none: the tap still lands on the row's click handler. */
+   pointer-events none: the tap still lands on the row's click handler.
+   Same badge as the search / library rows (global/redesign/modules/_item.scss,
+   audit v5 TOP 8): 36px anchored in the bottom-right corner, not a 40px disc
+   centred on the cover. */
 @media (hover: none) {
 	.thumbnail::after {
 		content: "";
 		position: absolute;
-		inset: 0;
-		margin: auto;
-		width: 40px;
-		height: 40px;
+		inset: auto 2px 2px auto;
+		width: 36px;
+		height: 36px;
 		border-radius: 50%;
+		z-index: 1;
 		pointer-events: none;
 		background: rgba(0, 0, 0, 0.55)
 			url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff'><path d='M8 5v14l11-7z'/></svg>")
-			center / 18px 18px no-repeat;
+			center / 16px 16px no-repeat;
 		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
 	}
 	.isPlaying .thumbnail::after {
