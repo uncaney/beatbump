@@ -46,8 +46,7 @@
 	// D2: up to 10 local albums (dateAdded desc) none of whose tracks appear
 	// in the profile's play history (GET me/never-played, server-side set
 	// difference). Hidden for an anonymous profile and when empty, same as
-	// the other personal rows; no localStorage cache (AP1 covers reprendre/
-	// pour-toi/recemment-acquis only).
+	// the other personal rows. c30a AP4: cached like the other rows.
 	let neverPlayed: any[] = [];
 	// c29b D3: tracks played >= 3 times more than 60 days ago and not once
 	// in the last 30 days (GET me/stats/rediscover). Hidden for an anonymous
@@ -106,6 +105,10 @@
 	let resumeSource: RowSource = "empty";
 	let forYouSource: RowSource = "empty";
 	let acquiredSource: RowSource = "empty";
+	// c30a AP4: the three cycle-29 rows paint from the cache too.
+	let rediscoverSource: RowSource = "empty";
+	let newInLibrarySource: RowSource = "empty";
+	let neverPlayedSource: RowSource = "empty";
 
 	function storageOrUndefined(): Storage | undefined {
 		try {
@@ -115,19 +118,26 @@
 		}
 	}
 
-	/** Best-effort snapshot of the 3 rows into the shared localStorage cache. */
+	/** Best-effort snapshot of the 6 rows into the shared localStorage cache. */
 	async function persistHomeCache() {
 		try {
 			const w = await whoami();
 			if (!w?.id) return;
-			writeHomeCache(storageOrUndefined(), w.id, { reprendre: resume, pourToi: forYou, recemmentAcquis: acquired });
+			writeHomeCache(storageOrUndefined(), w.id, {
+				reprendre: resume,
+				pourToi: forYou,
+				recemmentAcquis: acquired,
+				redecouvrir: rediscover,
+				nouveautes: newInLibrary,
+				jamaisEcoute: neverPlayed,
+			});
 		} catch {
 			/* best-effort: offline whoami, private mode, quota, ... */
 		}
 	}
 
 	/**
-	 * AP1: paint the 3 rows instantly from the cache (any profile's: the
+	 * AP1 / AP4: paint the 6 rows instantly from the cache (any profile's: the
 	 * profile id isn't known synchronously), then drop that optimistic paint
 	 * if `whoami()` turns out to belong to a different profile - the live
 	 * loads already in flight fill the rows for the right profile moments
@@ -147,6 +157,18 @@
 		if (snap.rows.recemmentAcquis.length) {
 			acquired = snap.rows.recemmentAcquis;
 			acquiredSource = "cache";
+		}
+		if (snap.rows.redecouvrir.length) {
+			rediscover = snap.rows.redecouvrir;
+			rediscoverSource = "cache";
+		}
+		if (snap.rows.nouveautes.length) {
+			newInLibrary = snap.rows.nouveautes;
+			newInLibrarySource = "cache";
+		}
+		if (snap.rows.jamaisEcoute.length) {
+			neverPlayed = snap.rows.jamaisEcoute;
+			neverPlayedSource = "cache";
 		}
 		void validateCacheProfile(snap.profileId);
 	}
@@ -170,6 +192,18 @@
 			acquired = [];
 			acquiredSource = "empty";
 		}
+		if (rediscoverSource === "cache") {
+			rediscover = [];
+			rediscoverSource = "empty";
+		}
+		if (newInLibrarySource === "cache") {
+			newInLibrary = [];
+			newInLibrarySource = "empty";
+		}
+		if (neverPlayedSource === "cache") {
+			neverPlayed = [];
+			neverPlayedSource = "empty";
+		}
 	}
 
 	/** L13/L14-style: a login/logout (this tab or another) invalidates the cache and this profile's rows. */
@@ -184,6 +218,9 @@
 		neverPlayed = [];
 		rediscover = [];
 		newInLibrary = [];
+		rediscoverSource = "empty";
+		newInLibrarySource = "empty";
+		neverPlayedSource = "empty";
 		weekCard = null;
 		void loadResume();
 		void loadForYou();
@@ -315,6 +352,7 @@
 		try {
 			if (await isAnonymousProfile()) {
 				neverPlayed = [];
+				neverPlayedSource = "empty";
 				return;
 			}
 			const res = await APIClient.fetch(`/api/v1/me/never-played?limit=${NEVER_PLAYED_MAX}`);
@@ -327,6 +365,8 @@
 		} catch {
 			neverPlayed = [];
 		}
+		neverPlayedSource = neverPlayed.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
 
 	const REDISCOVER_MAX = 12;
@@ -334,6 +374,7 @@
 		try {
 			if (await isAnonymousProfile()) {
 				rediscover = [];
+				rediscoverSource = "empty";
 				return;
 			}
 			const res = await APIClient.fetch(`/api/v1/me/stats/rediscover?limit=${REDISCOVER_MAX}`);
@@ -346,6 +387,8 @@
 		} catch {
 			rediscover = [];
 		}
+		rediscoverSource = rediscover.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
 
 	const NEW_IN_LIBRARY_MAX = 12;
@@ -361,6 +404,8 @@
 		} catch {
 			newInLibrary = [];
 		}
+		newInLibrarySource = newInLibrary.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
 
 	// ---- c30a F1 + F2: one card once, at most 4 personal rows above YouTube ----
@@ -439,6 +484,9 @@
 		reprendre: resumeSource === "cache",
 		"pour-toi": forYouSource === "cache",
 		"recemment-acquis": acquiredSource === "cache",
+		redecouvrir: rediscoverSource === "cache",
+		"nouveautes-artistes": newInLibrarySource === "cache",
+		"jamais-ecoute": neverPlayedSource === "cache",
 	} as Record<string, boolean>;
 
 	onMount(() => {
