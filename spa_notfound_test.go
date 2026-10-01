@@ -18,6 +18,7 @@ func TestIsKnownSPAPath(t *testing.T) {
 		"/": true, "/home": true, "/search/daft%20punk": true, "/artist/UC123": true,
 		"/library/downloads-offline": true, "/listen": true, "/nope": false,
 		"/this/does/not/exist": false, "/api/v1/x": false, "/favicon.ico": false,
+		"/share-target": true, "/share-target/": true, "/share-targets": false,
 	} {
 		if got := IsKnownSPAPath(p); got != want {
 			t.Errorf("IsKnownSPAPath(%q) = %v, want %v", p, got, want)
@@ -42,6 +43,7 @@ func TestSpaNotFoundServesShellWith404(t *testing.T) {
 		{"/this/does/not/exist", http.StatusNotFound, "<html>shell</html>"},
 		{"/home", http.StatusOK, "static"},
 		{"/artist/UCxxx", http.StatusOK, "static"},
+		{"/share-target?text=https%3A%2F%2Fyoutu.be%2FdQw4w9WgXcQ", http.StatusOK, "static"},
 		{"/robots.txt", http.StatusOK, "static"},
 		{"/_app/immutable/x.js", http.StatusOK, "static"},
 		{"/localf", http.StatusOK, "static"},
