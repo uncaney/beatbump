@@ -67,13 +67,14 @@
 		});
 	};
 
-	// One word per concept (F4): "Lire" on a local album (French screen),
-	// YouTube albums keep "Play Album" / "Album Radio"; the radio button only
-	// exists when YouTube gave an autoMixId.
+	// UX7: one action row (InfoBox release-actions): "Tout lire" (play icon)
+	// then "Radio" (radio icon, aria-label "Album Radio"; only when YouTube
+	// gave an autoMixId), then Garder hors-ligne / Partager / ⋮. Short labels
+	// on desktop, icon-only with the aria-label on phones.
 	$: headerButtons = [
-		{ text: isLocalAlbum ? "Lire" : "Play Album", action: () => playAlbum(), icon: "play" },
+		{ text: "Tout lire", label: "Tout lire", action: () => playAlbum(), icon: "play" },
 		...(hasAutoMix
-			? [{ text: "Album Radio", type: "outlined", action: () => playRadio(), icon: "play" }]
+			? [{ text: "Radio", label: "Album Radio", type: "outlined", action: () => playRadio(), icon: "radio" }]
 			: []),
 		{ icon: "dots", type: "icon" },
 	] as any[];
@@ -126,12 +127,13 @@
 		on:shuffle={playShuffle}
 	>
 		<!-- O8: download the missing tracks then pin the whole album.
-		     Audit v7 TOP 3: its own row inside the header grid, under
-		     the play buttons (was a bare div after the InfoBox:
-		     x=0 on phones, under the cover on desktop). -->
+		     UX7: on the single action row, after Tout lire / Radio. -->
 		<svelte:fragment slot="actions">
 			{#if !notFound && items.length}
-				<KeepOfflineButton tracks={items} />
+				<KeepOfflineButton
+					tracks={items}
+					responsive
+				/>
 			{/if}
 		</svelte:fragment>
 	</InfoBox>

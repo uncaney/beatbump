@@ -37,6 +37,8 @@
 		action?: () => void;
 		style?: "normal" | "squared";
 		icon?: Icons | { name: Icons; size?: string };
+		/** UX7: accessible name of the release row button (its label is icon-only on phones). */
+		label?: string;
 	};
 
 	/** Thumbnail to display*/
@@ -116,6 +118,14 @@
 		playlistAdd: void;
 		addqueue: void;
 	}>();
+
+	// UX7: on a release page every action sits on ONE row (Tout lire /
+	// Radio / Garder hors-ligne / Partager / ⋮): icon + short label on
+	// desktop, icon-only with an aria-label on phones. `releaseId` feeds the
+	// "Partager" button of YouTube and local albums alike.
+	$: isRelease = type === "release";
+	$: releaseId = isRelease ? ($page.url.searchParams.get("id") ?? "") : "";
+	const iconName = (icon: Button["icon"]) => (typeof icon === "string" ? icon : icon?.name);
 
 	// EQ1: "Radio" on a local album page (/release?id=lb-…) builds a targeted
 	// queue from local/related?seed=album:<id>, context "Radio : <title>".
@@ -223,6 +233,68 @@
 			</p>
 		{/if}
 	</div>
+	{#if isRelease}
+		<div
+			class="button-group release-actions"
+			data-testid="release-actions"
+		>
+			{#each buttons as { type, icon, text, action, label }, i}
+				{@const name = iconName(icon)}
+				{#if type === "icon"}
+					<!-- ⋮ always last, after the slot / share buttons below. -->
+				{:else}
+					<button
+						type="button"
+						class="ra-btn {i === 0 ? 'btn-primary' : 'btn-secondary'}"
+						data-testid={i === 0 ? "release-play" : "album-radio"}
+						aria-label={label ?? text}
+						title={label ?? text}
+						on:click={action}
+					>
+						{#if name}
+							<Icon
+								{name}
+								size="1.1em"
+							/>
+						{/if}
+						<span class="ra-lbl">{text}</span>
+					</button>
+				{/if}
+			{/each}
+			<slot name="actions" />
+			{#if localAlbumId}
+				<button
+					type="button"
+					class="ra-btn btn-reset btn-secondary"
+					data-testid="radio-seed"
+					aria-label="Radio de l'album"
+					title="Radio de l'album"
+					disabled={radioBusy}
+					on:click={startRadio}
+				>
+					<Icon
+						name="radio"
+						size="1.1em"
+					/>
+					<span class="ra-lbl">Radio</span>
+				</button>
+			{/if}
+			{#if releaseId}
+				<!-- c31b: "Partager" the album (/release?id=…), YouTube or local. -->
+				<ShareLinkButton
+					kind="album"
+					id={releaseId}
+					{title}
+					artist={releaseArtists[0]?.name ?? ""}
+					variant="secondary"
+					responsive
+				/>
+			{/if}
+			{#if buttons.some((b) => b.type === "icon")}
+				<PopperButton items={DropdownItems} />
+			{/if}
+		</div>
+	{:else}
 	<div class="button-group">
 		{#each buttons as { style, type, icon, text, action }, i}
 			{#if type === "icon"}
@@ -241,35 +313,6 @@
 			{/if}
 		{/each}
 	</div>
-	{#if $$slots.actions || localAlbumId}
-		<!-- Audit v7 TOP 3: a second action row (Keep offline) that stays in the
-		     header grid: under Play Album / Album Radio, in the content column on
-		     desktop (not under the cover), at the 16 px gutter on phones. -->
-		<div class="actions-row">
-			<slot name="actions" />
-			{#if localAlbumId}
-				<button
-					type="button"
-					class="btn-reset btn-secondary"
-					data-testid="radio-seed"
-					disabled={radioBusy}
-					on:click={startRadio}
-				>
-					<Icon
-						name="radio"
-						size="1.1em"
-					/>
-					<span>Radio</span>
-				</button>
-				<!-- c31b: "Partager" the local album (/release?id=lb-...). -->
-				<ShareLinkButton
-					kind="album"
-					id={localAlbumId}
-					{title}
-					artist={releaseArtists[0]?.name ?? ""}
-				/>
-			{/if}
-		</div>
 	{/if}
 </div>
 
@@ -314,42 +357,25 @@
 			min-height: max(2.75rem, 44px);
 		}
 	}
-	/* Audit v7 TOP 3: fourth grid row for the actions slot. Same breakpoints
-	   as listPages.scss `.box`; on desktop the row sits in the right column
-	   under the buttons (never under the cover), on phones it spans the box
-	   (16 px gutter from .resp-content-width) and starts at the left edge
-	   like the content below, so it reads as part of the album header. */
-	.box {
-		grid-template-areas:
-			"img"
-			"metadata"
-			"buttons"
-			"actions";
-		@media screen and (min-width: 286px) and (max-width: 512px) {
-			grid-template-areas:
-				"img img"
-				"metadata metadata"
-				"buttons buttons"
-				"actions actions";
-		}
-		@media screen and (min-width: 512px) {
-			grid-template-areas:
-				"img metadata"
-				"img buttons"
-				"img actions";
-		}
-	}
-	.actions-row {
-		grid-area: actions;
-		display: flex;
+	/* UX7: the release row. One line whenever it fits (it does at 390 px in
+	   the icon-only phone layout), labels hidden on phones where each button
+	   keeps its aria-label; 44 px floor from the button system. */
+	.release-actions {
 		flex-wrap: wrap;
-		align-items: center;
 		gap: 0.5rem;
-		justify-self: stretch;
-		justify-content: flex-start;
 		min-width: 0;
-		@media screen and (max-width: 512px) {
-			justify-content: center;
+		:global(.ra-btn) {
+			padding-inline: 0.9rem;
+		}
+		@media only screen and (max-width: 719px) {
+			:global(.ra-btn) {
+				min-width: max(2.75rem, 44px);
+				padding-inline: 0.6rem;
+				gap: 0;
+			}
+			:global(.ra-lbl) {
+				display: none;
+			}
 		}
 	}
 </style>

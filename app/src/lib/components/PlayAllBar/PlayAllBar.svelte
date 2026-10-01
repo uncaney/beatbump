@@ -158,6 +158,12 @@
 		data-testid="play-all-bar"
 		bind:this={bar}
 	>
+		<!-- UX7: the count is its own one-line caption above the buttons (it
+		     sat between Aléatoire and Radio and wrapped with them). -->
+		<span
+			class="pab-count"
+			data-testid="play-all-count">{label}</span
+		>
 		<button
 			type="button"
 			class="pab-btn btn-reset btn-primary"
@@ -184,10 +190,6 @@
 			/>
 			<span>Aléatoire</span>
 		</button>
-		<span
-			class="pab-count"
-			data-testid="play-all-count">{label}</span
-		>
 		{#if radioSeed}
 			<button
 				type="button"
@@ -222,7 +224,13 @@
 		cursor: progress;
 	}
 	.pab-count {
+		flex: 0 0 100%;
 		color: #999;
 		font-size: var(--text-secondary-size);
+		line-height: 1.3;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		margin-bottom: -0.2rem;
 	}
 </style>
