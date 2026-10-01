@@ -28,7 +28,7 @@ import { derived, get } from "svelte/store";
 import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
-import { planInsert, removeAt } from "./queueOps";
+import { planInsert, planReorder, removeAt } from "./queueOps";
 import { fetchNext, filterList } from "./utils.list";
 import { APIClient } from "$lib/api";
 import { SERVER_DOMAIN } from "../../../env";
@@ -914,6 +914,27 @@ export class ListService {
                 getSrc(track?.videoId, track?.playlistId, undefined, true),
             ).catch(() => {});
         }
+    }
+
+    /**
+     * Drag reorder (DraggableList): replace the queue with `mix`, the same
+     * rows in a new order, keeping the cursor on the playing track. Goes
+     * through the store setter (subscribers + tab sync are notified), drops
+     * the warm next-track URL and re-prefetches position + 1, so "suivant"
+     * plays the new neighbour instead of the old one (G1). Synchronous, so a
+     * `dragend` handler that reads the store right after sees the new order.
+     * Returns false (nothing applied) when `mix` is not a permutation of the
+     * current queue (a drag that straddled a queue change).
+     */
+    public reorder(mix: Item[]): boolean {
+        const { mix: current, position } = this._$.value;
+        const plan = planReorder(current, position, mix);
+        if (!plan) return false;
+        this._$.update((u) => ({ ...u, mix: plan.mix, position: plan.position }));
+        this.clearNextTrack();
+        this.schedulePrefetch(plan.position);
+        syncTabs.updateSessionList(this._$.value);
+        return true;
     }
 
     /**
