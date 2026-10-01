@@ -22,11 +22,15 @@
 	import { CTX_ListItem } from "$lib/contexts";
 	import { SITE_ORIGIN_URL } from "$lib/stores/url";
 	import { deleteSongFromPlaylist } from "$lib/workers/db/db";
+	import { UNAVAILABLE_OFFLINE_MSG, cachedIds, networkOffline } from "$lib/offline";
+	import { rowOfflineState } from "$lib/offlineBatch";
 	export let item: Item;
 	export let idx: number;
 	export let ctx: Record<string, unknown> = {};
 
 	let parent: HTMLElement;
+	// V1: badge when cached, muted + toast when offline and not cached.
+	$: offlineState = rowOfflineState(item?.videoId, $cachedIds, $networkOffline);
 
 	const dispatch = createEventDispatcher<{
 		setPageIsPlaying: { id: string };
@@ -132,6 +136,10 @@
 		const target = event.target as HTMLElement;
 		// The subtitle link's text is a span inside the <a>: look up, not at the target.
 		if (target && (target.nodeName === "A" || target.closest?.("a"))) return;
+		if (offlineState === "unavailable") {
+			notify(UNAVAILABLE_OFFLINE_MSG, "error");
+			return;
+		}
 		if (page === "queue") {
 			if (groupSession.initialized && groupSession.hasActiveSession) {
 				if (idx === 0) {
@@ -189,10 +197,15 @@
 </script>
 
 <svelte:window bind:innerWidth={width} />
+<!-- V1: aria-disabled marks a row that cannot play offline (harness offline_badges). -->
+<!-- svelte-ignore a11y-role-supports-aria-props -->
 <article
 	bind:this={parent}
 	class="m-item"
 	tabindex="0"
+	class:offline-unavailable={offlineState === "unavailable"}
+	data-offline={offlineState || undefined}
+	aria-disabled={offlineState === "unavailable" ? "true" : undefined}
 	class:isPlaying={isPagePlaying.has($SPage.params.slug) &&
 		$queue?.length > 0 &&
 		$queuePosition === idx}
@@ -258,6 +271,26 @@
 		<div class="column">
 			<span class="title"
 				>{item.title}
+				{#if offlineState === "ready"}
+					<span
+					class="offline-badge"
+					role="img"
+					aria-label="Prêt hors-ligne"
+					title="Prêt hors-ligne"
+					data-testid="offline-badge"
+					><svg
+						viewBox="0 0 24 24"
+						width="14"
+						height="14"
+						aria-hidden="true"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.5"
+						stroke-linecap="round"
+						stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 7v9M8 12l4 4 4-4" /></svg
+					></span
+				>
+				{/if}
 				{#if item?.explicit}
 					<span class="explicit">
 						{item.explicit ? "E" : ""}

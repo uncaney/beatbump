@@ -215,3 +215,16 @@ img::before {
 	padding-top: calc(100% * 2 / 3);
 	/* You could reduce this expression with a preprocessor or by doing the math. I've kept the longer form in `calc()` to make the math more readable for this demo. */
 }
+
+	/* V1: "Prêt hors-ligne" badge, rows that cannot play offline. */
+	.offline-badge {
+		display: inline-flex;
+		vertical-align: middle;
+		margin-left: 0.35em;
+		color: hsl(140 55% 62%);
+		flex: none;
+	}
+	.offline-unavailable {
+		opacity: 0.45;
+		filter: grayscale(0.6);
+	}

@@ -34,7 +34,8 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId, entityHref } from "$lib/local";
 	import { saveFavourite, removeFavourite } from "$lib/favourites";
-	import { downloadToDevice } from "$lib/offline";
+	import { UNAVAILABLE_OFFLINE_MSG, cachedIds, downloadToDevice, networkOffline } from "$lib/offline";
+	import { keepItemOffline, rowOfflineState } from "$lib/offlineBatch";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { mobileLongPress } from "$lib/actions/longtouch";
 	import type { Dropdown } from "$lib/configs/dropdowns.config";
@@ -138,6 +139,15 @@
 					await removeFavourite(data);
 					dispatch("update");
 				}
+			},
+		},
+		{
+			// O8: dropdowns.config "Garder hors-ligne" (download then pin).
+			text: "Garder hors-ligne",
+			icon: "download",
+			action: () => {
+				if (!browser) return;
+				void keepItemOffline(data);
 			},
 		},
 		{
@@ -263,6 +273,10 @@
 			goto(`/playlist/${data?.endpoint?.browseId}`);
 			return;
 		}
+		if (offlineState === "unavailable") {
+			notify(UNAVAILABLE_OFFLINE_MSG, "error");
+			return;
+		}
 		try {
 			loading = true;
 			videoId = data.videoId ? data.videoId : "";
@@ -321,6 +335,8 @@
 	// ::after on .img-container, see global/redesign/modules/_item.scss; the
 	// row's click is the real action). Audit v3 1.7 / TOP 10 #8.
 	$: isPlaylistRow = !!data?.endpoint?.pageType?.includes("PLAYLIST") || !!data?.type?.includes("playlist");
+	// V1: track rows only (albums / artists / playlists open a page).
+	$: offlineState = isArtist || isPlaylistRow ? "" : rowOfflineState(data?.videoId, $cachedIds, $networkOffline);
 	$: thumbLabel = isArtist
 		? `Ouvrir ${data?.title ?? ""}`
 		: isPlaylistRow
@@ -338,6 +354,9 @@
 <div
 	class="container"
 	class:pressing
+	class:offline-unavailable={offlineState === "unavailable"}
+	data-offline={offlineState || undefined}
+	aria-disabled={offlineState === "unavailable" ? "true" : undefined}
 	on:contextmenu|preventDefault={(e) => {
 		window.dispatchEvent(
 			new window.CustomEvent("contextmenu", { detail: "listing" }),
@@ -410,6 +429,26 @@
 			<div class="title">
 				<p class="text-title">
 					<span>{data.title}</span>
+					{#if offlineState === "ready"}
+						<span
+						class="offline-badge"
+						role="img"
+						aria-label="Prêt hors-ligne"
+						title="Prêt hors-ligne"
+						data-testid="offline-badge"
+						><svg
+							viewBox="0 0 24 24"
+							width="14"
+							height="14"
+							aria-hidden="true"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2.5"
+							stroke-linecap="round"
+							stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 7v9M8 12l4 4 4-4" /></svg
+						></span
+					>
+					{/if}
 					{#if data.explicit}
 						<Icon
 							name="explicit"
@@ -495,6 +534,19 @@
 
 <style lang="scss">
 	@use "../../../global/stylesheet/base/mixins";
+
+	/* V1: "Prêt hors-ligne" badge, cards that cannot play offline. */
+	.offline-badge {
+		display: inline-flex;
+		vertical-align: middle;
+		margin-left: 0.35em;
+		color: hsl(140 55% 62%);
+		flex: none;
+	}
+	.offline-unavailable {
+		opacity: 0.45;
+		filter: grayscale(0.6);
+	}
 
 	.menu {
 		padding-right: 0em;

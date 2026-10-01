@@ -131,6 +131,9 @@
 				notify("Failed to share: " + error, "error");
 			}
 		},
+		keepOffline: (ctx: BuildMenuParams) => {
+			void keepItemOffline(ctx.item);
+		},
 		download: (ctx: BuildMenuParams) => {
 			const { item } = ctx;
 			showDownloadSongPopper.set({ state: true, item });
@@ -151,6 +154,10 @@
 				"Add to Playlist",
 				MENU_HANDLERS.addToPlaylist.bind(MENU_HANDLERS.addToPlaylist, ctx),
 			)
+			.add(
+				"Garder hors-ligne",
+				MENU_HANDLERS.keepOffline.bind(MENU_HANDLERS.keepOffline, ctx),
+			)
 			.add("Favorite", MENU_HANDLERS.favorite.bind(MENU_HANDLERS.favorite, ctx))
 			.add(
 				"Start Group Session",
@@ -168,6 +175,8 @@
 	import Loading from "$components/Loading/Loading.svelte";
 	// import { groupSession } from "$lib/stores";
 	import { saveFavourite } from "$lib/favourites";
+	import { keepItemOffline, rowOfflineState } from "$lib/offlineBatch";
+	import { UNAVAILABLE_OFFLINE_MSG, cachedIds, networkOffline } from "$lib/offline";
 
 	import { browser } from "$app/environment";
 	import { buildDropdown, type Dropdown } from "$lib/configs/dropdowns.config";
@@ -312,6 +321,9 @@
 
 	$: isArtistKind = kind === "Fans might also like";
 
+	// V1: track cards only (a card with a browse endpoint opens a page).
+	$: offlineState = item?.endpoint?.browseId ? "" : rowOfflineState(item?.videoId, $cachedIds, $networkOffline);
+
 	// Cover placeholder (initials on a deterministic hue) once the <img> errors;
 	// the tile overlays the image box, so nothing moves.
 	let imgBroken = false;
@@ -322,10 +334,19 @@
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
 <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+<!-- V1: aria-disabled marks a row that cannot play offline (harness offline_badges). -->
+<!-- svelte-ignore a11y-role-supports-aria-props -->
 <article
 	class="item item{ASPECT_RATIO}"
 	on:contextmenu={(event) => handleContextMenu(event, DropdownItems)}
+	class:offline-unavailable={offlineState === "unavailable"}
+	data-offline={offlineState || undefined}
+	aria-disabled={offlineState === "unavailable" ? "true" : undefined}
 	on:click|stopPropagation={async () => {
+		if (offlineState === "unavailable") {
+			notify(UNAVAILABLE_OFFLINE_MSG, "error");
+			return;
+		}
 		loading = true;
 		loading = await clickHandler({ isBrowseEndpoint, index, item, kind, type });
 	}}
@@ -380,6 +401,26 @@
 	>
 		<span class="h1 link">
 			{item.title}
+			{#if offlineState === "ready"}
+				<span
+						class="offline-badge"
+						role="img"
+						aria-label="Prêt hors-ligne"
+						title="Prêt hors-ligne"
+						data-testid="offline-badge"
+						><svg
+							viewBox="0 0 24 24"
+							width="14"
+							height="14"
+							aria-hidden="true"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2.5"
+							stroke-linecap="round"
+							stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 7v9M8 12l4 4 4-4" /></svg
+						></span
+					>
+			{/if}
 		</span>
 		{#if item.subtitle}
 			<div class="subtitles secondary">
@@ -404,6 +445,19 @@
 <style lang="scss">
 	@import "../../../global/redesign/utility/mixins/media-query";
 	@import "../../../global/redesign/utility/mixins/old";
+
+	/* V1: "Prêt hors-ligne" badge, cards that cannot play offline. */
+	.offline-badge {
+		display: inline-flex;
+		vertical-align: middle;
+		margin-left: 0.35em;
+		color: hsl(140 55% 62%);
+		flex: none;
+	}
+	.offline-unavailable {
+		opacity: 0.45;
+		filter: grayscale(0.6);
+	}
 
 	article {
 		--thumbnail-radius: clamp(

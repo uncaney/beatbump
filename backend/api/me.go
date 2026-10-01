@@ -333,10 +333,42 @@ func MeRecordPlayHandler(c echo.Context) error {
 	if isLid(ref) {
 		source = "local"
 	}
+	// O9: a play replayed from the client outbox carries its own playedAt.
+	now := time.Now()
+	playedAt := clientPlayedAt(m["playedAt"], now)
+	delete(m, "playedAt")
 	raw, _ := json.Marshal(m)
-	ev := db.PlayEvent{ProfileID: pid, Ref: ref, Title: title, Artist: artist, ArtistID: artistID, Album: itemAlbum(string(raw)), Source: source, Data: string(raw), PlayedAt: time.Now()}
+	ev := db.PlayEvent{ProfileID: pid, Ref: ref, Title: title, Artist: artist, ArtistID: artistID, Album: itemAlbum(string(raw)), Source: source, Data: string(raw), PlayedAt: playedAt}
 	db.DB.Create(&ev)
 	return c.JSON(http.StatusOK, map[string]interface{}{"ok": true})
+}
+
+// maxClientPlayAge bounds how old a client-provided playedAt may be (O9).
+const maxClientPlayAge = 7 * 24 * time.Hour
+
+// clientPlayedAt returns the client's playedAt (epoch milliseconds as a JSON
+// number or numeric string, or an RFC 3339 string) when it lies within the
+// last 7 days and not in the future; otherwise the server time `now`.
+func clientPlayedAt(v interface{}, now time.Time) time.Time {
+	var t time.Time
+	switch x := v.(type) {
+	case float64:
+		t = time.UnixMilli(int64(x))
+	case string:
+		if ms, err := strconv.ParseInt(x, 10, 64); err == nil {
+			t = time.UnixMilli(ms)
+		} else if p, err := time.Parse(time.RFC3339, x); err == nil {
+			t = p
+		} else {
+			return now
+		}
+	default:
+		return now
+	}
+	if t.After(now) || now.Sub(t) > maxClientPlayAge {
+		return now
+	}
+	return t
 }
 
 func clampLimit(c echo.Context, def, max int) int {

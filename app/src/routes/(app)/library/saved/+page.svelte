@@ -2,6 +2,8 @@
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import PlayAllBar from "$components/PlayAllBar/PlayAllBar.svelte";
+	import KeepOfflineButton from "$lib/components/ListItem/KeepOfflineButton.svelte";
+	import { keepableTracks } from "$lib/offlineBatch";
 	import { getFavorites, getFollows } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
 	import { IDBService } from "$lib/workers/db/service";
@@ -83,7 +85,12 @@
 	{/if}
 
 	<section>
-		<h2>Favorites</h2>
+		<div class="fav-head">
+			<h2>Favorites</h2>
+			{#if !loading && keepableTracks(items).length}
+				<KeepOfflineButton tracks={items} />
+			{/if}
+		</div>
 		{#if loading}
 			<p class="state">Loading…</p>
 		{:else if offline && items.length === 0}
@@ -116,6 +123,13 @@
 	}
 	h2 {
 		margin: 1.25rem 0 0.5rem;
+	}
+	.fav-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem 1rem;
 	}
 	.artist-row {
 		display: flex;

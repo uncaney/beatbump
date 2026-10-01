@@ -249,6 +249,9 @@
 				const r = await downloadToDevice(item);
 				notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
 			})
+			.add("Garder hors-ligne", () => {
+				void keepItemOffline(item);
+			})
 			.add("Favorite", () => {
 				saveFavourite(item);
 			})
@@ -319,7 +322,8 @@
 
 	import { goto } from "$app/navigation";
 	import { resolveArtistId, entityHref } from "$lib/local";
-	import { downloadToDevice } from "$lib/offline";
+	import { UNAVAILABLE_OFFLINE_MSG, cachedIds, downloadToDevice, networkOffline } from "$lib/offline";
+	import { keepItemOffline, rowOfflineState } from "$lib/offlineBatch";
 	import { addToQueueEnd, playNext } from "$lib/queueActions";
 	import { buildDropdown } from "$lib/configs/dropdowns.config";
 	import { APIParams, FINITE_LIST_PARAMS } from "$lib/constants";
@@ -379,6 +383,10 @@
 
 	let isHovering = false;
 
+	// V1: cached rows get the badge; offline, the others are muted and a
+	// click explains instead of failing.
+	$: offlineState = rowOfflineState(item?.videoId, $cachedIds, $networkOffline);
+
 	// Keyboard activation of the labelled thumbnail ("Lire {title}").
 	function thumbKeydown(e: KeyboardEvent) {
 		if (e.key !== "Enter" && e.key !== " ") return;
@@ -391,6 +399,10 @@
 		const target = event.target as HTMLElement;
 		// The subtitle link's text is a span inside the <a>: look up, not at the target.
 		if (target && (target.nodeName === "A" || target.closest?.("a"))) return;
+		if (offlineState === "unavailable") {
+			notify(UNAVAILABLE_OFFLINE_MSG, "error");
+			return;
+		}
 
 		Logger.dev(item);
 		const queueIndex = binarySearchIndex<typeof $list.mix>(
@@ -480,11 +492,16 @@
 <!-- svelte-ignore a11y-click-events-have-key-events -->
 <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
 <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+<!-- V1: aria-disabled marks a row that cannot play offline (harness offline_badges). -->
+<!-- svelte-ignore a11y-role-supports-aria-props -->
 <article
 	class="m-item"
 	tabindex="0"
 	class:isPlaying
 	class:release-row={currentCtx === "release"}
+	class:offline-unavailable={offlineState === "unavailable"}
+	data-offline={offlineState || undefined}
+	aria-disabled={offlineState === "unavailable" ? "true" : undefined}
 	{draggable}
 	on:click|stopPropagation={handleClick}
 	on:pointerenter={() => {
@@ -536,6 +553,26 @@
 		<div class="column">
 			<span class="title"
 				>{item.title}
+				{#if offlineState === "ready"}
+					<span
+					class="offline-badge"
+					role="img"
+					aria-label="Prêt hors-ligne"
+					title="Prêt hors-ligne"
+					data-testid="offline-badge"
+					><svg
+						viewBox="0 0 24 24"
+						width="14"
+						height="14"
+						aria-hidden="true"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.5"
+						stroke-linecap="round"
+						stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 7v9M8 12l4 4 4-4" /></svg
+					></span
+				>
+				{/if}
 				{#if item.explicit}
 					<Icon
 						name="explicit"
