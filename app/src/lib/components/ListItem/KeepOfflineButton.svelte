@@ -13,7 +13,6 @@
 	import { getOfflineTracks } from "$lib/offline";
 	import { cancelKeepJob, findKeepJob, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepProgress } from "$lib/offlineBatch";
 	import { notify } from "$lib/utils";
-	import Icon from "$components/Icon/Icon.svelte";
 
 	/** Tracks of the source, or a loader (album pages resolve their queue lazily). */
 	export let tracks: any[] = [];
