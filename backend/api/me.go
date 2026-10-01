@@ -715,19 +715,34 @@ func MeMixHandler(c echo.Context) error {
 	}
 	wg.Wait()
 	seen = map[string]bool{}
+	// c41b B6-19: one copy per normalised (artist, title) over the whole mix
+	// (seeds included), the suggested album's copy inside each pool.
+	preferred := duplicatePreferred()
+	seenKey := map[string]bool{}
+	freshKey := func(h map[string]interface{}) bool {
+		k := dupTrackKey(h)
+		if k == "" {
+			return true
+		}
+		if seenKey[k] {
+			return false
+		}
+		seenKey[k] = true
+		return true
+	}
 	for i, lid := range uniqSeeds {
 		h := results[i].hit
 		if h == nil {
 			continue
 		}
-		if !seen[lid] && !ex[lid] {
+		if !seen[lid] && !ex[lid] && freshKey(h) {
 			seen[lid] = true
 			items = append(items, localSongItem(h))
 		}
 		added := 0
-		for _, ph := range results[i].pool {
+		for _, ph := range collapseDuplicates(results[i].pool, preferred) {
 			l := mstr(ph, "lid")
-			if l == "" || seen[l] || ex[l] {
+			if l == "" || seen[l] || ex[l] || !freshKey(ph) {
 				continue
 			}
 			seen[l] = true

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -311,6 +312,7 @@ func duplicateGroups() []dupGroup {
 	groups, ok := scanDuplicateGroups()
 	if ok {
 		dupMemo, dupMemoAt = groups, now
+		setDuplicatePreferred(groups, now)
 	}
 	return groups
 }
@@ -320,6 +322,9 @@ func resetDuplicateMemo() {
 	dupMu.Lock()
 	dupMemo, dupMemoAt = nil, time.Time{}
 	dupMu.Unlock()
+	dupPrefMu.Lock()
+	dupPref, dupPrefAt = nil, time.Time{}
+	dupPrefMu.Unlock()
 }
 
 // LocalDuplicatesHandler serves GET /api/v1/local/duplicates.
@@ -377,3 +382,113 @@ func LocalDuplicatesHandler(c echo.Context) error {
 		"groups": page, "total": len(groups), "offset": off, "limit": lim,
 	})
 }
+
+// ---- one copy per track in mixes, related and Pour toi (B6-19) ----
+
+var (
+	dupPrefMu sync.Mutex
+	// dupPref is the set of suggested album ids of the last scan (only the
+	// albums that belong to a group).
+	dupPref   map[string]bool
+	dupPrefAt time.Time
+	// dupAutoRefresh is set by WarmDuplicates (main): a stale preference set
+	// then triggers one background rescan. Tests leave it off, so a sampler
+	// never starts a scan behind their back.
+	dupAutoRefresh atomic.Bool
+	dupRefreshing  atomic.Bool
+)
+
+// setDuplicatePreferred records the suggested copies of a scan.
+func setDuplicatePreferred(groups []dupGroup, at time.Time) {
+	p := map[string]bool{}
+	for _, g := range groups {
+		p[g.Suggested] = true
+	}
+	dupPrefMu.Lock()
+	dupPref, dupPrefAt = p, at
+	dupPrefMu.Unlock()
+}
+
+// WarmDuplicates runs the first duplicate scan in the background at start-up
+// and lets later samplers refresh it when it is older than dupMemoTTL.
+func WarmDuplicates() {
+	dupAutoRefresh.Store(true)
+	refreshDuplicatesAsync()
+}
+
+func refreshDuplicatesAsync() {
+	if !dupRefreshing.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer dupRefreshing.Store(false)
+		duplicateGroups()
+	}()
+}
+
+// duplicatePreferred never blocks a sampler on a scan: it answers the last
+// known suggested copies (possibly stale, nil before the first scan) and,
+// when auto refresh is on and the set is stale, starts one rescan.
+var duplicatePreferred = func() map[string]bool {
+	dupPrefMu.Lock()
+	p, at := dupPref, dupPrefAt
+	dupPrefMu.Unlock()
+	if dupAutoRefresh.Load() && (p == nil || dupMemoNow().Sub(at) >= dupMemoTTL) {
+		refreshDuplicatesAsync()
+	}
+	return p
+}
+
+// dupTrackKey is the normalised (artist, title) of a track hit, "" when the
+// title normalises to nothing (such hits are never collapsed).
+func dupTrackKey(h map[string]interface{}) string {
+	t := dupNorm(mstr(h, "title"))
+	if t == "" {
+		return ""
+	}
+	return matchNorm(mArtist(h)) + "\x00" + t
+}
+
+// collapseDuplicates keeps one track hit per normalised (artist, title):
+// the one whose album is a suggested copy (`preferred`, album id -> true)
+// when the group has one, else the first. The kept hit takes the position
+// of the first occurrence, so the caller's order (shuffle, seed first) is
+// preserved. Pure; hits without a key pass through untouched.
+func collapseDuplicates(hits []map[string]interface{}, preferred map[string]bool) []map[string]interface{} {
+	isPreferred := func(h map[string]interface{}) bool {
+		if len(preferred) == 0 {
+			return false
+		}
+		id, _, _ := trackAlbumKey(h)
+		return id != "" && preferred[id]
+	}
+	pos := map[string]int{}
+	out := make([]map[string]interface{}, 0, len(hits))
+	for _, h := range hits {
+		k := dupTrackKey(h)
+		if k == "" {
+			out = append(out, h)
+			continue
+		}
+		i, ok := pos[k]
+		if !ok {
+			pos[k] = len(out)
+			out = append(out, h)
+			continue
+		}
+		if !isPreferred(out[i]) && isPreferred(h) {
+			out[i] = h
+		}
+	}
+	return out
+}
+
+// collapseLibraryDuplicates is collapseDuplicates with the library's
+// current suggested copies.
+func collapseLibraryDuplicates(hits []map[string]interface{}) []map[string]interface{} {
+	return collapseDuplicates(hits, duplicatePreferred())
+}
+
+// dupOversample is how many more hits a sampler draws so the collapse still
+// leaves n items (duplicates are a few percent of the library).
+func dupOversample(n int) int { return n + n/4 + 1 }

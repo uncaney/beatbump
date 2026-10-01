@@ -19,6 +19,9 @@ var version = "dev"
 func main() {
 	db.InitDB()
 	downloader.StartWorker()
+	// c41b B6-19: first duplicate-albums scan in the background, so mixes
+	// know the suggested copies (refreshed every 10 min on demand).
+	api.WarmDuplicates()
 
 	e := newServer()
 	e.Logger.Fatal(e.Start(":8080"))
