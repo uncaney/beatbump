@@ -66,12 +66,20 @@
 		justify-items: flex-start;
 		visibility: visible;
 }
+/* Audit v8 TOP 3: the ellipsis never rendered. .title is nowrap inside
+   .column, a flex item of the .metadata row whose min-width defaulted to the
+   title's min-content (= the full title), so nothing ever overflowed .title
+   itself; the row clipped it flat at its edge. min-width: 0 on .column (below)
+   lets it shrink, max-width: 100% keeps .title inside it, so text-overflow
+   finally has something to clip. Artist-link tap boxes (.artists) untouched. */
 .title {
 	font-weight: 500;
 	text-overflow: ellipsis;
 	overflow: hidden;
 	white-space: nowrap;
 	display: block;
+	min-width: 0;
+	max-width: 100%;
 }
 
 .metadata {
@@ -95,7 +103,11 @@
 	display: flex;
 	flex-direction: column;
 	justify-content: center;
-overflow:hidden;
+	overflow: hidden;
+	/* Shrinkable text column (audit v8 TOP 3), see .title above. */
+	flex: 1 1 auto;
+	min-width: 0;
+	max-width: 100%;
 }
 /* Artist-link tap box (audit v5 TOP 4): the 26px span box sticks 6px above
    and below the subtitle text, but every `overflow: hidden` ancestor
