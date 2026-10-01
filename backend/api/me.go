@@ -124,6 +124,51 @@ func decodeBody(c echo.Context, v interface{}) error {
 	return json.NewDecoder(c.Request().Body).Decode(v)
 }
 
+// ---- history item slimming (K13) ----
+// A play event used to store the whole item the front sent (1-2 KB of
+// YouTube tracking blobs each) and events=1&limit=200 replayed all of it.
+// Same DROP_KEYS as app/src/lib/historyOutbox.ts, applied server side at
+// write (new events) and at read (events stored before this change).
+var historyDropKeys = []string{"loggingContext", "clickTrackingParams", "playerParams", "playlistSetVideoId", "itct", "params", "musicVideoType", "autoMixList"}
+
+const historyMaxThumbnails = 2
+
+// slimHistoryItem drops the replay-useless keys in place and keeps at most
+// historyMaxThumbnails thumbnails.
+func slimHistoryItem(m map[string]interface{}) {
+	for _, k := range historyDropKeys {
+		delete(m, k)
+	}
+	if th, ok := m["thumbnails"].([]interface{}); ok && len(th) > historyMaxThumbnails {
+		m["thumbnails"] = th[:historyMaxThumbnails]
+	}
+}
+
+// slimStoredItem applies slimHistoryItem to a stored item JSON. Rows that
+// cannot carry anything to drop are returned as-is without parsing.
+func slimStoredItem(data string) json.RawMessage {
+	needs := strings.Contains(data, `"thumbnails"`)
+	for _, k := range historyDropKeys {
+		if needs {
+			break
+		}
+		needs = strings.Contains(data, `"`+k+`"`)
+	}
+	if !needs {
+		return json.RawMessage(data)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &m); err != nil {
+		return json.RawMessage(data)
+	}
+	slimHistoryItem(m)
+	out, err := json.Marshal(m)
+	if err != nil {
+		return json.RawMessage(data)
+	}
+	return out
+}
+
 // ---- favorites ----
 func MeFavoritesHandler(c echo.Context) error {
 	pid := profileID(c)
@@ -343,6 +388,7 @@ func MeRecordPlayHandler(c echo.Context) error {
 	playedAt := stampPlayedAt(m["playedAt"], m["clientSentAt"], now)
 	delete(m, "playedAt")
 	delete(m, "clientSentAt")
+	slimHistoryItem(m) // K13: never store the tracking blobs
 	// I10: an outbox replay (several tabs, or a lost response then a retry)
 	// sends the same (ref, playedAt) again: idempotent within playDedupeWindow.
 	if clientStamped && playAlreadyRecorded(pid, ref, playedAt) {
@@ -447,7 +493,7 @@ func rehydrate(rows []struct {
 	items := make([]json.RawMessage, 0, len(rows))
 	for _, r := range rows {
 		if r.Data != "" {
-			items = append(items, json.RawMessage(r.Data))
+			items = append(items, slimStoredItem(r.Data))
 		}
 	}
 	return items
@@ -510,7 +556,7 @@ func meRecentEvents(c echo.Context, pid string, n int) error {
 		if e.Data == "" {
 			continue
 		}
-		items = append(items, json.RawMessage(e.Data))
+		items = append(items, slimStoredItem(e.Data))
 		playedAt = append(playedAt, e.PlayedAt.UnixMilli())
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "playedAt": playedAt, "events": true})
