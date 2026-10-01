@@ -45,8 +45,97 @@ const META_CACHE = "ytm-offline-meta";
 const QUOTA_KEY = "/__ytm_audio_quota__";
 const META_PREFIX = "/__ytm_meta__/";
 const DEFAULT_QUOTA = 2 * 1024 * 1024 * 1024; // ~2 GiB
-const SHELL_ASSETS = [...build, ...files, "/"];
 const ACCESS_THROTTLE_MS = 60_000; // lastAccess is rewritten at most once a minute per track
+
+// K3 (audit perf v2): the install used to precache the WHOLE build (~150
+// immutable files, 2.8 MB, 256 requests in the first 8 s of a first visit, in
+// competition with the page). Now the install only takes the shell: "/", the
+// static files, the two entry scripts and the chunks the shell HTML, the root
+// layout (node 0), the root error page (node 1) and the home route pull in,
+// read from the client manifest (entry/app.*.js carries every node's preload
+// dependency list). The rest of `build` is filled after activation in batches
+// of PRECACHE_BATCH every PRECACHE_BATCH_DELAY_MS (kept alive by the API
+// fetches of the page) and on demand by the fetch handler, so a second,
+// offline load still boots from the cache.
+const IMMUTABLE = "/_app/immutable/";
+const PRECACHE_BATCH = 10;
+const PRECACHE_BATCH_DELAY_MS = 2000;
+const BUILD_SET = new Set<string>(build);
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Cache one shell asset unless it is already there; a failing asset must not
+// abort the precache (which would leave the PWA unable to boot offline).
+async function addIfMissing(c: Cache, path: string): Promise<void> {
+	try {
+		if (await c.match(path)) return;
+		await c.add(path);
+	} catch {
+		/* ignore */
+	}
+}
+
+async function cachedText(c: Cache, path: string): Promise<string> {
+	try {
+		await addIfMissing(c, path);
+		const r = await c.match(path);
+		return r ? await r.text() : "";
+	} catch {
+		return "";
+	}
+}
+
+// The build paths the shell needs on a cold, offline boot of "/" or "/home".
+async function shellBuildAssets(c: Cache): Promise<string[]> {
+	const out = new Set<string>();
+	const entries = build.filter((p) => p.startsWith(IMMUTABLE + "entry/"));
+	entries.forEach((p) => out.add(p));
+	const html = await cachedText(c, "/");
+	for (const m of html.matchAll(/\/_app\/immutable\/[^"'\s)]+/g)) out.add(m[0]);
+	const app = entries.find((p) => /\/entry\/app\.[^/]+\.js$/.test(p));
+	const manifest = app ? await cachedText(c, app) : "";
+	if (manifest) {
+		// node id -> preload dependencies: n(()=>import("../nodes/<id>.x.js"),["../nodes/…","../chunks/…",…])
+		const deps = new Map<number, string[]>();
+		for (const m of manifest.matchAll(/import\("\.\.\/nodes\/(\d+)\.[^"]+"\),\[([^\]]*)\]/g)) {
+			deps.set(
+				Number(m[1]),
+				[...m[2].matchAll(/"\.\.\/([^"]+)"/g)].map((d) => IMMUTABLE + d[1]),
+			);
+		}
+		// route dictionary: "/":[2], "/(app)/home":[10], …
+		const wanted = new Set<number>([0, 1]);
+		for (const m of manifest.matchAll(/"([^"]*)":\[([^\]]*)\]/g)) {
+			if (m[1] !== "/" && !/\/home$/.test(m[1])) continue;
+			for (const n of m[2].matchAll(/\d+/g)) wanted.add(Number(n[0]));
+		}
+		for (const id of wanted) for (const d of deps.get(id) || []) out.add(d);
+	}
+	return [...out].filter((p) => BUILD_SET.has(p));
+}
+
+// The deferred precache of everything else in `build`, once per SW lifetime
+// (restarted lazily by the next trigger if the SW was stopped mid-way).
+let restPrecache: Promise<void> | null = null;
+let restDone = false;
+function precacheRest(): Promise<void> {
+	if (restDone) return Promise.resolve();
+	if (!restPrecache) {
+		restPrecache = (async () => {
+			const c = await caches.open(SHELL);
+			const have = new Set((await c.keys()).map((k) => new URL(k.url).pathname));
+			const todo = build.filter((p) => !have.has(p));
+			for (let i = 0; i < todo.length; i += PRECACHE_BATCH) {
+				if (i) await sleep(PRECACHE_BATCH_DELAY_MS);
+				await Promise.all(todo.slice(i, i + PRECACHE_BATCH).map((p) => addIfMissing(c, p)));
+			}
+			restDone = true;
+		})().catch(() => {
+			restPrecache = null;
+		});
+	}
+	return restPrecache;
+}
 
 // Response headers we stamp on every cached audio entry (used by list-audio + LRU).
 const H_BYTES = "X-YTM-Bytes";
@@ -59,9 +148,10 @@ declare const self: ServiceWorkerGlobalScope;
 self.addEventListener("install", (event) => {
 	event.waitUntil(
 		caches.open(SHELL).then(async (c) => {
-			// Cache each shell asset independently so one failing asset can't abort
-			// the whole precache (which would leave the PWA unable to boot offline).
-			await Promise.all(SHELL_ASSETS.map((a) => c.add(a).catch(() => {})));
+			// Shell only (K3): "/", the static files and the build assets the
+			// shell / root layout / home route need; each cached independently.
+			const shell = await shellBuildAssets(c);
+			await Promise.all([...new Set<string>(["/", ...files, ...shell])].map((a) => addIfMissing(c, a)));
 			await self.skipWaiting();
 		}).catch(() => {}),
 	);
@@ -74,6 +164,9 @@ self.addEventListener("activate", (event) => {
 			await Promise.all(keys.filter((k) => k.startsWith("ytm-shell-") && k !== SHELL).map((k) => caches.delete(k)));
 			await purgeProfileScopedApiCache(); // G16: entries stored by an older SW
 			await self.clients.claim();
+			// K3: the rest of the build, in batches, without delaying activation
+			// (a pending activate waitUntil would hold every fetch of the page).
+			void precacheRest();
 		})(),
 	);
 });
@@ -320,9 +413,21 @@ self.addEventListener("fetch", (event) => {
 
 	if (req.method !== "GET") return;
 
-	// app-shell assets → cache-first
-	if (url.origin === location.origin && (build.includes(url.pathname) || files.includes(url.pathname))) {
-		event.respondWith(caches.match(req).then((r) => r || fetch(req)));
+	// app-shell assets → cache-first; a miss (not yet precached, K3) is fetched
+	// and stored on the way so the next offline boot has it.
+	if (url.origin === location.origin && (BUILD_SET.has(url.pathname) || files.includes(url.pathname))) {
+		event.respondWith(
+			(async () => {
+				const hit = await caches.match(req);
+				if (hit) return hit;
+				const res = await fetch(req);
+				if (res.ok && BUILD_SET.has(url.pathname)) {
+					const copy = res.clone();
+					event.waitUntil(caches.open(SHELL).then((c) => c.put(req, copy)).catch(() => {}));
+				}
+				return res;
+			})(),
+		);
 		return;
 	}
 
@@ -330,6 +435,9 @@ self.addEventListener("fetch", (event) => {
 	// Profile-scoped answers (/api/v1/me/*) are NEVER cached nor replayed (G16).
 	if (url.pathname.startsWith("/api/")) {
 		const profileScoped = isProfileScopedApi(url);
+		// K3: an API call means the page is up; the deferred precache may run
+		// now, kept alive by this event (idempotent, one run per SW lifetime).
+		if (!restDone) event.waitUntil(precacheRest());
 		event.respondWith(
 			(async () => {
 				const c = await caches.open(API_CACHE);
