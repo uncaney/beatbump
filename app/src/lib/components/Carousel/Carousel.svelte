@@ -199,7 +199,7 @@
 		on:scroll={onScroll}
 		bind:this={carousel}
 		use:observer={{ items }}
-		style:--thumbnail-size={itemWidth ? `calc(${itemWidth} - 1.5em)` : undefined}
+		style:--thumbnail-size={itemWidth || undefined}
 		style:--column-width={itemWidth || undefined}
 	>
 		{#each items as item, index}
@@ -239,21 +239,29 @@
 <style lang="scss">
 	@import "./index.scss";
 
-	// Audit v7 TOP 8: when a host passes `itemWidth` (the ~560px fullscreen
-	// Related panel), the card must really take that width. CarouselItem's
-	// `article { flex: 0 1 }` collapses each card to its min-content (~139px)
-	// even though `--column-width` is set, so the 160px request only reached the
-	// thumbnail. Pin the article flex-basis + width to --column-width (this
-	// selector outranks CarouselItem's `article`), and reserve a right gutter so
-	// the last card clears the scroll arrow. Carousels without itemWidth are
-	// untouched (the class is absent).
+	// Audit v7 TOP 8 / v8 TOP 8: when a host passes `itemWidth` (the ~560px
+	// fullscreen Related panel), the card AND its cover must really take that
+	// width. CarouselItem's `article { flex: 0 1 }` collapsed each card to its
+	// min-content, and its 0.75em padding inside a border-box 160px card left a
+	// 139px cover (v8: "pochette de 139 px dans une carte de 160"). Pin the
+	// article flex-basis + width to --column-width (this selector outranks
+	// CarouselItem's `article`), drop its inline padding so --thumbnail-size
+	// (= itemWidth, see the style: binding above) is the cover's box, and space
+	// the cards with a gap instead. The right gutter (3rem = the 3rem arrow)
+	// is reserved AND masked, so the partially visible next card never shows
+	// text under the arrow; at scroll end the last card stops before the mask.
+	// Carousels without itemWidth are untouched (the class is absent).
 	.scroll.item-width {
-		scroll-padding-inline-end: 40px;
-		padding-inline-end: 2.5rem;
+		column-gap: 1.25em;
+		scroll-padding-inline-end: 3rem;
+		padding-inline-end: 3rem;
+		-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 3rem), transparent);
+		mask-image: linear-gradient(to right, #000 calc(100% - 3rem), transparent);
 
 		:global(article) {
 			flex: 0 0 var(--column-width, 160px);
 			width: var(--column-width, 160px);
+			padding-inline: 0;
 		}
 	}
 </style>

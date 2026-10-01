@@ -91,7 +91,22 @@ $focus-color: #1c1c1c;
 	}
 }
 
-button:not(.icon-btn),
+// `button:not(.icon-btn)` forces `color: #0f0f0f !important`, title-case
+// (`text-transform: capitalize`), a light background and a fixed em padding
+// on EVERY plain button in the app. Components that fully style themselves
+// (KeepOfflineButton, PlayAllBar, the home "Reprendre" pills, the fullscreen
+// artist button, "Rejouer cette journee", "Voir les N titres") carry their
+// own colour, casing and 44px touch size, which this rule overrode: they
+// rendered black-on-dark at 1.05:1 (audit v7 3.0, v8 TOP 1).
+// `.btn-reset` is the documented opt-out: a button carrying it keeps its own
+// styles (the selector below is the ONLY place the escape is needed, every
+// other rule of this file is opt-in by class). It never disables `.icon-btn`.
+// Cycle 24 put this escape in `global/stylesheet/modules/_button.scss`, which
+// is NOT loaded (nothing imports `global/stylesheet.scss`; only three partials
+// of that tree are pulled by components). This file is the live one.
+// The button-system classes (.btn-primary / .btn-secondary / .btn-ghost, end
+// of this file) opt out on their own, so they need no `.btn-reset`.
+button:not(.icon-btn):not(.btn-reset):not(.btn-primary):not(.btn-secondary):not(.btn-ghost),
 .button {
 	@extend %button-base;
 }
@@ -183,4 +198,110 @@ button.danger {
 
 :where(.squared) {
 	border-radius: v.$xs-radius !important;
+}
+
+// ============================================================================
+// Button system (audit v8 TOP 7 / 3.0). Three named classes, one shape, so a
+// screen never shows three primaries and three secondaries at once.
+//
+//   .btn-primary    white filled pill, black text. The ONE main action of a
+//                   screen: "Lire tout", "Reprendre la file", "Play Album".
+//   .btn-secondary  translucent pill (8 % white) with a 25 % white border,
+//                   inherits the panel's text colour. Every other action:
+//                   "Aléatoire", "Garder hors-ligne", "Rejouer cette journée",
+//                   "Voir les N titres", "Reprendre depuis <appareil>".
+//   .btn-ghost      text only, no fill, no border, same box. Tertiary /
+//                   dismiss actions ("Annuler" next to a running batch).
+//
+// Shared: 44px touch floor (2.75rem = 33px at the 12px mobile root, the px
+// floor wins), plain case, 999px radius, inherited font, 600 weight, inline
+// flex with a 0.4rem gap for a leading icon. They are excluded from the
+// `button:not(...)` chain above, so `.btn-reset` is optional on them; keep it
+// on components that also set their own geometry. Component styles may add
+// layout (margin, max-width, ellipsis) and states; they should not restate
+// colours.
+// Green (`$accent`, #1ed760) is a STATE colour: the playing row, the "Prêt
+// hors-ligne" badge, the active pin border. Never a button fill, a green
+// button reads as "already active". Still green at HEAD (files outside this
+// lane): "Tout lire" (library/downloads-offline/+page.svelte `.cta.primary`)
+// and the EmptyState "Explorer" CTA; move them to .btn-primary /
+// .btn-secondary and drop their `$accent !important`.
+// Usage: <button type="button" class="btn-secondary">Aléatoire</button>
+// ============================================================================
+%btn-system {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4rem;
+	box-sizing: border-box;
+	min-height: max(2.75rem, 44px);
+	padding: 0.45rem 1rem;
+	border-radius: 999px;
+	border: 1px solid transparent;
+	font: inherit;
+	font-weight: 600;
+	line-height: 1.2;
+	text-transform: none;
+	white-space: nowrap;
+	cursor: pointer;
+	-webkit-user-select: none;
+	user-select: none;
+	transition: background-color 80ms linear, border-color 80ms linear, color 80ms linear;
+	&:disabled,
+	&[aria-disabled="true"] {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+	&:focus-visible {
+		outline: 2px solid #fff;
+		outline-offset: 2px;
+	}
+}
+
+.btn-primary {
+	@extend %btn-system;
+	background: #fff;
+	border-color: #fff;
+	color: #0f0f0f;
+	@media (hover: hover) {
+		&:hover:not(:disabled) {
+			background: #e6e6e6;
+			border-color: #e6e6e6;
+		}
+	}
+	&:active:not(:disabled) {
+		background: #d4d4d4;
+		border-color: #d4d4d4;
+	}
+}
+
+.btn-secondary {
+	@extend %btn-system;
+	background: rgba(255, 255, 255, 0.08);
+	border-color: rgba(255, 255, 255, 0.25);
+	color: inherit;
+	@media (hover: hover) {
+		&:hover:not(:disabled) {
+			background: rgba(255, 255, 255, 0.14);
+			border-color: rgba(255, 255, 255, 0.4);
+		}
+	}
+	&:active:not(:disabled) {
+		background: rgba(255, 255, 255, 0.2);
+	}
+}
+
+.btn-ghost {
+	@extend %btn-system;
+	background: transparent;
+	border-color: transparent;
+	color: inherit;
+	@media (hover: hover) {
+		&:hover:not(:disabled) {
+			background: rgba(255, 255, 255, 0.08);
+		}
+	}
+	&:active:not(:disabled) {
+		background: rgba(255, 255, 255, 0.14);
+	}
 }

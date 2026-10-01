@@ -1172,6 +1172,12 @@
 		text-align: start;
 		margin-inline: 0;
 	}
+	// Audit v8 TOP 8 / 3.2: the ProgressBar times ("0:46") rendered at 8.55px
+	// on the 12px mobile root. Floor them from the panel (ProgressBar is shared
+	// with the mini-bar and keeps its own scale there).
+	.container :global(.timestamp) {
+		font-size: max(0.6875rem, 11px);
+	}
 	.context-return {
 		font-size: max(0.75rem, 11px);
 		padding: 0.2em 0.7em;

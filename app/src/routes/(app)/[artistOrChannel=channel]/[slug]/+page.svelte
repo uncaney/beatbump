@@ -156,7 +156,7 @@
 					{#if seeAllUrl && !allSongs && songsTotal > (songs?.items?.length ?? 0)}
 						<button
 							type="button"
-							class="see-all-titles"
+							class="see-all-titles btn-reset btn-secondary"
 							data-testid="see-all-titles"
 							disabled={loadingAll}
 							on:click={showAllSongs}
@@ -232,19 +232,12 @@
 		margin-bottom: 1rem;
 	}
 
-	.see-all-titles {
-		min-height: 2.5rem;
-		padding: 0.45rem 1rem;
-		border-radius: 2rem;
-		border: 1px solid rgba(255, 255, 255, 0.25);
-		background: rgba(255, 255, 255, 0.08);
-		color: inherit;
-		font-weight: 600;
-		cursor: pointer;
-		&:disabled {
-			opacity: 0.6;
-			cursor: progress;
-		}
+	// Audit v8 TOP 1: the global `button:not(.icon-btn)` rule gave it black
+	// text on the translucent pill (1.05:1) and title-case. Colour, plain case
+	// and the 44px floor come from .btn-secondary (global/redesign/modules/
+	// _button.scss); only the busy state lives here.
+	.see-all-titles:disabled {
+		cursor: progress;
 	}
 
 	main {

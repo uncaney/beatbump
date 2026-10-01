@@ -12,6 +12,7 @@
 	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
 	import { clockLabel, fetchRemoteResume, restoreRemoteResume } from "$lib/stores/nowPlayingSync";
 	import { AudioPlayer } from "$lib/player";
+	import list from "$lib/stores/list";
 	import { get } from "svelte/store";
 
 	const MAX = 20;
@@ -23,6 +24,19 @@
 	// C1: the saved queue ("Remember Last Track"), resumed where it stopped.
 	let saved: ResumeState | null = null;
 	$: savedTrack = saved ? saved.mix[saved.position] : null;
+	// Audit v8 TOP 5 / 3.1: the pill showed while the very same queue was
+	// already loaded, even playing ("Reprendre la file : Aerodynamic (1/50)"
+	// next to a mini-bar playing 2/50 of that file). The saved state IS the
+	// session's own queue (resumeState writes it every 5 s), so compare it to
+	// the live session: same length, same first and last videoId = same queue.
+	// Shown only while paused and when the saved queue is not the loaded one;
+	// `$paused` drops it the moment playback starts, without a navigation.
+	function isCurrentQueue(s: ResumeState | null, mix: unknown[] | null | undefined): boolean {
+		if (!s || !Array.isArray(mix) || !mix.length || mix.length !== s.mix.length) return false;
+		const id = (row: unknown) => (row && typeof row === "object" ? (row as { videoId?: unknown }).videoId : undefined);
+		return id(mix[0]) === id(s.mix[0]) && id(mix[mix.length - 1]) === id(s.mix[s.mix.length - 1]);
+	}
+	$: showSavedPill = !!savedTrack && $paused && !isCurrentQueue(saved, $list?.mix);
 	const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 	let resuming = false;
 	async function resumeQueue() {
@@ -130,7 +144,7 @@
 	});
 </script>
 
-{#if resume.length > 0 || savedTrack || remoteTrack}
+{#if resume.length > 0 || showSavedPill || remoteTrack}
 	<section
 		class="home-row"
 		data-row="reprendre"
@@ -139,7 +153,7 @@
 			<div class="resume-queue">
 				<button
 					type="button"
-					class="btn-reset resume-remote"
+					class="btn-reset btn-secondary resume-remote"
 					data-testid="resume-remote"
 					disabled={restoringRemote}
 					on:click={resumeRemote}
@@ -166,11 +180,11 @@
 				</button>
 			</div>
 		{/if}
-		{#if savedTrack}
+		{#if showSavedPill && savedTrack}
 			<div class="resume-queue">
 				<button
 					type="button"
-					class="btn-reset"
+					class="btn-reset btn-primary"
 					data-testid="resume-queue"
 					disabled={resuming}
 					on:click={resumeQueue}
@@ -234,27 +248,16 @@
 		   part of the "Reprendre" row, not floating against the edge. */
 		padding: 0.5em 1rem 0;
 	}
-	/* btn-reset: the pill keeps its own white colour (it was black-on-dark under
-	   the global button rule), plain case, and a 44px touch target on phones. */
+	/* Colours, 44px floor and plain case come from the button system
+	   (.btn-primary for the local queue, global/redesign/modules/_button.scss);
+	   only the long-label ellipsis and the busy cursor live here. */
 	.resume-queue button {
 		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		display: inline-flex;
-		align-items: center;
-		min-height: max(2.75rem, 44px);
-		padding: 0.55em 1.1em;
-		border-radius: 999px;
-		border: 1px solid #fff;
-		background: #fff;
-		color: #0f0f0f;
-		font-weight: 600;
-		text-transform: none;
-		cursor: pointer;
 	}
 	.resume-queue button:disabled {
-		opacity: 0.6;
 		cursor: progress;
 	}
 	/* Audit v7 TOP 9: the remote-resume card is "another device", not the local
@@ -262,12 +265,10 @@
 	   card, left-aligned, led by a device glyph so it reads as a cross-device
 	   hand-off. Keeps [data-testid=resume-remote] and the full sentence text. */
 	.resume-queue button.resume-remote {
+		/* .btn-secondary colours; card radius and sentence weight are its own. */
 		justify-content: flex-start;
 		gap: 0.5rem;
-		background: rgba(255, 255, 255, 0.08);
-		border: 1px solid rgba(255, 255, 255, 0.28);
 		border-radius: 0.9rem;
-		color: #fff;
 		font-weight: 500;
 	}
 	.resume-remote .rr-device {

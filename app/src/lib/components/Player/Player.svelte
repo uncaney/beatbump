@@ -661,7 +661,8 @@
 	// P2 context subtitle: desktop mini-bar only (no room on mobile).
 	.now-playing-context {
 		display: none;
-		font-size: 11px;
+		// Audit v8 TOP 8: 11px context line on the desktop mini-bar; 12px floor.
+		font-size: max(0.75rem, 12px);
 		color: rgba(255, 255, 255, 0.55);
 		white-space: nowrap;
 		overflow: hidden;

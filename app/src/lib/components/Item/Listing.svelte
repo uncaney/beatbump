@@ -45,6 +45,9 @@
 	import type { Item } from "$lib/types";
 	import { IsoBase64, Logger, filter, notify } from "$lib/utils";
 	import { coverLabel, hueFor, initials } from "$lib/utils/initials";
+	// Audit v8 TOP 2: /library/recent rows ended with an orphan " • " (the year
+	// run is dropped by the history serialiser, the separator stays).
+	import { trimSeparatorRuns } from "$lib/utils/subtitleRuns";
 	import {
 		showAddToPlaylistPopper,
 		showGroupSessionCreator,
@@ -461,7 +464,7 @@
 				</p>
 				{#if isArtist}
 					<p class="artist-stats">
-						{#each data.subtitle as subtitle}
+						{#each trimSeparatorRuns(data.subtitle) as subtitle}
 							{subtitle.text}
 						{/each}
 					</p>
@@ -474,7 +477,7 @@
 				{:else}
 					<p class="text-artist secondary">
 						{#if data.subtitle}
-							{#each data?.subtitle as artist}
+							{#each trimSeparatorRuns(data.subtitle) as artist}
 								{#if !artist.pageType}
 									{artist.text}
 								{:else if artist.pageType.includes("ALBUM")}

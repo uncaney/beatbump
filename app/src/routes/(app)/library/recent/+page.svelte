@@ -111,7 +111,7 @@
 						<span class="day-count">{g.items.length} titre{g.items.length > 1 ? "s" : ""}</span>
 						<button
 							type="button"
-							class="replay"
+							class="replay btn-reset btn-secondary"
 							data-testid="replay-day"
 							disabled={replaying !== ""}
 							on:click={() => replayDay(g)}>Rejouer cette journée</button
@@ -192,19 +192,14 @@
 		color: #999;
 		font-size: 0.9em;
 	}
+	// Audit v8 TOP 1 / 3.5: "Rejouer Cette Journee" rendered black on the dark
+	// pill (1.05:1), title-case, 27px tall, under the global button rule.
+	// Colour, plain case and the 44px floor come from .btn-secondary
+	// (global/redesign/modules/_button.scss); only layout + busy state here.
 	.replay {
 		margin-left: auto;
-		min-height: 2.25rem;
-		padding: 0.35rem 0.9rem;
-		border-radius: 2rem;
-		border: 1px solid rgba(255, 255, 255, 0.25);
-		background: rgba(255, 255, 255, 0.08);
-		color: inherit;
-		font-weight: 600;
-		cursor: pointer;
 	}
 	.replay:disabled {
-		opacity: 0.6;
 		cursor: progress;
 	}
 	.state {

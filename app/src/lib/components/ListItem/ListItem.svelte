@@ -8,6 +8,9 @@
 	lang="ts"
 >
     import {APIClient} from "$lib/api";
+    // Audit v8 TOP 2: a restored queue keeps " • " runs whose neighbour run
+    // was dropped, so every row ended with an orphan "•". Trim at render time.
+    import { trimSeparatorRuns } from "$lib/utils/subtitleRuns";
 
 	type StoreSubscriptions = {
 		$startIndex?: number;
@@ -602,7 +605,7 @@
 			</span>
 			<div class="artists secondary">
 				{#if Array.isArray(item.subtitle)}
-					{#each item.subtitle as subtitle}
+					{#each trimSeparatorRuns(item.subtitle) as subtitle}
 						{#if subtitle?.browseId}
 							<!-- Hit area = the text span only (see .artists > a in index.scss):
 							     a tap on the wrapped subtitle line plays the row. -->

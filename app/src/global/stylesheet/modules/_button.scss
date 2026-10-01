@@ -1,3 +1,10 @@
+// NOT LOADED (cycle 26 / c26a): nothing imports `global/stylesheet.scss` or
+// `global/stylesheet/modules`; the app loads `global/redesign/main.scss`
+// (routes/+layout.svelte). Only `stylesheet/components/_player.scss`,
+// `_carousel.scss` and `base/mixins` are pulled by components. The live button
+// rules, the `.btn-reset` escape and the `btn-primary/secondary/ghost` system
+// live in `global/redesign/modules/_button.scss`. Kept only so that
+// `stylesheet/modules/_modules.scss` still resolves; edit the redesign copy.
 @use "../base/variables" as v;
 @use "sass:color";
 
