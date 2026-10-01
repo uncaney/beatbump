@@ -43,6 +43,7 @@ const ACCESS_THROTTLE_MS = 60_000; // lastAccess is rewritten at most once a min
 const H_BYTES = "X-YTM-Bytes";
 const H_VIDEO = "X-YTM-VideoId";
 const H_AT = "X-YTM-Cached-At";
+const H_PINNED = "X-YTM-Pinned"; // "1" = pinned by the user, never evicted by the LRU
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -360,7 +361,7 @@ async function setQuota(bytes: number): Promise<number> {
 	return q;
 }
 
-type Entry = { url: string; videoId: string; bytes: number; at: number; lastAccess: number; contentType: string };
+type Entry = { url: string; videoId: string; bytes: number; at: number; lastAccess: number; contentType: string; pinned: boolean };
 
 // Every audio entry with its size, cached-at and last-access times (from the
 // meta index when the entry has a videoId, else from its headers).
@@ -390,6 +391,7 @@ async function listEntries(c: Cache): Promise<Entry[]> {
 			at: sameEntry && meta!.at ? meta!.at : at,
 			lastAccess: sameEntry && meta!.lastAccess ? meta!.lastAccess : at,
 			contentType: r.headers.get("Content-Type") || (r.type === "opaque" ? "opaque" : ""),
+			pinned: r.headers.get(H_PINNED) === "1",
 		});
 	}
 	return out;
@@ -397,7 +399,8 @@ async function listEntries(c: Cache): Promise<Entry[]> {
 
 // The entry the page is currently playing (message "now-playing"): never evicted.
 let nowPlaying: { url: string; videoId: string } = { url: "", videoId: "" };
-function isProtected(e: { url: string; videoId: string }, keep: string): boolean {
+function isProtected(e: { url: string; videoId: string; pinned?: boolean }, keep: string): boolean {
+	if (e.pinned) return true; // pinned by the user (X-YTM-Pinned): only an explicit uncache removes it
 	if (keep && e.url === keep) return true;
 	if (nowPlaying.url && e.url === nowPlaying.url) return true;
 	if (nowPlaying.videoId && e.videoId && e.videoId === nowPlaying.videoId) return true;
@@ -639,6 +642,27 @@ self.addEventListener("message", (event) => {
 		}
 		nowPlaying = { url, videoId: typeof data.videoId === "string" ? data.videoId : "" };
 		if (nowPlaying.videoId) touch(nowPlaying.videoId, null);
+		return;
+	}
+	// page -> SW { type: "pin-audio", videoId, pinned }  ->  { type: "audio-pinned", videoId, pinned, ok }
+	// Re-puts the cached response with the X-YTM-Pinned header; pinned entries are never evicted.
+	if (data.type === "pin-audio" && typeof data.videoId === "string") {
+		const videoId = data.videoId as string;
+		const pinned = !!data.pinned;
+		ev.waitUntil(
+			(async () => {
+				const c = await caches.open(AUDIO_CACHE);
+				const e = (await listEntries(c)).find((x) => x.videoId === videoId);
+				const r = e ? await c.match(e.url) : undefined;
+				if (!e || !r) return reply(ev, { type: "audio-pinned", videoId, pinned, ok: false });
+				const headers = new Headers(r.headers);
+				if (pinned) headers.set(H_PINNED, "1");
+				else headers.delete(H_PINNED);
+				const body = await r.arrayBuffer();
+				await c.put(e.url, new Response(body, { status: r.status, statusText: r.statusText, headers }));
+				return reply(ev, { type: "audio-pinned", videoId, pinned, ok: true });
+			})().catch(() => reply(ev, { type: "audio-pinned", videoId, pinned, ok: false })),
+		);
 		return;
 	}
 	if (data.type === "list-audio") {

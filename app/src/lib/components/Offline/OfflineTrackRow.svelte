@@ -65,6 +65,16 @@
 		</p>
 	</div>
 	<button
+		type="button"
+		class="btn pin"
+		class:on={!!track._pinned}
+		aria-pressed={!!track._pinned}
+		aria-label={track._pinned ? "Désépingler" : "Épingler hors-ligne"}
+		title={track._pinned ? "Désépingler (peut être évincé)" : "Épingler hors-ligne (jamais évincé)"}
+		on:click|stopPropagation={() => dispatch("pin", track)}>
+		<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill={track._pinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="2"><path d="M16 3l5 5-4 1-5 5 1 5-3 3-4-6-4 4-1-1 4-4-6-4 3-3 5 1 5-5z"/></svg>
+	</button>
+	<button
 		class="rm"
 		type="button"
 		title="Retirer du cache"
@@ -209,5 +219,8 @@
 		.sub {
 			white-space: normal;
 		}
+	}
+	.pin.on {
+		color: #1ed760;
 	}
 </style>

@@ -52,7 +52,7 @@ function patch(videoId: string, fields: Partial<OfflineTrack>) {
 // album, a couple of thumbnails, length, track number) plus our own fields.
 // Full Beatbump items (subtitle runs, loggingContext, …) weigh 2-3 KB each and
 // blow the localStorage cap around 2 000 tracks.
-const KEEP_KEYS = ["title", "videoId", "artistInfo", "album", "length", "index", "playlistId", "_offlineUrl", "_cached", "_bytes", "_at", "_evicted"] as const;
+const KEEP_KEYS = ["title", "videoId", "artistInfo", "album", "length", "index", "playlistId", "_offlineUrl", "_cached", "_bytes", "_at", "_evicted", "_pinned"] as const;
 export function slimTrack(item: any): OfflineTrack {
 	const out: Record<string, any> = {};
 	for (const k of KEEP_KEYS) if (item && item[k] !== undefined) out[k] = item[k];
@@ -238,9 +238,27 @@ export async function swRequest<T = any>(msg: Record<string, unknown>, replyType
 		sw.postMessage(msg);
 	});
 }
-export type AudioListEntry = { url: string; videoId: string; bytes: number; at: number; lastAccess?: number; contentType: string };
+export type AudioListEntry = { url: string; videoId: string; bytes: number; at: number; lastAccess?: number; contentType: string; pinned?: boolean };
 export function listCachedAudio() {
 	return swRequest<{ type: "audio-list"; entries: AudioListEntry[]; total: number; quota: number }>({ type: "list-audio" }, "audio-list");
+}
+/**
+ * Pin (or unpin) a cached track: the service worker stamps X-YTM-Pinned on the
+ * entry and never evicts it; the local list mirrors the flag (`_pinned`).
+ */
+export async function pinOffline(item: { videoId?: string }, pinned: boolean): Promise<boolean> {
+	const videoId = item && item.videoId ? String(item.videoId) : "";
+	if (!videoId) return false;
+	const r = await swRequest<{ type: "audio-pinned"; ok: boolean }>({ type: "pin-audio", videoId, pinned }, "audio-pinned");
+	const ok = !!(r && r.ok);
+	if (ok) {
+		try {
+			write(read().map((t) => (t.videoId === videoId ? { ...t, _pinned: pinned } : t)));
+		} catch {
+			/* list write best effort */
+		}
+	}
+	return ok;
 }
 export function setAudioQuota(bytes: number) {
 	return swRequest<{ type: "audio-quota"; quota: number }>({ type: "set-audio-quota", bytes }, "audio-quota");
@@ -312,6 +330,7 @@ export async function reconcileOfflineList(): Promise<OfflineTrack[] | null> {
 		const hit = byId.get(t.videoId) || (t._offlineUrl ? byUrl.get(ackKey(t._offlineUrl)) : undefined);
 		if (hit) {
 			t._cached = true;
+			t._pinned = !!hit.pinned;
 			if (t._evicted) delete t._evicted;
 			if (hit.url) t._offlineUrl = hit.url;
 			if (hit.bytes > 0) t._bytes = hit.bytes;

@@ -25,6 +25,7 @@
 
 	let imgBroken = false;
 	$: count = album.tracks.length;
+	$: allPinned = album.tracks.length > 0 && album.tracks.every((t: any) => !!t._pinned);
 	$: size = formatBytes(album.bytes);
 	$: isActive = !!activeId && album.tracks.some((t) => t.videoId === activeId);
 	$: toggleLabel = open ? "Replier l'album" : "Déplier l'album";
@@ -102,6 +103,15 @@
 					size="1.1em"
 				/>
 			</button>
+			<button
+				type="button"
+				class="btn pin"
+				class:on={allPinned}
+				aria-pressed={allPinned}
+				aria-label={allPinned ? "Désépingler l'album" : "Épingler l'album hors-ligne"}
+				on:click={() => dispatch("pin", { tracks: album.tracks, pinned: !allPinned })}>
+				<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill={allPinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="2"><path d="M16 3l5 5-4 1-5 5 1 5-3 3-4-6-4 4-1-1 4-4-6-4 3-3 5 1 5-5z"/></svg>
+			</button>
 		</div>
 	</div>
 	{#if open}
@@ -114,6 +124,7 @@
 					active={t.videoId === activeId}
 					on:play={() => dispatch("play", { tracks: album.tracks, index: i })}
 					on:remove={(e) => dispatch("remove", e.detail)}
+					on:pin={(e) => dispatch("pin", e.detail)}
 				/>
 			{/each}
 		</div>
@@ -304,5 +315,8 @@
 		.actions {
 			gap: 0.25rem;
 		}
+	}
+	.pin.on {
+		color: #1ed760;
 	}
 </style>

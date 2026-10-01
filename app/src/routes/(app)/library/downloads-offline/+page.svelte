@@ -15,7 +15,7 @@
 	import AlbumCard from "$components/Offline/AlbumCard.svelte";
 	import OfflineTrackRow from "$components/Offline/OfflineTrackRow.svelte";
 	import MixtapeSheet from "$components/Offline/MixtapeSheet.svelte";
-	import { getOfflineTracks, listCachedAudio, removeOffline, reconcileOfflineList } from "$lib/offline";
+	import { getOfflineTracks, listCachedAudio, removeOffline, reconcileOfflineList, pinOffline } from "$lib/offline";
 	import {
 		formatBytes,
 		groupByAlbum,
@@ -169,6 +169,17 @@
 	function remove(t: any) {
 		removeOffline(t);
 		refresh();
+	}
+
+	// Pin: a track (toggle) or an album ({ tracks, pinned }); pinned entries are never evicted.
+	async function pin(d: any) {
+		const items: any[] = Array.isArray(d?.tracks) ? d.tracks : [d];
+		const pinned = Array.isArray(d?.tracks) ? !!d.pinned : !d?._pinned;
+		let ok = 0;
+		for (const t of items) if (await pinOffline(t, pinned)) ok++;
+		await refresh();
+		if (!ok) notify("Ce morceau n'est pas encore dans le cache", "error");
+		else notify(pinned ? (ok > 1 ? `${ok} morceaux épinglés hors-ligne` : "Épinglé hors-ligne : jamais évincé") : (ok > 1 ? `${ok} morceaux désépinglés` : "Désépinglé"), "success");
 	}
 </script>
 
@@ -331,6 +342,7 @@
 						bind:open={openAlbums[album.key]}
 						on:play={(e) => start(e.detail.tracks, e.detail.index, { shuffle: e.detail.shuffle })}
 						on:remove={(e) => remove(e.detail)}
+						on:pin={(e) => pin(e.detail)}
 					/>
 				{/each}
 			</section>
@@ -417,6 +429,7 @@
 						active={t.videoId === activeId}
 						on:play={() => start(recent, i)}
 						on:remove={(e) => remove(e.detail)}
+						on:pin={(e) => pin(e.detail)}
 					/>
 				{/each}
 			</section>
