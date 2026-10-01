@@ -301,6 +301,22 @@
 			: srcImg.url;
 
 	let pressing = false;
+
+	// Accessible name of the thumbnail (the permanent play badge is a CSS
+	// ::after on .img-container, see global/redesign/modules/_item.scss; the
+	// row's click is the real action). Audit v3 1.7 / TOP 10 #8.
+	$: isPlaylistRow = !!data?.endpoint?.pageType?.includes("PLAYLIST") || !!data?.type?.includes("playlist");
+	$: thumbLabel = isArtist
+		? `Ouvrir ${data?.title ?? ""}`
+		: isPlaylistRow
+		? `Ouvrir la playlist ${data?.title ?? ""}`
+		: `Lire ${data?.title ?? ""}`;
+	const thumbKeydown = (e: KeyboardEvent) => {
+		if (e.key !== "Enter" && e.key !== " ") return;
+		e.preventDefault();
+		e.stopPropagation();
+		void clickHandler(e as unknown as { target: { nodeName: string } });
+	};
 </script>
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -349,13 +365,17 @@
 			<div
 				class="img-container"
 				class:artist-img={roundThumbnail}
+				role="button"
+				tabindex="0"
+				aria-label={thumbLabel}
+				on:keydown={thumbKeydown}
 			>
 				{#if loading}
 					<Loading size="3em" />
 				{/if}
 				<div class="thumbnail">
 					<img
-						alt="thumbnail"
+						alt=""
 						width={srcImg.width}
 						height={srcImg.height}
 						src={srcImg.url}
@@ -669,6 +689,12 @@
 				image-rendering: crisp-edges;
 			}
 		}
+	}
+
+	// Keyboard focus on the labelled thumbnail button ("Lire {title}").
+	.img-container:focus-visible {
+		outline: 2px solid #fff;
+		outline-offset: 2px;
 	}
 
 	// Round thumbnail: artists and channels only (see hasRoundThumbnail). Albums,

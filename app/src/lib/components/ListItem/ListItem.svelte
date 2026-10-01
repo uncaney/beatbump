@@ -503,14 +503,29 @@
 	{/if}
 	<div class="metadata">
 		{#if Array.isArray(item.thumbnails) && item.thumbnails.length}
-			<div class="thumbnail">
+			<!-- The permanent play badge on touch screens is a CSS ::after of
+			     .thumbnail (index.scss); the thumbnail carries the accessible
+			     name "Lire {title}" and plays the row from the keyboard too
+			     (audit v3 1.7 / TOP 10 #8). -->
+			<div
+				class="thumbnail"
+				role="button"
+				tabindex="0"
+				aria-label={`Lire ${item.title ?? ""}`}
+				on:keydown={(e) => {
+					if (e.key !== "Enter" && e.key !== " ") return;
+					e.preventDefault();
+					e.stopPropagation();
+					void handleClick(e as unknown as MouseEvent);
+				}}
+			>
 				<img
 					decoding="async"
 					loading="lazy"
 					src={item.thumbnails[0]?.url}
 					width={item.thumbnails[0]?.width}
 					height={item.thumbnails[0]?.height}
-					alt="thumbnail"
+					alt=""
 				/>
 			</div>
 		{/if}
