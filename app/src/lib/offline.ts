@@ -20,6 +20,8 @@ export type OfflineTrack = Record<string, any> & {
 	_at: number;
 	_cached?: boolean;
 	_bytes?: number;
+	/** Stable (/localf, /aud) entry the SW no longer holds: re-downloadable via recacheEvicted(). */
+	_evicted?: boolean;
 };
 export type OfflineResult = { ok: boolean; reason?: string; fellBack?: boolean; bytes?: number; cached?: boolean };
 
@@ -50,7 +52,7 @@ function patch(videoId: string, fields: Partial<OfflineTrack>) {
 // album, a couple of thumbnails, length, track number) plus our own fields.
 // Full Beatbump items (subtitle runs, loggingContext, …) weigh 2-3 KB each and
 // blow the localStorage cap around 2 000 tracks.
-const KEEP_KEYS = ["title", "videoId", "artistInfo", "album", "length", "index", "playlistId", "_offlineUrl", "_cached", "_bytes", "_at"] as const;
+const KEEP_KEYS = ["title", "videoId", "artistInfo", "album", "length", "index", "playlistId", "_offlineUrl", "_cached", "_bytes", "_at", "_evicted"] as const;
 export function slimTrack(item: any): OfflineTrack {
 	const out: Record<string, any> = {};
 	for (const k of KEEP_KEYS) if (item && item[k] !== undefined) out[k] = item[k];
@@ -310,13 +312,20 @@ export async function reconcileOfflineList(): Promise<OfflineTrack[] | null> {
 		const hit = byId.get(t.videoId) || (t._offlineUrl ? byUrl.get(ackKey(t._offlineUrl)) : undefined);
 		if (hit) {
 			t._cached = true;
+			if (t._evicted) delete t._evicted;
 			if (hit.url) t._offlineUrl = hit.url;
 			if (hit.bytes > 0) t._bytes = hit.bytes;
 			if (!t._at && hit.at) t._at = hit.at;
 		} else {
 			t._cached = false;
 			const recent = typeof t._at === "number" && now - t._at < RECONCILE_GRACE_MS;
-			if (!isStableAudioUrl(t._offlineUrl) && !recent) continue;
+			const stable = isStableAudioUrl(t._offlineUrl);
+			if (!stable && !recent) continue;
+			// Stable URL but gone from the cache and not in flight: the SW evicted
+			// it (quota). Keep the entry, flagged, so the Offline page can tell
+			// "to re-download" from "caching in progress" (F5); recacheEvicted()
+			// re-runs the download for them.
+			if (stable && !recent) t._evicted = true;
 		}
 		out.push(t);
 	}
@@ -374,6 +383,7 @@ export function cacheTrackOffline(item: any, url: string): Promise<OfflineResult
 				_at: Date.now(),
 				_cached: prev && prev._offlineUrl === url ? prev._cached : false,
 				_bytes: prev && prev._offlineUrl === url ? prev._bytes : undefined,
+				_evicted: undefined, // a (re)download is in flight again
 			});
 			list.unshift(entry);
 			write(list);
@@ -415,6 +425,21 @@ export function installPrefetchHook() {
 	});
 }
 installPrefetchHook();
+
+/**
+ * Re-download every entry flagged `_evicted` by reconcileOfflineList (stable
+ * /localf or /aud URL the service worker no longer holds). Sequential so a long
+ * list does not flood the SW; never throws. Returns how many were attempted / OK.
+ */
+export async function recacheEvicted(): Promise<{ total: number; ok: number }> {
+	const targets = read().filter((t) => t._evicted === true && isStableAudioUrl(t._offlineUrl));
+	let ok = 0;
+	for (const t of targets) {
+		const r = await cacheTrackOffline(t, t._offlineUrl);
+		if (r.ok) ok++;
+	}
+	return { total: targets.length, ok };
+}
 
 /**
  * Explicit "save for offline" (alias of cacheTrackOffline with URL resolution).
