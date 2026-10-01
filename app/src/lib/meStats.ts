@@ -91,3 +91,62 @@ export function clockSummary(minutes: number[][] | undefined | null): string {
 	});
 	return `Tu écoutes surtout ${DAY_PARTS[part][0]}, le ${WEEKDAYS_FR[day]}.`;
 }
+
+export interface DecadeRow {
+	decade: number;
+	minutes: number;
+	plays: number;
+}
+export interface Decades {
+	days: number;
+	decades: DecadeRow[]; // oldest first
+	plays: number;
+	localPlays: number;
+	matchedPlays: number;
+}
+export async function getDecades(days = 365): Promise<Decades> {
+	return (await APIClient.fetch(`/api/v1/me/stats/decades?days=${days}`)).json();
+}
+
+export interface YearTop {
+	key: string;
+	title: string;
+	artist?: string;
+	artistId?: string;
+	albumId?: string;
+	count: number;
+}
+export interface YearView {
+	year: number;
+	tz: number;
+	months: number[]; // 12, minutes, January first
+	plays: number;
+	minutes: number;
+	estimated: boolean;
+	distinctTracks: number;
+	distinctArtists: number;
+	distinctAlbums: number;
+	topArtist: YearTop | null;
+	topAlbum: YearTop | null;
+	newArtists: number;
+	newArtistNames: string[];
+}
+export async function getYear(year?: number): Promise<YearView> {
+	const y = year ? `year=${year}&` : "";
+	return (await APIClient.fetch(`/api/v1/me/stats/year?${y}tz=${tzParam()}`)).json();
+}
+
+export const MONTHS_FR = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."] as const;
+
+/** "années 90", "années 2000", "années 2010" (French usage for a decade). */
+export function decadeLabel(decade: number): string {
+	if (decade >= 1900 && decade < 2000) return `années ${String(decade).slice(2)}`;
+	return `années ${decade}`;
+}
+
+/** Share of each decade in the matched minutes, in whole percents (sum may be 99-101). */
+export function decadeShares(rows: DecadeRow[]): { decade: number; pct: number }[] {
+	const total = rows.reduce((a, r) => a + (r.minutes || 0), 0);
+	if (!(total > 0)) return [];
+	return rows.map((r) => ({ decade: r.decade, pct: Math.round(((r.minutes || 0) / total) * 100) }));
+}

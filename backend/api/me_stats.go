@@ -103,6 +103,22 @@ func itemAlbum(data string) string {
 	return strings.TrimSpace(m.Album.Text)
 }
 
+// itemAlbumID reads item.album.browseId from a stored item JSON ("" when absent).
+func itemAlbumID(data string) string {
+	if data == "" {
+		return ""
+	}
+	var m struct {
+		Album *struct {
+			BrowseID string `json:"browseId"`
+		} `json:"album"`
+	}
+	if json.Unmarshal([]byte(data), &m) != nil || m.Album == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.Album.BrowseID)
+}
+
 // playArtist reads (artist name, artist id) from a stored item JSON.
 func playArtist(data string) (string, string) {
 	if data == "" {
@@ -165,6 +181,7 @@ type topEntry struct {
 	Title    string          `json:"title"`
 	Artist   string          `json:"artist,omitempty"`
 	ArtistID string          `json:"artistId,omitempty"`
+	AlbumID  string          `json:"albumId,omitempty"` // 41A: albums only, item.album.browseId (lb-... for local)
 	Count    int             `json:"count"`
 	Item     json.RawMessage `json:"item,omitempty"`
 }
@@ -212,10 +229,13 @@ func aggregateBy(rows []playRow, by string, limit int) []topEntry {
 			k := strings.ToLower(album) + "\x00" + strings.ToLower(artist)
 			if i, ok := idx[k]; ok {
 				out[i].Count += r.Cnt
+				if out[i].AlbumID == "" {
+					out[i].AlbumID = itemAlbumID(r.Data)
+				}
 				continue
 			}
 			idx[k] = len(out)
-			out = append(out, topEntry{Key: album, Title: album, Artist: artist, Count: r.Cnt})
+			out = append(out, topEntry{Key: album, Title: album, Artist: artist, AlbumID: itemAlbumID(r.Data), Count: r.Cnt})
 		}
 	default: // tracks
 		for _, r := range rows {
@@ -283,7 +303,7 @@ type statsSummary struct {
 	DistinctTracks  int     `json:"distinctTracks"`
 	DistinctArtists int     `json:"distinctArtists"`
 	DistinctAlbums  int     `json:"distinctAlbums"` // ST1: distinct albums played in the window
-	TopHour         int     `json:"topHour"` // -1 when there are no plays
+	TopHour         int     `json:"topHour"`        // -1 when there are no plays
 	Local           int     `json:"local"`
 	YouTube         int     `json:"youtube"`
 	Hours           [24]int `json:"hours"`

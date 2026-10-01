@@ -184,6 +184,9 @@ func newServer() *echo.Echo {
 	me.GET("/stats/streaks", api.MeStreaksHandler)
 	// 41A (B6-22): 7 x 24 minutes (Monday first, viewer-local hours), last 90 days.
 	me.GET("/stats/clock", api.MeClockHandler)
+	// 41A (B6-22): minutes per release decade (local tracks) and "Ton année".
+	me.GET("/stats/decades", api.MeDecadesHandler)
+	me.GET("/stats/year", api.MeYearHandler)
 	// BI3: RFC 4180 export of the profile history (last 10 000 plays).
 	me.GET("/stats/export.csv", api.MeStatsExportCSVHandler)
 	me.GET("/never-played", api.MeNeverPlayedHandler)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockSummary, localDateKey, streakLabel, streakNeedsToday } from "./meStats";
+import { clockSummary, decadeLabel, decadeShares, localDateKey, streakLabel, streakNeedsToday } from "./meStats";
 
 describe("streakLabel", () => {
 	it("says the run and the record", () => {
@@ -40,5 +40,26 @@ describe("clockSummary", () => {
 		expect(clockSummary(empty())).toBe("");
 		expect(clockSummary(null)).toBe("");
 		expect(clockSummary([[1]])).toBe("");
+	});
+});
+
+describe("decades", () => {
+	it("labels decades the French way", () => {
+		expect(decadeLabel(1990)).toBe("années 90");
+		expect(decadeLabel(1960)).toBe("années 60");
+		expect(decadeLabel(2000)).toBe("années 2000");
+		expect(decadeLabel(2010)).toBe("années 2010");
+	});
+	it("computes shares of the matched minutes", () => {
+		expect(
+			decadeShares([
+				{ decade: 1990, minutes: 30, plays: 5 },
+				{ decade: 2000, minutes: 10, plays: 2 },
+			]),
+		).toEqual([
+			{ decade: 1990, pct: 75 },
+			{ decade: 2000, pct: 25 },
+		]);
+		expect(decadeShares([])).toEqual([]);
 	});
 });

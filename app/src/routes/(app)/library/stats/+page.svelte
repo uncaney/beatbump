@@ -9,6 +9,7 @@
 	import CollectionNav from "../_CollectionNav.svelte";
 	import Clock from "./_Clock.svelte";
 	import Streak from "./_Streak.svelte";
+	import Year from "./_Year.svelte";
 
 	const periods = [
 		{ days: 7, label: "7 jours" },
@@ -198,6 +199,7 @@
 
 		<Streak />
 		<Clock />
+		<Year />
 
 		<div class="lists">
 			<section
