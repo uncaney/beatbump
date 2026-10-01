@@ -20,6 +20,8 @@ import {
 	parseResumeState,
 	readResumeState,
 	resumeSeekTime,
+	resumeWriteSequence,
+	resyncResumeTracking,
 	slimQueueItem,
 	writeResumeState,
 } from "./resumeState";
@@ -285,5 +287,59 @@ describe("K8: the position is written apart from the queue", () => {
 		expect(parseResumePos(JSON.stringify({ v: 1, base: 0, videoId: "x" }))).toBeNull();
 		expect(parseResumePos(JSON.stringify({ v: 1, base: 1, videoId: "" }))).toBeNull();
 		expect(parseResumePos(JSON.stringify({ v: 1, base: 1, videoId: "x", currentTime: -3 }))?.currentTime).toBe(0);
+	});
+});
+
+describe("L10: resumePos orphaned by an external RESUME_KEY rewrite", () => {
+	const mix = [track(0), track(1), track(2)];
+
+	it("writeResumeState bumps a write sequence the periodic save loop can compare against", () => {
+		const s = memory();
+		const before = resumeWriteSequence();
+		writeResumeState(s, buildResumeState({ mix, position: 0 }, 0, 0));
+		expect(resumeWriteSequence()).toBe(before + 1);
+		writeResumeState(s, buildResumeState({ mix, position: 1 }, 0, 0));
+		expect(resumeWriteSequence()).toBe(before + 2);
+	});
+
+	it("resyncResumeTracking rebuilds lastQueue/last from a disk-read state", () => {
+		const st = buildResumeState({ mix, position: 1, currentMixType: "local" }, 12.5, 200, 1000)!;
+		const { lastQueue, last } = resyncResumeTracking(st);
+		expect(lastQueue).toBe(st);
+		expect(last).toEqual({
+			sig: resumeSignature({
+				mix: st.mix,
+				position: st.position,
+				currentMixType: st.type,
+				context: st.context,
+				currentMixId: st.currentMixId,
+			}),
+			t: 12.5,
+		});
+	});
+
+	it("resyncResumeTracking is a no-op (null) when nothing is on disk", () => {
+		expect(resyncResumeTracking(null)).toEqual({ lastQueue: null, last: null });
+	});
+
+	it("a rewrite that keeps the same signature (same queue, new savedAt) still anchors a fresh pos correctly once resynced", () => {
+		const s = memory();
+		// The periodic loop wrote this queue first (its own lastQueue == st).
+		const st = buildResumeState({ mix, position: 1, currentMixType: "local" }, 5, 200, 1000)!;
+		writeResumeState(s, st);
+		// Then something ELSE in the same tab rewrites RESUME_KEY with an
+		// identical queue (remote resume of the same playlist): same signature,
+		// new savedAt - the loop's stale `st` would anchor an orphaned pos.
+		const externallyWritten = buildResumeState({ mix, position: 1, currentMixType: "local" }, 5, 200, 2000)!;
+		writeResumeState(s, externallyWritten);
+		// The loop notices (resumeWriteSequence moved) and resyncs from disk
+		// instead of keeping `st`.
+		const fresh = parseResumeState(s.getItem(RESUME_KEY));
+		const { lastQueue } = resyncResumeTracking(fresh);
+		expect(lastQueue?.savedAt).toBe(2000);
+		const pos = buildResumePos(lastQueue!, 15, 200, 2500)!;
+		expect(writeResumePos(s, pos)).toBe(true);
+		// Read back: the position applies (base matches the CURRENT savedAt).
+		expect(readResumeState(s, 3000)?.currentTime).toBe(15);
 	});
 });

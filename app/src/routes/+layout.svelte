@@ -24,7 +24,7 @@
     import {restoreResumeState, resumeShortcutClaimed, startResumePersistence} from "$lib/stores/resumeState";
     import {startNowPlayingSync} from "$lib/stores/nowPlayingSync";
     import {onDestroy, onMount} from "svelte";
-    import {get, writable} from "svelte/store";
+    import {get} from "svelte/store";
 
     export let data;
 
@@ -36,29 +36,76 @@
     // start as '' and get the pathname in onMount, which recreated the whole
     // page once after its first mount (every entry page's onMount ran twice:
     // me/mix, me/stats/recent, local/albums, me/nowplaying each x2 per GET /).
-    // Initialised synchronously, the first value is already the final one.
-    const ua = browser ? navigator.userAgent : "";
-    const layoutData = writable({
-        key: browser ? location.pathname : '',
-        page: browser ? location.pathname : '',
-        origin: browser ? location.origin : '',
-        iOS: ua.includes('iPhone') || ua.includes('iPad'),
-        Android: ua.includes('Android'),
-    });
-
-    $: ({key} = $layoutData);
+    // $page is populated synchronously (SSR/hydration), so the first value is
+    // already the final one: no extra remount at startup.
+    //
+    // L17 (audit v7, P2): `key` used to be set once from `location.pathname`
+    // and never updated again, so the Back button (Nav.svelte, keyed off
+    // `!key.includes("home")`) reflected the page the app was OPENED on, not
+    // the current one, and the K1 150ms transition never replayed on
+    // navigation. Deriving it from `$page.url.pathname` keeps the synchronous
+    // first value AND makes both correct per-navigation (the Wrapper's
+    // `{#key key}` now remounts its slot on every route change - that is the
+    // point of K1's transition, not a regression).
+    $: key = $page.url.pathname;
     let main: HTMLElement;
+
+    // L16 (audit v7, P1): reload-on-update shared with the lazyComponent error
+    // handler below (a chunk 404 after a SW update offers the same action).
+    let reloading = false;
+    const reloadNow = () => {
+        if (reloading) return;
+        reloading = true;
+        window.location.reload();
+    };
+
+    // L16 (audit v7, P1): a deferred chunk 404s when the SW just activated a
+    // new shell and dropped the old one (lazyComponent already retried once).
+    // Reset whatever store triggered the load so the page isn't left locked
+    // under `no-scroll` / a dead popper state, then offer the same reload
+    // action as the SW-update toast.
+    const handleChunkLoadError = (e: unknown, attempt: number, reset: () => void) => {
+        Logger.err(e);
+        if (attempt === 0) return; // lazyComponent's single retry is still in flight
+        reset();
+        notify("Le chargement d'une partie de l'app a échoué.", "error", {
+            label: "Recharger maintenant",
+            run: reloadNow,
+        });
+    };
 
     // K7 (audit perf v2): the fullscreen player, the group-session creator and
     // the add-to-playlist popper only serve on demand; their chunks (and what
     // only they import: DraggableList, CreatePlaylist, Description…) leave the
     // layout node and are fetched on the first open, then stay mounted.
-    const Fullscreen = lazyComponent(() => import("$lib/components/Player/Fullscreen.svelte"));
-    const GroupSessionCreator = lazyComponent(() => import("$lib/components/GroupSessionCreator/GroupSessionCreator.svelte"));
-    const PlaylistPopper = lazyComponent(() => import("$lib/components/PlaylistPopper/PlaylistPopper.svelte"));
-    $: if (browser && $fullscreenStore === "open") void Fullscreen.load().catch((e) => Logger.err(e));
-    $: if (browser && $showGroupSessionCreator) void GroupSessionCreator.load().catch((e) => Logger.err(e));
-    $: if (browser && $showAddToPlaylistPopper?.state) void PlaylistPopper.load().catch((e) => Logger.err(e));
+    const Fullscreen = lazyComponent(() => import("$lib/components/Player/Fullscreen.svelte"), {
+        onError: (e, attempt) => handleChunkLoadError(e, attempt, () => fullscreenStore.set("closed")),
+    });
+    const GroupSessionCreator = lazyComponent(() => import("$lib/components/GroupSessionCreator/GroupSessionCreator.svelte"), {
+        onError: (e, attempt) => handleChunkLoadError(e, attempt, () => showGroupSessionCreator.set(false)),
+    });
+    const PlaylistPopper = lazyComponent(() => import("$lib/components/PlaylistPopper/PlaylistPopper.svelte"), {
+        onError: (e, attempt) => handleChunkLoadError(e, attempt, () => showAddToPlaylistPopper.set({ state: false, item: undefined })),
+    });
+    $: if (browser && $fullscreenStore === "open") void Fullscreen.load().catch(() => {});
+    $: if (browser && $showGroupSessionCreator) void GroupSessionCreator.load().catch(() => {});
+    $: if (browser && $showAddToPlaylistPopper?.state) void PlaylistPopper.load().catch(() => {});
+
+    // L16 (audit v7, P1): warm the Fullscreen + PlaylistPopper chunks at the
+    // first play so the common path (tap the player bar right after opening
+    // the app) never races a SW update - closes the deployment-window gap
+    // without delaying startup (idle callback, not on the critical path).
+    let warmedDeferredChunks = false;
+    const warmDeferredChunks = () => {
+        if (warmedDeferredChunks || !browser) return;
+        warmedDeferredChunks = true;
+        const run = () => {
+            void Fullscreen.load().catch(() => {});
+            void PlaylistPopper.load().catch(() => {});
+        };
+        if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 2000 });
+        else setTimeout(run, 500);
+    };
 
     let isFullscreen = false;
 
@@ -154,6 +201,18 @@
         };
     });
     onMount(() => {
+        // L16: first play (AudioPlayer.paused false after its initial true/false
+        // value) warms the deferred chunks - see warmDeferredChunks above.
+        let firstPausedValue = true;
+        return AudioPlayer.paused.subscribe((paused) => {
+            if (firstPausedValue) {
+                firstPausedValue = false;
+                return;
+            }
+            if (!paused) warmDeferredChunks();
+        });
+    });
+    onMount(() => {
         // C1 exact resume: the saved queue comes back as it was, PAUSED at the
         // saved position (no YouTube radio, works offline for a local queue).
         // `lastTrack` alone (state saved before C1) keeps the old behaviour.
@@ -185,12 +244,6 @@
         try {
             if ("serviceWorker" in navigator) {
                 const hadController = !!navigator.serviceWorker.controller;
-                let reloading = false;
-                const reloadNow = () => {
-                    if (reloading) return;
-                    reloading = true;
-                    window.location.reload();
-                };
                 navigator.serviceWorker.addEventListener("controllerchange", () => {
                     // first install (no prior controller) shouldn't reload
                     if (!hadController || reloading) return;

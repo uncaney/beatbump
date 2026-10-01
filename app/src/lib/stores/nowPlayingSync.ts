@@ -41,6 +41,30 @@ interface StorageLike {
 	removeItem?(key: string): void;
 }
 
+/** The minimal BroadcastChannel surface `wireProfileChannel` needs (testable without a real one). */
+export interface ProfileChannelLike {
+	onmessage: ((ev: MessageEvent) => void) | null;
+	close(): void;
+}
+
+/**
+ * L14 (audit v7, P3): `named` (whether this tab's current profile has a
+ * name) used to be memoised for the page's whole lifetime once known
+ * (K12), so a login that happens via the Account page UI - without a
+ * reload - never pushed `me/nowplaying` until the next page load. me.ts's
+ * login()/logout() now broadcast on the same channel (L13); any message
+ * here means "the profile may have changed", so `onProfileChanged` must
+ * re-ask `whoami()` next time, regardless of the message's own payload.
+ * Pure/injectable so it's unit-testable without a real BroadcastChannel.
+ */
+export function wireProfileChannel(channel: ProfileChannelLike, onProfileChanged: () => void): () => void {
+	channel.onmessage = () => onProfileChanged();
+	return () => {
+		channel.onmessage = null;
+		channel.close();
+	};
+}
+
 /** A short human name for this device, from its user agent. */
 export function deviceNameFromUA(ua: string | null | undefined): string {
 	const s = String(ua ?? "");
@@ -324,9 +348,16 @@ export function startNowPlayingSync(): () => void {
 		document.addEventListener("visibilitychange", onVisibility);
 		cleanups.push(() => document.removeEventListener("visibilitychange", onVisibility));
 		// A login / logout changes who the state belongs to: ask whoami again.
+		// L14: the shared profile channel (me.ts, L13) catches it immediately -
+		// another tab, or this tab's own Account-page login without a reload -
+		// instead of waiting for this tab to regain focus.
 		const reset = () => (named = null);
 		window.addEventListener("focus", reset);
 		cleanups.push(() => window.removeEventListener("focus", reset));
+		if (typeof BroadcastChannel !== "undefined") {
+			const channel = new BroadcastChannel(me.PROFILE_CHANNEL_NAME);
+			cleanups.push(wireProfileChannel(channel, reset));
+		}
 	});
 	return () => {
 		stopped = true;

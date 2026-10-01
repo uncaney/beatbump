@@ -15,6 +15,17 @@ function itemRef(item: any): string {
 // GETs that can only answer 404 for it (me/nowplaying).
 const WHOAMI_KEY = "ytm-whoami";
 const WHOAMI_TTL_MS = 5 * 60 * 1000;
+// L13 (audit v7, P3): a login/logout in another tab (or on this tab's
+// Account page) left every OTHER tab's `ytm-whoami` memo (sessionStorage,
+// per-tab) stale for up to WHOAMI_TTL_MS: nowPlayingSync and the account UI
+// kept answering with the old profile. Two complementary fixes: login()/
+// logout() now broadcast on a shared channel so any tab sharing it drops its
+// memo immediately (forgetWhoami); and, as a safety net for a tab that
+// missed the broadcast (opened before this build, channel unsupported), a
+// `visibilitychange` back to visible re-fetches fresh when the memo is
+// older than WHOAMI_VISIBLE_REFRESH_MS.
+export const PROFILE_CHANNEL_NAME = "ytm-profile";
+const WHOAMI_VISIBLE_REFRESH_MS = 60 * 1000;
 type Who = { id: string; name: string };
 function readWhoamiMemo(): Who | null {
 	try {
@@ -24,6 +35,17 @@ function readWhoamiMemo(): Who | null {
 		if (!j || typeof j !== "object" || typeof j.at !== "number" || Date.now() - j.at > WHOAMI_TTL_MS) return null;
 		if (typeof j.id !== "string") return null;
 		return { id: j.id, name: typeof j.name === "string" ? j.name : "" };
+	} catch {
+		return null;
+	}
+}
+function whoamiMemoAgeMs(): number | null {
+	try {
+		const raw = sessionStorage.getItem(WHOAMI_KEY);
+		if (!raw) return null;
+		const j = JSON.parse(raw);
+		if (!j || typeof j.at !== "number") return null;
+		return Date.now() - j.at;
 	} catch {
 		return null;
 	}
@@ -40,6 +62,40 @@ function writeWhoamiMemo(w: Who | null): void {
 export function forgetWhoami(): void {
 	writeWhoamiMemo(null);
 }
+
+let profileChannel: BroadcastChannel | undefined;
+function getProfileChannel(): BroadcastChannel | undefined {
+	if (profileChannel || typeof BroadcastChannel === "undefined") return profileChannel;
+	profileChannel = new BroadcastChannel(PROFILE_CHANNEL_NAME);
+	// Another tab logged in/out: this tab's memo no longer describes who it
+	// is talking to. nowPlayingSync listens on the same channel for its own
+	// `named` flag (L14).
+	profileChannel.onmessage = () => forgetWhoami();
+	return profileChannel;
+}
+function announceProfileChange(): void {
+	try {
+		getProfileChannel()?.postMessage({ at: Date.now() });
+	} catch {
+		/* best-effort */
+	}
+}
+
+let visibilityRefreshWired = false;
+function wireWhoamiVisibilityRefresh(): void {
+	if (visibilityRefreshWired || typeof document === "undefined") return;
+	visibilityRefreshWired = true;
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState !== "visible") return;
+		const age = whoamiMemoAgeMs();
+		if (age !== null && age > WHOAMI_VISIBLE_REFRESH_MS) void whoami({ fresh: true }).catch(() => {});
+	});
+}
+if (typeof document !== "undefined") {
+	wireWhoamiVisibilityRefresh();
+	getProfileChannel(); // start listening even before any login()/logout() in THIS tab
+}
+
 export async function whoami(opts: { fresh?: boolean } = {}): Promise<Who> {
 	if (!opts.fresh) {
 		const memo = readWhoamiMemo();
@@ -64,10 +120,12 @@ export async function login(name: string): Promise<{ id: string; name: string }>
 	forgetWhoami();
 	const r = await (await APIClient.post(`/api/v1/me/login`, { name })).json();
 	if (r && typeof r === "object" && typeof r.id === "string") writeWhoamiMemo({ id: r.id, name: typeof r.name === "string" ? r.name : "" });
+	announceProfileChange();
 	return r;
 }
 export async function logout() {
 	forgetWhoami();
+	announceProfileChange();
 	return APIClient.post(`/api/v1/me/logout`, {});
 }
 

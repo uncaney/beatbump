@@ -274,14 +274,51 @@ export function readResumeState(
 	}
 }
 
+// L10 (audit v7, P2): bumped by every successful writeResumeState call in
+// this tab. The periodic save loop (startResumePersistence) remembers the
+// value right after ITS OWN writes; when it differs on the next tick, some
+// other code in the same tab (restoreRemoteResume, a remote-resume restore)
+// rewrote RESUME_KEY without going through the loop, so its in-memory
+// `lastQueue` is stale and must be resynced before a "pos"-only write can be
+// trusted (see resyncResumeTracking + startResumePersistence below). A
+// second tab rewriting the same key is covered separately by a `storage`
+// event (storage events don't fire in the writing tab itself).
+let resumeWriteSeq = 0;
+export function resumeWriteSequence(): number {
+	return resumeWriteSeq;
+}
+
 export function writeResumeState(storage: StorageLike | undefined, state: ResumeState | null): boolean {
 	if (!storage || !state) return false;
 	try {
 		storage.setItem(RESUME_KEY, JSON.stringify(state));
+		resumeWriteSeq++;
 		return true;
 	} catch {
 		return false; // quota / private mode: resume is best-effort
 	}
+}
+
+/**
+ * L10: rebuild the periodic save loop's `lastQueue` / `last` tracking from a
+ * state actually read off storage (or from a `storage` event's `newValue`),
+ * so the next save decides "queue" vs "pos" against what is really on disk
+ * instead of a stale in-memory copy. Pure so the resync decision is testable
+ * without DOM timers.
+ */
+export function resyncResumeTracking(disk: ResumeState | null): {
+	lastQueue: ResumeState | null;
+	last: { sig: string; t: number } | null;
+} {
+	if (!disk) return { lastQueue: null, last: null };
+	const sig = resumeSignature({
+		mix: disk.mix,
+		position: disk.position,
+		currentMixType: disk.type,
+		context: disk.context,
+		currentMixId: disk.currentMixId,
+	});
+	return { lastQueue: disk, last: { sig, t: disk.currentTime } };
 }
 
 /** K8: the small periodic write (position only). */
@@ -538,23 +575,33 @@ export function startResumePersistence(enabled: () => boolean): () => void {
 		// K8: the full state last written (its savedAt anchors the position key).
 		let lastQueue: ResumeState | null = null;
 		let purged = false;
+		// L10: the write-sequence value right after this loop's own last write;
+		// a mismatch on the next tick means someone else (same tab) rewrote
+		// RESUME_KEY in between (e.g. restoreRemoteResume).
+		let knownWriteSeq = resumeWriteSequence();
 		const save = (minDelta = 0.25) => {
 			try {
+				const storage = browserStorage();
 				if (!enabled()) {
 					// I7: turning the setting off removes the saved queue.
-					if (!purged) clearResumeState(browserStorage());
+					if (!purged) clearResumeState(storage);
 					purged = true;
 					last = null;
 					lastQueue = null;
+					knownWriteSeq = resumeWriteSequence();
 					return;
 				}
 				purged = false;
+				if (lastQueue && resumeWriteSequence() !== knownWriteSeq) {
+					const fresh = parseResumeState(storage?.getItem(RESUME_KEY));
+					({ lastQueue, last } = resyncResumeTracking(fresh));
+					knownWriteSeq = resumeWriteSequence();
+				}
 				const list = SessionListService.value;
 				const t = AudioPlayer.currentTime;
 				const sig = resumeSignature(list);
 				const plan = resumeSavePlan(last, sig, t, minDelta);
 				if (plan === "none") return;
-				const storage = browserStorage();
 				if (plan === "pos" && lastQueue) {
 					// K8: only the position moved: a ~100-byte write, not the queue.
 					const pos = buildResumePos(lastQueue, t, AudioPlayer.duration);
@@ -563,6 +610,7 @@ export function startResumePersistence(enabled: () => boolean): () => void {
 				}
 				const state = buildResumeState(list, t, AudioPlayer.duration);
 				if (state && writeResumeState(storage, state)) {
+					knownWriteSeq = resumeWriteSequence();
 					last = { sig, t: state.currentTime };
 					lastQueue = state;
 					// The position key belongs to the previous queue: refresh it.
@@ -574,6 +622,17 @@ export function startResumePersistence(enabled: () => boolean): () => void {
 		};
 		const timer = setInterval(() => save(RESUME_MIN_TIME_DELTA), RESUME_SAVE_INTERVAL_MS);
 		cleanups.push(() => clearInterval(timer));
+		// L10: a second tab rewriting RESUME_KEY (another device's state pulled
+		// in, or its own periodic save) doesn't bump this tab's write sequence
+		// (storage events never fire in the writing document), so resync
+		// directly from the event instead of waiting for the next tick.
+		const onStorage = (e: StorageEvent) => {
+			if (e.key !== RESUME_KEY) return;
+			({ lastQueue, last } = resyncResumeTracking(parseResumeState(e.newValue)));
+			knownWriteSeq = resumeWriteSequence();
+		};
+		window.addEventListener("storage", onStorage);
+		cleanups.push(() => window.removeEventListener("storage", onStorage));
 		let first = true;
 		cleanups.push(
 			AudioPlayer.paused.subscribe((paused) => {
