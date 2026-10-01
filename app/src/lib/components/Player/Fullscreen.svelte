@@ -1183,6 +1183,21 @@
 		color: hsla(0, 0%, 100%, 0.85);
 	}
 
+	// Related "Dans ta bibliotheque" (audit v6 TOP 6): fixed 160px cards (the
+	// carousel article is `flex: 0 1` and shrank to 139px in the panel) and a
+	// right gutter so the scroll arrow sits beside the last card, not on it.
+	section[data-row="related-local"] {
+		:global(.section) {
+			padding-inline-end: 2rem;
+		}
+		:global(.scroll) {
+			scroll-padding-inline-end: 40px;
+		}
+		:global(.scroll article) {
+			flex: 0 0 var(--column-width, 160px);
+		}
+	}
+
 	.text-shadow {
 		text-shadow: 0.1em 0.1em 0.2em rgb(0 0 0 / 69.2%),
 			-0.1em -0.1em 0.2em rgb(0 0 0 / 41.8%);
