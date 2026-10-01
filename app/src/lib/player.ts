@@ -61,7 +61,9 @@ function metaDataHandler({
 		const position = sessionList.position;
 		const currentTrack = sessionList.mix[position];
 
-		const artwork = currentTrack?.thumbnails;
+		// Copy before reversing: `thumbnails` is the queue item's own array, and
+		// `reverse()` in place flipped the row thumbnails on every track start (F14/G14).
+		const artwork = Array.isArray(currentTrack?.thumbnails) ? [...currentTrack.thumbnails] : [];
 
 		console.debug({ currentTrack, position, mix: sessionList.mix });
 
@@ -70,11 +72,14 @@ function metaDataHandler({
 			title: currentTrack?.title,
 			artist: currentTrack?.artistInfo?.artist?.[0]?.text || "",
 			album: currentTrack?.album?.title ?? undefined,
-			artwork: artwork.reverse().map(({ url, width, height }) => ({
-				src: url,
-				sizes: `${width}x${height}`,
-				type: "image/jpeg",
-			})),
+			artwork: artwork
+				.reverse()
+				.filter((t) => t && typeof t.url === "string")
+				.map(({ url, width, height }) => ({
+					src: url,
+					sizes: `${width}x${height}`,
+					type: "image/jpeg",
+				})),
 		});
 		navigator.mediaSession.setActionHandler("play", () => {
 			AudioPlayer.play();
