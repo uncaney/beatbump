@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { enqueuePlay, flushOutbox, OUTBOX_LEASE_KEY, OUTBOX_MAX, readOutbox, slimHistoryItem, statusResult, takeOutboxLease, type SendResult } from "./historyOutbox";
+import { enqueuePlay, flushOutbox, OUTBOX_LEASE_KEY, REPLAY_MARK, replayItem, OUTBOX_MAX, readOutbox, slimHistoryItem, statusResult, takeOutboxLease, type SendResult } from "./historyOutbox";
 
 function memStore() {
 	const m = new Map<string, string>();
@@ -92,5 +92,30 @@ describe("historyOutbox", () => {
 		const free = { request: async (_n: string, _o: unknown, cb: (l: unknown) => Promise<unknown>) => cb({}) };
 		expect(await flushOutbox(send, st, { locks: free })).toEqual({ sent: 1, dropped: 0, left: 0 });
 		expect(calls).toBe(1);
+	});
+});
+
+describe("I11: replays carry the client clock", () => {
+	it("marks each replayed item with clientSentAt = now, never stored in the queue", async () => {
+		const st = memStore();
+		enqueuePlay({ ...song("a"), [REPLAY_MARK]: 1 }, 10, st);
+		expect(readOutbox(st)[0].item[REPLAY_MARK]).toBeUndefined();
+		const sent: any[] = [];
+		await flushOutbox(
+			async (item) => {
+				sent.push(item);
+				return "ok";
+			},
+			st,
+			{ locks: null, now: () => 777 },
+		);
+		expect(sent).toHaveLength(1);
+		expect(sent[0][REPLAY_MARK]).toBe(777);
+		expect(sent[0].videoId).toBe("a");
+	});
+	it("replayItem does not mutate the queued item", () => {
+		const it0 = { videoId: "x" };
+		expect(replayItem(it0, 5)).toEqual({ videoId: "x", clientSentAt: 5 });
+		expect(it0).toEqual({ videoId: "x" });
 	});
 });

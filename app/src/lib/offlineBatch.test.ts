@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 // as a parameter, so the module is stubbed out here.
 vi.mock("$lib/offline", () => ({
 	cacheTrackOffline: vi.fn(),
+	deviceOffline: () => false,
 	downloadForOffline: vi.fn(),
 	isStableAudioUrl: () => false,
 	listCachedAudio: vi.fn(),
@@ -11,7 +12,7 @@ vi.mock("$lib/offline", () => ({
 	requestPersistentStorage: vi.fn(),
 }));
 
-import { cancelKeepJob, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
+import { cancelKeepJob, findKeepJob, jobMatchesKey, keepAliases, keepItemOfflineWith, keepMenuKey, KEEP_OFFLINE_MSG, KEEP_RUNNING_MSG, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
 import { get } from "svelte/store";
 
 const MB = 1024 * 1024;
@@ -174,5 +175,133 @@ describe("keepJobs (I12)", () => {
 		cancelKeepJob("/album/y");
 		const r = await p;
 		expect(r?.cancelled).toBe(true);
+	});
+});
+
+describe("menu Garder hors-ligne (I13)", () => {
+	const album = { title: "Discovery", playlistId: "OLAK5uy_abc", endpoint: { pageType: "MUSIC_PAGE_TYPE_ALBUM", browseId: "MPREb_disc" } };
+	const menuDeps = (over: Partial<Parameters<typeof keepItemOfflineWith>[1]> = {}) => {
+		const toasts: Array<{ msg: string; action?: { label: string; run: () => void } }> = [];
+		const fetched: string[] = [];
+		const { deps } = fakeDeps({});
+		return {
+			toasts,
+			fetched,
+			deps: {
+				offline: () => false,
+				notify: (msg: string, _t: "success" | "error", action?: { label: string; run: () => void }) => void toasts.push({ msg, action }),
+				fetchQueue: async (id: string) => {
+					fetched.push(id);
+					return [tr("a"), tr("b"), tr("c")];
+				},
+				keep: deps,
+				...over,
+			},
+		};
+	};
+	it("offline: says so and starts nothing", async () => {
+		const m = menuDeps({ offline: () => true });
+		expect(await keepItemOfflineWith(album, m.deps)).toBeNull();
+		expect(m.toasts.map((t) => t.msg)).toEqual([KEEP_OFFLINE_MSG]);
+		expect(m.fetched).toEqual([]);
+		expect(get(keepJobs).size).toBe(0);
+	});
+	it("a second menu click on the same album joins the running batch (déjà en cours)", async () => {
+		const m = menuDeps();
+		const p1 = keepItemOfflineWith(album, m.deps);
+		const p2 = keepItemOfflineWith({ ...album }, m.deps);
+		expect(m.toasts.some((t) => t.msg === KEEP_RUNNING_MSG && t.action?.label === "Annuler")).toBe(true);
+		const r = await p1;
+		expect(await p2).toBe(r);
+		expect(r?.ready).toBe(3);
+		expect(m.fetched).toEqual(["OLAK5uy_abc"]);
+	});
+	it("the start toast cancels the batch", async () => {
+		const m = menuDeps();
+		const p = keepItemOfflineWith(album, m.deps);
+		await new Promise((r) => setTimeout(r, 0));
+		const start = m.toasts.find((t) => /morceaux : téléchargement/.test(t.msg));
+		expect(start?.action?.label).toBe("Annuler");
+		start!.action!.run();
+		const r = await p;
+		expect(r?.cancelled).toBe(true);
+		expect(m.toasts.at(-1)?.msg).toMatch(/^Annulé/);
+	});
+	it("matches the album page button key and the menu key", () => {
+		expect(keepAliases(album)).toEqual(["MPREb_disc", "OLAK5uy_abc"]);
+		expect(keepMenuKey(album)).toBe("keep:MPREb_disc");
+		const menuJob = { key: "keep:MPREb_disc", aliases: keepAliases(album) };
+		expect(jobMatchesKey(menuJob, "/release?type=album&id=MPREb_disc")).toBe(true);
+		expect(jobMatchesKey(menuJob, "/release?id=MPREb_discX")).toBe(false);
+		const pageJob = { key: "/release?id=MPREb_disc", aliases: [] };
+		expect(jobMatchesKey(pageJob, "keep:MPREb_disc", keepAliases(album))).toBe(true);
+		expect(jobMatchesKey(pageJob, "keep:other", ["other"])).toBe(false);
+		const jobs = new Map([[pageJob.key, { ...pageJob, progress: null, ctrl: new AbortController(), done: Promise.resolve(null) }]]);
+		expect(findKeepJob(jobs, "keep:MPREb_disc", keepAliases(album))?.key).toBe("/release?id=MPREb_disc");
+		expect(keepAliases(tr("solo"))).toEqual(["solo"]);
+		expect(keepAliases(tr("solo", { endpoint: { browseId: "MPREb_disc" } }))).toEqual(["solo"]);
+	});
+});
+
+describe("keepOffline pins per track (I15)", () => {
+	it("a batch cut midway keeps the tracks it finished pinned", async () => {
+		const pinned: string[] = [];
+		const cached = new Set<string>();
+		const ctrl = new AbortController();
+		const deps: KeepDeps = {
+			pin: async (t) => {
+				if (!cached.has(t.videoId)) return { ok: false, reason: "not_cached" };
+				pinned.push(t.videoId);
+				return { ok: true };
+			},
+			download: async (t) => {
+				await new Promise((r) => setTimeout(r, t.videoId === "a" ? 1 : 20));
+				cached.add(t.videoId);
+				return { ok: true, bytes: MB };
+			},
+			cacheInfo: async () => null,
+		};
+		const p = keepOffline([tr("a"), tr("b"), tr("c"), tr("d")], {
+			signal: ctrl.signal,
+			onProgress: (pr) => {
+				if (pr.ready === 1) ctrl.abort(); // network cut / Annuler after the first one
+			},
+		}, deps);
+		const r = await p;
+		expect(r.cancelled).toBe(true);
+		expect(pinned[0]).toBe("a"); // pinned before the rest of the batch finished
+		expect(pinned).not.toContain("d");
+	});
+	it("re-downloads once a track evicted between its write and its pin", async () => {
+		const cached = new Set<string>();
+		const downloads: string[] = [];
+		let evictOnce = true;
+		const deps: KeepDeps = {
+			pin: async (t) => {
+				if (t.videoId === "a" && evictOnce && downloads.includes("a")) {
+					evictOnce = false;
+					cached.delete("a"); // B's write ran the LRU
+				}
+				return cached.has(t.videoId) ? { ok: true } : { ok: false, reason: "not_cached" };
+			},
+			download: async (t) => {
+				downloads.push(t.videoId);
+				cached.add(t.videoId);
+				return { ok: true, bytes: MB };
+			},
+			cacheInfo: async () => null,
+		};
+		const r = await keepOffline([tr("a"), tr("b")], {}, deps);
+		expect(r).toMatchObject({ ready: 2, failed: 0, refused: 0 });
+		expect(downloads.filter((x) => x === "a")).toHaveLength(2);
+	});
+	it("evicted twice: refused (cache too small), not failed", async () => {
+		const deps: KeepDeps = {
+			pin: async () => ({ ok: false, reason: "not_cached" }),
+			download: async () => ({ ok: true, bytes: MB }),
+			cacheInfo: async () => null,
+		};
+		const r = await keepOffline([tr("a")], {}, deps);
+		expect(r).toMatchObject({ ready: 0, failed: 0, refused: 1 });
 	});
 });

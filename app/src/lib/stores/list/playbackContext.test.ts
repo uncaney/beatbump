@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeContext, makeContext, normalizeContext } from "./playbackContext";
+import { continuedContext, describeContext, makeContext, normalizeContext, playAllContextFor } from "./playbackContext";
 
 const row = (videoId: string) => ({ videoId });
 const album = ["a1", "a2", "a3", "a4"].map(row);
@@ -61,5 +61,37 @@ describe("describeContext", () => {
 		expect(describeContext(null, album, 1)?.label).toBe("File · 2/4");
 		expect(describeContext(null, [row("a")], 0)).toBeNull();
 		expect(describeContext(ctx, [], 0)).toBeNull();
+	});
+});
+
+describe("I8: context after a continuation and on Lire tout", () => {
+	const t = (id: string) => ({ videoId: id });
+	it("a continued album becomes the extended queue with the right total", () => {
+		const album = [t("a"), t("b"), t("c")];
+		const ctx = makeContext({ kind: "album", title: "Discovery", href: "/release?id=x" }, album);
+		const mix = [...album, t("x"), t("y")];
+		// before the fix: header only, no counter, on the appended rows
+		expect(describeContext(ctx, mix, 3)!.label).toBe("Album : Discovery");
+		const next = continuedContext(ctx, mix);
+		const view = describeContext(next, mix, 3)!;
+		expect(view.label).toBe("File : Suite · 4/5");
+		expect(view.total).toBe(5);
+		expect(view.interrupted).toBe(false);
+		expect(continuedContext(null, mix)).toBeNull();
+	});
+	it("derives Favoris / Playlist / Artiste from the page", () => {
+		expect(playAllContextFor("/library/saved", "x")).toEqual({ kind: "favorites", title: "Favoris", href: "/library/saved" });
+		expect(playAllContextFor("/library/playlists-srv/12", " Road ")).toEqual({
+			kind: "playlist",
+			title: "Road",
+			href: "/library/playlists-srv/12",
+		});
+		expect(playAllContextFor("/artist/UCabc", "Daft Punk")?.kind).toBe("artist");
+		expect(playAllContextFor("/home", "x")).toBeNull();
+		expect(playAllContextFor(undefined)).toBeNull();
+		const ctx = makeContext(playAllContextFor("/library/saved"), [t("a"), t("b"), t("c")]);
+		expect(describeContext(ctx, [t("a"), t("b"), t("c")], 1)!.label).toBe("Favoris · 2/3");
+		const art = makeContext(playAllContextFor("/artist/UCabc", "Daft Punk"), [t("a"), t("b")]);
+		expect(describeContext(art, [t("a"), t("b")], 0)!.label).toBe("Artiste : Daft Punk · 1/2");
 	});
 });

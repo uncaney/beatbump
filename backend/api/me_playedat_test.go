@@ -39,7 +39,7 @@ func TestClientPlayedAtBounds(t *testing.T) {
 func TestRecordPlayKeepsClientPlayedAt(t *testing.T) {
 	useTestDB(t)
 	at := time.Now().Add(-90 * time.Minute).UnixMilli()
-	body := strings.TrimSuffix(songBody, "}") + fmt.Sprintf(`,"playedAt":%d}`, at)
+	body := strings.TrimSuffix(songBody, "}") + fmt.Sprintf(`,"playedAt":%d,"clientSentAt":%d}`, at, time.Now().UnixMilli())
 	c, rec := ctxFor(http.MethodPost, "/api/v1/me/history", body, map[string]string{"User-Agent": "Mozilla/5.0 Chrome/128"})
 	if err := MeRecordPlayHandler(c); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("handler: %v status %d", err, rec.Code)
@@ -55,6 +55,9 @@ func TestRecordPlayKeepsClientPlayedAt(t *testing.T) {
 	_ = json.Unmarshal([]byte(ev.Data), &data)
 	if _, ok := data["playedAt"]; ok {
 		t.Fatalf("playedAt leaked into the stored item: %s", ev.Data)
+	}
+	if _, ok := data["clientSentAt"]; ok {
+		t.Fatalf("clientSentAt leaked into the stored item: %s", ev.Data)
 	}
 }
 
@@ -81,7 +84,8 @@ func TestRecordPlayIgnoresFuturePlayedAt(t *testing.T) {
 func TestRecordPlayIdempotentOnPlayedAt(t *testing.T) {
 	useTestDB(t)
 	at := time.Now().Add(-20 * time.Minute).UnixMilli()
-	body := strings.TrimSuffix(songBody, "}") + fmt.Sprintf(`,"playedAt":%d}`, at)
+	sent := time.Now().UnixMilli()
+	body := strings.TrimSuffix(songBody, "}") + fmt.Sprintf(`,"playedAt":%d,"clientSentAt":%d}`, at, sent)
 	for i := 0; i < 2; i++ {
 		c, rec := ctxFor(http.MethodPost, "/api/v1/me/history", body, map[string]string{"User-Agent": "Mozilla/5.0 Chrome/128"})
 		if err := MeRecordPlayHandler(c); err != nil || rec.Code != http.StatusOK {
@@ -94,7 +98,7 @@ func TestRecordPlayIdempotentOnPlayedAt(t *testing.T) {
 		t.Fatalf("got %d rows, want 1", n)
 	}
 	// A real later play of the same track (playedAt 5 min after) is a new row.
-	later := strings.TrimSuffix(songBody, "}") + fmt.Sprintf(`,"playedAt":%d}`, at+5*60*1000)
+	later := strings.TrimSuffix(songBody, "}") + fmt.Sprintf(`,"playedAt":%d,"clientSentAt":%d}`, at+5*60*1000, sent)
 	c, _ := ctxFor(http.MethodPost, "/api/v1/me/history", later, map[string]string{"User-Agent": "Mozilla/5.0 Chrome/128"})
 	if err := MeRecordPlayHandler(c); err != nil {
 		t.Fatal(err)
@@ -102,5 +106,53 @@ func TestRecordPlayIdempotentOnPlayedAt(t *testing.T) {
 	db.DB.Model(&db.PlayEvent{}).Count(&n)
 	if n != 2 {
 		t.Fatalf("got %d rows after a later play, want 2", n)
+	}
+}
+
+// I11: direct POSTs trust the client clock only within 5 min of the server;
+// outbox replays are moved onto the server clock when the client is skewed.
+func TestStampPlayedAtClockSkew(t *testing.T) {
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	ms := func(d time.Duration) float64 { return float64(now.Add(d).UnixMilli()) }
+	cases := []struct {
+		name   string
+		played interface{}
+		sent   interface{}
+		want   time.Time
+	}{
+		{"direct, no playedAt", nil, nil, now},
+		{"direct, 30 s off", ms(-30 * time.Second), nil, now.Add(-30 * time.Second)},
+		{"direct, phone 3 h behind", ms(-3 * time.Hour), nil, now},
+		{"direct, phone 10 min ahead", ms(10 * time.Minute), nil, now},
+		{"replay 2 h old, clock ok", ms(-2 * time.Hour), ms(-time.Second), now.Add(-2 * time.Hour)},
+		{"replay 2 h old, clock 1 min behind (kept)", ms(-2*time.Hour - time.Minute), ms(-time.Minute), now.Add(-2*time.Hour - time.Minute)},
+		// the phone is 3 h behind: its "1 day ago" play was really 1 day ago on the server clock
+		{"replay, clock 3 h behind", ms(-27 * time.Hour), ms(-3 * time.Hour), now.Add(-24 * time.Hour)},
+		{"replay, clock 3 h ahead", ms(-21 * time.Hour), ms(3 * time.Hour), now.Add(-24 * time.Hour)},
+		{"replay 8 days old", ms(-8 * 24 * time.Hour), ms(0), now},
+		{"replay in the future", ms(time.Hour), ms(0), now},
+		{"replay, garbage sentAt = direct rule", ms(-2 * time.Hour), "x", now},
+	}
+	for _, c := range cases {
+		if got := stampPlayedAt(c.played, c.sent, now); !got.Equal(c.want) {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestRecordPlayDirectSkewedClockUsesServerTime(t *testing.T) {
+	useTestDB(t)
+	at := time.Now().Add(-3 * time.Hour).UnixMilli()
+	body := strings.TrimSuffix(songBody, "}") + fmt.Sprintf(`,"playedAt":%d}`, at)
+	c, _ := ctxFor(http.MethodPost, "/api/v1/me/history", body, map[string]string{"User-Agent": "Mozilla/5.0 Chrome/128"})
+	if err := MeRecordPlayHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	var ev db.PlayEvent
+	if err := db.DB.First(&ev).Error; err != nil {
+		t.Fatalf("no event: %v", err)
+	}
+	if time.Since(ev.PlayedAt) > time.Minute {
+		t.Fatalf("skewed direct playedAt kept: %v", ev.PlayedAt)
 	}
 }

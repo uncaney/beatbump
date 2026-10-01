@@ -7,7 +7,7 @@
 	// button shows the running batch again when the page is reopened.
 	import { page } from "$app/stores";
 	import { getOfflineTracks } from "$lib/offline";
-	import { cancelKeepJob, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepProgress } from "$lib/offlineBatch";
+	import { cancelKeepJob, findKeepJob, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepProgress } from "$lib/offlineBatch";
 	import { notify } from "$lib/utils";
 
 	/** Tracks of the source, or a loader (album pages resolve their queue lazily). */
@@ -18,7 +18,8 @@
 
 	// $page (not `location`): a same-route navigation (release?id=A → B) reuses this component.
 	$: key = sourceKey || ($page?.url ? $page.url.pathname + $page.url.search : "");
-	$: job = key ? $keepJobs.get(key) : undefined;
+	// I13: a menu ⋮ batch of this album / playlist shows (and cancels) here too.
+	$: job = key ? findKeepJob($keepJobs, key) : undefined;
 	$: running = !!job;
 
 	let progress: KeepProgress | null = null;
@@ -58,7 +59,7 @@
 		);
 	}
 	function cancel() {
-		if (key) cancelKeepJob(key);
+		if (job) cancelKeepJob(job.key);
 	}
 </script>
 

@@ -72,14 +72,21 @@ func buildLocalArtist(artistId string) map[string]interface{} {
 	// load and play every title of the artist ("Voir les N titres"). Both ride
 	// on the songs shelf (the artist page loader only forwards `songs`) and at
 	// the top level.
+	// I19: the count shown ("Voir les N titres", "N titres" next to Lire
+	// tout) is what the seeAll link really loads (one LocalSongsHandler
+	// page, capped at localArtistSeeAllLimit); the full count rides along as
+	// artistTotal with the page URLs that cover it.
 	var seeAll map[string]interface{}
+	shownTotal := songsTotal
 	if name != "" && songsTotal > 0 {
 		seeAll = localArtistSeeAll(name, songsTotal)
-		resp["songsTotal"] = songsTotal
+		shownTotal = seeAll["total"].(int)
+		resp["songsTotal"] = shownTotal
+		resp["artistSongsTotal"] = songsTotal
 		resp["seeAll"] = seeAll
 	}
 	if len(songItems) > 0 {
-		sz := localSongsShelf{Total: songsTotal, SeeAll: seeAll}
+		sz := localSongsShelf{Total: shownTotal, SeeAll: seeAll}
 		sz.Header.Title = "Songs"
 		sz.Contents = songItems
 		resp["songs"] = sz
@@ -104,20 +111,46 @@ const localArtistSongsPreview = 12
 // localArtistSeeAllLimit matches the LocalSongsHandler page cap (pag: 200).
 const localArtistSeeAllLimit = 200
 
+// localArtistSeeAllPages bounds the page URLs listed for a very large artist.
+const localArtistSeeAllPages = 5
+
 // localArtistSeeAll is the "Voir les N titres" link of a local artist page: the
-// full track list through /api/v1/local/songs (album order), capped at
-// localArtistSeeAllLimit.
+// track list through /api/v1/local/songs (album order), one page of
+// localArtistSeeAllLimit. I19: `title` / `total` count what that link loads
+// (min(total, limit)), so the label never announces titles "Lire tout" will
+// not play; `artistTotal` is the real count and `pages` the URLs (offset by
+// limit, at most localArtistSeeAllPages) that load all of them.
 func localArtistSeeAll(name string, total int) map[string]interface{} {
-	q := url.Values{}
-	q.Set("artist", name)
-	q.Set("limit", strconv.Itoa(localArtistSeeAllLimit))
-	q.Set("sort", "album:asc")
-	return map[string]interface{}{
-		"title": fmt.Sprintf("Voir les %d titres", total),
-		"url":   "/api/v1/local/songs?" + q.Encode(),
-		"total": total,
-		"limit": localArtistSeeAllLimit,
+	pageURL := func(offset int) string {
+		q := url.Values{}
+		q.Set("artist", name)
+		q.Set("limit", strconv.Itoa(localArtistSeeAllLimit))
+		q.Set("sort", "album:asc")
+		if offset > 0 {
+			q.Set("offset", strconv.Itoa(offset))
+		}
+		return "/api/v1/local/songs?" + q.Encode()
 	}
+	shown := total
+	if shown > localArtistSeeAllLimit {
+		shown = localArtistSeeAllLimit
+	}
+	pages := []string{}
+	for off := 0; off < total && len(pages) < localArtistSeeAllPages; off += localArtistSeeAllLimit {
+		pages = append(pages, pageURL(off))
+	}
+	out := map[string]interface{}{
+		"title":       fmt.Sprintf("Voir les %d titres", shown),
+		"url":         pageURL(0),
+		"total":       shown,
+		"artistTotal": total,
+		"limit":       localArtistSeeAllLimit,
+		"pages":       pages,
+	}
+	if total > localArtistSeeAllLimit {
+		out["next"] = pageURL(localArtistSeeAllLimit)
+	}
+	return out
 }
 
 var localTrackAttrs = []string{"lid", "title", "artist", "albumArtist", "album", "track", "durationSec", "year"}

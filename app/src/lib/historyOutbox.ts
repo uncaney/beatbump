@@ -3,10 +3,21 @@
 // oldest dropped) with the client `playedAt`, and replayed on the window
 // `online` event and at startup. The backend keeps a client playedAt when it
 // lies within the last 7 days and not in the future (api/me.go).
+// I11: a replay also carries `clientSentAt` (the client clock when it is
+// sent) so the server can measure and correct a skewed client clock; a
+// direct POST (no marker) is dated by the server unless the client clock is
+// within 5 min of it.
 // Pure helpers take the storage as a parameter (historyOutbox.test.ts).
 
 export const OUTBOX_KEY = "ytm-history-outbox";
 export const OUTBOX_MAX = 500;
+/** I11: body key of an outbox replay: the client clock (ms) at send time. */
+export const REPLAY_MARK = "clientSentAt";
+
+/** I11: the item as sent by a replay (marked with the client clock now). */
+export function replayItem(item: Record<string, unknown>, now: number): Record<string, unknown> {
+	return { ...item, [REPLAY_MARK]: now };
+}
 
 export type OutboxEntry = { item: Record<string, unknown>; playedAt: number };
 export type SendResult = "ok" | "retry" | "drop";
@@ -30,7 +41,7 @@ export function slimHistoryItem(item: any): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
 	if (!item || typeof item !== "object") return out;
 	for (const [k, v] of Object.entries(item)) {
-		if (DROP_KEYS.includes(k) || typeof v === "function" || k === "playedAt") continue;
+		if (DROP_KEYS.includes(k) || typeof v === "function" || k === "playedAt" || k === REPLAY_MARK) continue;
 		out[k] = v;
 	}
 	if (Array.isArray(item.thumbnails)) out.thumbnails = item.thumbnails.slice(0, 2);
@@ -142,7 +153,7 @@ export function flushOutbox(send: SendPlay, store: KV | null = defaultStore(), o
 				if (lease && !takeOutboxLease(store, owner, now())) break;
 				const head = readOutbox(store)[0];
 				if (!head) break;
-				const r = await send(head.item, head.playedAt).catch(() => "retry" as SendResult);
+				const r = await send(replayItem(head.item, now()), head.playedAt).catch(() => "retry" as SendResult);
 				if (r === "retry") break;
 				if (r === "ok") sent++;
 				else dropped++;

@@ -55,12 +55,91 @@ const offlineTracksStore = writable<OfflineTrack[]>([], (set) => {
 	return () => window.removeEventListener("storage", on);
 });
 export const offlineTracks: Readable<OfflineTrack[]> = { subscribe: offlineTracksStore.subscribe };
-/** videoIds whose audio is in the SW cache per the local list (`_cached === true`). */
-export const cachedIds: Readable<Set<string>> = derived(offlineTracksStore, (list) => {
+/**
+ * I14: last `list-audio` answer of the SW (videoIds it really holds, and when
+ * it was asked). null until the SW answered once.
+ */
+export type SwAudioSnapshot = { ids: Set<string>; at: number };
+const swAudioSnapshot = writable<SwAudioSnapshot | null>(null);
+
+/**
+ * I14: the "Prêt hors-ligne" set, over the local list's tracks. Without a
+ * SW answer: `_cached === true`. With one, the SW decides: a track it holds
+ * is ready (even when the list missed the ack), one its LRU evicted is not
+ * (even though the list still says cached); only a track recorded after
+ * that answer (`_at` newer, cached since) is taken from the list. A track
+ * removed from the list loses its badge at once.
+ */
+export function cachedIdsFrom(list: ReadonlyArray<Partial<OfflineTrack> | null | undefined>, sw: SwAudioSnapshot | null): Set<string> {
 	const ids = new Set<string>();
-	for (const t of list) if (t && t._cached === true && t.videoId) ids.add(t.videoId);
+	for (const t of list) {
+		if (!t || !t.videoId) continue;
+		const listSays = t._cached === true;
+		if (!sw) {
+			if (listSays) ids.add(t.videoId);
+		} else if (sw.ids.has(t.videoId) || (listSays && typeof t._at === "number" && t._at > sw.at)) {
+			ids.add(t.videoId);
+		}
+	}
 	return ids;
-});
+}
+
+function sameSet(a: Set<string>, b: Set<string>): boolean {
+	if (a.size !== b.size) return false;
+	for (const x of a) if (!b.has(x)) return false;
+	return true;
+}
+
+/** videoIds whose audio is in the SW cache (I14: per the SW once it answered, else the local list). */
+export const cachedIds: Readable<Set<string>> = (() => {
+	let last: Set<string> | null = null;
+	return derived([offlineTracksStore, swAudioSnapshot], ([list, sw], set) => {
+		const next = cachedIdsFrom(list, sw);
+		// Re-emit only when the set changed (every ack rewrites the list).
+		if (!last || !sameSet(last, next)) {
+			last = next;
+			set(next);
+		}
+	}, new Set<string>());
+})();
+
+/** I14: record a SW `list-audio` answer as the badge source of truth. */
+export function setSwAudioSnapshot(entries: ReadonlyArray<{ videoId?: string }> | null | undefined, at = Date.now()): void {
+	if (!Array.isArray(entries)) return;
+	const ids = new Set<string>();
+	for (const e of entries) if (e && typeof e.videoId === "string" && e.videoId) ids.add(e.videoId);
+	swAudioSnapshot.set({ ids, at });
+}
+
+// I14: after a cache change (an audio-cached / audio-pinned / audio-uncached
+// answer: the SW LRU may have evicted other tracks) ask the SW again,
+// debounced, so the badges follow its real content.
+const SW_REFRESH_DEBOUNCE_MS = 1_500;
+let swRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+export function scheduleSwAudioRefresh(): void {
+	if (typeof window === "undefined") return;
+	if (swRefreshTimer) clearTimeout(swRefreshTimer);
+	swRefreshTimer = setTimeout(() => {
+		swRefreshTimer = null;
+		const asked = Date.now();
+		void listCachedAudio()
+			.then((l) => {
+				if (l && Array.isArray(l.entries)) setSwAudioSnapshot(l.entries, asked);
+			})
+			.catch(() => {});
+	}, SW_REFRESH_DEBOUNCE_MS);
+}
+const CACHE_CHANGE_REPLIES = new Set(["audio-cached", "audio-pinned", "audio-uncached", "audio-quota"]);
+if (typeof navigator !== "undefined" && typeof window !== "undefined" && "serviceWorker" in navigator) {
+	try {
+		navigator.serviceWorker.addEventListener("message", (ev: MessageEvent) => {
+			const t = ev.data && ev.data.type;
+			if (typeof t === "string" && CACHE_CHANGE_REPLIES.has(t)) scheduleSwAudioRefresh();
+		});
+	} catch {
+		/* no SW messaging: the local list stays the badge source */
+	}
+}
 /** deviceOffline() as a store: follows the window online / offline events. */
 export const networkOffline: Readable<boolean> = readable(false, (set) => {
 	if (typeof window === "undefined") return;
@@ -354,8 +433,10 @@ const RECONCILE_GRACE_MS = 5 * 60 * 1000;
  * Returns the reconciled list; `null` when the SW gave no answer (list untouched).
  */
 export async function reconcileOfflineList(): Promise<OfflineTrack[] | null> {
+	const asked = Date.now();
 	const l = await listCachedAudio();
 	if (!l || !Array.isArray(l.entries)) return null;
+	setSwAudioSnapshot(l.entries, asked); // I14: badges follow the SW
 	const byId = new Map<string, AudioListEntry>();
 	const byUrl = new Map<string, AudioListEntry>();
 	for (const e of l.entries) {

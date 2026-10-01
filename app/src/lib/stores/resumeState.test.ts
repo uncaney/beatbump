@@ -3,7 +3,11 @@ import {
 	RESUME_KEY,
 	RESUME_MAX_ITEMS,
 	REMEMBER_MIGRATED_KEY,
+	RESUME_MAX_AGE_MS,
 	buildResumeState,
+	clearResumeState,
+	resumeSignature,
+	shouldSaveResume,
 	migrateRememberLastTrack,
 	resumeAction,
 	resumeKeptFor,
@@ -176,5 +180,55 @@ describe("resumeAction (I4)", () => {
 	it("restores when another track (or none) is under the cursor", () => {
 		expect(resumeAction({ videoId: "aaaaaaaaaaa" }, state, true)).toBe("restore");
 		expect(resumeAction(undefined, state, true)).toBe("restore");
+	});
+});
+
+describe("I7: conditional save, max age, purge", () => {
+	const mix = [track(0), track(1), track(2)];
+	it("signature changes with cursor, queue order and context, not with time", () => {
+		const a = resumeSignature({ mix, position: 1 });
+		expect(resumeSignature({ mix, position: 1 })).toBe(a);
+		expect(resumeSignature({ mix, position: 2 })).not.toBe(a);
+		expect(resumeSignature({ mix: [mix[1], mix[0], mix[2]], position: 1 })).not.toBe(a);
+		expect(resumeSignature({ mix: [...mix, track(3)], position: 1 })).not.toBe(a);
+		expect(
+			resumeSignature({ mix, position: 1, context: { kind: "album", title: "X", href: "", ids: [] } }),
+		).not.toBe(a);
+	});
+	it("periodic save only when the time moved > 2 s or the queue changed", () => {
+		const sig = resumeSignature({ mix, position: 0 });
+		expect(shouldSaveResume(null, sig, 0)).toBe(true);
+		const last = { sig, t: 40 };
+		expect(shouldSaveResume(last, sig, 41.5)).toBe(false); // paused / barely moved
+		expect(shouldSaveResume(last, sig, 40)).toBe(false); // paused tab: no rewrite
+		expect(shouldSaveResume(last, sig, 45)).toBe(true);
+		expect(shouldSaveResume(last, sig, 10)).toBe(true); // seek back
+		expect(shouldSaveResume(last, resumeSignature({ mix, position: 1 }), 40)).toBe(true);
+	});
+	it("pause write: exact position once, second pause write of the same state skipped", () => {
+		const sig = resumeSignature({ mix, position: 0 });
+		expect(shouldSaveResume({ sig, t: 40 }, sig, 41, 0.25)).toBe(true);
+		expect(shouldSaveResume({ sig, t: 41 }, sig, 41, 0.25)).toBe(false);
+	});
+	it("ignores a state older than 30 days at read", () => {
+		const s = memory();
+		const now = 1_800_000_000_000;
+		writeResumeState(s, buildResumeState({ mix, position: 0 }, 5, 10, now - RESUME_MAX_AGE_MS - 1));
+		expect(readResumeState(s, now)).toBeNull();
+		writeResumeState(s, buildResumeState({ mix, position: 0 }, 5, 10, now - 3600_000));
+		expect(readResumeState(s, now)?.mix).toHaveLength(3);
+	});
+	it("clearResumeState removes the saved queue and lastTrack", () => {
+		const m = new Map<string, string>([
+			[RESUME_KEY, "x"],
+			["lastTrack", "y"],
+			["other", "z"],
+		]);
+		clearResumeState({
+			getItem: (k) => m.get(k) ?? null,
+			setItem: (k, v) => void m.set(k, v),
+			removeItem: (k) => void m.delete(k),
+		});
+		expect([...m.keys()]).toEqual(["other"]);
 	});
 });

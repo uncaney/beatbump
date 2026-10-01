@@ -43,3 +43,14 @@ describe("recent by day (S3)", () => {
 		expect(toMs("nope")).toBeNaN();
 	});
 });
+
+describe("recent by day from one row per play (I18)", () => {
+	it("a title played on two days is on both; a day replays all its plays in order", () => {
+		const items = [row("a"), row("b"), row("a"), row("c"), row("a")];
+		const playedAt = [at(31, 14), at(31, 12), at(31, 9), at(29, 20), at(29, 8)];
+		const g = groupByDay(items, playedAt, NOW)!;
+		expect(g.map((x) => x.items.map((i) => i.videoId))).toEqual([["a", "b"], ["c", "a"]]);
+		expect(g[0].replay.map((x) => x.videoId)).toEqual(["a", "b", "a"]);
+		expect(g[1].replay.map((x) => x.videoId)).toEqual(["a", "c"]);
+	});
+});

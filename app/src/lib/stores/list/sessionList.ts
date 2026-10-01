@@ -30,6 +30,7 @@ import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
 import { applyMixOp, planInsert, planReorder, removeAt } from "./queueOps";
 import {
+    continuedContext,
     describeContext,
     makeContext,
     type PlaybackContext,
@@ -696,6 +697,9 @@ export class ListService {
         await this.#sanitizeAndUpdate("APPLY", {
             mix: ["append", picked] satisfies MixListAppendOp,
         });
+        // I8: the appended rows are not part of the album / playlist the
+        // queue came from: the context becomes the extended queue.
+        this.setContext(continuedContext(this._state.context ?? null, this._state.mix));
         notify("Suite : dans ta bibliothèque", "success");
         let position = await this.updatePosition("next");
         if (position >= this._state.mix.length) position = this._state.position;
@@ -944,15 +948,13 @@ export class ListService {
                     clickTracking: this.clickTrackingParams,
                 }),
             });
-            if (!data) return;
-            if (data.related) this._$.value.related = data.related;
-            const state = await this.#sanitizeAndUpdate("APPLY", data);
-            await getSrc(
-                state.mix[position].videoId,
-                state.mix[position].playlistId,
-                undefined,
-                true,
-            );
+            // I20: a YouTube "Lire tout" queue (or no network) still steps
+            // back inside the queue when `next.json` answers nothing.
+            if (data?.related) this._$.value.related = data.related;
+            const state = data ? await this.#sanitizeAndUpdate("APPLY", data) : this._state;
+            const row = state.mix[position];
+            if (!row) return;
+            await getSrc(row.videoId, row.playlistId, undefined, true);
         }
 
         syncTabs.updatePosition(position);
@@ -1158,6 +1160,7 @@ export class ListService {
         mix: Item[],
         type?: "auto" | "playlist" | "local",
         context?: PlaybackContextInput | PlaybackContext | null,
+        opts: { fresh?: boolean } = {},
     ) {
         this.invalidatePrefetch();
         const guard = await mutex.do(async () => {
@@ -1165,6 +1168,9 @@ export class ListService {
             return new Promise<ISessionListProvider>((resolve) => {
                 this.#sanitizeAndUpdate("SET", {
                     ...this._state,
+                    // I20: a hand-built queue ("Lire tout") must not carry
+                    // the previous session's YouTube continuation.
+                    ...(opts.fresh && { continuation: "", clickTrackingParams: "", currentMixId: "" }),
                     mix: ["set", mix],
                     currentMixType: type,
                     context: makeContext(context ?? null, mix),

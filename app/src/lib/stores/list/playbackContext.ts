@@ -11,6 +11,7 @@ export type PlaybackContextKind =
 	| "foryou"
 	| "playlist"
 	| "offline"
+	| "artist"
 	| "queue";
 
 export interface PlaybackContextInput {
@@ -33,6 +34,7 @@ const KIND_LABEL: Record<PlaybackContextKind, string> = {
 	foryou: "Pour toi",
 	playlist: "Playlist",
 	offline: "Hors-ligne",
+	artist: "Artiste",
 	queue: "File",
 };
 
@@ -40,6 +42,7 @@ const RETURN_LABEL: Partial<Record<PlaybackContextKind, string>> = {
 	album: "Revenir à l'album",
 	mixtape: "Revenir à la mixtape",
 	favorites: "Revenir aux favoris",
+	artist: "Revenir à l'artiste",
 };
 
 export function contextKindLabel(kind: PlaybackContextKind): string {
@@ -148,4 +151,35 @@ export function describeContext(
 		returnLabel:
 			returnIndex >= 0 ? RETURN_LABEL[ctx.kind] ?? "Revenir à la liste" : "",
 	};
+}
+
+/**
+ * I8: the queue was extended past its source (C4 "Suite : dans ta
+ * bibliothèque"). The appended rows belong to no album / playlist, so the
+ * context becomes the queue itself ("File : Suite · 15/24", ids = the whole
+ * queue): the counter and total stay right instead of showing only the
+ * stale "Album : Discovery" header. No context stays no context.
+ */
+export function continuedContext(
+	ctx: PlaybackContext | null | undefined,
+	mix: ReadonlyArray<{ videoId?: string } | undefined>,
+): PlaybackContext | null {
+	if (!ctx) return null;
+	return makeContext({ kind: "queue", title: "Suite", href: "" }, mix);
+}
+
+/**
+ * I8: the context of a "Lire tout" / "Aléatoire" started on `pathname`
+ * (`title` = the page heading, e.g. the playlist or artist name). null when
+ * the page has no known source (the player then shows "File · n/N").
+ */
+export function playAllContextFor(pathname: string | null | undefined, title?: string | null): PlaybackContextInput | null {
+	const path = typeof pathname === "string" ? pathname : "";
+	const name = typeof title === "string" ? title.trim().slice(0, 200) : "";
+	if (/^\/library\/saved\/?$/.test(path) || /^\/favorites\/?$/.test(path)) {
+		return { kind: "favorites", title: "Favoris", href: path };
+	}
+	if (/^\/library\/playlists(-srv)?\/[^/]+\/?$/.test(path)) return { kind: "playlist", title: name, href: path };
+	if (/^\/(artist|channel)\/[^/]+\/?$/.test(path)) return { kind: "artist", title: name, href: path };
+	return null;
 }
