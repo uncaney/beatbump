@@ -215,6 +215,130 @@ export function buildRediscoverRow(items: unknown, max = 12, min = REDISCOVER_MI
 	return rows.length >= min ? rows : [];
 }
 
+// ---- F1 / F2 (c30a): one card once, at most 4 personal rows above YouTube ----
+
+/** A personal row as the component holds it: its `data-row` key and its cards. */
+export interface HomeRowInput {
+	key: string;
+	items: RowItem[] | null | undefined;
+	/** Keep the row even with no card (Reprendre carries pills / the week card). */
+	keepEmpty?: boolean;
+	/**
+	 * Cap applied AFTER the dedupe, so a low-priority row can be fetched
+	 * longer than it shows (Récemment acquis: 40 fetched, 20 shown) and still
+	 * fill up once the higher-priority rows took their cards.
+	 */
+	max?: number;
+	/**
+	 * F1: an album row that LOST cards to the dedupe and ends under this many
+	 * is hidden (a 2-card leftover row reads as broken). A row the dedupe did
+	 * not touch keeps its cards whatever their count (small libraries).
+	 */
+	minAfterDedupe?: number;
+}
+
+export interface HomeRow {
+	key: string;
+	items: RowItem[];
+}
+
+export interface ArrangedHomeRows {
+	/** Rows painted above the first YouTube row, in HOME_ROW_ORDER. */
+	visible: HomeRow[];
+	/** Rows folded behind the "Plus pour toi" toggle, in HOME_ROW_ORDER. */
+	more: HomeRow[];
+}
+
+/** Which row keeps a card present in several rows: the first key here wins. */
+export const HOME_ROW_PRIORITY = ["reprendre", "pour-toi", "redecouvrir", "nouveautes-artistes", "jamais-ecoute", "recemment-acquis"];
+/** Paint order of the personal rows on /home. */
+export const HOME_ROW_ORDER = ["reprendre", "pour-toi", "recemment-acquis", "nouveautes-artistes", "redecouvrir", "jamais-ecoute"];
+/** Rows that always take a visible slot when they have something to show. */
+export const HOME_PINNED_ROWS = ["reprendre", "pour-toi"];
+/** F2: personal rows painted above the first YouTube row. */
+export const HOME_MAX_VISIBLE_ROWS = 4;
+/** F1: an album row that lost cards to the dedupe needs this many to stay. */
+export const ALBUM_ROW_MIN = 4;
+/** localStorage key of the "Plus pour toi" toggle ("1" = unfolded). */
+export const HOME_MORE_ROWS_KEY = "ytm-home-more-rows";
+
+/**
+ * F1 + F2: dedupe the cards across the personal rows (a ref - videoId or
+ * browseId - appears in one row only, the row earliest in HOME_ROW_PRIORITY
+ * keeps it) and cap the rows painted above the first YouTube row to
+ * `maxVisible`: the pinned rows (Reprendre, Pour toi) first, then the best
+ * filled of the remaining rows; the rest go to `more`. Both lists follow
+ * HOME_ROW_ORDER so a row never changes place as the others load. Empty rows
+ * are dropped unless `keepEmpty`; see HomeRowInput.minAfterDedupe for the
+ * album rows, and `max` for a cap applied after the dedupe. A row whose
+ * cards all survive (and fit `max`) keeps its very array (reference
+ * equality), so an untouched Carousel does not re-render. Pure: inputs are
+ * never mutated.
+ */
+export function arrangeHomeRows(
+	rows: HomeRowInput[],
+	opts: { maxVisible?: number; pinned?: string[] } = {},
+): ArrangedHomeRows {
+	const maxVisible = Math.max(0, opts.maxVisible ?? HOME_MAX_VISIBLE_ROWS);
+	const pinnedKeys = opts.pinned ?? HOME_PINNED_ROWS;
+	const priorityOf = (key: string, i: number) => {
+		const p = HOME_ROW_PRIORITY.indexOf(key);
+		return p >= 0 ? p : HOME_ROW_PRIORITY.length + i;
+	};
+	const orderOf = (key: string, i: number) => {
+		const p = HOME_ROW_ORDER.indexOf(key);
+		return p >= 0 ? p : HOME_ROW_ORDER.length + i;
+	};
+
+	// 1. dedupe, highest-priority row first
+	const indexed = rows.map((row, i) => ({ row, i }));
+	indexed.sort((a, b) => priorityOf(a.row.key, a.i) - priorityOf(b.row.key, b.i));
+	const seen = new Set<string>();
+	const kept: { key: string; items: RowItem[]; order: number }[] = [];
+	for (const { row, i } of indexed) {
+		const source = Array.isArray(row.items) ? row.items : [];
+		const deduped: RowItem[] = [];
+		for (const it of source) {
+			const ref = rowItemRef(it);
+			if (ref && seen.has(ref)) continue;
+			if (ref) seen.add(ref);
+			deduped.push(it);
+		}
+		let items = deduped.length === source.length ? source : deduped;
+		if (typeof row.max === "number" && row.max >= 0 && items.length > row.max) items = items.slice(0, row.max);
+		const lost = source.length - deduped.length;
+		if (items.length === 0 && !row.keepEmpty) continue;
+		if (lost > 0 && typeof row.minAfterDedupe === "number" && items.length < row.minAfterDedupe) continue;
+		kept.push({ key: row.key, items, order: orderOf(row.key, i) });
+	}
+	kept.sort((a, b) => a.order - b.order);
+
+	// 2. visible slots: pinned rows, then the best filled of the others
+	const pinned = kept.filter((r) => pinnedKeys.includes(r.key)).slice(0, maxVisible);
+	const rest = kept.filter((r) => !pinnedKeys.includes(r.key));
+	const slots = Math.max(0, maxVisible - pinned.length);
+	const picked = new Set(
+		rest
+			.slice()
+			.sort((a, b) => b.items.length - a.items.length || a.order - b.order)
+			.slice(0, slots)
+			.map((r) => r.key),
+	);
+	const visible = kept.filter((r) => pinned.includes(r) || picked.has(r.key));
+	const more = rest.filter((r) => !picked.has(r.key));
+	const strip = (r: { key: string; items: RowItem[] }): HomeRow => ({ key: r.key, items: r.items });
+	return { visible: visible.map(strip), more: more.map(strip) };
+}
+
+/** "1" in localStorage = the folded rows are open. Never throws. */
+export function readMoreRowsOpen(storage: { getItem(key: string): string | null } | undefined): boolean {
+	try {
+		return storage?.getItem(HOME_MORE_ROWS_KEY) === "1";
+	} catch {
+		return false;
+	}
+}
+
 // ---- ST1 "Ta semaine" card ----
 // localStorage key: the dismissed ISO week ("YYYY-Www"); the card shows again
 // once a new week starts even if the previous one was dismissed.

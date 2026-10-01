@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HOME_CACHE_KEY, clearHomeCache, emptyHomeCacheRows, peekHomeCache, readHomeCache, slimCard, writeHomeCache } from "./homeCache";
+import { HOME_CACHE_KEY, HOME_CACHE_ROW_KEYS, HOME_CACHE_VERSION, clearHomeCache, emptyHomeCacheRows, peekHomeCache, readHomeCache, slimCard, writeHomeCache } from "./homeCache";
 
 const card = (id: string, extra: Record<string, any> = {}): Record<string, any> => ({
 	videoId: id,
@@ -56,6 +56,29 @@ describe("writeHomeCache / readHomeCache", () => {
 		const rows = readHomeCache(storage, "p1");
 		expect(rows?.reprendre).toHaveLength(20);
 	});
+	it("AP4 (c30a): round-trips, slims and caps the three cycle-29 rows too", () => {
+		const storage = memoryStorage();
+		const many = Array.from({ length: 25 }, (_, i) => card(`j${i}`));
+		writeHomeCache(storage, "p1", {
+			redecouvrir: [card("r1")],
+			nouveautes: [card("n1"), card("n2")],
+			jamaisEcoute: many,
+		});
+		const rows = readHomeCache(storage, "p1");
+		expect(rows?.redecouvrir.map((c) => c.videoId)).toEqual(["r1"]);
+		expect(rows?.nouveautes.map((c) => c.videoId)).toEqual(["n1", "n2"]);
+		expect(rows?.jamaisEcoute).toHaveLength(20);
+		expect(rows?.jamaisEcoute[0]).not.toHaveProperty("loggingContext");
+		expect(rows?.jamaisEcoute[0].thumbnails).toHaveLength(1);
+		// rows not written are empty, never undefined
+		expect(rows?.reprendre).toEqual([]);
+		expect(HOME_CACHE_ROW_KEYS).toEqual(["reprendre", "pourToi", "recemmentAcquis", "redecouvrir", "nouveautes", "jamaisEcoute"]);
+	});
+	it("ignores a v1 (three-row) envelope: the version is now 2", () => {
+		expect(HOME_CACHE_VERSION).toBe(2);
+		const v1 = { v: 1, savedAt: Date.now(), profileId: "p1", rows: { reprendre: [card("r1")], pourToi: [], recemmentAcquis: [] } };
+		expect(readHomeCache({ getItem: () => JSON.stringify(v1) }, "p1")).toBeNull();
+	});
 	it("returns null for a different profile (never leaks another profile's rows)", () => {
 		const storage = memoryStorage();
 		writeHomeCache(storage, "p1", { reprendre: [card("r1")] });
@@ -74,14 +97,14 @@ describe("writeHomeCache / readHomeCache", () => {
 		const storage = memoryStorage();
 		writeHomeCache(storage, "p1", { reprendre: [card("r1")] });
 		const raw = JSON.parse(storage.getItem(HOME_CACHE_KEY)!);
-		raw.v = 2;
+		raw.v = 99;
 		storage.setItem(HOME_CACHE_KEY, JSON.stringify(raw));
 		expect(readHomeCache(storage, "p1")).toBeNull();
 	});
 	it("never throws on corrupted JSON, missing storage or missing rows", () => {
 		expect(readHomeCache({ getItem: () => "{not json" }, "p1")).toBeNull();
 		expect(readHomeCache(undefined, "p1")).toBeNull();
-		expect(readHomeCache({ getItem: () => JSON.stringify({ v: 1, savedAt: Date.now(), profileId: "p1" }) }, "p1")).toBeNull();
+		expect(readHomeCache({ getItem: () => JSON.stringify({ v: HOME_CACHE_VERSION, savedAt: Date.now(), profileId: "p1" }) }, "p1")).toBeNull();
 	});
 	it("writeHomeCache is a no-op without a profile id or a settable storage", () => {
 		const storage = memoryStorage();
@@ -125,6 +148,6 @@ describe("clearHomeCache", () => {
 
 describe("emptyHomeCacheRows", () => {
 	it("gives an empty row set", () => {
-		expect(emptyHomeCacheRows()).toEqual({ reprendre: [], pourToi: [], recemmentAcquis: [] });
+		expect(emptyHomeCacheRows()).toEqual({ reprendre: [], pourToi: [], recemmentAcquis: [], redecouvrir: [], nouveautes: [], jamaisEcoute: [] });
 	});
 });

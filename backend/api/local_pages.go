@@ -153,7 +153,10 @@ func localArtistSeeAll(name string, total int) map[string]interface{} {
 	return out
 }
 
-var localTrackAttrs = []string{"lid", "title", "artist", "albumArtist", "album", "track", "durationSec", "year"}
+// videoId (L8-13): the YouTube id a track was acquired from, when the index
+// knows it, so a play made in streaming before the acquisition counts as a
+// play of the local track (never-played).
+var localTrackAttrs = []string{"lid", "title", "artist", "albumArtist", "album", "track", "durationSec", "year", "videoId"}
 
 // trackAlbumArtist mirrors the indexer's album aggregation key: albumArtist, else artist.
 func trackAlbumArtist(t map[string]interface{}) string {

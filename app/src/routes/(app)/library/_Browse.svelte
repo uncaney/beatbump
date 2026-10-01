@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Listing from "$components/Item/Listing.svelte";
+	import { goto } from "$app/navigation";
 	import { page } from "$app/stores";
 	import { APIClient } from "$lib/api";
 	import {
@@ -35,6 +36,32 @@
 
 	// BI2: sort + filter remembered per route (localStorage ytm-sort:<pathname>).
 	$: pathname = $page.url.pathname;
+
+	// BI4 (c30a): ?filter=never-played|added-30d narrows the albums list to
+	// what a home row shows ("Voir tout" of Jamais écouté / Nouveautés); the
+	// active filter is a removable chip. ?sort=<allowed> overrides the
+	// remembered sort for this landing (the row's order), without saving it.
+	const FILTER_LABELS: Record<string, string> = {
+		"never-played": "Jamais écouté",
+		"added-30d": "Ajoutés ces 30 derniers jours",
+	};
+	let filter = "";
+	let mounted = false;
+	$: urlFilter = (() => {
+		const f = $page.url.searchParams.get("filter") || "";
+		return kind === "albums" && f in FILTER_LABELS ? f : "";
+	})();
+	$: if (mounted && urlFilter !== filter) void applyFilter(urlFilter);
+	async function applyFilter(f: string) {
+		filter = f;
+		activeLetter = "";
+		// a load may be in flight (debounced query, A-Z seek): wait for it, never skip the reload
+		while (loading) await new Promise((r) => setTimeout(r, 50));
+		await load(true);
+	}
+	function clearFilter() {
+		void goto(pathname);
+	}
 	$: canIndex = (kind === "albums" || kind === "artists") && isTitleSort(kind, sort);
 	$: sortDesc = sort.endsWith(":desc");
 	let seeking = "";
@@ -53,6 +80,7 @@
 				`/api/v1/local/${kind}?sort=${encodeURIComponent(sort)}` +
 				`&offset=${offset}&limit=${pageSize}` +
 				(q ? `&q=${encodeURIComponent(q)}` : "") +
+				(filter ? `&filter=${encodeURIComponent(filter)}` : "") +
 				extraParams;
 			const res = await APIClient.fetch(url);
 			const data = await res.json();
@@ -123,6 +151,10 @@
 		);
 		sort = prefs.sort;
 		q = prefs.q;
+		const urlSort = $page.url.searchParams.get("sort") || "";
+		if (sortOptions.some((o) => o.value === urlSort)) sort = urlSort;
+		filter = urlFilter;
+		mounted = true;
 		load(true);
 		const io = new IntersectionObserver((entries) => {
 			if (entries[0].isIntersecting && !done && !loading) load();
@@ -162,6 +194,22 @@
 			</label>
 		</div>
 	</header>
+
+	{#if filter}
+		<div
+			class="filter-chip"
+			data-testid="browse-filter-chip"
+			data-filter={filter}
+		>
+			<span class="chip-label">{FILTER_LABELS[filter]}</span>
+			<button
+				type="button"
+				class="btn-reset chip-remove"
+				aria-label="Retirer le filtre {FILTER_LABELS[filter]}"
+				on:click={clearFilter}>✕</button
+			>
+		</div>
+	{/if}
 
 	{#if canIndex}
 		<nav
@@ -253,6 +301,39 @@
 		align-items: center;
 		gap: 0.4rem;
 		white-space: nowrap;
+	}
+	// BI4: the active filter chip, 44px tall so the remove button is a tap target.
+	.filter-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		margin: 0 0 0.75rem;
+		padding: 0 0.25rem 0 0.9rem;
+		min-height: max(2.75rem, 44px);
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.12);
+		border: 1px solid rgba(255, 255, 255, 0.2);
+	}
+	.chip-label {
+		font-weight: 600;
+	}
+	.chip-remove {
+		min-width: max(2.75rem, 44px);
+		min-height: max(2.75rem, 44px);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 999px;
+		color: inherit;
+		background: transparent;
+		border: 0;
+		cursor: pointer;
+		opacity: 0.8;
+		&:hover,
+		&:focus-visible {
+			opacity: 1;
+			background: rgba(255, 255, 255, 0.12);
+		}
 	}
 	// BI2: A-Z index. Phones only (the desktop list is a short scroll with a
 	// filter box): one sticky row of 44px letter buttons that scrolls

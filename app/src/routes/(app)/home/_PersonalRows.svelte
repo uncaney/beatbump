@@ -1,12 +1,30 @@
 <script lang="ts">
 	// Personal rows at the top of /home: Reprendre (H1), Pour toi (H2),
-	// Récemment acquis (H3). Client-only: every row loads after mount, in
+	// Récemment acquis (H3), Nouveautés de tes artistes (EQ3), Redécouvrir
+	// (D3), Jamais écouté (D2). Client-only: every row loads after mount, in
 	// parallel, renders nothing while loading and stays hidden when its source
 	// is empty or fails, so the YouTube rows below never wait on it.
+	// c30a F1 + F2: arrangeHomeRows ($lib/homeRows) shows a card in one row
+	// only and paints at most 4 rows above the first YouTube row; the others
+	// fold behind "Plus pour toi" ([data-testid=home-more-rows]).
 	import { onMount } from "svelte";
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
-	import { buildForYouRow, buildRediscoverRow, buildResumeRow, capItems, isoWeekKey, readLastTrack, sanitizeCard, shouldShowWeekCard, WEEK_CARD_DISMISS_KEY } from "$lib/homeRows";
+	import {
+		ALBUM_ROW_MIN,
+		HOME_MORE_ROWS_KEY,
+		arrangeHomeRows,
+		buildForYouRow,
+		buildRediscoverRow,
+		buildResumeRow,
+		capItems,
+		isoWeekKey,
+		readLastTrack,
+		readMoreRowsOpen,
+		sanitizeCard,
+		shouldShowWeekCard,
+		WEEK_CARD_DISMISS_KEY,
+	} from "$lib/homeRows";
 	import { peekHomeCache, clearHomeCache, writeHomeCache } from "$lib/homeCache";
 	import { getMix, getRecent, getStatsSummary, getTopBy, isAnonymousProfile, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
 	import { settings } from "$lib/stores";
@@ -17,6 +35,10 @@
 	import { get } from "svelte/store";
 
 	const MAX = 20;
+	// F1: Récemment acquis is the lowest-priority row of the dedupe (the newest
+	// albums mostly belong to Nouveautés / Jamais écouté too), so it is fetched
+	// twice as long as it shows and capped to MAX after the dedupe.
+	const ACQUIRED_FETCH = 2 * MAX;
 
 	let resume: any[] = [];
 	let forYou: any[] = [];
@@ -24,8 +46,7 @@
 	// D2: up to 10 local albums (dateAdded desc) none of whose tracks appear
 	// in the profile's play history (GET me/never-played, server-side set
 	// difference). Hidden for an anonymous profile and when empty, same as
-	// the other personal rows; no localStorage cache (AP1 covers reprendre/
-	// pour-toi/recemment-acquis only).
+	// the other personal rows. c30a AP4: cached like the other rows.
 	let neverPlayed: any[] = [];
 	// c29b D3: tracks played >= 3 times more than 60 days ago and not once
 	// in the last 30 days (GET me/stats/rediscover). Hidden for an anonymous
@@ -84,6 +105,10 @@
 	let resumeSource: RowSource = "empty";
 	let forYouSource: RowSource = "empty";
 	let acquiredSource: RowSource = "empty";
+	// c30a AP4: the three cycle-29 rows paint from the cache too.
+	let rediscoverSource: RowSource = "empty";
+	let newInLibrarySource: RowSource = "empty";
+	let neverPlayedSource: RowSource = "empty";
 
 	function storageOrUndefined(): Storage | undefined {
 		try {
@@ -93,19 +118,26 @@
 		}
 	}
 
-	/** Best-effort snapshot of the 3 rows into the shared localStorage cache. */
+	/** Best-effort snapshot of the 6 rows into the shared localStorage cache. */
 	async function persistHomeCache() {
 		try {
 			const w = await whoami();
 			if (!w?.id) return;
-			writeHomeCache(storageOrUndefined(), w.id, { reprendre: resume, pourToi: forYou, recemmentAcquis: acquired });
+			writeHomeCache(storageOrUndefined(), w.id, {
+				reprendre: resume,
+				pourToi: forYou,
+				recemmentAcquis: acquired,
+				redecouvrir: rediscover,
+				nouveautes: newInLibrary,
+				jamaisEcoute: neverPlayed,
+			});
 		} catch {
 			/* best-effort: offline whoami, private mode, quota, ... */
 		}
 	}
 
 	/**
-	 * AP1: paint the 3 rows instantly from the cache (any profile's: the
+	 * AP1 / AP4: paint the 6 rows instantly from the cache (any profile's: the
 	 * profile id isn't known synchronously), then drop that optimistic paint
 	 * if `whoami()` turns out to belong to a different profile - the live
 	 * loads already in flight fill the rows for the right profile moments
@@ -125,6 +157,18 @@
 		if (snap.rows.recemmentAcquis.length) {
 			acquired = snap.rows.recemmentAcquis;
 			acquiredSource = "cache";
+		}
+		if (snap.rows.redecouvrir.length) {
+			rediscover = snap.rows.redecouvrir;
+			rediscoverSource = "cache";
+		}
+		if (snap.rows.nouveautes.length) {
+			newInLibrary = snap.rows.nouveautes;
+			newInLibrarySource = "cache";
+		}
+		if (snap.rows.jamaisEcoute.length) {
+			neverPlayed = snap.rows.jamaisEcoute;
+			neverPlayedSource = "cache";
 		}
 		void validateCacheProfile(snap.profileId);
 	}
@@ -148,6 +192,18 @@
 			acquired = [];
 			acquiredSource = "empty";
 		}
+		if (rediscoverSource === "cache") {
+			rediscover = [];
+			rediscoverSource = "empty";
+		}
+		if (newInLibrarySource === "cache") {
+			newInLibrary = [];
+			newInLibrarySource = "empty";
+		}
+		if (neverPlayedSource === "cache") {
+			neverPlayed = [];
+			neverPlayedSource = "empty";
+		}
 	}
 
 	/** L13/L14-style: a login/logout (this tab or another) invalidates the cache and this profile's rows. */
@@ -162,6 +218,9 @@
 		neverPlayed = [];
 		rediscover = [];
 		newInLibrary = [];
+		rediscoverSource = "empty";
+		newInLibrarySource = "empty";
+		neverPlayedSource = "empty";
 		weekCard = null;
 		void loadResume();
 		void loadForYou();
@@ -277,10 +336,10 @@
 
 	async function loadAcquired() {
 		try {
-			const res = await APIClient.fetch(`/api/v1/local/albums?sort=dateAdded:desc&limit=${MAX}`);
+			const res = await APIClient.fetch(`/api/v1/local/albums?sort=dateAdded:desc&limit=${ACQUIRED_FETCH}`);
 			if (!res.ok) return;
 			const r = await res.json();
-			acquired = capItems(r?.items, MAX).map(sanitizeCard);
+			acquired = capItems(r?.items, ACQUIRED_FETCH).map(sanitizeCard);
 		} catch {
 			acquired = [];
 		}
@@ -293,6 +352,7 @@
 		try {
 			if (await isAnonymousProfile()) {
 				neverPlayed = [];
+				neverPlayedSource = "empty";
 				return;
 			}
 			const res = await APIClient.fetch(`/api/v1/me/never-played?limit=${NEVER_PLAYED_MAX}`);
@@ -305,6 +365,8 @@
 		} catch {
 			neverPlayed = [];
 		}
+		neverPlayedSource = neverPlayed.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
 
 	const REDISCOVER_MAX = 12;
@@ -312,6 +374,7 @@
 		try {
 			if (await isAnonymousProfile()) {
 				rediscover = [];
+				rediscoverSource = "empty";
 				return;
 			}
 			const res = await APIClient.fetch(`/api/v1/me/stats/rediscover?limit=${REDISCOVER_MAX}`);
@@ -324,6 +387,8 @@
 		} catch {
 			rediscover = [];
 		}
+		rediscoverSource = rediscover.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
 
 	const NEW_IN_LIBRARY_MAX = 12;
@@ -339,7 +404,90 @@
 		} catch {
 			newInLibrary = [];
 		}
+		newInLibrarySource = newInLibrary.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
+
+	// ---- c30a F1 + F2: one card once, at most 4 personal rows above YouTube ----
+	// The Reprendre section also carries the pills and the week card, so it
+	// keeps its slot even with no card to show (keepEmpty).
+	$: reprendreHasExtras = showSavedPill || (!!remote && !!remoteTrack && $paused) || !!weekCard;
+	$: arranged = arrangeHomeRows([
+		{ key: "reprendre", items: resume, keepEmpty: reprendreHasExtras },
+		{ key: "pour-toi", items: forYou },
+		{ key: "recemment-acquis", items: acquired, max: MAX, minAfterDedupe: ALBUM_ROW_MIN },
+		{ key: "nouveautes-artistes", items: newInLibrary, minAfterDedupe: ALBUM_ROW_MIN },
+		{ key: "redecouvrir", items: rediscover },
+		{ key: "jamais-ecoute", items: neverPlayed, minAfterDedupe: ALBUM_ROW_MIN },
+	]);
+	$: visibleKeys = new Set(arranged.visible.map((r) => r.key));
+	$: rowItems = Object.fromEntries([...arranged.visible, ...arranged.more].map((r) => [r.key, r.items])) as Record<string, any[]>;
+	$: discoveryVisible = arranged.visible.filter((r) => r.key in DISCOVERY_ROWS);
+	$: moreRows = arranged.more.filter((r) => r.key in DISCOVERY_ROWS);
+	$: moreCards = moreRows.reduce((n, r) => n + r.items.length, 0);
+
+	// The four discovery rows share one template; their copy, link and
+	// test ids live here. "Voir tout" lands on the list that shows the SAME
+	// thing as the row (F5 + BI4): the albums page with the row's filter and
+	// sort, the dedicated Redécouvrir list, the albums page newest first.
+	interface DiscoveryRow {
+		title: string;
+		subheading: string;
+		seeAllHref: string;
+		testid: string;
+		isBrowseEndpoint: boolean;
+	}
+	const DISCOVERY_ROWS: Record<string, DiscoveryRow> = {
+		"recemment-acquis": {
+			title: "Récemment acquis",
+			subheading: "Derniers albums ajoutés à la bibliothèque",
+			seeAllHref: "/library/albums?sort=dateAdded:desc",
+			testid: "row-recently-added",
+			isBrowseEndpoint: true,
+		},
+		"nouveautes-artistes": {
+			title: "Nouveautés de tes artistes",
+			subheading: "Albums ajoutés ces 30 derniers jours par les artistes que tu suis ou écoutes le plus",
+			seeAllHref: "/library/albums?filter=added-30d&sort=dateAdded:desc",
+			testid: "row-new-in-library",
+			isBrowseEndpoint: true,
+		},
+		redecouvrir: {
+			title: "Redécouvrir",
+			subheading: "Des morceaux que tu aimais et que tu n'as plus écoutés depuis un mois",
+			seeAllHref: "/library/rediscover",
+			testid: "row-rediscover",
+			isBrowseEndpoint: false,
+		},
+		"jamais-ecoute": {
+			title: "Jamais écouté",
+			subheading: "Des albums de ta bibliothèque que tu n'as jamais lancés",
+			seeAllHref: "/library/albums?filter=never-played&sort=dateAdded:desc",
+			testid: "row-never-played",
+			isBrowseEndpoint: true,
+		},
+	};
+
+	// F2: the folded rows ("Plus pour toi") stay as the viewer left them.
+	let moreOpen = false;
+	function toggleMore() {
+		moreOpen = !moreOpen;
+		try {
+			storageOrUndefined()?.setItem(HOME_MORE_ROWS_KEY, moreOpen ? "1" : "0");
+		} catch {
+			/* no storage: this load only */
+		}
+	}
+
+	// AP1 opacity cue per row key (true while the row shows its cached paint).
+	$: cacheRows = {
+		reprendre: resumeSource === "cache",
+		"pour-toi": forYouSource === "cache",
+		"recemment-acquis": acquiredSource === "cache",
+		redecouvrir: rediscoverSource === "cache",
+		"nouveautes-artistes": newInLibrarySource === "cache",
+		"jamais-ecoute": neverPlayedSource === "cache",
+	} as Record<string, boolean>;
 
 	onMount(() => {
 		try {
@@ -347,6 +495,7 @@
 		} catch {
 			saved = null;
 		}
+		moreOpen = readMoreRowsOpen(storageOrUndefined());
 		paintFromCache();
 		void loadResume();
 		void loadRemote();
@@ -367,7 +516,7 @@
 	});
 </script>
 
-{#if resume.length > 0 || showSavedPill || remoteTrack || weekCard}
+{#if visibleKeys.has("reprendre")}
 	<section
 		class="home-row"
 		data-row="reprendre"
@@ -444,27 +593,33 @@
 				</button>
 			</div>
 		{/if}
-		{#if resume.length > 0}
-		<div class="row-fade" class:is-cache={resumeSource === "cache"}>
-			<Carousel
-				items={resume}
-				header={{ title: "Reprendre", subheading: "Là où tu t'es arrêté" }}
-				type="trending"
-				isBrowseEndpoint={false}
-			/>
-		</div>
+		{#if rowItems.reprendre?.length > 0}
+			<div
+				class="row-fade"
+				class:is-cache={cacheRows.reprendre}
+			>
+				<Carousel
+					items={rowItems.reprendre}
+					header={{ title: "Reprendre", subheading: "Là où tu t'es arrêté" }}
+					type="trending"
+					isBrowseEndpoint={false}
+				/>
+			</div>
 		{/if}
 	</section>
 {/if}
 
-{#if forYou.length > 0}
+{#if visibleKeys.has("pour-toi")}
 	<section
 		class="home-row"
 		data-row="pour-toi"
 	>
-		<div class="row-fade" class:is-cache={forYouSource === "cache"}>
+		<div
+			class="row-fade"
+			class:is-cache={cacheRows["pour-toi"]}
+		>
 			<Carousel
-				items={forYou}
+				items={rowItems["pour-toi"]}
 				header={{ title: "Pour toi", subheading: "D'après ta bibliothèque" }}
 				type="trending"
 				isBrowseEndpoint={false}
@@ -475,80 +630,85 @@
 	</section>
 {/if}
 
-{#if acquired.length > 0}
+<!-- F1 + F2: the discovery rows that won a slot above the first YouTube row.
+     testid on a box-bearing wrapper: .home-row is display: contents, which a
+     visibility check reads as an empty box. -->
+{#each discoveryVisible as row (row.key)}
 	<section
 		class="home-row"
-		data-row="recemment-acquis"
+		data-row={row.key}
 	>
-		<div class="row-fade" class:is-cache={acquiredSource === "cache"}>
+		<div
+			class="row-fade"
+			class:is-cache={!!cacheRows[row.key]}
+			data-testid={DISCOVERY_ROWS[row.key].testid}
+		>
 			<Carousel
-				items={acquired}
-				header={{ title: "Récemment acquis", subheading: "Derniers albums ajoutés à la bibliothèque" }}
+				items={rowItems[row.key]}
+				header={{ title: DISCOVERY_ROWS[row.key].title, subheading: DISCOVERY_ROWS[row.key].subheading }}
 				type="trending"
-				isBrowseEndpoint={true}
-				seeAllHref="/library/albums"
+				isBrowseEndpoint={DISCOVERY_ROWS[row.key].isBrowseEndpoint}
+				seeAllHref={DISCOVERY_ROWS[row.key].seeAllHref}
 				seeAllLabel="Voir tout"
 			/>
 		</div>
 	</section>
-{/if}
+{/each}
 
-{#if newInLibrary.length > 0}
-	<section
-		class="home-row"
-		data-row="nouveautes-artistes"
-	>
-		<div data-testid="row-new-in-library">
-			<Carousel
-				items={newInLibrary}
-				header={{ title: "Nouveautés de tes artistes", subheading: "Albums ajoutés ces 30 derniers jours par les artistes que tu suis ou écoutes le plus" }}
-				type="trending"
-				isBrowseEndpoint={true}
-				seeAllHref="/library/albums"
-				seeAllLabel="Voir tout"
-			/>
+{#if moreRows.length > 0}
+	<div class="more-rows">
+		<button
+			type="button"
+			class="btn-reset btn-secondary"
+			data-testid="home-more-rows"
+			aria-expanded={moreOpen}
+			aria-controls="home-more-rows-panel"
+			on:click={toggleMore}
+		>
+			{moreOpen ? "Moins" : "Plus pour toi"} · {moreRows.length} rangée{moreRows.length > 1 ? "s" : ""}, {moreCards} carte{moreCards > 1 ? "s" : ""}
+		</button>
+	</div>
+	{#if moreOpen}
+		<div
+			id="home-more-rows-panel"
+			class="more-rows-panel"
+		>
+			{#each moreRows as row (row.key)}
+				<section
+					class="home-row"
+					data-row={row.key}
+					data-folded="1"
+				>
+					<div
+						class="row-fade"
+						class:is-cache={!!cacheRows[row.key]}
+						data-testid={DISCOVERY_ROWS[row.key].testid}
+					>
+						<Carousel
+							items={rowItems[row.key]}
+							header={{ title: DISCOVERY_ROWS[row.key].title, subheading: DISCOVERY_ROWS[row.key].subheading }}
+							type="trending"
+							isBrowseEndpoint={DISCOVERY_ROWS[row.key].isBrowseEndpoint}
+							seeAllHref={DISCOVERY_ROWS[row.key].seeAllHref}
+							seeAllLabel="Voir tout"
+						/>
+					</div>
+				</section>
+			{/each}
 		</div>
-	</section>
-{/if}
-
-{#if rediscover.length > 0}
-	<section
-		class="home-row"
-		data-row="redecouvrir"
-	>
-		<!-- testid on a box-bearing wrapper: .home-row is display: contents, which a
-		     visibility check reads as an empty box. -->
-		<div data-testid="row-rediscover">
-			<Carousel
-				items={rediscover}
-				header={{ title: "Redécouvrir", subheading: "Des morceaux que tu aimais et que tu n'as plus écoutés depuis un mois" }}
-				type="trending"
-				isBrowseEndpoint={false}
-				seeAllHref="/library/recent"
-				seeAllLabel="Voir tout"
-			/>
-		</div>
-	</section>
-{/if}
-
-{#if neverPlayed.length > 0}
-	<section
-		class="home-row"
-		data-row="jamais-ecoute"
-	>
-		<Carousel
-			items={neverPlayed}
-			header={{ title: "Jamais écouté", subheading: "Des albums de ta bibliothèque que tu n'as jamais lancés" }}
-			type="trending"
-			isBrowseEndpoint={true}
-			seeAllHref="/library/albums"
-			seeAllLabel="Voir tout"
-		/>
-	</section>
+	{/if}
 {/if}
 
 <style>
 	.home-row {
+		display: contents;
+	}
+	/* F2: the fold. Same 1rem gutter as the row headers; the panel is
+	   display: contents so the folded rows flow like the visible ones. */
+	.more-rows {
+		padding: 0.25em 1rem 0.5em;
+	}
+	.more-rows-panel {
 		display: contents;
 	}
 	/* AP1: the row painted from the localStorage cache dims very slightly

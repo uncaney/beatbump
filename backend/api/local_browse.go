@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"beatbump-server/backend/db"
 
@@ -154,15 +155,45 @@ func LocalArtistsHandler(c echo.Context) error {
 	})
 }
 
+// albumDocAttrs is what localAlbumItem needs from an albums doc.
+var albumDocAttrs = []string{"id", "album", "albumArtist", "artistId", "year", "coverLid", "trackCount"}
+
+// BI4: ?filter= values of GET /local/albums, the lists behind the home rows'
+// "Voir tout". The albums index is filterable on albumArtist / artistId /
+// source only (local_covers.go), so both are materialised from a bounded
+// newest-first scan (recentAlbumDocs), sorted in Go and paged here.
+//
+//	never-played  albums none of whose tracks the profile played (the
+//	              me/never-played logic, profile cookie), up to the scan cap
+//	added-30d     albums added in the last addedRecentlyDays days
+var albumFilters = map[string]bool{"never-played": true, "added-30d": true}
+
+const (
+	albumFilterScanPage = 200
+	albumFilterScanCap  = 1000
+	addedRecentlyDays   = 30
+)
+
+// badFilter is the 400 answer for an unknown ?filter= value.
+func badFilter(c echo.Context, raw string) error {
+	return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": "unknown filter: " + raw})
+}
+
 func LocalAlbumsHandler(c echo.Context) error {
 	off, lim := pag(c, 60)
 	sortBy, ok := validSort(c.QueryParam("sort"), albumSortable, "dateAdded:desc")
 	if !ok {
 		return badSort(c, c.QueryParam("sort"))
 	}
+	if f := c.QueryParam("filter"); f != "" {
+		if !albumFilters[f] {
+			return badFilter(c, f)
+		}
+		return localAlbumsFiltered(c, f, off, lim, sortBy)
+	}
 	payload := map[string]interface{}{
 		"q": c.QueryParam("q"), "offset": off, "limit": lim, "sort": []string{sortBy},
-		"attributesToRetrieve": []string{"id", "album", "albumArtist", "artistId", "year", "coverLid", "trackCount"},
+		"attributesToRetrieve": albumDocAttrs,
 	}
 	if aid := c.QueryParam("artistId"); aid != "" {
 		payload["filter"] = "artistId = \"" + escapeMeili(aid) + "\""
@@ -174,6 +205,110 @@ func LocalAlbumsHandler(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"items": items, "total": total, "offset": off, "limit": lim, "sort": sortBy,
+	})
+}
+
+// recentAlbumDocs scans the albums index newest first (dateAdded desc,
+// epoch seconds) and returns the docs added since `cutoff` (0: every doc,
+// up to the cap), honouring the listing's q and artistId. Bounded by
+// albumFilterScanCap docs (five pages).
+func recentAlbumDocs(q, artistId string, cutoff int64) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0)
+	attrs := append(append([]string{}, albumDocAttrs...), "dateAdded")
+	for off := 0; off < albumFilterScanCap; off += albumFilterScanPage {
+		payload := map[string]interface{}{
+			"q": q, "offset": off, "limit": albumFilterScanPage, "sort": []string{"dateAdded:desc"},
+			"attributesToRetrieve": attrs,
+		}
+		if artistId != "" {
+			payload["filter"] = "artistId = \"" + escapeMeili(artistId) + "\""
+		}
+		hits, _ := meiliBrowse("albums", payload)
+		if len(hits) == 0 {
+			break
+		}
+		stop := false
+		for _, a := range hits {
+			if cutoff > 0 && albumDateAdded(a) < cutoff {
+				stop = true
+				break
+			}
+			out = append(out, a)
+		}
+		if stop || len(hits) < albumFilterScanPage {
+			break
+		}
+	}
+	return out
+}
+
+// sortAlbumDocs orders album docs by a validated "field:dir" (albumSortable)
+// in Go, since the filtered listings are materialised rather than paged by
+// Meili. Strings compare case-insensitively; dateAdded / trackCount as
+// numbers; year as the 4-digit string the index stores.
+func sortAlbumDocs(docs []map[string]interface{}, sortBy string) {
+	parts := strings.SplitN(sortBy, ":", 2)
+	field := parts[0]
+	desc := len(parts) == 2 && parts[1] == "desc"
+	if field == "dateAdded" && desc {
+		return // the scan order
+	}
+	less := func(a, b map[string]interface{}) bool {
+		switch field {
+		case "dateAdded":
+			return albumDateAdded(a) < albumDateAdded(b)
+		case "trackCount":
+			return mint(a, field) < mint(b, field)
+		case "year":
+			return mnumStr(a, field) < mnumStr(b, field)
+		}
+		return strings.ToLower(mstr(a, field)) < strings.ToLower(mstr(b, field))
+	}
+	sort.SliceStable(docs, func(i, j int) bool {
+		if desc {
+			return less(docs[j], docs[i])
+		}
+		return less(docs[i], docs[j])
+	})
+}
+
+// localAlbumsFiltered answers GET /local/albums?filter=never-played|added-30d.
+// `total` is exact for added-30d; for never-played it counts the survivors
+// of the play_events pair filter (an upper bound: the Meili confirmation may
+// still reject a few, the client then sees a short page and stops).
+func localAlbumsFiltered(c echo.Context, filter string, off, lim int, sortBy string) error {
+	var cutoff int64
+	if filter == "added-30d" {
+		cutoff = time.Now().Add(-addedRecentlyDays * 24 * time.Hour).Unix()
+	}
+	docs := recentAlbumDocs(c.QueryParam("q"), c.QueryParam("artistId"), cutoff)
+	sortAlbumDocs(docs, sortBy)
+	items := make([]IListItemRenderer, 0, lim)
+	total := 0
+	switch filter {
+	case "added-30d":
+		total = len(docs)
+		start, end := off, off+lim
+		if start > total {
+			start = total
+		}
+		if end > total {
+			end = total
+		}
+		for _, a := range docs[start:end] {
+			items = append(items, localAlbumItem(a))
+		}
+	case "never-played":
+		played := loadPlayedIndex(profileID(c))
+		items = neverPlayedAlbums(docs, played, off, lim)
+		for _, a := range docs {
+			if album, aa := mstr(a, "album"), mstr(a, "albumArtist"); album != "" && aa != "" && !played.knownPlayed(album, aa) {
+				total++
+			}
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"items": items, "total": total, "offset": off, "limit": lim, "sort": sortBy, "filter": filter,
 	})
 }
 
@@ -245,9 +380,55 @@ func mintFloat(v interface{}) int {
 // walking every album.
 const neverPlayedScanCap = 120
 
-// albumNeverPlayed reports whether none of an album's tracks (by lid) is in
-// `played` (a profile's distinct play refs - local track refs ARE their lid,
-// me.go itemMeta/MeRecordPlayHandler). An album with no resolvable tracks is
+// playedIndex folds a profile's play history for the never-played checks
+// (L8-4): every distinct play ref (local lid or YouTube videoId) and every
+// (album, artist) pair the play rows carry, lower-cased. The pairs reject
+// most candidates without Meili; the refs confirm the survivors.
+type playedIndex struct {
+	refs   map[string]bool
+	albums map[string]bool
+}
+
+// albumPairKey is the case-insensitive (album, artist) key of playedIndex.
+func albumPairKey(album, artist string) string {
+	return strings.ToLower(strings.TrimSpace(album)) + "\x00" + strings.ToLower(strings.TrimSpace(artist))
+}
+
+// loadPlayedIndex reads a profile's play_events in two aggregate queries
+// (distinct refs; distinct album/artist pairs). Rows without an album
+// label (YouTube plays, legacy rows) only contribute their ref: the albums
+// they belong to are confirmed through Meili like before.
+func loadPlayedIndex(pid string) playedIndex {
+	idx := playedIndex{refs: map[string]bool{}, albums: map[string]bool{}}
+	var refs []string
+	db.DB.Model(&db.PlayEvent{}).Where("profile_id = ?", pid).Distinct("ref").Pluck("ref", &refs)
+	for _, r := range refs {
+		if r != "" {
+			idx.refs[r] = true
+		}
+	}
+	var pairs []struct {
+		Album  string
+		Artist string
+	}
+	db.DB.Model(&db.PlayEvent{}).Select("album, artist").Where("profile_id = ? AND album <> ''", pid).Group("album, artist").Scan(&pairs)
+	for _, p := range pairs {
+		idx.albums[albumPairKey(p.Album, p.Artist)] = true
+	}
+	return idx
+}
+
+// knownPlayed reports whether a play row already names this album (by its
+// album + albumArtist pair): no Meili query is needed to reject it.
+func (p playedIndex) knownPlayed(album, albumArtist string) bool {
+	return p.albums[albumPairKey(album, albumArtist)]
+}
+
+// albumNeverPlayed reports whether none of an album's tracks is in `played`
+// (a profile's distinct play refs): by lid (local track refs ARE their lid,
+// me.go itemMeta/MeRecordPlayHandler) and, L8-13, by the YouTube videoId
+// the track was acquired from, so an album streamed before it was acquired
+// is not offered as never played. An album with no resolvable tracks is
 // never offered (nothing to confirm it was never played).
 func albumNeverPlayed(album, albumArtist string, played map[string]bool) bool {
 	tracks := albumTracks(album, albumArtist)
@@ -258,8 +439,41 @@ func albumNeverPlayed(album, albumArtist string, played map[string]bool) bool {
 		if played[mstr(t, "lid")] {
 			return false
 		}
+		if vid := mstr(t, "videoId"); vid != "" && played[vid] {
+			return false
+		}
 	}
 	return true
+}
+
+// neverPlayedAlbums walks `candidates` (album docs, in the wanted order) and
+// returns the never-played ones after the first `skip`, at most `limit`
+// (limit <= 0: no cap). L8-4: a candidate whose (album, albumArtist) pair is
+// on a play row is dropped without Meili; only the survivors cost one
+// albumTracks query each (the lid / videoId confirmation). The walk stops as
+// soon as `limit` albums are collected, so the home row (limit 10) costs at
+// most 10 confirmations plus the survivors the confirmation rejects.
+func neverPlayedAlbums(candidates []map[string]interface{}, played playedIndex, skip, limit int) []IListItemRenderer {
+	items := make([]IListItemRenderer, 0)
+	found := 0
+	for _, a := range candidates {
+		if limit > 0 && len(items) >= limit {
+			break
+		}
+		album, aa := mstr(a, "album"), mstr(a, "albumArtist")
+		if album == "" || aa == "" || played.knownPlayed(album, aa) {
+			continue
+		}
+		if !albumNeverPlayed(album, aa, played.refs) {
+			continue
+		}
+		found++
+		if found <= skip {
+			continue
+		}
+		items = append(items, localAlbumItem(a))
+	}
+	return items
 }
 
 // MeNeverPlayedHandler: GET /api/v1/me/never-played?limit=10 (D2). Local
@@ -272,28 +486,10 @@ func albumNeverPlayed(album, albumArtist string, played map[string]bool) bool {
 func MeNeverPlayedHandler(c echo.Context) error {
 	pid := profileID(c)
 	limit := clampLimit(c, 10, 50)
-
-	var refs []string
-	db.DB.Model(&db.PlayEvent{}).Where("profile_id = ?", pid).Distinct("ref").Pluck("ref", &refs)
-	played := make(map[string]bool, len(refs))
-	for _, r := range refs {
-		played[r] = true
-	}
-
+	played := loadPlayedIndex(pid)
 	candidates, _ := meiliBrowse("albums", map[string]interface{}{
 		"q": "", "offset": 0, "limit": neverPlayedScanCap, "sort": []string{"dateAdded:desc"},
-		"attributesToRetrieve": []string{"id", "album", "albumArtist", "artistId", "year", "coverLid", "trackCount"},
+		"attributesToRetrieve": albumDocAttrs,
 	})
-	items := make([]IListItemRenderer, 0, limit)
-	for _, a := range candidates {
-		if len(items) >= limit {
-			break
-		}
-		album, aa := mstr(a, "album"), mstr(a, "albumArtist")
-		if album == "" || aa == "" || !albumNeverPlayed(album, aa, played) {
-			continue
-		}
-		items = append(items, localAlbumItem(a))
-	}
-	return c.JSON(http.StatusOK, map[string]interface{}{"items": items})
+	return c.JSON(http.StatusOK, map[string]interface{}{"items": neverPlayedAlbums(candidates, played, 0, limit)})
 }

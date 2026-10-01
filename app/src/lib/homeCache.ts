@@ -1,21 +1,25 @@
 // AP1 "instant home": a slim localStorage snapshot of the personal rows
-// (Reprendre / Pour toi / Récemment acquis) painted immediately on mount,
-// replaced in place once the live API answers. Kept free of Svelte/store
+// (Reprendre / Pour toi / Récemment acquis, and since c30a AP4 Redécouvrir /
+// Nouveautés / Jamais écouté) painted immediately on mount, replaced in
+// place once the live API answers. Kept free of Svelte/store
 // imports so it is unit-testable; the component (_PersonalRows.svelte) only
 // reads/writes through these pure helpers.
 
 import type { RowItem } from "./homeRows";
 
-/** localStorage key (v1 envelope: version + savedAt + profile scope + rows). */
+/** localStorage key (versioned envelope: version + savedAt + profile scope + rows). */
 export const HOME_CACHE_KEY = "ytm-home-cache";
-const HOME_CACHE_VERSION = 1;
+// v2 (c30a AP4): six rows instead of three. A v1 envelope is ignored (not
+// migrated): the live loads repaint everything within the second anyway.
+export const HOME_CACHE_VERSION = 2;
 // Ignored after 7 days: a week-old "Récemment acquis" is worse than nothing.
 const HOME_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-// Bounded to ~60 slim cards total (3 rows x 20): enough to paint every row
+// Bounded to ~120 slim cards total (6 rows x 20): enough to paint every row
 // without the cache itself growing unbounded in localStorage.
 export const HOME_CACHE_MAX_PER_ROW = 20;
 
-export type HomeCacheRowKey = "reprendre" | "pourToi" | "recemmentAcquis";
+export type HomeCacheRowKey = "reprendre" | "pourToi" | "recemmentAcquis" | "redecouvrir" | "nouveautes" | "jamaisEcoute";
+export const HOME_CACHE_ROW_KEYS: readonly HomeCacheRowKey[] = ["reprendre", "pourToi", "recemmentAcquis", "redecouvrir", "nouveautes", "jamaisEcoute"];
 export type HomeCacheRows = Record<HomeCacheRowKey, RowItem[]>;
 
 interface HomeCacheEnvelope {
@@ -31,7 +35,7 @@ type StorageLike = {
 	removeItem?(key: string): void;
 };
 
-const emptyRows = (): HomeCacheRows => ({ reprendre: [], pourToi: [], recemmentAcquis: [] });
+const emptyRows = (): HomeCacheRows => ({ reprendre: [], pourToi: [], recemmentAcquis: [], redecouvrir: [], nouveautes: [], jamaisEcoute: [] });
 
 /**
  * Minimal copy of a card kept in the cache: just enough to render a
@@ -71,7 +75,7 @@ export interface HomeCacheSnapshot {
 
 /**
  * Read the cache ignoring the profile scope: any structurally valid,
- * non-expired v1 envelope. Used for the optimistic first paint (before
+ * non-expired envelope of the current version. Used for the optimistic first paint (before
  * `whoami()` resolves, so the profile id isn't known synchronously yet);
  * the caller compares `profileId` itself once it has one and drops the
  * paint on a mismatch. Any corruption/expiry answers null, never throws.
@@ -86,17 +90,14 @@ export function peekHomeCache(storage: StorageLike | undefined): HomeCacheSnapsh
 		if (typeof parsed.profileId !== "string" || !parsed.profileId) return null;
 		if (typeof parsed.savedAt !== "number" || !Number.isFinite(parsed.savedAt)) return null;
 		if (Date.now() - parsed.savedAt > HOME_CACHE_MAX_AGE_MS) return null;
-		const rows = parsed.rows;
+		const rows = parsed.rows as Partial<Record<HomeCacheRowKey, unknown>> | undefined;
 		if (!rows || typeof rows !== "object") return null;
-		return {
-			profileId: parsed.profileId,
-			savedAt: parsed.savedAt,
-			rows: {
-				reprendre: Array.isArray(rows.reprendre) ? rows.reprendre : [],
-				pourToi: Array.isArray(rows.pourToi) ? rows.pourToi : [],
-				recemmentAcquis: Array.isArray(rows.recemmentAcquis) ? rows.recemmentAcquis : [],
-			},
-		};
+		const out = emptyRows();
+		for (const k of HOME_CACHE_ROW_KEYS) {
+			const v = rows[k];
+			if (Array.isArray(v)) out[k] = v;
+		}
+		return { profileId: parsed.profileId, savedAt: parsed.savedAt, rows: out };
 	} catch {
 		return null;
 	}
@@ -121,15 +122,13 @@ export function readHomeCache(storage: StorageLike | undefined, profileId: strin
 export function writeHomeCache(storage: StorageLike | undefined, profileId: string, rows: Partial<HomeCacheRows>): void {
 	try {
 		if (!storage?.setItem || !profileId) return;
+		const bounded = emptyRows();
+		for (const k of HOME_CACHE_ROW_KEYS) bounded[k] = boundRow(rows[k]);
 		const envelope: HomeCacheEnvelope = {
 			v: HOME_CACHE_VERSION,
 			savedAt: Date.now(),
 			profileId,
-			rows: {
-				reprendre: boundRow(rows.reprendre),
-				pourToi: boundRow(rows.pourToi),
-				recemmentAcquis: boundRow(rows.recemmentAcquis),
-			},
+			rows: bounded,
 		};
 		storage.setItem(HOME_CACHE_KEY, JSON.stringify(envelope));
 	} catch {
