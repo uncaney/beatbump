@@ -128,8 +128,9 @@
 		margin-left: auto;
 	}
 	.close {
-		min-width: max(2rem, 32px);
-		min-height: max(2rem, 32px);
+		// L8-7: 32px undercut .btn-ghost's 44px floor (scoped rule wins).
+		min-width: max(2.75rem, 44px);
+		min-height: max(2.75rem, 44px);
 		padding: 0;
 		font-size: 1.1rem;
 		line-height: 1;

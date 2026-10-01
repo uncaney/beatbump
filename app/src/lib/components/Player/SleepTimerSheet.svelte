@@ -62,7 +62,7 @@
 				</h2>
 				<button
 					type="button"
-					class="close-btn"
+					class="btn-reset close-btn"
 					aria-label="Fermer"
 					title="Fermer (Échap)"
 					on:click={close}>×</button
@@ -93,7 +93,7 @@
 					{#each SLEEP_MINUTE_OPTIONS as m}
 						<button
 							type="button"
-							class="opt"
+							class="btn-reset opt"
 							aria-pressed={$sleepMode === m}
 							on:click={() => pick(m)}
 						>
@@ -102,7 +102,7 @@
 					{/each}
 					<button
 						type="button"
-						class="opt"
+						class="btn-reset opt"
 						aria-pressed={$sleepMode === "track"}
 						on:click={() => pick("track")}
 					>
@@ -112,7 +112,7 @@
 				{#if $sleepMode !== null}
 					<button
 						type="button"
-						class="opt cancel"
+						class="btn-reset opt cancel"
 						on:click={cancel}
 					>
 						Annuler la minuterie

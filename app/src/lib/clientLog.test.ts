@@ -4,24 +4,36 @@ vi.mock("../env", () => ({ SERVER_DOMAIN: "" }));
 
 import {
 	CLIENT_LOG_MAX_BODY,
+	CLIENT_LOG_MAX_MESSAGE,
 	_setClientLogSender,
 	buildClientLogPayload,
 	clientLogKey,
 	describeThrown,
+	pageLocationPath,
 	reportClientError,
 	shouldReport,
 } from "./clientLog";
 
 describe("ST3 clientLog: payload", () => {
 	it("clips every field and drops a stack equal to the message", () => {
-		const p = buildClientLogPayload("error", " boom ", { stack: "boom", url: "https://x/y", ua: "UA" });
-		expect(p).toEqual({ kind: "error", message: "boom", url: "https://x/y", ua: "UA" });
+		const p = buildClientLogPayload("error", " boom ", { stack: "boom", url: "/y", ua: "UA" });
+		expect(p).toEqual({ kind: "error", message: "boom", url: "/y", ua: "UA" });
 		const long = buildClientLogPayload("media", "m".repeat(5000), { stack: "s".repeat(5000), url: "u".repeat(900), ua: "a".repeat(400) });
-		expect(long!.message.length).toBe(1000);
+		expect(long!.message.length).toBe(CLIENT_LOG_MAX_MESSAGE);
+		expect(long!.message.length).toBe(500); // L8-17
 		expect(long!.stack!.length).toBe(2000);
-		expect(long!.url!.length).toBe(500);
+		expect(long!.url!.length).toBe(256);
 		expect(long!.ua!.length).toBe(250);
 		expect(JSON.stringify(long).length).toBeLessThan(CLIENT_LOG_MAX_BODY);
+	});
+	it("L8-17: reports the pathname only, never the query or the fragment", () => {
+		expect(pageLocationPath("https://music.ekaii.fr/search/abba?filter=songs#top")).toBe("/search/abba");
+		expect(pageLocationPath("https://music.ekaii.fr/listen?id=dQw4w9WgXcQ")).toBe("/listen");
+		expect(pageLocationPath({ pathname: "/home", href: "https://music.ekaii.fr/home?x=1" })).toBe("/home");
+		expect(pageLocationPath({ href: "https://music.ekaii.fr/library/albums?sort=album:asc" })).toBe("/library/albums");
+		expect(pageLocationPath("/listen?id=x#y")).toBe("/listen");
+		expect(pageLocationPath("")).toBe("");
+		expect(pageLocationPath(undefined)).toBe("");
 	});
 	it("needs a message, defaults the kind", () => {
 		expect(buildClientLogPayload("error", "")).toBeNull();
@@ -59,7 +71,7 @@ describe("ST3 clientLog: reportClientError", () => {
 	beforeEach(() => {
 		// node environment: a minimal window so the reporter runs (it is a
 		// no-op outside the browser).
-		if (!hadWindow) g.window = { location: { href: "https://music.ekaii.fr/home" } };
+		if (!hadWindow) g.window = { location: { href: "https://music.ekaii.fr/search/abba?filter=songs#x", pathname: "/search/abba" } };
 	});
 	afterEach(() => {
 		_setClientLogSender(null);
@@ -81,7 +93,11 @@ describe("ST3 clientLog: reportClientError", () => {
 		expect(first.kind).toBe("media");
 		expect(first.message).toBe("MEDIA_ERR_DECODE");
 		expect(first.stack).toBe("st");
-		expect(typeof first.url).toBe("string");
+		expect(first.url).toBe("/search/abba"); // L8-17: no query string, no fragment
+		expect(sent[0]).not.toContain("filter=songs");
+		_setClientLogSender((b) => void sent.push(b));
+		expect(reportClientError("error", "explicit url", { url: "https://music.ekaii.fr/listen?id=dQw4w9WgXcQ" })).toBe(true);
+		expect(JSON.parse(sent[sent.length - 1]).url).toBe("/listen");
 	});
 	it("never throws when the transport does", () => {
 		_setClientLogSender(() => {

@@ -145,13 +145,17 @@
 		flex: 1 1 auto;
 		min-width: 0;
 	}
+	// L8-7: 2.25rem was 27px on mobile; the round trash button now sits on
+	// the 44px floor (min-* so .btn-secondary's own floor is never undercut).
 	.remove-track {
 		flex: 0 0 auto;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 2.25rem;
-		height: 2.25rem;
+		min-width: max(2.75rem, 44px);
+		min-height: max(2.75rem, 44px);
+		width: max(2.75rem, 44px);
+		height: max(2.75rem, 44px);
 		border-radius: 50%;
 		padding: 0;
 	}

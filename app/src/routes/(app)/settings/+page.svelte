@@ -184,7 +184,7 @@
 					<button
 						type="button"
 						id="pwa-install"
-						class="btn"
+						class="btn-reset btn"
 						aria-describedby="pwa-install-desc"
 						disabled={installing}
 						on:click={install}

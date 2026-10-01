@@ -27,6 +27,12 @@ RUN npm run build
 
 FROM golang:1.24.5 AS backend-builder
 
+# AP5 / F13: the served build version. Pass `--build-arg VERSION=$(git
+# rev-parse --short HEAD)` from the build script; it reaches main.version
+# through -ldflags and is reported by /api/v1/stats/library and /about.
+# Unset, the binary falls back to the YTM_VERSION env, then "dev".
+ARG VERSION=dev
+
 # Set destination for COPY
 WORKDIR /app
 
@@ -39,8 +45,8 @@ RUN go mod download
 COPY backend /app/backend
 COPY *.go ./
 
-# Build
-RUN CGO_ENABLED=0 GOOS=linux go build -o /beat-server
+# Build (version stamped into main.version, see ARG VERSION above)
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION}" -o /beat-server
 
 # Stage to get CA certificates
 FROM alpine:latest AS certs

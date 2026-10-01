@@ -15,6 +15,8 @@
 		artists: number;
 		lastAdded: string;
 		version: string;
+		/** F13: YTM_REPORT_EMAIL on the server; absent = no recipient. */
+		reportEmail?: string;
 	}
 
 	let stats: LibraryStats | null = null;
@@ -27,6 +29,53 @@
 	let usage = 0;
 	let quota = 0;
 	let probing = true;
+	// F13: "Copier le diagnostic" feedback (no recipient configured).
+	let copied: "" | "ok" | "fail" = "";
+	let copiedTimer: ReturnType<typeof setTimeout>;
+
+	/** The diagnostic block: what a report needs, no profile data. */
+	const diagText = () =>
+		`Version serveur : ${stats?.version ?? "?"}\nVersion app : ${servedVersion || "?"}\nPage : ${
+			browser ? location.pathname : ""
+		}\nService worker : ${!swSupported ? "non pris en charge" : swWaiting ? "mise à jour en attente" : swController ? "actif" : "inactif"}\nStockage persistant : ${
+			persisted === null ? "inconnu" : persisted ? "oui" : "non"
+		}\nNavigateur : ${browser ? navigator.userAgent : ""}\n\nDescription :\n`;
+
+	$: reportHref = stats?.reportEmail
+		? `mailto:${stats.reportEmail}?subject=${encodeURIComponent("music.ekaii.fr : problème")}&body=${encodeURIComponent(diagText())}`
+		: "";
+
+	async function copyDiag() {
+		const text = diagText();
+		let ok = false;
+		try {
+			if (navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(text);
+				ok = true;
+			}
+		} catch {
+			ok = false;
+		}
+		if (!ok) {
+			// Fallback (http origin, old WebView): a hidden textarea + execCommand.
+			try {
+				const ta = document.createElement("textarea");
+				ta.value = text;
+				ta.setAttribute("readonly", "");
+				ta.style.position = "fixed";
+				ta.style.opacity = "0";
+				document.body.appendChild(ta);
+				ta.select();
+				ok = document.execCommand("copy");
+				ta.remove();
+			} catch {
+				ok = false;
+			}
+		}
+		copied = ok ? "ok" : "fail";
+		clearTimeout(copiedTimer);
+		copiedTimer = setTimeout(() => (copied = ""), 2500);
+	}
 
 	const fmtInt = (n: number) => new Intl.NumberFormat("fr-FR").format(Math.round(n || 0));
 	const fmtBytes = (b: number) => {
@@ -173,13 +222,38 @@
 			<p class="hint">
 				Les erreurs de lecture sont remontées automatiquement au serveur (sans donnée de profil). Pour le reste :
 			</p>
-			<a
-				class="btn-secondary"
-				data-testid="about-report"
-				href="mailto:?subject={encodeURIComponent('music.ekaii.fr : problème')}&body={encodeURIComponent(
-					`Version serveur : ${stats?.version ?? '?'}\nVersion app : ${servedVersion || '?'}\nPage : ${browser ? location.href : ''}\n\nDescription :\n`,
-				)}">Signaler un problème</a
-			>
+			{#if reportHref}
+				<!-- F13: a recipient is configured (YTM_REPORT_EMAIL): a real mailto. -->
+				<a
+					class="btn-secondary"
+					data-testid="about-report"
+					href={reportHref}>Signaler un problème</a
+				>
+			{:else}
+				<!-- No recipient: copy the diagnostic block to paste wherever the
+				     user reaches the operator (message, chat), instead of a mailto
+				     that opens an empty composer. -->
+				<button
+					type="button"
+					class="btn-secondary"
+					data-testid="about-copy-diag"
+					aria-live="polite"
+					on:click={copyDiag}
+				>
+					{#if copied === "ok"}
+						Diagnostic copié
+					{:else if copied === "fail"}
+						Copie impossible, sélectionne le texte ci-dessous
+					{:else}
+						Copier le diagnostic
+					{/if}
+				</button>
+				{#if copied === "fail"}
+					<pre
+						class="diag"
+						data-testid="about-diag-text">{diagText()}</pre>
+				{/if}
+			{/if}
 		</section>
 	</main>
 {/if}
@@ -250,9 +324,20 @@
 		color: inherit;
 		text-decoration: underline;
 	}
-	a.btn-secondary {
+	a.btn-secondary,
+	button.btn-secondary {
 		text-decoration: none;
 		margin-top: 0.5rem;
+	}
+	.diag {
+		margin: 0.75rem 0 0;
+		padding: 0.75rem;
+		border-radius: 0.5rem;
+		background: rgba(255, 255, 255, 0.06);
+		font-size: 0.85rem;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		user-select: all;
 	}
 	@media screen and (max-width: 37em) {
 		.tiles {

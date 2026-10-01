@@ -286,7 +286,7 @@
 		<button
 			type="button"
 			id="offline-resync"
-			class="btn"
+			class="btn-reset btn"
 			aria-describedby="offline-resync-desc"
 			disabled={loading || !!busy || nothingCached}
 			title={nothingCached
@@ -315,7 +315,7 @@
 			<button
 				type="button"
 				id="offline-persist-request"
-				class="btn"
+				class="btn-reset btn"
 				disabled={persistBusy}
 				title="Demande au navigateur de ne jamais effacer le hors-ligne de cet appareil"
 				on:click={askPersist}>Protéger</button
@@ -364,7 +364,7 @@
 			<button
 				type="button"
 				id="offline-clear"
-				class="btn danger"
+				class="btn-reset btn danger"
 				aria-describedby="offline-clear-desc"
 				disabled={loading || !!busy || (cachedTracks === 0 && localCount === 0)}
 				bind:this={clearButton}
@@ -387,7 +387,7 @@
 					<button
 						type="button"
 						id="offline-clear-confirm"
-						class="btn danger"
+						class="btn-reset btn danger"
 						disabled={!!busy}
 						bind:this={confirmButton}
 						on:click={doClear}
@@ -397,7 +397,7 @@
 					<button
 						type="button"
 						id="offline-clear-cancel"
-						class="btn"
+						class="btn-reset btn"
 						disabled={!!busy}
 						on:click={cancelClear}
 					>
@@ -418,7 +418,7 @@
 			<button
 				type="button"
 				id="offline-retry"
-				class="btn"
+				class="btn-reset btn"
 				disabled={loading || !!busy}
 				on:click={refresh}>Retry</button
 			>

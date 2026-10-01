@@ -11,11 +11,24 @@ package api
 // fields the client sent (clipped) and the server receive time. Harness
 // requests (Playwright, X-Ytm-Harness) are ignored unless
 // YTM_STATS_INCLUDE_HARNESS=1, like me/history and me/nowplaying.
+//
+// L8-2 / L8-17 hardening:
+//   - GET needs `Authorization: Bearer <YTM_ADMIN_TOKEN>`: 401 without or
+//     with a wrong token, 404 when the variable is not set (the endpoint
+//     then does not exist for anyone; the SPA never calls it).
+//   - POST is rate limited per client IP (token bucket, clientLogPostBurst
+//     per clientLogPostWindow, 429 beyond) so a loop cannot flush the ring.
+//   - Only the URL pathname is kept (query string and fragment dropped:
+//     `/search/<query>` stays, `?id=`/`#...` go) and the message is clipped
+//     to clientLogMaxMessage (500) characters.
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +41,19 @@ const clientLogCapacity = 500
 
 // clientLogMaxBody is the request body limit (413 above).
 const clientLogMaxBody = 4 * 1024
+
+// clientLogMaxMessage is the stored message length (L8-17).
+const clientLogMaxMessage = 500
+
+// clientLogMaxURL is the stored pathname length.
+const clientLogMaxURL = 256
+
+// clientLogPostBurst POSTs per clientLogPostWindow and per client IP; the
+// bucket refills continuously (burst = bucket size).
+const (
+	clientLogPostBurst  = 30
+	clientLogPostWindow = time.Minute
+)
 
 // clientLogEntry is one stored report.
 type clientLogEntry struct {
@@ -91,8 +117,109 @@ func (r *clientLogRing) len() int {
 
 var clientLog = newClientLogRing(clientLogCapacity)
 
-// resetClientLog empties the ring (tests).
-func resetClientLog() { clientLog = newClientLogRing(clientLogCapacity) }
+// resetClientLog empties the ring and the rate limiter (tests).
+func resetClientLog() {
+	clientLog = newClientLogRing(clientLogCapacity)
+	clientLogLimiter = newIPLimiter(clientLogPostBurst, clientLogPostWindow)
+}
+
+// ---- per-IP token bucket ----
+
+// ipLimiter is a bounded map of token buckets keyed by client IP. A bucket
+// holds `burst` tokens and refills `burst` tokens per `window`; a request
+// takes one token. Full (idle) buckets are swept when the map grows past
+// ipLimiterMaxKeys so an address scan cannot grow it for ever.
+type ipLimiter struct {
+	mu      sync.Mutex
+	burst   float64
+	rate    float64 // tokens per nanosecond
+	buckets map[string]*ipBucket
+	now     func() time.Time
+}
+
+type ipBucket struct {
+	tokens float64
+	last   time.Time
+}
+
+const ipLimiterMaxKeys = 4096
+
+func newIPLimiter(burst int, window time.Duration) *ipLimiter {
+	return &ipLimiter{
+		burst:   float64(burst),
+		rate:    float64(burst) / float64(window),
+		buckets: map[string]*ipBucket{},
+		now:     time.Now,
+	}
+}
+
+// allow reports whether one more request from ip fits in its bucket.
+func (l *ipLimiter) allow(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	b := l.buckets[ip]
+	if b == nil {
+		if len(l.buckets) >= ipLimiterMaxKeys {
+			l.sweep(now)
+		}
+		b = &ipBucket{tokens: l.burst, last: now}
+		l.buckets[ip] = b
+	} else {
+		b.tokens += float64(now.Sub(b.last)) * l.rate
+		if b.tokens > l.burst {
+			b.tokens = l.burst
+		}
+		b.last = now
+	}
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
+}
+
+// sweep (under lock) drops every bucket that is full again, i.e. idle for
+// at least a window; if none is, the oldest half goes.
+func (l *ipLimiter) sweep(now time.Time) {
+	for ip, b := range l.buckets {
+		if b.tokens+float64(now.Sub(b.last))*l.rate >= l.burst {
+			delete(l.buckets, ip)
+		}
+	}
+	if len(l.buckets) < ipLimiterMaxKeys {
+		return
+	}
+	n := len(l.buckets) / 2
+	for ip := range l.buckets {
+		if n == 0 {
+			break
+		}
+		delete(l.buckets, ip)
+		n--
+	}
+}
+
+var clientLogLimiter = newIPLimiter(clientLogPostBurst, clientLogPostWindow)
+
+// clientLogPathname keeps the path of a reported page URL: an absolute URL
+// (`https://host/search/x?y#z`) or a bare path (`/listen?id=..`) both give
+// the path only; unparsable input gives "".
+func clientLogPathname(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	p := u.Path
+	if p == "" && u.Opaque == "" && (u.Scheme != "" || u.Host != "") {
+		p = "/"
+	}
+	return clip(p, clientLogMaxURL)
+}
 
 type clientLogBody struct {
 	Kind    string `json:"kind"`
@@ -104,6 +231,10 @@ type clientLogBody struct {
 
 // ClientLogPostHandler: POST /api/v1/client-log.
 func ClientLogPostHandler(c echo.Context) error {
+	if !clientLogLimiter.allow(c.RealIP()) {
+		c.Response().Header().Set("Retry-After", "60")
+		return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "rate limited"})
+	}
 	raw, err := io.ReadAll(io.LimitReader(c.Request().Body, clientLogMaxBody+1))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad body"})
@@ -116,7 +247,7 @@ func ClientLogPostHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad json"})
 	}
 	b.Kind = clip(b.Kind, 32)
-	b.Message = clip(b.Message, 1024)
+	b.Message = clip(b.Message, clientLogMaxMessage)
 	if b.Kind == "" || b.Message == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "kind and message required"})
 	}
@@ -132,16 +263,44 @@ func ClientLogPostHandler(c echo.Context) error {
 		Kind:    b.Kind,
 		Message: b.Message,
 		Stack:   clip(b.Stack, 2048),
-		URL:     clip(b.URL, 512),
+		URL:     clientLogPathname(b.URL),
 		UA:      clip(strings.TrimSpace(ua), 256),
 	})
 	return c.JSON(http.StatusOK, map[string]interface{}{"ok": true})
 }
 
-// ClientLogGetHandler: GET /api/v1/client-log?limit=50 (1..500), newest first.
+// clientLogAuthorized checks `Authorization: Bearer <YTM_ADMIN_TOKEN>`
+// (constant-time compare). Returns the status to answer when refused
+// (404 with no token configured, 401 otherwise) or 0 when allowed.
+func clientLogAuthorized(r *http.Request) int {
+	want := strings.TrimSpace(os.Getenv("YTM_ADMIN_TOKEN"))
+	if want == "" {
+		return http.StatusNotFound
+	}
+	auth := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(auth) <= len(prefix) || !strings.EqualFold(auth[:len(prefix)], prefix) {
+		return http.StatusUnauthorized
+	}
+	got := strings.TrimSpace(auth[len(prefix):])
+	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		return http.StatusUnauthorized
+	}
+	return 0
+}
+
+// ClientLogGetHandler: GET /api/v1/client-log?limit=50 (1..500), newest
+// first. Operator only (YTM_ADMIN_TOKEN bearer).
 func ClientLogGetHandler(c echo.Context) error {
-	n := clampLimit(c, 50, clientLogCapacity)
 	c.Response().Header().Set("Cache-Control", "no-store")
+	if status := clientLogAuthorized(c.Request()); status != 0 {
+		if status == http.StatusUnauthorized {
+			c.Response().Header().Set("WWW-Authenticate", `Bearer realm="client-log"`)
+			return c.JSON(status, map[string]string{"error": "unauthorized"})
+		}
+		return c.JSON(status, map[string]string{"error": "not_found"})
+	}
+	n := clampLimit(c, 50, clientLogCapacity)
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"entries": clientLog.newest(n),
 		"total":   clientLog.len(),
