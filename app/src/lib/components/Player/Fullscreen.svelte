@@ -882,7 +882,9 @@
 							SessionListService.next();
 							// AudioPlayer.updateTime($durationStore);
 						}}
-						prevBtn={() => SessionListService.previous()}
+						prevBtn={() => {
+							if ($queue.length) void AudioPlayer.previousOrRestart();
+						}}
 					/>
 					{#if nextUp?.title}
 						<p

@@ -244,7 +244,8 @@
 	}
 	function prevTrack() {
 		if (!$queue.length) return;
-		SessionListService.previous();
+		// c39c B6-8: restart after 3 s, else the previous track.
+		void AudioPlayer.previousOrRestart();
 	}
 	function nextTrack() {
 		if (!$queue.length) return;
@@ -425,10 +426,7 @@
 					SessionListService.next(undefined, true);
 					// AudioPlayer.updateTime($durationStore);
 				}}
-				prevBtn={() => {
-					if ($queue.length && $SessionListService.position >= 1)
-						SessionListService.previous(true);
-				}}
+				prevBtn={prevTrack}
 			/>
 			<ProgressBar />
 		{/if}

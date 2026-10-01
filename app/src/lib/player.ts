@@ -30,7 +30,14 @@ import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from ".
 import { reportClientError } from "./clientLog";
 import { setWorkerInterval } from "./utils/workerTimeout";
 import { resumeKeptFor } from "./stores/resumeState";
-import { MEDIA_SEEK_OFFSET_S, mediaArtwork, positionState, seekTarget } from "./stores/list/mediaSession";
+import {
+	mediaArtwork,
+	mediaMetadataFields,
+	mediaSessionSeekTarget,
+	positionState,
+	previousAction,
+	seekTarget,
+} from "./stores/list/mediaSession";
 
 let userSettings: UserSettings | undefined = undefined;
 
@@ -91,46 +98,41 @@ function metaDataHandler({
 		if (!currentTrack) return console.debug("no current track");
 		// C3: local tracks show the library cover (`/cover?lid=`, 512 px) on the
 		// lock screen; thumbnails are copied, never reversed in place (F14/G14).
+		// c39c B6-26: every artist, the album (row or album queue), sharp artwork.
+		const fields = mediaMetadataFields(currentTrack, sessionList.context);
 		navigator.mediaSession.metadata = new MediaMetadata({
-			title: currentTrack?.title,
-			artist: currentTrack?.artistInfo?.artist?.[0]?.text || "",
-			album: currentTrack?.album?.title ?? undefined,
+			title: fields.title,
+			artist: fields.artist,
+			album: fields.album,
 			artwork: mediaArtwork(currentTrack, typeof location !== "undefined" ? location.origin : ""),
 		});
 		navigator.mediaSession.setActionHandler("play", () => {
 			AudioPlayer.play();
 		});
 		navigator.mediaSession.setActionHandler("pause", () => AudioPlayer.pause());
-		navigator.mediaSession.setActionHandler("seekto", (session) => {
-			if (session.fastSeek && "fastSeek" in AudioPlayer) {
-				session.seekTime && AudioPlayer.fastSeek(session.seekTime);
-				setPosition(
-					session.seekTime ?? AudioPlayer.currentTime,
+		// c39c B6-8: seekto 0 is a real seek; the action name is set here so a
+		// handler called with a bare `{ seekTime }` still resolves.
+		const onSeek = (action: "seekto" | "seekbackward" | "seekforward") =>
+			(details?: MediaSessionActionDetails) => {
+				const target = mediaSessionSeekTarget(
+					{ ...(details ?? {}), action },
+					AudioPlayer.currentTime,
 					AudioPlayer.duration,
 				);
-				return;
-			}
-			session.seekTime && AudioPlayer.seek(session.seekTime);
-
-			setPosition(
-				session.seekTime ?? AudioPlayer.currentTime,
-				AudioPlayer.duration,
-			);
-		});
+				if (target === null) return;
+				AudioPlayer.seekTo(target, action === "seekto" && details?.fastSeek === true);
+			};
+		setMediaAction("seekto", onSeek("seekto"));
 		navigator.mediaSession.setActionHandler("previoustrack", () =>
-			SessionListService.previous(),
+			AudioPlayer.previousOrRestart(),
 		);
 		navigator.mediaSession.setActionHandler("nexttrack", () =>
 			SessionListService.next(),
 		);
 		// C3: headset / lock screen ±10 s.
-		setMediaAction("seekbackward", (details) =>
-			AudioPlayer.seekBy(-(details?.seekOffset || MEDIA_SEEK_OFFSET_S)),
-		);
-		setMediaAction("seekforward", (details) =>
-			AudioPlayer.seekBy(details?.seekOffset || MEDIA_SEEK_OFFSET_S),
-		);
-		setPosition(currentTime, duration);
+		setMediaAction("seekbackward", onSeek("seekbackward"));
+		setMediaAction("seekforward", onSeek("seekforward"));
+		setPosition(currentTime, duration, AudioPlayer.playbackRate);
 	}
 }
 
@@ -535,9 +537,44 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		if (!this.player) return;
 		const duration = this.duration > 0 ? this.duration : this.player.duration;
 		const target = seekTarget(this.currentTime || this.player.currentTime || 0, delta, duration);
-		this.seek(target);
-		this._currentTimeStore.set(target);
-		this.updatePositionState();
+		this.seekTo(target);
+	}
+
+	/**
+	 * c39c B6-8: absolute seek from the lock screen / headset (0 included);
+	 * the time store and the Media Session position follow at once.
+	 */
+	public seekTo(target: number, fast = false) {
+		if (!this.player || !isFinite(target)) return;
+		const t = Math.max(0, target);
+		if (fast && typeof this.player.fastSeek === "function") {
+			if (t < this.durationStore.value / 2) this.setStaleTimeout();
+			this.player.fastSeek(t);
+			this._progress.set(t, { duration: 10 });
+		} else {
+			this.seek(t);
+		}
+		this._currentTimeStore.set(t);
+		const duration = this.duration > 0 ? this.duration : this.player.duration;
+		setPosition(t, duration, this.player.playbackRate);
+	}
+
+	/**
+	 * c39c B6-8: player button, keyboard and lock-screen "previous": restart
+	 * the track after 3 s, otherwise step back in the queue.
+	 */
+	public async previousOrRestart(): Promise<void> {
+		const t = this.player && isFinite(this.player.currentTime) ? this.player.currentTime : this.currentTime;
+		if (previousAction(t, SessionListService.position) === "restart") {
+			if (this.player) this.seekTo(0);
+			return;
+		}
+		await SessionListService.previous();
+	}
+
+	/** Media element playback rate (1 before the element exists). */
+	public get playbackRate(): number {
+		return this.player ? this.player.playbackRate : 1;
 	}
 
 	/** C3: refresh the lock-screen position (seeked / ratechange / durationchange). */
@@ -838,7 +875,8 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 				// instead of advancing; repeat / shuffle state is left untouched and the
 				// normal auto-advance resumes on the next play().
 				if (this._sleepHold) return;
-				if (shouldStopAtTrackEnd()) {
+				// c39c B6-9: "album" / "tracks" modes stop after a queue index.
+				if (shouldStopAtTrackEnd(SessionListService.position)) {
 					this._sleepHold = true;
 					this.nextSrc.url = undefined;
 					this.pause();

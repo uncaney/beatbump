@@ -64,6 +64,9 @@ export const FILES = [
 	"lib/components/IdentityPrompt/IdentityPrompt.svelte",
 	"lib/components/IdentityPrompt/DeviceOnlyBanner.svelte",
 	"lib/identity.ts",
+	// c39c B6-9: sleep timer sheet and its store (toasts, labels).
+	"lib/components/Player/SleepTimerSheet.svelte",
+	"lib/stores/sleepTimer.ts",
 ] as const;
 
 /**
