@@ -17,7 +17,9 @@
 	$: pageItems = data?.items;
 	$: path = data?.path;
 	$: id = $page.url.searchParams.get("id");
-	$: items = pageItems?.items;
+	$: items = pageItems?.items ?? [];
+	// 404 from the album endpoint (local album with no track left): no page data.
+	$: notFound = !pageItems;
 	$: releaseInfo = pageItems?.releaseInfo ?? {};
 	$: thumbnail = releaseInfo?.thumbnails?.[0]?.url?.replace(
 		/=(w(\d+))-(h(\d+))/g,
@@ -90,6 +92,9 @@
 		type="release"
 		on:shuffle={playShuffle}
 	/>
+	{#if notFound}
+		<p class="release-missing">Cet album n'est plus dans la bibliothèque.</p>
+	{/if}
 	{#each items as item, index}
 		<ListItem
 			on:setPageIsPlaying={() => setId()}

@@ -8,6 +8,7 @@ package api
 import (
 	"bytes"
 	"crypto/sha1"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,38 @@ func artistID(name string) string {
 func albumID(albumArtist, album string) string {
 	h := sha1.Sum([]byte(normName(albumArtist) + "\x00" + normName(album)))
 	return "lb-" + hex.EncodeToString(h[:])[:12]
+}
+
+// localAlbumRef is the album browseId carried by local song items:
+// "<albumID>.<base64url(albumArtist\x00album)>". The prefix is the canonical
+// lb- id (what the albums index + offline grouping use); the suffix lets
+// buildLocalAlbum rebuild the page from the tracks index when the indexer never
+// emitted an album doc for that (albumArtist, album) pair (yubal ytm/ paths,
+// singles) -- a bare sha1 cannot be reversed to the key (F2). base64url + "."
+// keep the id URL-safe without encoding (Listing/release pass it raw).
+func localAlbumRef(albumArtist, album string) string {
+	hint := base64.RawURLEncoding.EncodeToString([]byte(albumArtist + "\x00" + album))
+	return albumID(albumArtist, album) + "." + hint
+}
+
+// parseLocalAlbumRef splits a browseId into its canonical lb- id and the
+// (albumArtist, album) hint when present; bare "lb-…" ids return empty hints.
+func parseLocalAlbumRef(ref string) (id, albumArtist, album string) {
+	id = ref
+	i := strings.IndexByte(ref, '.')
+	if i < 0 {
+		return id, "", ""
+	}
+	id = ref[:i]
+	raw, err := base64.RawURLEncoding.DecodeString(ref[i+1:])
+	if err != nil {
+		return id, "", ""
+	}
+	parts := strings.SplitN(string(raw), "\x00", 2)
+	if len(parts) != 2 {
+		return id, "", ""
+	}
+	return id, parts[0], parts[1]
 }
 
 func isLid(s string) bool {
@@ -185,7 +218,7 @@ func localSongItem(h map[string]interface{}) IListItemRenderer {
 		if aa == "" {
 			aa = artist
 		}
-		item.Album = &Artist{Text: album, BrowseId: albumID(aa, album), PageType: "MUSIC_PAGE_TYPE_ALBUM"}
+		item.Album = &Artist{Text: album, BrowseId: localAlbumRef(aa, album), PageType: "MUSIC_PAGE_TYPE_ALBUM"}
 	}
 	return item
 }
@@ -217,6 +250,7 @@ func localShelf(query string) *MusicShelf {
 	}
 	shelf := &MusicShelf{}
 	shelf.Header.Title = "Your Library"
+	shelf.Local = true
 	for _, h := range hits {
 		if mstr(h, "lid") == "" {
 			continue

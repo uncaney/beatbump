@@ -157,6 +157,12 @@ function cachedAt(t: OfflineTrack): number {
  * number when known, singles newest-cached first. Albums are ordered by most
  * recently cached track.
  */
+/** Canonical album key: local album refs may carry a ".<hint>" suffix (see
+ *  backend localAlbumRef); the group key ignores it so old and new cached tracks merge. */
+function albumKeyOf(browseId: string): string {
+	return browseId.startsWith("lb-") ? browseId.split(".")[0] : browseId;
+}
+
 export function groupByAlbum(tracks: OfflineTrack[]): AlbumGroup[] {
 	const map = new Map<string, AlbumGroup>();
 	for (const t of tracks || []) {
@@ -168,7 +174,7 @@ export function groupByAlbum(tracks: OfflineTrack[]): AlbumGroup[] {
 		let name: string;
 		let isSingles = false;
 		if (info && info.browseId) {
-			key = "id:" + info.browseId;
+			key = "id:" + albumKeyOf(info.browseId);
 			name = info.name || "Album";
 		} else if (info && info.name) {
 			key = "name:" + norm(info.name) + "|" + norm(artist);

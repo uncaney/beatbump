@@ -21,6 +21,9 @@ type MusicShelf struct {
 		Title string `json:"title"`
 	} `json:"header,omitempty"`
 	Contents []IListItemRenderer `json:"contents"`
+	// Local marks the owned-library ("Your Library") shelf: the search page renders
+	// it as a plain list instead of the paginated YouTube shelf (F1).
+	Local bool `json:"local,omitempty"`
 }
 type Artist struct {
 	PageType string `json:"pageType,omitempty"`
