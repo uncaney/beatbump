@@ -6,6 +6,7 @@
 	import { settings } from "$stores/settings";
 	import {
 		applySwEviction,
+		cachedIds,
 		getOfflineTracks,
 		listCachedAudio,
 		reconcileOfflineList,
@@ -18,8 +19,12 @@
 		type AudioListEntry,
 	} from "$lib/offline";
 	import { freeUpSummary, planFreeUp, type FreeUpPlan } from "$lib/offlineFreeUp";
+	import { PACK_SIZES_MB, packLabel, packSizeOf, planPack, type PackPlan } from "$lib/offlinePack";
+	import { cancelKeepJob, defaultKeepDeps, keepDepsWithAbort, keepJobs, keepSummary, startKeepJob, type KeepProgress, type KeepResult } from "$lib/offlineBatch";
+	import { getFavorites, getMix, getRecent } from "$lib/me";
 	import { notify } from "$lib/utils";
 	import { currentTrack } from "$lib/stores/list";
+	import { get } from "svelte/store";
 
 	const MB = 1024 * 1024;
 	const GB = 1024 * MB;
@@ -284,6 +289,132 @@
 		}
 	}
 
+	// HL3 "Préparer un pack": plan (planPack: favourites, recent plays, mix,
+	// uncached only, known size else 4 Mo) up to the chosen size, then one keep
+	// job (I12 store, so leaving the page keeps it running) that downloads +
+	// pins each track, 2 at a time. "Annuler" aborts the job: the in-flight SW
+	// fetches are aborted too (keepDepsWithAbort), what landed stays pinned.
+	// window.__ytmPackPlan carries the plan, then the outcome, for the harness.
+	const PACK_KEY = "pack:settings";
+	function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
+		return p.catch(() => fallback);
+	}
+	let packSizeMb: (typeof PACK_SIZES_MB)[number] = 100;
+	let packState: "" | "planning" | "running" | "done" | "cancelled" = "";
+	let packPlan: PackPlan | null = null;
+	let packProgress: KeepProgress | null = null;
+	let packDoneBytes = 0;
+	let packResult = "";
+	let packOwned = false; // started by this instance (its onDone writes the outcome)
+	$: packJob = $keepJobs.get(PACK_KEY);
+	$: if (packJob?.progress) packProgress = packJob.progress;
+	// A pack started before (a previous visit of the page) still runs: show it;
+	// when it ends without our onDone, close it from the last progress seen.
+	$: if (packJob && packState === "") packState = "running";
+	$: if (!packJob && packState === "running" && !packOwned) {
+		packState = "done";
+		packResult = packProgress ? `${packProgress.ready}/${packProgress.total} prêts hors-ligne` : "Pack terminé";
+	}
+	$: packRunning = packState === "running" || packState === "planning";
+	$: packTarget = packPlan ? packPlan.target : packSizeMb * MB;
+	$: packText =
+		packState === "planning"
+			? "Préparation…"
+			: packState === "running"
+				? packLabel(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, packDoneBytes, packTarget)
+				: packResult;
+	type PackWindow = Window & { __ytmPackPlan?: Record<string, unknown> };
+	function exposePack(extra: Record<string, unknown> = {}) {
+		if (typeof window === "undefined") return;
+		(window as PackWindow).__ytmPackPlan = {
+			target: packTarget,
+			count: packPlan?.count ?? 0,
+			bytes: packPlan?.bytes ?? 0,
+			left: packPlan?.left ?? 0,
+			candidates: packPlan?.candidates ?? 0,
+			videoIds: packPlan ? packPlan.items.map((i) => i.videoId) : [],
+			state: packState,
+			doneBytes: packDoneBytes,
+			progress: packProgress,
+			...extra,
+		};
+	}
+	async function startPack() {
+		if (packRunning || busy || loading) return;
+		packState = "planning";
+		packOwned = true;
+		packPlan = null;
+		packProgress = null;
+		packDoneBytes = 0;
+		packResult = "";
+		error = "";
+		try {
+			const [fav, rec, mix, l] = await Promise.all([
+				safe(getFavorites(), { favorites: [], items: [] } as { favorites: any[]; items: any[] }),
+				safe(getRecent(100), { items: [] } as { items: any[] }),
+				safe(getMix(), { items: [], seeds: 0 } as { items: any[]; seeds: number }),
+				safe(listCachedAudio(), null),
+			]);
+			if (l && Array.isArray(l.entries)) {
+				entries = l.entries;
+				total = l.total || 0;
+			}
+			const cached = new Set<string>(get(cachedIds));
+			const sizes = new Map<string, number>();
+			for (const t of getOfflineTracks()) if (t.videoId && Number(t._bytes) > 0) sizes.set(t.videoId, Number(t._bytes));
+			for (const e of entries) {
+				if (e.videoId) cached.add(e.videoId);
+				if (e.videoId && e.bytes > 0) sizes.set(e.videoId, e.bytes);
+			}
+			const favItems = Array.isArray(fav?.items) && fav.items.length ? fav.items : Array.isArray(fav?.favorites) ? fav.favorites : [];
+			packPlan = planPack({ favorites: favItems, recent: rec?.items, mix: mix?.items, cached, sizes }, packSizeMb * MB);
+			if (!packPlan.count) {
+				packState = "done";
+				packResult = packPlan.candidates ? "Rien ne rentre dans ce pack : choisis une taille plus grande." : "Rien à préparer : tes favoris et tes écoutes récentes sont déjà hors-ligne.";
+				exposePack();
+				return;
+			}
+			packState = "running";
+			packProgress = { ready: 0, failed: 0, refused: 0, total: packPlan.count };
+			exposePack();
+			// O10: a pack is an explicit "keep offline".
+			void requestPersistentStorage();
+			const plan = packPlan;
+			void startKeepJob(PACK_KEY, () => plan.items.map((i) => i.item), {
+				deps: (signal) =>
+					keepDepsWithAbort(signal, {
+						...defaultKeepDeps,
+						download: async (t, o) => {
+							const r = await defaultKeepDeps.download(t, o);
+							if (r.ok) packDoneBytes += Number(r.bytes) || packSizeOf(t, sizes).bytes;
+							return r;
+						},
+					}),
+				onDone: (r: KeepResult) => {
+					packState = r.cancelled ? "cancelled" : "done";
+					packProgress = { ready: r.ready, failed: r.failed, refused: r.refused, total: r.total };
+					const s = keepSummary(r);
+					packResult = `${s.text} · ${fmtBytes(packDoneBytes)}`;
+					notify(s.text, s.type);
+					exposePack({ result: { ...r } });
+					void refresh();
+				},
+			});
+		} catch (e) {
+			packState = "";
+			error = `Impossible de préparer le pack : ${(e as Error)?.message ?? e}`;
+		}
+	}
+	function cancelPack() {
+		if (packState !== "running") return;
+		// The UI stops now; onDone (within the second, the SW fetches are
+		// aborted) writes the final count.
+		packState = "cancelled";
+		packResult = `Annulation… ${packProgress?.ready ?? 0} prêt${(packProgress?.ready ?? 0) > 1 ? "s" : ""}`;
+		cancelKeepJob(PACK_KEY);
+		exposePack();
+	}
+
 	async function doResync() {
 		if (busy) return;
 		busy = "resync";
@@ -518,6 +649,78 @@
 			</div>
 		{/if}
 	</div>
+
+	<!-- HL3: sized offline pack (favourites, recent plays, mix), pinned. -->
+	<div class="setting">
+		<label
+			for="offline-pack-size"
+			id="offline-pack-label"
+		>
+			Préparer un pack hors-ligne
+			<span id="offline-pack-desc"
+				>Télécharge et épingle tes favoris, puis tes écoutes récentes, puis ta
+				sélection, jusqu'à la taille choisie.</span
+			>
+		</label>
+		<div class="pack-controls">
+			<div class="select">
+				<select
+					id="offline-pack-size"
+					name="offline-pack-size"
+					data-testid="pack-size"
+					aria-describedby="offline-pack-desc"
+					disabled={packRunning}
+					bind:value={packSizeMb}
+				>
+					{#each PACK_SIZES_MB as mb}
+						<option value={mb}>{mb} Mo</option>
+					{/each}
+				</select>
+			</div>
+			{#if packState === "running"}
+				<button
+					type="button"
+					id="offline-pack-cancel"
+					class="btn btn-secondary danger"
+					data-testid="pack-cancel"
+					on:click={cancelPack}
+				>
+					Annuler
+				</button>
+			{:else}
+				<button
+					type="button"
+					id="offline-pack-start"
+					class="btn btn-secondary"
+					data-testid="pack-start"
+					aria-describedby="offline-pack-desc"
+					disabled={loading || !!busy || packRunning}
+					on:click={startPack}
+				>
+					{packState === "planning" ? "Préparation…" : "Préparer"}
+				</button>
+			{/if}
+		</div>
+	</div>
+	{#if packState}
+		<div
+			class="confirm neutral pack-progress"
+			data-testid="pack-progress"
+			data-state={packState}
+			data-ready={packProgress?.ready ?? 0}
+			data-total={packProgress?.total ?? packPlan?.count ?? 0}
+			data-bytes={packDoneBytes}
+			role="status"
+			aria-live="polite"
+		>
+			<progress
+				max={Math.max(1, packProgress?.total ?? packPlan?.count ?? 1)}
+				value={packProgress?.ready ?? 0}
+				aria-label="Progression du pack"
+			/>
+			<span id="offline-pack-text">{packText}</span>
+		</div>
+	{/if}
 
 	<div class="setting">
 		<label
@@ -807,6 +1010,23 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
+	}
+
+	/* HL3 pack: size select + Préparer / Annuler side by side; the progress
+	   block spans the section below the row. */
+	.pack-controls {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.pack-progress {
+		margin-block: 0 1em;
+		progress {
+			width: 100%;
+			height: 0.5rem;
+			accent-color: #00cd6a;
+		}
 	}
 
 	.feedback {

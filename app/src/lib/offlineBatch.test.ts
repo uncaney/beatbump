@@ -10,9 +10,10 @@ vi.mock("$lib/offline", () => ({
 	listCachedAudio: vi.fn(),
 	pinOffline: vi.fn(),
 	requestPersistentStorage: vi.fn(),
+	abortCacheAudio: vi.fn(),
 }));
 
-import { cancelKeepJob, findKeepJob, jobMatchesKey, keepAliases, keepItemOfflineWith, keepMenuKey, KEEP_OFFLINE_MSG, KEEP_RUNNING_MSG, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
+import { CANCELLED_REASON, keepDepsWithAbort, cancelKeepJob, findKeepJob, jobMatchesKey, keepAliases, keepItemOfflineWith, keepMenuKey, KEEP_OFFLINE_MSG, KEEP_RUNNING_MSG, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
 import { get } from "svelte/store";
 
 const MB = 1024 * 1024;
@@ -321,5 +322,88 @@ describe("keepOffline I15 (atomic pin)", () => {
 			["b", { pinned: true }],
 			["c", { pinned: true }],
 		]);
+	});
+});
+
+
+/* ---- HL3: keepDepsWithAbort (pack "Annuler" stops the downloads in flight) ---- */
+
+describe("keepDepsWithAbort", () => {
+	// A download that never settles on its own (a SW fetch on a slow link).
+	function hangingDeps(cached = new Set<string>()): KeepDeps & { aborted: string[] } {
+		const aborted: string[] = [];
+		return {
+			aborted,
+			pin: async (t) => (cached.has(t.videoId) ? { ok: true } : { ok: false, reason: "not_cached" }),
+			download: () => new Promise(() => {}),
+			cacheInfo: async () => ({ quota: 0, pinnedBytes: 0, avgBytes: 4 * MB }),
+		};
+	}
+
+	it("resolves the in-flight download with reason cancelled as soon as the signal aborts, and tells the SW", async () => {
+		const base = hangingDeps();
+		const ctrl = new AbortController();
+		const deps = keepDepsWithAbort(ctrl.signal, base, (t) => base.aborted.push(t.videoId));
+		const p = deps.download(tr("a"), { pinned: true });
+		let settled = false;
+		void p.then(() => (settled = true));
+		await new Promise((r) => setTimeout(r, 5));
+		expect(settled).toBe(false);
+		ctrl.abort();
+		const r = await p;
+		expect(r).toEqual({ ok: false, reason: CANCELLED_REASON });
+		expect(base.aborted).toEqual(["a"]);
+		// Already aborted: no download starts at all.
+		expect(await deps.download(tr("b"))).toEqual({ ok: false, reason: CANCELLED_REASON });
+	});
+
+	it("passes a settled download through untouched (ok and bytes kept, pin unchanged)", async () => {
+		const ctrl = new AbortController();
+		const { deps: base } = fakeDeps({ bytes: 3 * MB });
+		const deps = keepDepsWithAbort(ctrl.signal, base);
+		expect(await deps.download(tr("a"))).toEqual({ ok: true, bytes: 3 * MB });
+		expect(deps.pin).toBe(base.pin);
+		expect(deps.cacheInfo).toBe(base.cacheInfo);
+	});
+
+	it("keepOffline with these deps ends within the second after Annuler, keeps what landed and reports cancelled", async () => {
+		const cached = new Set<string>();
+		const base: KeepDeps = {
+			pin: async (t) => (cached.has(t.videoId) ? { ok: true } : { ok: false, reason: "not_cached" }),
+			download: async (t) => {
+				if (t.videoId === "fast") {
+					cached.add("fast");
+					return { ok: true, bytes: 4 * MB };
+				}
+				return new Promise(() => {}); // "slow" hangs until the abort
+			},
+			cacheInfo: async () => ({ quota: 0, pinnedBytes: 0, avgBytes: 4 * MB }),
+		};
+		const ctrl = new AbortController();
+		const deps = keepDepsWithAbort(ctrl.signal, base, () => {});
+		const started = Date.now();
+		const done = keepOffline([tr("fast"), tr("slow"), tr("slow2")], { signal: ctrl.signal }, deps);
+		await new Promise((r) => setTimeout(r, 10));
+		ctrl.abort();
+		const r = await done;
+		expect(Date.now() - started).toBeLessThan(1000);
+		expect(r.ready).toBe(1);
+		expect(r.failed).toBe(0);
+		expect(r.cancelled).toBe(true);
+		expect(cached.has("fast")).toBe(true);
+	});
+
+	it("startKeepJob hands its abort signal to a deps factory; cancelKeepJob then stops the batch", async () => {
+		const base = hangingDeps();
+		const key = "pack:test";
+		const done = startKeepJob(key, () => [tr("a"), tr("b"), tr("c")], { deps: (signal) => keepDepsWithAbort(signal, base, (t) => base.aborted.push(t.videoId)) });
+		await new Promise((r) => setTimeout(r, 10));
+		expect(get(keepJobs).has(key)).toBe(true);
+		cancelKeepJob(key);
+		const r = await done;
+		expect(r?.cancelled).toBe(true);
+		expect(r?.ready).toBe(0);
+		expect(base.aborted.sort()).toEqual(["a", "b"]); // the 2 in flight; "c" never started
+		expect(get(keepJobs).has(key)).toBe(false);
 	});
 });
