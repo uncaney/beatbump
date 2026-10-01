@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from "$components/EmptyState/EmptyState.svelte";
 	import Listing from "$components/Item/Listing.svelte";
 	import { goto } from "$app/navigation";
 	import { page } from "$app/stores";
@@ -48,6 +49,12 @@
 		"added-30d": "Ajoutés ces 30 derniers jours",
 	};
 	let filter = "";
+	/**
+	 * U12-12: the server answers never-played with `reason: "anonymous"` for a
+	 * guest profile (no history to filter on): no filter chip, no count, the
+	 * name EmptyState instead of the whole library.
+	 */
+	let anonymousFilter = false;
 	let mounted = false;
 	$: urlFilter = (() => {
 		const f = $page.url.searchParams.get("filter") || "";
@@ -90,6 +97,7 @@
 			const data = await res.json();
 			const got = Array.isArray(data.items) ? data.items : [];
 			items = reset ? got : [...items, ...got];
+			anonymousFilter = !!filter && data?.reason === "anonymous";
 			total = data.total ?? items.length;
 			// L9-2: the never-played list pages over candidates and says where
 			// to continue (nextOffset); the other lists page by row count.
@@ -223,7 +231,7 @@
 		</div>
 	</header>
 
-	{#if filter}
+	{#if filter && !anonymousFilter}
 		<div
 			class="filter-chip"
 			data-testid="browse-filter-chip"
@@ -288,6 +296,17 @@
 		<p class="state">Recherche de « {seeking} »…</p>
 	{:else if loading}
 		<p class="state">Chargement…</p>
+	{:else if anonymousFilter}
+		<div data-testid="never-played-anonymous">
+			<EmptyState
+				testid="empty-state"
+				icon="user"
+				title="Dis-moi ton prénom"
+				text="« Jamais écouté » suit ton historique d'écoute : donne ton prénom dans Compte, puis écoute quelques albums."
+				href="/library/account"
+				cta="Dis-moi ton prénom"
+			/>
+		</div>
 	{:else if items.length === 0}
 		<p class="state">{q || filter ? "Aucun résultat" : "Rien ici pour l’instant"}</p>
 	{:else if done}

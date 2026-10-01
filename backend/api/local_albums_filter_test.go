@@ -78,6 +78,7 @@ func TestLocalAlbumsFilterAdded30d(t *testing.T) {
 func TestLocalAlbumsFilterNeverPlayed(t *testing.T) {
 	useTestDB(t)
 	stub := newAlbumFilterStub(t)
+	seedNamedProfiles(t, "p-test", "p-other")
 	seed := []db.PlayEvent{
 		{ProfileID: "p-test", Ref: "lidd1000000", Title: "Zeta 1", Artist: "Artist A", Album: "Zeta", Source: "local"},
 		{ProfileID: "p-test", Ref: "lidd1000031", Title: "Old 1", Source: "local"}, // no album label: Meili must catch it
@@ -133,6 +134,7 @@ func TestLocalAlbumsUnknownFilterIs400(t *testing.T) {
 // albums index nor re-confirms pages 1-4.
 func TestLocalAlbumsNeverPlayedPagingCostIsFlat(t *testing.T) {
 	useTestDB(t)
+	seedNamedProfiles(t, "p-test")
 	stub := &neverPlayedStub{}
 	for i := 0; i < 300; i++ {
 		lid := fmt.Sprintf("lidp%07d", i)

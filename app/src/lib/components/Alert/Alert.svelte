@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { fullscreenStore } from "$lib/components/Player/channel";
 	import { alertHandler } from "$lib/stores/stores";
 	import type { Alert, AlertAction } from "$lib/stores/stores";
 	import { flip } from "svelte/animate";
@@ -22,7 +23,13 @@
 	}
 </script>
 
-<div class="alert-container">
+<!-- U12-13: in the phone fullscreen player the bottom anchor put the toast on
+     the "Suivant :" line under the controls; there it docks at the top. -->
+<div
+	class="alert-container"
+	class:in-fullscreen={$fullscreenStore === "open"}
+	data-testid="alert-container"
+>
 	{#each $alertHandler as notif (notif.id)}
 		<div
 			in:fly|global={{ y: 150, duration: 250, easing: expoOut }}
@@ -83,6 +90,16 @@
 			left: auto;
 			align-items: flex-end;
 			padding-right: max(1.25rem, env(safe-area-inset-right, 0px));
+		}
+		// U12-13: phone fullscreen player. The controls, "Suivant :" and the
+		// queue handle fill the bottom of the sheet; anchor the stack under its
+		// top bar (over the artwork, above every control) instead.
+		@media (max-width: 639.98px) {
+			&.in-fullscreen {
+				top: calc(env(safe-area-inset-top, 0px) + 4.5rem);
+				bottom: auto;
+				padding-bottom: 0;
+			}
 		}
 	}
 

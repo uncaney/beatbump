@@ -282,7 +282,16 @@ func localAlbumsFiltered(c echo.Context, filter string, off, lim int, sortBy str
 		if off > neverPlayedMaxOffset {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": "offset too large"})
 		}
-		scan := neverPlayedScanFor(profileID(c), c.QueryParam("q"), c.QueryParam("artistId"), sortBy)
+		pid := profileID(c)
+		if profileAnonymous(pid) {
+			// U12-12: no name, no history to tell "never played" apart; nextOffset
+			// stays a number (the client stops: no items, offset >= total).
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"items": []IListItemRenderer{}, "total": 0, "offset": off, "limit": lim, "sort": sortBy, "filter": filter,
+				"nextOffset": off, "reason": "anonymous",
+			})
+		}
+		scan := neverPlayedScanFor(pid, c.QueryParam("q"), c.QueryParam("artistId"), sortBy)
 		var next int
 		items, next = neverPlayedWindow(scan.candidates, scan.refs, off, lim)
 		return c.JSON(http.StatusOK, map[string]interface{}{
