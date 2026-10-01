@@ -59,6 +59,8 @@ func newServer() *echo.Echo {
 			return next(c)
 		}
 	})
+	// Unknown SPA routes get the shell with a real 404 status (spa_notfound.go).
+	e.Use(spaNotFound("./build"))
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
 		Root: "./build",
 		// Audio reverse-proxy paths must bypass the SPA static handler: with IgnoreBase
