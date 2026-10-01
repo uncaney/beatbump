@@ -19,6 +19,7 @@ import {
 	type PinResult,
 } from "$lib/offline";
 import { get, writable, type Readable } from "svelte/store";
+import { clearFailed, recordFailed } from "$lib/offlineFailed";
 
 /** Toast shown when the SW refuses a pin because pinned bytes would exceed the quota (G7). */
 export const QUOTA_MSG = "Quota atteint, augmente-le dans Réglages";
@@ -28,7 +29,14 @@ export const KEEP_CONCURRENCY = 2;
 
 export type KeepProgress = { ready: number; failed: number; refused: number; total: number };
 export type KeepResult = KeepProgress & { cancelled: boolean };
-export type KeepOptions = { onProgress?: (p: KeepProgress) => void; signal?: AbortSignal };
+export type KeepOptions = {
+	onProgress?: (p: KeepProgress) => void;
+	signal?: AbortSignal;
+	/** UX9: one track counted in `failed` (download / pin impossible). */
+	onFailed?: (t: any) => void;
+	/** UX9: one track counted in `ready` (pinned offline). */
+	onReady?: (t: any) => void;
+};
 export type KeepDeps = {
 	pin: (t: any) => Promise<PinResult>;
 	/** I15: `pinned: true` asks the SW to write the entry pinned (atomic pin). */
@@ -128,6 +136,21 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 		}
 	};
 	const aborted = () => !!opts.signal?.aborted;
+	const hook = (fn: ((t: any) => void) | undefined, t: any) => {
+		try {
+			fn?.(t);
+		} catch {
+			/* a UI callback must not break the batch */
+		}
+	};
+	const ready = (t: any) => {
+		p.ready++;
+		hook(opts.onReady, t);
+	};
+	const failed = (t: any) => {
+		p.failed++;
+		hook(opts.onFailed, t);
+	};
 	if (!list.length) return { ...p, cancelled: false };
 	// O10: the first "Garder hors-ligne" asks for persistent storage.
 	if (deps === defaultDeps) void requestPersistentStorage();
@@ -138,10 +161,10 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 	for (const t of list) {
 		if (aborted()) return { ...p, cancelled: true };
 		const r = await deps.pin(t).catch(() => ({ ok: false, reason: "error" }) as PinResult);
-		if (r.ok) p.ready++;
+		if (r.ok) ready(t);
 		else if (r.reason === "not_cached") toDownload.push(t);
 		else if (r.reason === "quota") p.refused++;
-		else p.failed++;
+		else failed(t);
 		emit();
 	}
 	if (!toDownload.length) return { ...p, cancelled: false };
@@ -195,13 +218,13 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 					// HL3: stopped by "Annuler" (keepDepsWithAbort): neither failed
 					// nor refused, the batch reports cancelled below.
 					cancelledInFlight++;
-				} else p.failed++;
+				} else failed(t);
 				emit();
 				continue;
 			}
 			if (!pr) continue;
 			if (pr.ok) {
-				p.ready++;
+				ready(t);
 				pinnedBytes += (Number(r.bytes) || est) - est;
 			} else {
 				pinnedBytes -= est;
@@ -209,7 +232,7 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 				if (pr.reason === "quota" || (retried && pr.reason === "not_cached")) {
 					quotaStop = true;
 					p.refused++;
-				} else p.failed++;
+				} else failed(t);
 			}
 			emit();
 		}
@@ -441,7 +464,13 @@ export function startKeepJob(
 			patchJob(key, (j) => ({ ...j, progress: { ready: 0, failed: 0, refused: 0, total: list.length } }));
 			result = await keepOffline(
 				list,
-				{ signal: ctrl.signal, onProgress: (p) => patchJob(key, (j) => ({ ...j, progress: p })) },
+				{
+					signal: ctrl.signal,
+					onProgress: (p) => patchJob(key, (j) => ({ ...j, progress: p })),
+					// UX9: every keep / pack job feeds the failed-downloads store.
+					onFailed: recordFailed,
+					onReady: (t) => clearFailed(t?.videoId),
+				},
 				deps,
 			);
 			try {
