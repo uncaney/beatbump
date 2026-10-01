@@ -61,7 +61,7 @@
 		</a>
 		<button
 			type="button"
-			class="outlined back-button"
+			class="outlined back-button btn-reset"
 			on:click={back}
 		>
 			Retour

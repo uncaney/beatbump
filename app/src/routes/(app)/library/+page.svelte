@@ -122,6 +122,7 @@
 		<div style="margin-block-start: 0.5em;">
 			<Button
 				outlined
+				class="btn-reset"
 				on:click={async () => {
 					try {
 						exportDB();
@@ -137,6 +138,7 @@
 			>
 			<Button
 				outlined
+				class="btn-reset"
 				on:click={() => {
 					showImportModal = true;
 				}}

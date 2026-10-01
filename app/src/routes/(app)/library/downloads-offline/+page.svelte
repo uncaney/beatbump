@@ -383,7 +383,7 @@
 				Tout lire
 			</button>
 			<button
-				class="cta"
+				class="cta btn-reset"
 				class:is-disabled={!canShuffle}
 				type="button"
 				title={shuffleTitle}
@@ -400,7 +400,7 @@
 			</button>
 			<div class="mixtape-wrap">
 				<button
-					class="cta"
+					class="cta btn-reset"
 					class:is-disabled={!canMixtape}
 					id="offline-mixtape"
 					type="button"
@@ -454,7 +454,7 @@
 		{#if evictedCount || recaching}
 			<div class="recache-bar">
 				<button
-					class="cta"
+					class="cta btn-reset"
 					id="offline-recache"
 					type="button"
 					aria-busy={!!recaching}
