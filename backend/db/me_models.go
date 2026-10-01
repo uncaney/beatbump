@@ -76,3 +76,14 @@ type PlaylistItem struct {
 	Data       string    `json:"-"`
 	CreatedAt  time.Time `json:"createdAt"`
 }
+
+// NowPlaying (C2): one row per profile, the last C1 resume state pushed by the
+// device that played last (slim queue rows + index + position, <= 64 KB).
+type NowPlaying struct {
+	ProfileID  string    `gorm:"primaryKey" json:"-"`
+	DeviceID   string    `json:"deviceId"`
+	DeviceName string    `json:"deviceName"`
+	Payload    string    `json:"-"`        // C1 resume state JSON
+	Position   float64   `json:"position"` // seconds
+	UpdatedAt  time.Time `json:"updatedAt"`
+}

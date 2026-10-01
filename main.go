@@ -131,6 +131,8 @@ func newServer() *echo.Echo {
 	me.POST("/acquire", api.MeAcquireHandler)
 	me.GET("/acquire", api.MeAcquireStatusHandler)
 	me.GET("/mix", api.MeMixHandler)
+	me.PUT("/nowplaying", api.MeNowPlayingPutHandler)
+	me.GET("/nowplaying", api.MeNowPlayingGetHandler)
 
 	// Download & Settings
 	e.GET("/api/v1/download/playlist", api.DownloadPlaylistHandler)
