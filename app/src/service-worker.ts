@@ -88,14 +88,15 @@ async function cachedText(c: Cache, path: string): Promise<string> {
 }
 
 // The build paths the shell needs on a cold, offline boot of "/" or "/home".
-async function shellBuildAssets(c: Cache): Promise<string[]> {
-	const out = new Set<string>();
-	const entries = build.filter((p) => p.startsWith(IMMUTABLE + "entry/"));
-	entries.forEach((p) => out.add(p));
-	const html = await cachedText(c, "/");
+// L5 (audit v7, P3): the regex extraction below is pulled out as a pure
+// function (no Cache/SW API) so it can be unit-tested against a real Vite/
+// SvelteKit `entry/app.*.js` manifest shape (see service-worker.shell.test.ts)
+// without spinning up a service worker. A Vite/SvelteKit version bump can
+// change that format (e.g. a `__vite__mapDeps([0,1])` index into a shared
+// array instead of a literal per-node path array) and silently starve it.
+export function parseShellDeps(html: string, manifest: string, entryPaths: string[]): string[] {
+	const out = new Set<string>(entryPaths);
 	for (const m of html.matchAll(/\/_app\/immutable\/[^"'\s)]+/g)) out.add(m[0]);
-	const app = entries.find((p) => /\/entry\/app\.[^/]+\.js$/.test(p));
-	const manifest = app ? await cachedText(c, app) : "";
 	if (manifest) {
 		// node id -> preload dependencies: n(()=>import("../nodes/<id>.x.js"),["../nodes/…","../chunks/…",…])
 		const deps = new Map<number, string[]>();
@@ -113,7 +114,28 @@ async function shellBuildAssets(c: Cache): Promise<string[]> {
 		}
 		for (const id of wanted) for (const d of deps.get(id) || []) out.add(d);
 	}
-	return [...out].filter((p) => BUILD_SET.has(p));
+	return [...out];
+}
+
+// Below this count of matched shell assets, the regex above is considered to
+// have (likely) starved on a manifest-format change: fall back instead of
+// silently shipping a near-empty shell.
+export const SHELL_MIN_ASSETS = 20;
+
+async function shellBuildAssets(c: Cache): Promise<string[]> {
+	const entries = build.filter((p) => p.startsWith(IMMUTABLE + "entry/"));
+	const html = await cachedText(c, "/");
+	const app = entries.find((p) => /\/entry\/app\.[^/]+\.js$/.test(p));
+	const manifest = app ? await cachedText(c, app) : "";
+	const found = parseShellDeps(html, manifest, entries).filter((p) => BUILD_SET.has(p));
+	if (found.length >= SHELL_MIN_ASSETS) return found;
+	// Fallback: every entry/* (always needed) plus every chunks/* the root
+	// HTML itself references (not the whole build - K3 deliberately keeps the
+	// install small; precacheRest still fills the rest in the background).
+	console.warn(`[sw] shellBuildAssets matched only ${found.length} assets (< ${SHELL_MIN_ASSETS}); falling back to entry/* + chunks/* referenced by the HTML`);
+	const fallback = new Set<string>(entries);
+	for (const m of html.matchAll(/\/_app\/immutable\/(?:entry|chunks)\/[^"'\s)]+/g)) fallback.add(m[0]);
+	return [...fallback].filter((p) => BUILD_SET.has(p));
 }
 
 // The deferred precache of everything else in `build`, once per SW lifetime
