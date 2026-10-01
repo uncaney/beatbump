@@ -3,13 +3,12 @@
 	lang="ts"
 >
 	import { browser } from "$app/environment";
-	let _Peer: typeof Peer;
-	let RTC_module;
-	if (browser) {
-		RTC_module = import("peerjs");
-		RTC_module.then((module) => {
-			_Peer = module.default;
-		});
+	// PeerJS is only fetched when the Sync modal is actually mounted,
+	// not when the library page loads.
+	let RTC_module: Promise<typeof import("peerjs")> | undefined;
+	function loadPeerJs() {
+		if (!RTC_module) RTC_module = import("peerjs");
+		return RTC_module;
 	}
 </script>
 
@@ -160,12 +159,8 @@
 	}
 	onMount(() =>
 		(async () => {
-			if (!_Peer) {
-				const _module = await RTC_module;
-				RTC = _module.default;
-			} else {
-				RTC = _Peer;
-			}
+			const _module = await loadPeerJs();
+			RTC = _module.default;
 		})(),
 	);
 	// $: console.log(RTC, _Peer)
