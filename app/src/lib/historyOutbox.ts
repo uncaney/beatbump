@@ -74,20 +74,72 @@ export function enqueuePlay(item: any, playedAt: number, store: KV | null = defa
 const sameEntry = (a: OutboxEntry, b: OutboxEntry) =>
 	a.playedAt === b.playedAt && (a.item as any)?.videoId === (b.item as any)?.videoId && (a.item as any)?.title === (b.item as any)?.title;
 
-let flushing: Promise<{ sent: number; dropped: number; left: number }> | null = null;
+let flushing: Promise<FlushResult> | null = null;
+type FlushResult = { sent: number; dropped: number; left: number };
+
+// I10: one flusher across tabs. `navigator.locks` (ifAvailable: a tab that
+// finds the lock taken skips, the holder sends the queue) when available,
+// else a localStorage lease renewed while flushing. The server is also
+// idempotent on (profile, ref, playedAt) (api/me.go playAlreadyRecorded).
+export const OUTBOX_LOCK = "ytm-history-outbox";
+export const OUTBOX_LEASE_KEY = "ytm-history-outbox-lease";
+export const OUTBOX_LEASE_MS = 30_000;
+type LockManagerLike = {
+	request: (name: string, opts: { ifAvailable: boolean }, cb: (lock: unknown) => Promise<unknown>) => Promise<unknown>;
+};
+export type FlushOpts = { locks?: LockManagerLike | null; owner?: string; now?: () => number };
+const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+function browserLocks(): LockManagerLike | null {
+	try {
+		const l = (globalThis as any).navigator?.locks;
+		return l && typeof l.request === "function" ? l : null;
+	} catch {
+		return null;
+	}
+}
+
+/** Take / renew the lease for `owner`; false when another tab holds a live one. */
+export function takeOutboxLease(store: KV | null, owner: string, now: number): boolean {
+	if (!store) return true;
+	try {
+		const cur = JSON.parse(store.getItem(OUTBOX_LEASE_KEY) || "null");
+		if (cur && cur.owner !== owner && typeof cur.until === "number" && cur.until > now) return false;
+		store.setItem(OUTBOX_LEASE_KEY, JSON.stringify({ owner, until: now + OUTBOX_LEASE_MS }));
+		return true;
+	} catch {
+		return true; // storage unusable: no cross-tab coordination possible
+	}
+}
+
+function releaseOutboxLease(store: KV | null, owner: string): void {
+	if (!store) return;
+	try {
+		const cur = JSON.parse(store.getItem(OUTBOX_LEASE_KEY) || "null");
+		if (cur && cur.owner === owner) store.setItem(OUTBOX_LEASE_KEY, JSON.stringify({ owner, until: 0 }));
+	} catch {
+		/* best-effort */
+	}
+}
 
 /**
  * Replay the queue oldest first, one at a time; stops at the first "retry"
  * (still offline / server down). Entries are removed one by one from the
  * CURRENT storage content, so a play queued during the flush is kept.
+ * Another tab flushing (lock / lease held) makes this a no-op.
  */
-export function flushOutbox(send: SendPlay, store: KV | null = defaultStore()): Promise<{ sent: number; dropped: number; left: number }> {
+export function flushOutbox(send: SendPlay, store: KV | null = defaultStore(), opts: FlushOpts = {}): Promise<FlushResult> {
 	if (flushing) return flushing;
-	flushing = (async () => {
+	const owner = opts.owner ?? TAB_ID;
+	const now = opts.now ?? Date.now;
+	const locks = opts.locks === undefined ? browserLocks() : opts.locks;
+	const skipped = (): FlushResult => ({ sent: 0, dropped: 0, left: readOutbox(store).length });
+	const run = async (lease: boolean): Promise<FlushResult> => {
 		let sent = 0;
 		let dropped = 0;
 		try {
 			for (;;) {
+				if (lease && !takeOutboxLease(store, owner, now())) break;
 				const head = readOutbox(store)[0];
 				if (!head) break;
 				const r = await send(head.item, head.playedAt).catch(() => "retry" as SendResult);
@@ -100,11 +152,22 @@ export function flushOutbox(send: SendPlay, store: KV | null = defaultStore()): 
 				writeOutbox(cur, store);
 			}
 		} finally {
-			flushing = null;
+			if (lease) releaseOutboxLease(store, owner);
 		}
 		return { sent, dropped, left: readOutbox(store).length };
-	})();
-	return flushing;
+	};
+	const p: Promise<FlushResult> = (async () => {
+		if (locks) {
+			const r = await locks.request(OUTBOX_LOCK, { ifAvailable: true }, async (lock) => (lock ? run(false) : skipped()));
+			return r as FlushResult;
+		}
+		if (!takeOutboxLease(store, owner, now())) return skipped();
+		return run(true);
+	})().finally(() => {
+		if (flushing === p) flushing = null;
+	});
+	flushing = p;
+	return p;
 }
 
 let installed = false;

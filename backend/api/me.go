@@ -335,12 +335,30 @@ func MeRecordPlayHandler(c echo.Context) error {
 	}
 	// O9: a play replayed from the client outbox carries its own playedAt.
 	now := time.Now()
+	_, clientStamped := m["playedAt"]
 	playedAt := clientPlayedAt(m["playedAt"], now)
 	delete(m, "playedAt")
+	// I10: an outbox replay (several tabs, or a lost response then a retry)
+	// sends the same (ref, playedAt) again: idempotent within playDedupeWindow.
+	if clientStamped && playAlreadyRecorded(pid, ref, playedAt) {
+		return c.JSON(http.StatusOK, map[string]interface{}{"ok": true, "duplicate": true})
+	}
 	raw, _ := json.Marshal(m)
 	ev := db.PlayEvent{ProfileID: pid, Ref: ref, Title: title, Artist: artist, ArtistID: artistID, Album: itemAlbum(string(raw)), Source: source, Data: string(raw), PlayedAt: playedAt}
 	db.DB.Create(&ev)
 	return c.JSON(http.StatusOK, map[string]interface{}{"ok": true})
+}
+
+// playDedupeWindow: a client-stamped play whose (profile, ref) already has an
+// event this close to its playedAt is a replay, not a new play (I10).
+const playDedupeWindow = 60 * time.Second
+
+func playAlreadyRecorded(pid, ref string, playedAt time.Time) bool {
+	var n int64
+	db.DB.Model(&db.PlayEvent{}).
+		Where("profile_id = ? AND ref = ? AND played_at > ? AND played_at < ?", pid, ref, playedAt.Add(-playDedupeWindow), playedAt.Add(playDedupeWindow)).
+		Count(&n)
+	return n > 0
 }
 
 // maxClientPlayAge bounds how old a client-provided playedAt may be (O9).

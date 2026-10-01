@@ -75,3 +75,32 @@ func TestRecordPlayIgnoresFuturePlayedAt(t *testing.T) {
 		t.Fatalf("future playedAt kept: %v", ev.PlayedAt)
 	}
 }
+
+// I10: the outbox replays the same (ref, playedAt) from two tabs or after a
+// lost response: one row.
+func TestRecordPlayIdempotentOnPlayedAt(t *testing.T) {
+	useTestDB(t)
+	at := time.Now().Add(-20 * time.Minute).UnixMilli()
+	body := strings.TrimSuffix(songBody, "}") + fmt.Sprintf(`,"playedAt":%d}`, at)
+	for i := 0; i < 2; i++ {
+		c, rec := ctxFor(http.MethodPost, "/api/v1/me/history", body, map[string]string{"User-Agent": "Mozilla/5.0 Chrome/128"})
+		if err := MeRecordPlayHandler(c); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("post %d: %v status %d", i, err, rec.Code)
+		}
+	}
+	var n int64
+	db.DB.Model(&db.PlayEvent{}).Count(&n)
+	if n != 1 {
+		t.Fatalf("got %d rows, want 1", n)
+	}
+	// A real later play of the same track (playedAt 5 min after) is a new row.
+	later := strings.TrimSuffix(songBody, "}") + fmt.Sprintf(`,"playedAt":%d}`, at+5*60*1000)
+	c, _ := ctxFor(http.MethodPost, "/api/v1/me/history", later, map[string]string{"User-Agent": "Mozilla/5.0 Chrome/128"})
+	if err := MeRecordPlayHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	db.DB.Model(&db.PlayEvent{}).Count(&n)
+	if n != 2 {
+		t.Fatalf("got %d rows after a later play, want 2", n)
+	}
+}

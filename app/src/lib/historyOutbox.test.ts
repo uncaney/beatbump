@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { enqueuePlay, flushOutbox, OUTBOX_MAX, readOutbox, slimHistoryItem, statusResult, type SendResult } from "./historyOutbox";
+import { enqueuePlay, flushOutbox, OUTBOX_LEASE_KEY, OUTBOX_MAX, readOutbox, slimHistoryItem, statusResult, takeOutboxLease, type SendResult } from "./historyOutbox";
 
 function memStore() {
 	const m = new Map<string, string>();
@@ -65,5 +65,32 @@ describe("historyOutbox", () => {
 		expect(r.left).toBe(2);
 		const r2 = await flushOutbox(async () => "ok", st);
 		expect(r2).toEqual({ sent: 2, dropped: 0, left: 0 });
+	});
+
+	it("I10: skips while another tab holds a live lease, flushes once it expired", async () => {
+		const st = memStore();
+		enqueuePlay(song("a"), 1, st);
+		expect(takeOutboxLease(st, "other-tab", 1000)).toBe(true);
+		let calls = 0;
+		const send = async (): Promise<SendResult> => (calls++, "ok");
+		const r = await flushOutbox(send, st, { locks: null, owner: "me", now: () => 2000 });
+		expect(calls).toBe(0);
+		expect(r).toEqual({ sent: 0, dropped: 0, left: 1 });
+		const r2 = await flushOutbox(send, st, { locks: null, owner: "me", now: () => 1000 + 31_000 });
+		expect(calls).toBe(1);
+		expect(r2.left).toBe(0);
+		expect(JSON.parse(st.getItem(OUTBOX_LEASE_KEY)!).until).toBe(0); // released
+	});
+
+	it("I10: with navigator.locks, a tab that does not get the lock sends nothing", async () => {
+		const st = memStore();
+		enqueuePlay(song("a"), 1, st);
+		let calls = 0;
+		const send = async (): Promise<SendResult> => (calls++, "ok");
+		const busy = { request: async (_n: string, _o: unknown, cb: (l: unknown) => Promise<unknown>) => cb(null) };
+		expect(await flushOutbox(send, st, { locks: busy })).toEqual({ sent: 0, dropped: 0, left: 1 });
+		const free = { request: async (_n: string, _o: unknown, cb: (l: unknown) => Promise<unknown>) => cb({}) };
+		expect(await flushOutbox(send, st, { locks: free })).toEqual({ sent: 1, dropped: 0, left: 0 });
+		expect(calls).toBe(1);
 	});
 });
