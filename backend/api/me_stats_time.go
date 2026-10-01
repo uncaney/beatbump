@@ -168,3 +168,68 @@ func MeStreaksHandler(c echo.Context) error {
 	mins := refMinutes(windowRows(pid, streakWindowDays+1))
 	return c.JSON(http.StatusOK, computeStreaks(evs, mins, time.Now(), tz))
 }
+
+// clockResp is the payload of me/stats/clock: minutes listened per weekday
+// (0 = Monday ... 6 = Sunday, the French week) and local hour.
+type clockResp struct {
+	Days    int            `json:"days"`
+	TZ      int            `json:"tz"`
+	Minutes [7][24]float64 `json:"minutes"`
+	Total   float64        `json:"total"`
+	TopDay  int            `json:"topDay"`  // -1 without plays
+	TopHour int            `json:"topHour"` // -1 without plays
+}
+
+// computeClock folds plays into the weekday x hour matrix (viewer local).
+func computeClock(evs []statEvent, mins map[string]float64, tzOffsetMin int) clockResp {
+	loc := time.FixedZone("viewer", tzOffsetMin*60)
+	out := clockResp{TZ: tzOffsetMin, TopDay: -1, TopHour: -1}
+	var perDay [7]float64
+	var perHour [24]float64
+	for _, e := range evs {
+		t := e.PlayedAt.In(loc)
+		wd := (int(t.Weekday()) + 6) % 7 // Monday = 0
+		m := playMinutes(mins, e.Ref)
+		out.Minutes[wd][t.Hour()] += m
+		perDay[wd] += m
+		perHour[t.Hour()] += m
+		out.Total += m
+	}
+	for d := range out.Minutes {
+		for h := range out.Minutes[d] {
+			out.Minutes[d][h] = round1(out.Minutes[d][h])
+		}
+	}
+	out.Total = round1(out.Total)
+	best := 0.0
+	for d, v := range perDay {
+		if v > best {
+			best, out.TopDay = v, d
+		}
+	}
+	best = 0
+	for h, v := range perHour {
+		if v > best {
+			best, out.TopHour = v, h
+		}
+	}
+	return out
+}
+
+// MeClockHandler: GET /api/v1/me/stats/clock?tz=<minutes>&days=90 (days
+// clamped to 1..365, default 90).
+func MeClockHandler(c echo.Context) error {
+	pid := profileID(c)
+	tz := statsTZ(c)
+	days := 90
+	if n, err := strconv.Atoi(strings.TrimSpace(c.QueryParam("days"))); err == nil && n > 0 {
+		days = n
+		if days > 365 {
+			days = 365
+		}
+	}
+	evs := profileEvents(pid, time.Now().Add(-time.Duration(days)*24*time.Hour))
+	out := computeClock(evs, refMinutes(windowRows(pid, days)), tz)
+	out.Days = days
+	return c.JSON(http.StatusOK, out)
+}

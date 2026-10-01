@@ -7,6 +7,7 @@
 	import { NNBSP, formatCountFr, formatIntFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
+	import Clock from "./_Clock.svelte";
 	import Streak from "./_Streak.svelte";
 
 	const periods = [
@@ -196,6 +197,7 @@
 		</section>
 
 		<Streak />
+		<Clock />
 
 		<div class="lists">
 			<section

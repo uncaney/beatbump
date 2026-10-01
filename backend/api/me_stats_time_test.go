@@ -115,3 +115,43 @@ func TestMeStreaksHandler_ProfileScoped(t *testing.T) {
 		t.Fatalf("seed changed: %d", n)
 	}
 }
+
+func TestComputeClock(t *testing.T) {
+	// Saturday 3 Oct 2026, 20:10 UTC and 21:30 UTC; Monday 5 Oct 08:00 UTC.
+	sat1 := time.Date(2026, 10, 3, 20, 10, 0, 0, time.UTC)
+	sat2 := time.Date(2026, 10, 3, 21, 30, 0, 0, time.UTC)
+	mon := time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC)
+	mins := map[string]float64{"A": 4, "B": 2}
+	c := computeClock([]statEvent{ev("A", sat1), ev("A", sat2), ev("B", mon)}, mins, 0)
+	if c.Minutes[5][20] != 4 || c.Minutes[5][21] != 4 || c.Minutes[0][8] != 2 {
+		t.Fatalf("matrix: sat20=%v sat21=%v mon8=%v", c.Minutes[5][20], c.Minutes[5][21], c.Minutes[0][8])
+	}
+	if c.TopDay != 5 || c.Total != 10 {
+		t.Fatalf("topDay=%d total=%v", c.TopDay, c.Total)
+	}
+	// UTC+4: Saturday 21:30 UTC is Sunday 01:30 local.
+	c = computeClock([]statEvent{ev("A", sat2)}, mins, 240)
+	if c.Minutes[6][1] != 4 || c.TopDay != 6 || c.TopHour != 1 {
+		t.Fatalf("tz shift: sun1=%v topDay=%d topHour=%d", c.Minutes[6][1], c.TopDay, c.TopHour)
+	}
+	if e := computeClock(nil, nil, 0); e.TopDay != -1 || e.TopHour != -1 || e.Total != 0 {
+		t.Fatalf("empty: %+v", e)
+	}
+}
+
+func TestMeClockHandler(t *testing.T) {
+	useTestDB(t)
+	seedPlays(t)
+	out := getJSON(t, MeClockHandler, "/api/v1/me/stats/clock?tz=0&days=30")
+	m, _ := out["minutes"].([]interface{})
+	if len(m) != 7 || len(m[0].([]interface{})) != 24 {
+		t.Fatalf("shape: %v", out["minutes"])
+	}
+	// 30 days: A x3 (12) + B x2 (7) + C (2) = 21; D (40 days ago) and p-other out.
+	if tot := out["total"].(float64); tot != 21 {
+		t.Fatalf("total %v, want 21", tot)
+	}
+	if out["days"].(float64) != 30 {
+		t.Fatalf("days %v", out["days"])
+	}
+}

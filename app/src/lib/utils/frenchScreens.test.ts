@@ -71,6 +71,7 @@ export const FILES = [
 	"lib/stores/nowPlayingSync.ts",
 	// 41A: Ton mois extras (série, grille, Ton année) and Partager ma semaine.
 	"routes/(app)/library/stats/_Streak.svelte",
+	"routes/(app)/library/stats/_Clock.svelte",
 	"lib/meStats.ts",
 ] as const;
 
