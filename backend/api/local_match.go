@@ -24,27 +24,56 @@ var matchAccents = strings.NewReplacer(
 	"’", "'", "‘", "'", "“", "\"", "”", "\"", "–", "-", "—", "-",
 )
 
-// matchEditionWords mark a bracketed / dashed qualifier as an edition label
-// (dropped). Version words that change the content (live, remix, acoustic,
-// instrumental, "(Taylor's Version)") are deliberately absent: "(Live)" stays a
-// different album.
-const matchEditionWords = `deluxe|remaster(?:ed)?|edition|expanded|anniversary|bonus|special|collector'?s?|super|explicit|clean|reissue|edit`
+// matchEditionWords mark a bracketed / dashed qualifier as a pure packaging
+// label (dropped): Deluxe, Remastered, Expanded, Anniversary, Bonus Track
+// Version, Explicit, Clean, "Edition" alone... Version words that change the
+// content (live, remix, acoustic, instrumental, "(Taylor's Version)") are
+// deliberately absent, and "edit" is too ("Radio Edit", "Extended Edit" are
+// other cuts).
+const matchEditionWords = `deluxe|remaster(?:ed)?|edition|expanded|anniversary|bonus|special|collector'?s?|super|explicit|clean|reissue`
+
+// matchContentWords (L12-4, audit logic v12) keep a qualifier that names
+// different content even when it also carries a packaging word: "(Drumless
+// Edition)", "(Live Edition)", "(Instrumental Edition)", "(Acoustic Edition)",
+// "(Remix Edition)", "(Demo Edition)" are not the same album as the plain one.
+const matchContentWords = `live|drumless|instrumentals?|acoustic|remix\w*|demos?|karaoke|a ?cappella|acapella|unplugged|orchestral|commentary`
 
 var (
 	matchBracketRe = regexp.MustCompile(`[\(\[\{][^\)\]\}]*\b(?:` + matchEditionWords + `)\b[^\)\]\}]*[\)\]\}]`)
 	matchDashRe    = regexp.MustCompile(`\s+-\s+[^-]*\b(?:` + matchEditionWords + `)\b.*$`)
+	matchContentRe = regexp.MustCompile(`\b(?:` + matchContentWords + `)\b`)
 	matchFeatRe    = regexp.MustCompile(`[\(\[]?\b(?:feat|ft|featuring)\b\.?.*$`)
 	matchNonAlnum  = regexp.MustCompile(`[^a-z0-9]+`)
 	matchArtistSep = regexp.MustCompile(`\s*(?:,|&|/|;|\bx\b|\band\b|\bet\b|\bwith\b)\s*`)
 )
+
+// matchDropPackaging removes the packaging qualifiers of a lowercased,
+// accent-folded title; a qualifier naming other content stays.
+func matchDropPackaging(s string) string {
+	keep := func(q string) string {
+		if matchContentRe.MatchString(q) {
+			return q
+		}
+		return " "
+	}
+	s = matchBracketRe.ReplaceAllStringFunc(s, keep)
+	return matchDashRe.ReplaceAllStringFunc(s, keep)
+}
+
+// matchHasPackaging reports whether a raw title carries a packaging
+// qualifier that matchNorm drops ("Discovery (Deluxe)": true, "Discovery":
+// false, "Alive (Live Edition)": false).
+func matchHasPackaging(s string) bool {
+	s = matchAccents.Replace(strings.ToLower(s))
+	return matchDropPackaging(s) != s
+}
 
 // matchNorm normalises an album title or artist name for the strict
 // comparison: case, accents, edition qualifiers ("(Deluxe)", "[Remastered]",
 // " - 2011 Remaster"), "feat. ..." tails, punctuation and spacing.
 func matchNorm(s string) string {
 	s = matchAccents.Replace(strings.ToLower(s))
-	s = matchBracketRe.ReplaceAllString(s, " ")
-	s = matchDashRe.ReplaceAllString(s, " ")
+	s = matchDropPackaging(s)
 	s = matchFeatRe.ReplaceAllString(s, " ")
 	s = strings.ReplaceAll(s, "&", " and ")
 	s = strings.ReplaceAll(s, "'", "")

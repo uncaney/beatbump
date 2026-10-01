@@ -118,6 +118,15 @@ func TestDupNormKeys(t *testing.T) {
 		{"2U (feat. Justin Bieber) (Afrojack Remix)", "2U (feat. Justin Bieber) (R3hab Remix)"},
 		{"Alive 1997", "Alive 2007"},
 		{"Unplugged", "Unplugged (Live)"},
+		// L12-4: editions with other content are other albums / tracks.
+		{"Album", "Album (Drumless Edition)"},
+		{"Album", "Album (Live Edition)"},
+		{"Album", "Album (Acoustic Edition)"},
+		{"Album", "Album (Instrumental)"},
+		{"Album", "Album (Remix Edition)"},
+		{"Album", "Album (Demo Edition)"},
+		{"Song", "Song (Radio Edit)"},
+		{"Song (Radio Edit)", "Song (Extended Edit)"},
 	}
 	for _, p := range diff {
 		if dupNorm(p[0]) == dupNorm(p[1]) {
@@ -194,6 +203,70 @@ func TestLocalDuplicatesGroupsAndSuggestion(t *testing.T) {
 	p, _ := getDuplicates(t, "?limit=1&offset=2")
 	if p.Total != 3 || len(p.Groups) != 1 {
 		t.Errorf("paging: %+v", p)
+	}
+}
+
+// L12-4: a derived edition never joins the plain album's group, and at equal
+// track count and quality the copy without a packaging qualifier is the one
+// suggested (not the newest reissue).
+func TestDuplicatesContentEditionsAndUnqualifiedSuggested(t *testing.T) {
+	docs := []map[string]interface{}{
+		dupDoc("lb-000000000011", "Band", "Album (Deluxe Edition)", 10, "2022", "soulseek", 9),
+		dupDoc("lb-000000000012", "Band", "Album", 10, "2015", "lidarr", 8),
+		dupDoc("lb-000000000013", "Band", "Album (Drumless Edition)", 10, "2023", "soulseek", 7),
+		dupDoc("lb-000000000014", "Band", "Album (Live Edition)", 10, "2024", "soulseek", 6),
+		dupDoc("lb-000000000015", "Band", "Album (Drumless Edition) [Remastered]", 10, "2024", "lidarr", 5),
+	}
+	groups := groupDuplicateAlbums(docs, nil)
+	if len(groups) != 2 {
+		t.Fatalf("want 2 groups (plain + drumless), got %+v", groups)
+	}
+	ids := func(g dupGroup) []string {
+		out := []string{}
+		for _, a := range g.Albums {
+			out = append(out, a.ID)
+		}
+		return out
+	}
+	var plain, drumless dupGroup
+	for _, g := range groups {
+		switch len(g.Albums) {
+		case 2:
+			if g.Albums[0].ID == "lb-000000000012" || g.Albums[1].ID == "lb-000000000012" {
+				plain = g
+			} else {
+				drumless = g
+			}
+		}
+	}
+	if plain.Suggested != "lb-000000000012" {
+		t.Errorf("plain group: the unqualified copy should be suggested: %v", ids(plain))
+	}
+	if drumless.Suggested != "lb-000000000013" {
+		t.Errorf("drumless group: the copy without [Remastered] should be suggested: %v", ids(drumless))
+	}
+	for _, g := range groups {
+		for _, a := range g.Albums {
+			if a.ID == "lb-000000000014" {
+				t.Errorf("the live edition has no duplicate: %v", ids(g))
+			}
+		}
+	}
+	// Quality still beats the bare title: the lossless reissue is kept.
+	q := groupDuplicateAlbums(docs[:2], map[string]int{"lb-000000000011": 900, "lb-000000000012": 300})
+	if len(q) != 1 || q[0].Suggested != "lb-000000000011" {
+		t.Errorf("lossless deluxe should win on quality: %+v", q)
+	}
+	// Track side: "Song (Radio Edit)" and "Song (Instrumental)" are not "Song".
+	hit := func(title string) map[string]interface{} {
+		return map[string]interface{}{"title": title, "artist": "Band"}
+	}
+	if dupTrackKey(hit("Song")) == dupTrackKey(hit("Song (Instrumental)")) ||
+		dupTrackKey(hit("Song")) == dupTrackKey(hit("Song (Radio Edit)")) {
+		t.Error("track keys must keep content qualifiers apart")
+	}
+	if dupTrackKey(hit("Song")) != dupTrackKey(hit("Song (Remastered)")) {
+		t.Error("a remastered track is the same song")
 	}
 }
 

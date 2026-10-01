@@ -27,6 +27,20 @@ func TestMatchNorm(t *testing.T) {
 		"Red (Taylor's Version)":                            "red taylors version",
 		"Simon & Garfunkel":                                 "simon and garfunkel",
 		"  Homework!!  ":                                    "homework",
+		// L12-4: content qualifiers survive even next to a packaging word.
+		"Album (Drumless Edition)":       "album drumless edition",
+		"Album (Live Edition)":           "album live edition",
+		"Album (Acoustic Edition)":       "album acoustic edition",
+		"Album (Instrumental)":           "album instrumental",
+		"Album (Remixes Deluxe Edition)": "album remixes deluxe edition",
+		"Album (Demo Edition)":           "album demo edition",
+		"Album - Live Edition":           "album live edition",
+		"Album (Edition)":                "album",
+		"Album (Explicit)":               "album",
+		"Album (Clean)":                  "album",
+		"Album (Expanded Edition)":       "album",
+		"Album (Bonus Track Version)":    "album",
+		"Song (Radio Edit)":              "song radio edit",
 	} {
 		if got := matchNorm(in); got != want {
 			t.Errorf("matchNorm(%q) = %q, want %q", in, got, want)

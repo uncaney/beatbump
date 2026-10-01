@@ -146,14 +146,19 @@ func dupYear(a dupAlbum) int {
 }
 
 // dupBetter reports whether copy a should be kept over copy b: more tracks,
-// then higher quality (lossless first), then newest (year, then date added),
-// then the smaller id so the answer is stable.
+// then higher quality (lossless first), then the unqualified title ("Album"
+// over "Album (Deluxe Edition)", L12-4: never the reissue just because it is
+// newer), then newest (year, then date added), then the smaller id so the
+// answer is stable.
 func dupBetter(a, b dupAlbum) bool {
 	if a.TrackCount != b.TrackCount {
 		return a.TrackCount > b.TrackCount
 	}
 	if a.Quality != b.Quality {
 		return a.Quality > b.Quality
+	}
+	if qa, qb := matchHasPackaging(a.Title), matchHasPackaging(b.Title); qa != qb {
+		return !qa
 	}
 	if ya, yb := dupYear(a), dupYear(b); ya != yb {
 		return ya > yb
@@ -335,7 +340,7 @@ func resetDuplicateMemo() {
 // Answer: {"groups": [{key, albums: [{id, title, artist, year, trackCount,
 // source, quality?, bitrateHint?}], suggested}], "total": N, "offset", "limit"}.
 // albums[0] is always the suggested copy (more tracks, then lossless / higher
-// qualityScore, then newest). An empty library or no duplicate answers
+// qualityScore, then the title without a packaging qualifier, then newest). An empty library or no duplicate answers
 // {"groups": [], "total": 0} (never null). Read only: nothing is deleted.
 //
 //	?key=dk-…            one group: {"group": {...}, "groups": [{...}],
