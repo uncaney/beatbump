@@ -5,6 +5,7 @@
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
 	import Header from "$lib/components/Layouts/Header.svelte";
 	import Loading from "$lib/components/Loading/Loading.svelte";
+	import ErrorState from "$lib/components/EmptyState/ErrorState.svelte";
 	import PersonalRows from "./_PersonalRows.svelte";
 	import FirstRun from "./_FirstRun.svelte";
 	import { homeChipContext } from "$lib/contexts";
@@ -31,6 +32,8 @@
 	let continuations: Record<string, any> = {};
 	let visitorData: string | undefined;
 	let homeReady = false;
+	// L10-9: home.json failed twice (loader retry): say so, offer a retry.
+	let homeFailed = false;
 	let homeToken = 0;
 	$: applyHome(data.streamed?.home);
 	function applyHome(p: Promise<any> | undefined) {
@@ -44,6 +47,7 @@
 				headerThumbnail = Array.isArray(d?.headerThumbnail) ? d.headerThumbnail : [];
 				continuations = d?.continuations && typeof d.continuations === "object" ? d.continuations : {};
 				visitorData = d?.visitorData;
+				homeFailed = false;
 				loading = false;
 				hasData = false;
 				homeReady = true;
@@ -51,6 +55,7 @@
 			(err) => {
 				if (token !== homeToken) return;
 				console.error("home.json failed", err);
+				homeFailed = true;
 				homeReady = true;
 			},
 		);
@@ -119,6 +124,11 @@
 
 	let loading = false;
 	let hasData = false;
+	function retryHome() {
+		homeFailed = false;
+		homeReady = false;
+		void invalidate("home:load");
+	}
 	homeChipContext.set({ params: data.params ?? "" });
 </script>
 
@@ -191,6 +201,19 @@
 					<div class="yt-skeleton__card" />
 				{/each}
 			</div>
+		</div>
+	{/if}
+	{#if homeFailed}
+		<div
+			class="resp-content-width"
+			data-testid="home-error"
+		>
+			<ErrorState
+				title="Impossible de charger les suggestions YouTube"
+				text="Tes rangées personnelles restent là ; réessaie dans un instant."
+				retryTestid="retry-home"
+				on:retry={retryHome}
+			/>
 		</div>
 	{/if}
 	{#each carousels as carousel (carousel.items)}

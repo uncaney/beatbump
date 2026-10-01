@@ -7,6 +7,7 @@
 	// history and are invited to say their name; offline, the history is
 	// unreachable (MeOffline, like /library/recent).
 	import EmptyState from "$components/EmptyState/EmptyState.svelte";
+	import ErrorState from "$components/EmptyState/ErrorState.svelte";
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
@@ -22,6 +23,8 @@
 	let loading = true;
 	let offline = false;
 	let anonymous = false;
+	// L10-9: the request failed (not offline): error state + retry, never "empty".
+	let failed = false;
 	let playing = false;
 
 	async function load() {
@@ -31,12 +34,14 @@
 		try {
 			anonymous = await isAnonymousProfile();
 			const res = await APIClient.fetch(`/api/v1/me/stats/rediscover?limit=${LIMIT}`);
+			if (!res.ok) throw new Error(`rediscover ${res.status}`);
 			r = await res.json();
 		} catch (e) {
 			err = e;
 			console.error("rediscover load failed", e);
 		}
 		offline = meLoadOffline([r], err);
+		failed = !offline && err !== undefined;
 		items = offline || err ? [] : capItems(r?.items, LIMIT).map(sanitizeCard);
 		loading = false;
 	}
@@ -86,6 +91,12 @@
 		<p class="state">Chargement…</p>
 	{:else if offline}
 		<MeOffline text="Ton historique reviendra avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
+	{:else if failed}
+		<ErrorState
+			title="Impossible de charger Redécouvrir"
+			retryTestid="retry-list"
+			on:retry={() => load()}
+		/>
 	{:else if items.length === 0}
 		<!-- UX3: one action out of the empty list (anonymous or new profile). -->
 		<div data-testid="rediscover-empty">
@@ -96,8 +107,8 @@
 				text={anonymous
 					? "Dis-moi ton prénom dans Compte pour retrouver tes écoutes : cette liste suit ton historique."
 					: "Il faut des morceaux écoutés au moins 3 fois il y a plus de deux mois, et pas depuis un mois."}
-				href="/library/albums"
-				cta="Explorer la bibliothèque"
+				href={anonymous ? "/library/account" : "/library/albums"}
+				cta={anonymous ? "Dire mon prénom" : "Explorer la bibliothèque"}
 			/>
 		</div>
 	{:else}

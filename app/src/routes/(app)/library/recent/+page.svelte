@@ -1,5 +1,6 @@
 <script lang="ts">
 	import EmptyState from "$components/EmptyState/EmptyState.svelte";
+	import ErrorState from "$components/EmptyState/ErrorState.svelte";
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
@@ -27,6 +28,8 @@
 	let loading = true;
 	// H2: the play history lives in the profile, unreachable offline.
 	let offline = false;
+	// L10-9: the request failed (not offline): error state + retry, never "empty".
+	let failed = false;
 
 	async function load() {
 		loading = true;
@@ -36,12 +39,19 @@
 		try {
 			// I18: the last 200 plays, one row per play (not one per title at
 			// its last play): each day lists and replays all of its plays.
-			[r, t] = await Promise.all([APIClient.fetch(RECENT_EVENTS_URL).then((x) => x.json()), getTop(60)]);
+			[r, t] = await Promise.all([
+				APIClient.fetch(RECENT_EVENTS_URL).then((x) => {
+					if (!x.ok) throw new Error(`recent ${x.status}`);
+					return x.json();
+				}),
+				getTop(60),
+			]);
 		} catch (e) {
 			err = e;
 			console.error("recent load failed", e);
 		}
 		offline = meLoadOffline([r, t], err);
+		failed = !offline && err !== undefined;
 		if (offline) {
 			recent = [];
 			top = [];
@@ -99,6 +109,12 @@
 			<p class="state">Chargement…</p>
 		{:else if offline}
 			<MeOffline text="Ton historique reviendra avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
+		{:else if failed}
+			<ErrorState
+				title="Impossible de charger l'historique"
+				retryTestid="retry-list"
+				on:retry={() => load()}
+			/>
 		{:else if recent.length === 0}
 			<!-- UX3: an empty history (anonymous or new profile) gets one way out. -->
 			<EmptyState
