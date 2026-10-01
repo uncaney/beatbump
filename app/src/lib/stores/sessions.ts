@@ -441,6 +441,9 @@ export class GroupSession
 							list.mix[list.position]?.playlistId,
 							undefined,
 							true,
+							// The host's own play already acquired it: no second acquisition
+							// from every guest joining the session (F12).
+							{ prefetch: true },
 						);
 					});
 			}

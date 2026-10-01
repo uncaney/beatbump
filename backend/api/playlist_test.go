@@ -2,10 +2,44 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 )
+
+// F3: playlist ids without the VL browse prefix (shared links, next.json
+// playlistId, OLAK album ids) made the upstream answer 400 -> 500 to the client.
+func TestNormalizePlaylistBrowseID(t *testing.T) {
+	cases := map[string]string{
+		"":                                     "",
+		"  ":                                   "",
+		"VLPLciALUPf8sIJlvH350O8PWh4UbSbOffSJ": "VLPLciALUPf8sIJlvH350O8PWh4UbSbOffSJ",
+		"PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf":   "VLPLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+		"RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs": "VLRDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs",
+		"OLAK5uy_lJ8xWqfWgT8ZtBCqWdTzgYw1Bqy2Z3Zz0":   "VLOLAK5uy_lJ8xWqfWgT8ZtBCqWdTzgYw1Bqy2Z3Zz0",
+		"VLOLAK5uy_lJ8xWqfWgT8ZtBCqWdTzgYw1Bqy2Z3Zz0": "VLOLAK5uy_lJ8xWqfWgT8ZtBCqWdTzgYw1Bqy2Z3Zz0",
+		"MPREb_abc":         "MPREb_abc",
+		"RDAMVM9bZkp7q19f0": "RDAMVM9bZkp7q19f0",
+	}
+	for in, want := range cases {
+		assert.Equal(t, want, normalizePlaylistBrowseID(in), "input %q", in)
+	}
+}
+
+func TestPlaylistEndpoint_MissingList(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/playlist.json", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	assert.NoError(t, PlaylistEndpointHandler(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	var body map[string]string
+	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, "bad_request", body["error"])
+}
 
 func TestGetPlaylist(t *testing.T) {
 	// Playlist ID provided by the user

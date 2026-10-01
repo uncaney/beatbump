@@ -4,6 +4,7 @@ import (
 	"beatbump-server/backend/api"
 	"beatbump-server/backend/api/downloader"
 	"beatbump-server/backend/db"
+	"net/http"
 	"strings"
 	"time"
 
@@ -15,6 +16,21 @@ func main() {
 	db.InitDB()
 	downloader.StartWorker()
 
+	e := newServer()
+	e.Logger.Fatal(e.Start(":8080"))
+}
+
+// apiNotFound answers unknown /api/* paths with a JSON 404. Without it the SPA
+// static handler (HTML5 fallback) served the 200 HTML shell for them and the
+// service worker cached that shell as a valid API response (F15).
+func apiNotFound(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
+}
+
+// newServer builds the Echo router with every middleware and route (no
+// listeners, no DB side effects) so tests can exercise the routing table.
+func newServer() *echo.Echo {
 	e := echo.New()
 
 	e.Use(middleware.CORS())
@@ -47,7 +63,11 @@ func main() {
 		Root: "./build",
 		// Audio reverse-proxy paths must bypass the SPA static handler: with IgnoreBase
 		// the exact routes /localf, /vp, /cover collapse to the build root and get index.html.
-		Skipper:    func(c echo.Context) bool { return api.IsAudioProxyPath(c.Request().URL.Path) },
+		// /api/ too: an unknown API path must reach the /api/* JSON 404, not the shell.
+		Skipper: func(c echo.Context) bool {
+			p := c.Request().URL.Path
+			return api.IsAudioProxyPath(p) || strings.HasPrefix(p, "/api/")
+		},
 		Browse:     true,
 		IgnoreBase: true,
 		HTML5:      true,
@@ -122,5 +142,8 @@ func main() {
 	e.GET("/api/v1/settings", api.GetSettingsHandler)
 	e.POST("/api/v1/settings", api.UpdateSettingsHandler)
 
-	e.Logger.Fatal(e.Start(":8080"))
+	// Catch-all for unknown API paths (Echo matches the static routes above first).
+	e.Any("/api/*", apiNotFound)
+
+	return e
 }

@@ -7,7 +7,9 @@
 // Consumed event (emitted by the session list / prefetcher):
 //   window.dispatchEvent(new CustomEvent("ytm:prefetched", { detail: { item, url } }))
 //   -> cacheTrackOffline(item, url)
-import { APIClient } from "$lib/api";
+import { APIClient, PREFETCH_INIT } from "$lib/api";
+import { settings } from "$lib/stores/settings";
+import { get } from "svelte/store";
 
 const KEY = "ytm-offline-tracks";
 const ACK_TIMEOUT_MS = 120_000; // a full track fetch on a slow link can take a while
@@ -18,6 +20,8 @@ export type OfflineTrack = Record<string, any> & {
 	_at: number;
 	_cached?: boolean;
 	_bytes?: number;
+	/** Stable (/localf, /aud) entry the SW no longer holds: re-downloadable via recacheEvicted(). */
+	_evicted?: boolean;
 };
 export type OfflineResult = { ok: boolean; reason?: string; fellBack?: boolean; bytes?: number; cached?: boolean };
 
@@ -48,7 +52,7 @@ function patch(videoId: string, fields: Partial<OfflineTrack>) {
 // album, a couple of thumbnails, length, track number) plus our own fields.
 // Full Beatbump items (subtitle runs, loggingContext, …) weigh 2-3 KB each and
 // blow the localStorage cap around 2 000 tracks.
-const KEEP_KEYS = ["title", "videoId", "artistInfo", "album", "length", "index", "playlistId", "_offlineUrl", "_cached", "_bytes", "_at"] as const;
+const KEEP_KEYS = ["title", "videoId", "artistInfo", "album", "length", "index", "playlistId", "_offlineUrl", "_cached", "_bytes", "_at", "_evicted"] as const;
 export function slimTrack(item: any): OfflineTrack {
 	const out: Record<string, any> = {};
 	for (const k of KEEP_KEYS) if (item && item[k] !== undefined) out[k] = item[k];
@@ -91,6 +95,18 @@ export function isStableAudioUrl(url: string | undefined): boolean {
 	return !!url && /\/(localf|aud)\b/.test(url);
 }
 
+/**
+ * settings.offline.autoCache: default on, only an explicit `false` disables
+ * automatic offline caching (played tracks in player.ts, prefetched +1/+2 here).
+ */
+export function autoCacheEnabled(): boolean {
+	try {
+		return get(settings)?.offline?.autoCache !== false;
+	} catch {
+		return true;
+	}
+}
+
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 	return new Promise((resolve) => {
 		const t = setTimeout(() => resolve(fallback), ms);
@@ -109,8 +125,10 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 
 async function resolveAudioUrl(lid: string): Promise<string> {
 	try {
+		// Resolution only (save for offline / download to device), not a play:
+		// X-Ytm-Prefetch keeps the backend from acquiring album + lookahead (F12).
 		const p = await withTimeout(
-			APIClient.fetch(`/api/v1/player.json?videoId=${lid}`).then((r) => r.json()),
+			APIClient.fetch(`/api/v1/player.json?videoId=${lid}`, PREFETCH_INIT).then((r) => r.json()),
 			15_000,
 			null as any,
 		);
@@ -294,13 +312,20 @@ export async function reconcileOfflineList(): Promise<OfflineTrack[] | null> {
 		const hit = byId.get(t.videoId) || (t._offlineUrl ? byUrl.get(ackKey(t._offlineUrl)) : undefined);
 		if (hit) {
 			t._cached = true;
+			if (t._evicted) delete t._evicted;
 			if (hit.url) t._offlineUrl = hit.url;
 			if (hit.bytes > 0) t._bytes = hit.bytes;
 			if (!t._at && hit.at) t._at = hit.at;
 		} else {
 			t._cached = false;
 			const recent = typeof t._at === "number" && now - t._at < RECONCILE_GRACE_MS;
-			if (!isStableAudioUrl(t._offlineUrl) && !recent) continue;
+			const stable = isStableAudioUrl(t._offlineUrl);
+			if (!stable && !recent) continue;
+			// Stable URL but gone from the cache and not in flight: the SW evicted
+			// it (quota). Keep the entry, flagged, so the Offline page can tell
+			// "to re-download" from "caching in progress" (F5); recacheEvicted()
+			// re-runs the download for them.
+			if (stable && !recent) t._evicted = true;
 		}
 		out.push(t);
 	}
@@ -358,6 +383,7 @@ export function cacheTrackOffline(item: any, url: string): Promise<OfflineResult
 				_at: Date.now(),
 				_cached: prev && prev._offlineUrl === url ? prev._cached : false,
 				_bytes: prev && prev._offlineUrl === url ? prev._bytes : undefined,
+				_evicted: undefined, // a (re)download is in flight again
 			});
 			list.unshift(entry);
 			write(list);
@@ -391,11 +417,29 @@ export function installPrefetchHook() {
 	if (prefetchHooked || typeof window === "undefined" || typeof document === "undefined") return;
 	prefetchHooked = true;
 	window.addEventListener("ytm:prefetched", (ev: Event) => {
+		// Auto-cache OFF: the prefetched URL still serves next(), but nothing is
+		// stored or listed (F7). Explicit saves go through downloadForOffline.
+		if (!autoCacheEnabled()) return;
 		const d = (ev as CustomEvent).detail || {};
 		if (d && d.item && typeof d.url === "string") void cacheTrackOffline(d.item, d.url);
 	});
 }
 installPrefetchHook();
+
+/**
+ * Re-download every entry flagged `_evicted` by reconcileOfflineList (stable
+ * /localf or /aud URL the service worker no longer holds). Sequential so a long
+ * list does not flood the SW; never throws. Returns how many were attempted / OK.
+ */
+export async function recacheEvicted(): Promise<{ total: number; ok: number }> {
+	const targets = read().filter((t) => t._evicted === true && isStableAudioUrl(t._offlineUrl));
+	let ok = 0;
+	for (const t of targets) {
+		const r = await cacheTrackOffline(t, t._offlineUrl);
+		if (r.ok) ok++;
+	}
+	return { total: targets.length, ok };
+}
 
 /**
  * Explicit "save for offline" (alias of cacheTrackOffline with URL resolution).
