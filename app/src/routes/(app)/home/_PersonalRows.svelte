@@ -62,6 +62,20 @@
 		remote = await fetchRemoteResume();
 	}
 
+	// Audit v7 TOP 10 (finishing lot): a restored queue loses the year run of a
+	// card subtitle but keeps the trailing " • " separator, so the resume cards
+	// read "Daft Punk • One More Time •". sanitizeCard keeps it (its trim is
+	// non-empty), so drop any trailing separator-only run here, always leaving at
+	// least one run. Items are not mutated.
+	function stripTrailingSeparator<T extends { subtitle?: any[] }>(item: T): T {
+		if (!Array.isArray(item?.subtitle)) return item;
+		const sub = item.subtitle.slice();
+		while (sub.length > 1 && typeof sub[sub.length - 1]?.text === "string" && /^[\s•·|]+$/.test(sub[sub.length - 1].text)) {
+			sub.pop();
+		}
+		return sub.length === item.subtitle.length ? item : { ...item, subtitle: sub };
+	}
+
 	async function loadResume() {
 		let recent: any[] = [];
 		try {
@@ -76,7 +90,7 @@
 		} catch {
 			lastTrack = null;
 		}
-		resume = buildResumeRow(lastTrack, recent, 10).map(sanitizeCard);
+		resume = buildResumeRow(lastTrack, recent, 10).map(sanitizeCard).map(stripTrailingSeparator);
 	}
 
 	async function loadForYou() {
@@ -123,11 +137,30 @@
 			<div class="resume-queue">
 				<button
 					type="button"
+					class="btn-reset resume-remote"
 					data-testid="resume-remote"
 					disabled={restoringRemote}
 					on:click={resumeRemote}
 				>
-					Reprendre depuis {remote.deviceName} : {remoteTrack.title ?? "morceau"} à {clockLabel(remote.state.currentTime)}
+					<svg
+						class="rr-device"
+						viewBox="0 0 24 24"
+						width="18"
+						height="18"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<rect x="2" y="4" width="14" height="10" rx="1.5" />
+						<path d="M2 18h14" />
+						<rect x="17" y="9" width="5" height="11" rx="1" />
+					</svg>
+					<span class="rr-text"
+						>Reprendre depuis {remote.deviceName} : {remoteTrack.title ?? "morceau"} à {clockLabel(remote.state.currentTime)}</span
+					>
 				</button>
 			</div>
 		{/if}
@@ -135,6 +168,7 @@
 			<div class="resume-queue">
 				<button
 					type="button"
+					class="btn-reset"
 					data-testid="resume-queue"
 					disabled={resuming}
 					on:click={resumeQueue}
@@ -193,15 +227,55 @@
 		display: contents;
 	}
 	.resume-queue {
-		padding: 0.5em 0 0;
+		/* Audit v7 TOP 6: the pill sat at x=0 on mobile while the row cards and
+		   headers start at a 16px gutter. Match it (1rem) so the button reads as
+		   part of the "Reprendre" row, not floating against the edge. */
+		padding: 0.5em 1rem 0;
 	}
+	/* btn-reset: the pill keeps its own white colour (it was black-on-dark under
+	   the global button rule), plain case, and a 44px touch target on phones. */
 	.resume-queue button {
 		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		display: inline-flex;
+		align-items: center;
+		min-height: max(2.75rem, 44px);
 		padding: 0.55em 1.1em;
 		border-radius: 999px;
+		border: 1px solid #fff;
+		background: #fff;
+		color: #0f0f0f;
+		font-weight: 600;
+		text-transform: none;
 		cursor: pointer;
+	}
+	.resume-queue button:disabled {
+		opacity: 0.6;
+		cursor: progress;
+	}
+	/* Audit v7 TOP 9: the remote-resume card is "another device", not the local
+	   queue. Set it apart from the white local pill: a secondary translucent
+	   card, left-aligned, led by a device glyph so it reads as a cross-device
+	   hand-off. Keeps [data-testid=resume-remote] and the full sentence text. */
+	.resume-queue button.resume-remote {
+		justify-content: flex-start;
+		gap: 0.5rem;
+		background: rgba(255, 255, 255, 0.08);
+		border: 1px solid rgba(255, 255, 255, 0.28);
+		border-radius: 0.9rem;
+		color: #fff;
+		font-weight: 500;
+	}
+	.resume-remote .rr-device {
+		flex: 0 0 auto;
+		opacity: 0.85;
+	}
+	.resume-remote .rr-text {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		min-width: 0;
 	}
 </style>

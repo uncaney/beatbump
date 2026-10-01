@@ -194,6 +194,7 @@
 
 	<div
 		class="scroll"
+		class:item-width={!!itemWidth}
 		id="scrollItem"
 		on:scroll={onScroll}
 		bind:this={carousel}
@@ -235,7 +236,24 @@
 	</div>
 </div>
 
-<style
-	lang="scss"
-	src="./index.scss"
-></style>
+<style lang="scss">
+	@import "./index.scss";
+
+	// Audit v7 TOP 8: when a host passes `itemWidth` (the ~560px fullscreen
+	// Related panel), the card must really take that width. CarouselItem's
+	// `article { flex: 0 1 }` collapses each card to its min-content (~139px)
+	// even though `--column-width` is set, so the 160px request only reached the
+	// thumbnail. Pin the article flex-basis + width to --column-width (this
+	// selector outranks CarouselItem's `article`), and reserve a right gutter so
+	// the last card clears the scroll arrow. Carousels without itemWidth are
+	// untouched (the class is absent).
+	.scroll.item-width {
+		scroll-padding-inline-end: 40px;
+		padding-inline-end: 2.5rem;
+
+		:global(article) {
+			flex: 0 0 var(--column-width, 160px);
+			width: var(--column-width, 160px);
+		}
+	}
+</style>
