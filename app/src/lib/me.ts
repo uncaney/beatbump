@@ -8,13 +8,66 @@ function itemRef(item: any): string {
 }
 
 // ---- account (named profiles) ----
-export async function whoami(): Promise<{ id: string; name: string }> {
-	return (await APIClient.fetch(`/api/v1/me/whoami`)).json();
+// K12 (audit perf v2): whoami is memoised 5 min per tab in sessionStorage
+// (37 GETs per anonymous home session before: every nowPlayingSync focus,
+// every home); login / logout refresh it. An anonymous profile is
+// {id, name: ""}; `isAnonymousProfile` lets callers skip the profile-scoped
+// GETs that can only answer 404 for it (me/nowplaying).
+const WHOAMI_KEY = "ytm-whoami";
+const WHOAMI_TTL_MS = 5 * 60 * 1000;
+type Who = { id: string; name: string };
+function readWhoamiMemo(): Who | null {
+	try {
+		const raw = sessionStorage.getItem(WHOAMI_KEY);
+		if (!raw) return null;
+		const j = JSON.parse(raw);
+		if (!j || typeof j !== "object" || typeof j.at !== "number" || Date.now() - j.at > WHOAMI_TTL_MS) return null;
+		if (typeof j.id !== "string") return null;
+		return { id: j.id, name: typeof j.name === "string" ? j.name : "" };
+	} catch {
+		return null;
+	}
+}
+function writeWhoamiMemo(w: Who | null): void {
+	try {
+		if (!w) sessionStorage.removeItem(WHOAMI_KEY);
+		else sessionStorage.setItem(WHOAMI_KEY, JSON.stringify({ id: w.id, name: w.name, at: Date.now() }));
+	} catch {
+		/* private mode / no sessionStorage: no memo */
+	}
+}
+/** Drop the memoised whoami (next call asks the server). */
+export function forgetWhoami(): void {
+	writeWhoamiMemo(null);
+}
+export async function whoami(opts: { fresh?: boolean } = {}): Promise<Who> {
+	if (!opts.fresh) {
+		const memo = readWhoamiMemo();
+		if (memo) return memo;
+	}
+	const w = await (await APIClient.fetch(`/api/v1/me/whoami`)).json();
+	if (w && typeof w === "object" && typeof w.id === "string") {
+		writeWhoamiMemo({ id: w.id, name: typeof w.name === "string" ? w.name : "" });
+	}
+	return w;
+}
+/** true when the profile is known to be anonymous (no name); false when named or when whoami fails. */
+export async function isAnonymousProfile(): Promise<boolean> {
+	try {
+		const w = await whoami();
+		return !(w && typeof w.name === "string" && w.name.trim());
+	} catch {
+		return false;
+	}
 }
 export async function login(name: string): Promise<{ id: string; name: string }> {
-	return (await APIClient.post(`/api/v1/me/login`, { name })).json();
+	forgetWhoami();
+	const r = await (await APIClient.post(`/api/v1/me/login`, { name })).json();
+	if (r && typeof r === "object" && typeof r.id === "string") writeWhoamiMemo({ id: r.id, name: typeof r.name === "string" ? r.name : "" });
+	return r;
 }
 export async function logout() {
+	forgetWhoami();
 	return APIClient.post(`/api/v1/me/logout`, {});
 }
 

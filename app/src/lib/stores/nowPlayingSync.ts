@@ -348,6 +348,9 @@ export async function fetchRemoteResume(): Promise<{
 	if (typeof navigator !== "undefined" && navigator.onLine === false) return null;
 	try {
 		const me = await import("$lib/me");
+		// K12: an anonymous profile has no server state (me/nowplaying answers
+		// 404): skip the GET (whoami is memoised 5 min, see $lib/me).
+		if (await me.isAnonymousProfile()) return null;
 		const row = await me.getNowPlaying();
 		let consumed: string | null = null;
 		try {

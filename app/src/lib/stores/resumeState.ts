@@ -12,6 +12,13 @@
 import { normalizeContext, type PlaybackContext } from "./list/playbackContext";
 
 export const RESUME_KEY = "resumeState";
+/**
+ * K8 (audit perf v2): the periodic save used to serialise the whole queue
+ * (up to 500 rows, ~100 KB) every 5 s of playback. The queue is now written
+ * under RESUME_KEY only when its signature changes; the playback position
+ * goes to this small key (RESUME_POS_KEY) every 5 s and is merged back at read.
+ */
+export const RESUME_POS_KEY = "resumePos";
 export const RESUME_VERSION = 1;
 export const RESUME_MAX_ITEMS = 500;
 export const RESUME_SAVE_INTERVAL_MS = 5000;
@@ -187,12 +194,81 @@ export function resumeSeekTime(state: Pick<ResumeState, "currentTime" | "duratio
 	return t;
 }
 
+/**
+ * K8: the playback position saved apart from the queue. `base` is the
+ * `savedAt` of the full state it belongs to and `videoId` the row under the
+ * cursor: a position only applies to the queue it was taken on (a remote
+ * restore or a newer full write has another `savedAt`, so a stale position
+ * is ignored at read).
+ */
+export interface ResumePos {
+	v: 1;
+	base: number;
+	videoId: string;
+	currentTime: number;
+	duration: number;
+	savedAt: number;
+}
+
+export function parseResumePos(raw: string | null | undefined): ResumePos | null {
+	if (!raw) return null;
+	let j: any;
+	try {
+		j = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	if (!j || typeof j !== "object" || j.v !== RESUME_VERSION || typeof j.videoId !== "string" || !j.videoId) return null;
+	const base = finite(j.base);
+	if (!(base > 0)) return null;
+	return {
+		v: RESUME_VERSION,
+		base,
+		videoId: j.videoId,
+		currentTime: Math.max(0, finite(j.currentTime)),
+		duration: Math.max(0, finite(j.duration)),
+		savedAt: finite(j.savedAt),
+	};
+}
+
+/** K8: `state` with the position of `pos` applied when it belongs to it. */
+export function mergeResumePos(state: ResumeState | null, pos: ResumePos | null): ResumeState | null {
+	if (!state || !pos) return state;
+	if (pos.base !== state.savedAt || pos.savedAt < state.savedAt) return state;
+	if (state.mix[state.position]?.videoId !== pos.videoId) return state;
+	return { ...state, currentTime: pos.currentTime, duration: pos.duration || state.duration, savedAt: pos.savedAt };
+}
+
+/** The position record for `state` at `currentTime` (null for an empty queue). */
+export function buildResumePos(state: ResumeState, currentTime: number, duration: number, now = Date.now()): ResumePos | null {
+	const videoId = state.mix[state.position]?.videoId;
+	if (typeof videoId !== "string" || !videoId) return null;
+	return {
+		v: RESUME_VERSION,
+		base: state.savedAt,
+		videoId,
+		currentTime: Math.max(0, finite(currentTime)),
+		duration: Math.max(0, finite(duration)),
+		savedAt: now,
+	};
+}
+
 export function readResumeState(
 	storage: Pick<StorageLike, "getItem"> | undefined,
 	now = Date.now(),
 ): ResumeState | null {
 	try {
-		return parseResumeState(storage?.getItem(RESUME_KEY), now);
+		const state = parseResumeState(storage?.getItem(RESUME_KEY), now);
+		if (!state) return null;
+		let pos: ResumePos | null = null;
+		try {
+			pos = parseResumePos(storage?.getItem(RESUME_POS_KEY));
+		} catch {
+			pos = null;
+		}
+		const merged = mergeResumePos(state, pos);
+		// I7 max age applies to the merged savedAt too (the position is newer).
+		return merged;
 	} catch {
 		return null;
 	}
@@ -208,10 +284,22 @@ export function writeResumeState(storage: StorageLike | undefined, state: Resume
 	}
 }
 
+/** K8: the small periodic write (position only). */
+export function writeResumePos(storage: StorageLike | undefined, pos: ResumePos | null): boolean {
+	if (!storage || !pos) return false;
+	try {
+		storage.setItem(RESUME_POS_KEY, JSON.stringify(pos));
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /** I7: drop the saved queue (and the legacy `lastTrack`) from this device. */
 export function clearResumeState(storage: StorageLike | undefined): void {
 	try {
 		storage?.removeItem?.(RESUME_KEY);
+		storage?.removeItem?.(RESUME_POS_KEY);
 		storage?.removeItem?.("lastTrack");
 	} catch {
 		/* best-effort */
@@ -252,6 +340,21 @@ export function shouldSaveResume(
 ): boolean {
 	if (!last || last.sig !== sig) return true;
 	return Math.abs(finite(t) - last.t) > minDelta;
+}
+
+/**
+ * K8: what a save writes. "queue" (the full state + position) when nothing
+ * was written yet or the signature changed; "pos" (the small position key)
+ * when only the time moved more than `minDelta`; "none" otherwise.
+ */
+export function resumeSavePlan(
+	last: { sig: string; t: number } | null,
+	sig: string,
+	t: number,
+	minDelta = RESUME_MIN_TIME_DELTA,
+): "queue" | "pos" | "none" {
+	if (!last || last.sig !== sig) return "queue";
+	return Math.abs(finite(t) - last.t) > minDelta ? "pos" : "none";
 }
 
 /**
@@ -432,6 +535,8 @@ export function startResumePersistence(enabled: () => boolean): () => void {
 	void loadRuntime().then(({ SessionListService, AudioPlayer }) => {
 		if (stopped) return;
 		let last: { sig: string; t: number } | null = null;
+		// K8: the full state last written (its savedAt anchors the position key).
+		let lastQueue: ResumeState | null = null;
 		let purged = false;
 		const save = (minDelta = 0.25) => {
 			try {
@@ -440,15 +545,29 @@ export function startResumePersistence(enabled: () => boolean): () => void {
 					if (!purged) clearResumeState(browserStorage());
 					purged = true;
 					last = null;
+					lastQueue = null;
 					return;
 				}
 				purged = false;
 				const list = SessionListService.value;
 				const t = AudioPlayer.currentTime;
 				const sig = resumeSignature(list);
-				if (!shouldSaveResume(last, sig, t, minDelta)) return;
+				const plan = resumeSavePlan(last, sig, t, minDelta);
+				if (plan === "none") return;
+				const storage = browserStorage();
+				if (plan === "pos" && lastQueue) {
+					// K8: only the position moved: a ~100-byte write, not the queue.
+					const pos = buildResumePos(lastQueue, t, AudioPlayer.duration);
+					if (pos && writeResumePos(storage, pos)) last = { sig, t: pos.currentTime };
+					return;
+				}
 				const state = buildResumeState(list, t, AudioPlayer.duration);
-				if (state && writeResumeState(browserStorage(), state)) last = { sig, t: state.currentTime };
+				if (state && writeResumeState(storage, state)) {
+					last = { sig, t: state.currentTime };
+					lastQueue = state;
+					// The position key belongs to the previous queue: refresh it.
+					writeResumePos(storage, buildResumePos(state, state.currentTime, state.duration, state.savedAt));
+				}
 			} catch {
 				/* best-effort */
 			}

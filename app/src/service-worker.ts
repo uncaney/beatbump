@@ -8,8 +8,9 @@
 //
 // Audio entries are keyed by URL in the Cache API (that is what the <audio>
 // element requests) but INDEXED BY videoId in the meta cache
-// ("ytm-offline-meta", key /__ytm_meta__/<videoId> -> {url, bytes, at,
-// lastAccess}). One videoId == one cached entry: re-caching under a new signed
+// ("ytm-offline-meta": one index document /__ytm_index__ -> {videoId: {url,
+// bytes, at, lastAccess, pinned, contentType}} read in one go (K9), plus one
+// backup entry per track /__ytm_meta__/<videoId>). One videoId == one cached entry: re-caching under a new signed
 // URL replaces the old entry, "already" is answered by videoId, and a request
 // for /aud/<id> that misses by URL is served from the videoId's entry.
 //
@@ -45,8 +46,97 @@ const META_CACHE = "ytm-offline-meta";
 const QUOTA_KEY = "/__ytm_audio_quota__";
 const META_PREFIX = "/__ytm_meta__/";
 const DEFAULT_QUOTA = 2 * 1024 * 1024 * 1024; // ~2 GiB
-const SHELL_ASSETS = [...build, ...files, "/"];
 const ACCESS_THROTTLE_MS = 60_000; // lastAccess is rewritten at most once a minute per track
+
+// K3 (audit perf v2): the install used to precache the WHOLE build (~150
+// immutable files, 2.8 MB, 256 requests in the first 8 s of a first visit, in
+// competition with the page). Now the install only takes the shell: "/", the
+// static files, the two entry scripts and the chunks the shell HTML, the root
+// layout (node 0), the root error page (node 1) and the home route pull in,
+// read from the client manifest (entry/app.*.js carries every node's preload
+// dependency list). The rest of `build` is filled after activation in batches
+// of PRECACHE_BATCH every PRECACHE_BATCH_DELAY_MS (kept alive by the API
+// fetches of the page) and on demand by the fetch handler, so a second,
+// offline load still boots from the cache.
+const IMMUTABLE = "/_app/immutable/";
+const PRECACHE_BATCH = 10;
+const PRECACHE_BATCH_DELAY_MS = 2000;
+const BUILD_SET = new Set<string>(build);
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Cache one shell asset unless it is already there; a failing asset must not
+// abort the precache (which would leave the PWA unable to boot offline).
+async function addIfMissing(c: Cache, path: string): Promise<void> {
+	try {
+		if (await c.match(path)) return;
+		await c.add(path);
+	} catch {
+		/* ignore */
+	}
+}
+
+async function cachedText(c: Cache, path: string): Promise<string> {
+	try {
+		await addIfMissing(c, path);
+		const r = await c.match(path);
+		return r ? await r.text() : "";
+	} catch {
+		return "";
+	}
+}
+
+// The build paths the shell needs on a cold, offline boot of "/" or "/home".
+async function shellBuildAssets(c: Cache): Promise<string[]> {
+	const out = new Set<string>();
+	const entries = build.filter((p) => p.startsWith(IMMUTABLE + "entry/"));
+	entries.forEach((p) => out.add(p));
+	const html = await cachedText(c, "/");
+	for (const m of html.matchAll(/\/_app\/immutable\/[^"'\s)]+/g)) out.add(m[0]);
+	const app = entries.find((p) => /\/entry\/app\.[^/]+\.js$/.test(p));
+	const manifest = app ? await cachedText(c, app) : "";
+	if (manifest) {
+		// node id -> preload dependencies: n(()=>import("../nodes/<id>.x.js"),["../nodes/…","../chunks/…",…])
+		const deps = new Map<number, string[]>();
+		for (const m of manifest.matchAll(/import\("\.\.\/nodes\/(\d+)\.[^"]+"\),\[([^\]]*)\]/g)) {
+			deps.set(
+				Number(m[1]),
+				[...m[2].matchAll(/"\.\.\/([^"]+)"/g)].map((d) => IMMUTABLE + d[1]),
+			);
+		}
+		// route dictionary: "/":[2], "/(app)/home":[10], …
+		const wanted = new Set<number>([0, 1]);
+		for (const m of manifest.matchAll(/"([^"]*)":\[([^\]]*)\]/g)) {
+			if (m[1] !== "/" && !/\/home$/.test(m[1])) continue;
+			for (const n of m[2].matchAll(/\d+/g)) wanted.add(Number(n[0]));
+		}
+		for (const id of wanted) for (const d of deps.get(id) || []) out.add(d);
+	}
+	return [...out].filter((p) => BUILD_SET.has(p));
+}
+
+// The deferred precache of everything else in `build`, once per SW lifetime
+// (restarted lazily by the next trigger if the SW was stopped mid-way).
+let restPrecache: Promise<void> | null = null;
+let restDone = false;
+function precacheRest(): Promise<void> {
+	if (restDone) return Promise.resolve();
+	if (!restPrecache) {
+		restPrecache = (async () => {
+			const c = await caches.open(SHELL);
+			const have = new Set((await c.keys()).map((k) => new URL(k.url).pathname));
+			const todo = build.filter((p) => !have.has(p));
+			for (let i = 0; i < todo.length; i += PRECACHE_BATCH) {
+				if (i) await sleep(PRECACHE_BATCH_DELAY_MS);
+				await Promise.all(todo.slice(i, i + PRECACHE_BATCH).map((p) => addIfMissing(c, p)));
+			}
+			restDone = true;
+		})().catch(() => {
+			restPrecache = null;
+		});
+	}
+	return restPrecache;
+}
 
 // Response headers we stamp on every cached audio entry (used by list-audio + LRU).
 const H_BYTES = "X-YTM-Bytes";
@@ -59,9 +149,10 @@ declare const self: ServiceWorkerGlobalScope;
 self.addEventListener("install", (event) => {
 	event.waitUntil(
 		caches.open(SHELL).then(async (c) => {
-			// Cache each shell asset independently so one failing asset can't abort
-			// the whole precache (which would leave the PWA unable to boot offline).
-			await Promise.all(SHELL_ASSETS.map((a) => c.add(a).catch(() => {})));
+			// Shell only (K3): "/", the static files and the build assets the
+			// shell / root layout / home route need; each cached independently.
+			const shell = await shellBuildAssets(c);
+			await Promise.all([...new Set<string>(["/", ...files, ...shell])].map((a) => addIfMissing(c, a)));
 			await self.skipWaiting();
 		}).catch(() => {}),
 	);
@@ -74,6 +165,9 @@ self.addEventListener("activate", (event) => {
 			await Promise.all(keys.filter((k) => k.startsWith("ytm-shell-") && k !== SHELL).map((k) => caches.delete(k)));
 			await purgeProfileScopedApiCache(); // G16: entries stored by an older SW
 			await self.clients.claim();
+			// K3: the rest of the build, in batches, without delaying activation
+			// (a pending activate waitUntil would hold every fetch of the page).
+			void precacheRest();
 		})(),
 	);
 });
@@ -92,6 +186,42 @@ async function purgeProfileScopedApiCache(): Promise<void> {
 		const c = await caches.open(API_CACHE);
 		const keys = await c.keys();
 		await Promise.all(keys.filter((k) => isProfileScopedApi(new URL(k.url))).map((k) => c.delete(k)));
+		await pruneApiCache(c);
+	} catch {
+		/* best effort */
+	}
+}
+
+// K15 (audit perf v2): the API cache was unbounded (every search.json, 605 KB
+// raw, went in). Answers above API_MAX_BYTES are not stored; the cache is
+// capped at API_MAX_ENTRIES, the oldest entries (Cache API keys are in
+// insertion order) pruned at activate and every API_PRUNE_EVERY puts.
+const API_MAX_BYTES = 300 * 1024;
+const API_MAX_ENTRIES = 200;
+const API_PRUNE_EVERY = 50;
+let apiPuts = 0;
+async function pruneApiCache(c: Cache): Promise<void> {
+	try {
+		const keys = await c.keys();
+		const extra = keys.length - API_MAX_ENTRIES;
+		if (extra <= 0) return;
+		await Promise.all(keys.slice(0, extra).map((k) => c.delete(k)));
+	} catch {
+		/* best effort */
+	}
+}
+async function putApiResponse(c: Cache, req: Request, res: Response): Promise<void> {
+	try {
+		const declared = Number(res.headers.get("Content-Length"));
+		if (declared > API_MAX_BYTES) return;
+		const body = await res.arrayBuffer();
+		if (body.byteLength > API_MAX_BYTES) return;
+		// The body is already decoded: drop the transfer headers of the network answer.
+		const headers = new Headers(res.headers);
+		headers.delete("Content-Encoding");
+		headers.delete("Content-Length");
+		await c.put(req, new Response(body, { status: res.status, statusText: res.statusText, headers }));
+		if (++apiPuts % API_PRUNE_EVERY === 0) await pruneApiCache(c);
 	} catch {
 		/* best effort */
 	}
@@ -107,45 +237,26 @@ const isAudio = (u: URL) =>
 // Meta index: videoId -> {url, bytes, at, lastAccess}
 // ---------------------------------------------------------------------------
 
-type Meta = { url: string; bytes: number; at: number; lastAccess: number; pinned?: boolean };
+type Meta = { url: string; bytes: number; at: number; lastAccess: number; pinned?: boolean; contentType?: string };
 
 function metaKey(videoId: string): string {
 	return META_PREFIX + encodeURIComponent(videoId);
 }
-async function getMeta(videoId: string): Promise<Meta | null> {
-	if (!videoId) return null;
-	try {
-		const m = await caches.open(META_CACHE);
-		const r = await m.match(metaKey(videoId));
-		if (!r) return null;
-		const v = await r.json();
-		return v && typeof v.url === "string" ? (v as Meta) : null;
-	} catch {
-		return null;
-	}
-}
-async function setMeta(videoId: string, meta: Meta): Promise<void> {
-	if (!videoId) return;
-	try {
-		const m = await caches.open(META_CACHE);
-		await m.put(metaKey(videoId), new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }));
-	} catch {
-		/* meta is best-effort: the audio entry itself still carries its headers */
-	}
-}
-async function deleteMeta(videoId: string): Promise<void> {
-	if (!videoId) return;
-	try {
-		const m = await caches.open(META_CACHE);
-		await m.delete(metaKey(videoId));
-	} catch {
-		/* ignore */
-	}
-}
-async function allMeta(): Promise<Map<string, Meta>> {
+
+// K9 (audit perf v2): one index document (INDEX_KEY -> {videoId: Meta}) is
+// the read path: loaded once per SW lifetime into memory, written through by
+// setMeta / deleteMeta (serialised, last write wins), read in one go by
+// allMeta / listEntries. The per-videoId /__ytm_meta__/<id> entries are kept
+// as the backup copy and are the migration source when the index is absent
+// (older SW): the first load enumerates them once and writes the index.
+const INDEX_KEY = "/__ytm_index__";
+let indexMem: Map<string, Meta> | null = null;
+let indexLoad: Promise<Map<string, Meta>> | null = null;
+let indexWrite: Promise<void> = Promise.resolve();
+
+async function enumerateMeta(m: Cache): Promise<Map<string, Meta>> {
 	const out = new Map<string, Meta>();
 	try {
-		const m = await caches.open(META_CACHE);
 		const keys = await m.keys();
 		for (const k of keys) {
 			const p = new URL(k.url).pathname;
@@ -164,7 +275,86 @@ async function allMeta(): Promise<Map<string, Meta>> {
 	}
 	return out;
 }
+function writeIndex(m: Cache, map: Map<string, Meta>): Promise<void> {
+	return m.put(INDEX_KEY, new Response(JSON.stringify(Object.fromEntries(map)), { headers: { "Content-Type": "application/json" } }));
+}
+function loadIndex(): Promise<Map<string, Meta>> {
+	if (indexMem) return Promise.resolve(indexMem);
+	if (!indexLoad) {
+		indexLoad = (async () => {
+			const m = await caches.open(META_CACHE);
+			let map: Map<string, Meta> | null = null;
+			try {
+				const r = await m.match(INDEX_KEY);
+				const j = r ? await r.json() : null;
+				if (j && typeof j === "object" && !Array.isArray(j)) {
+					map = new Map();
+					for (const [id, v] of Object.entries(j as Record<string, unknown>)) {
+						if (v && typeof (v as Meta).url === "string") map.set(id, v as Meta);
+					}
+				}
+			} catch {
+				map = null;
+			}
+			if (!map) {
+				map = await enumerateMeta(m); // migration from the per-videoId entries
+				await writeIndex(m, map).catch(() => {});
+			}
+			indexMem = map;
+			return map;
+		})().catch(async () => {
+			indexLoad = null; // retried by the next call; meanwhile read the entries directly
+			return enumerateMeta(await caches.open(META_CACHE));
+		});
+	}
+	return indexLoad;
+}
+function persistIndex(): Promise<void> {
+	const map = indexMem;
+	if (!map) return Promise.resolve();
+	indexWrite = indexWrite.then(async () => writeIndex(await caches.open(META_CACHE), map)).catch(() => {});
+	return indexWrite;
+}
 
+async function getMeta(videoId: string): Promise<Meta | null> {
+	if (!videoId) return null;
+	try {
+		return (await loadIndex()).get(videoId) ?? null;
+	} catch {
+		return null;
+	}
+}
+async function setMeta(videoId: string, meta: Meta): Promise<void> {
+	if (!videoId) return;
+	try {
+		const map = await loadIndex();
+		map.set(videoId, meta);
+		const m = await caches.open(META_CACHE);
+		await m.put(metaKey(videoId), new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }));
+		await persistIndex();
+	} catch {
+		/* meta is best-effort: the audio entry itself still carries its headers */
+	}
+}
+async function deleteMeta(videoId: string): Promise<void> {
+	if (!videoId) return;
+	try {
+		const map = await loadIndex();
+		map.delete(videoId);
+		const m = await caches.open(META_CACHE);
+		await m.delete(metaKey(videoId));
+		await persistIndex();
+	} catch {
+		/* ignore */
+	}
+}
+async function allMeta(): Promise<Map<string, Meta>> {
+	try {
+		return new Map(await loadIndex());
+	} catch {
+		return new Map();
+	}
+}
 // Which cached entry (if any) holds this videoId: the meta URL must still be in
 // the audio cache (Cache API evictions do not touch the meta cache).
 async function cachedForVideo(c: Cache, videoId: string): Promise<{ meta: Meta; hit: Response } | null> {
@@ -380,9 +570,21 @@ self.addEventListener("fetch", (event) => {
 
 	if (req.method !== "GET") return;
 
-	// app-shell assets → cache-first
-	if (url.origin === location.origin && (build.includes(url.pathname) || files.includes(url.pathname))) {
-		event.respondWith(caches.match(req).then((r) => r || fetch(req)));
+	// app-shell assets → cache-first; a miss (not yet precached, K3) is fetched
+	// and stored on the way so the next offline boot has it.
+	if (url.origin === location.origin && (BUILD_SET.has(url.pathname) || files.includes(url.pathname))) {
+		event.respondWith(
+			(async () => {
+				const hit = await caches.match(req);
+				if (hit) return hit;
+				const res = await fetch(req);
+				if (res.ok && BUILD_SET.has(url.pathname)) {
+					const copy = res.clone();
+					event.waitUntil(caches.open(SHELL).then((c) => c.put(req, copy)).catch(() => {}));
+				}
+				return res;
+			})(),
+		);
 		return;
 	}
 
@@ -390,6 +592,9 @@ self.addEventListener("fetch", (event) => {
 	// Profile-scoped answers (/api/v1/me/*) are NEVER cached nor replayed (G16).
 	if (url.pathname.startsWith("/api/")) {
 		const profileScoped = isProfileScopedApi(url);
+		// K3: an API call means the page is up; the deferred precache may run
+		// now, kept alive by this event (idempotent, one run per SW lifetime).
+		if (!restDone) event.waitUntil(precacheRest());
 		event.respondWith(
 			(async () => {
 				const c = await caches.open(API_CACHE);
@@ -397,7 +602,9 @@ self.addEventListener("fetch", (event) => {
 					const res = await fetch(req);
 					// Only JSON is an API answer worth replaying offline: an HTML shell
 					// (SPA fallback for an unknown path) must never be cached as data.
-					if (!profileScoped && res.ok && /json/i.test(res.headers.get("Content-Type") || "")) c.put(req, res.clone());
+					if (!profileScoped && res.ok && /json/i.test(res.headers.get("Content-Type") || "")) {
+						event.waitUntil(putApiResponse(c, req, res.clone())); // K15: bounded
+					}
 					return res;
 				} catch {
 					const hit = profileScoped ? undefined : await c.match(req);
@@ -457,13 +664,35 @@ async function setQuota(bytes: number): Promise<number> {
 
 type Entry = { url: string; videoId: string; bytes: number; at: number; lastAccess: number; contentType: string; pinned: boolean };
 
-// Every audio entry with its size, cached-at and last-access times (from the
-// meta index when the entry has a videoId, else from its headers).
+// Every audio entry with its size, cached-at and last-access times. K9: one
+// `c.keys()` plus the in-memory index answer every entry the index knows
+// (url, bytes and contentType recorded); only an entry the index does not
+// cover (legacy, no videoId, index written by an older SW without
+// contentType) is read from the cache, and its index record is completed
+// on the way so the next call is O(1) Cache API operations. Index records
+// whose URL is no longer in the cache (browser eviction) are dropped.
 async function listEntries(c: Cache): Promise<Entry[]> {
 	const keys = await c.keys();
 	const metas = await allMeta();
+	const byUrl = new Map<string, { videoId: string; meta: Meta }>();
+	for (const [videoId, meta] of metas) byUrl.set(meta.url, { videoId, meta });
 	const out: Entry[] = [];
+	const present = new Set<string>();
 	for (const k of keys) {
+		present.add(k.url);
+		const ix = byUrl.get(k.url);
+		if (ix && ix.meta.bytes > 0 && typeof ix.meta.contentType === "string") {
+			out.push({
+				url: k.url,
+				videoId: ix.videoId,
+				bytes: ix.meta.bytes,
+				at: ix.meta.at || 0,
+				lastAccess: ix.meta.lastAccess || ix.meta.at || 0,
+				contentType: ix.meta.contentType,
+				pinned: ix.meta.pinned === true,
+			});
+			continue;
+		}
 		const r = await c.match(k);
 		if (!r) continue;
 		let bytes = parseInt(r.headers.get(H_BYTES) || r.headers.get("Content-Length") || "0", 10);
@@ -478,7 +707,7 @@ async function listEntries(c: Cache): Promise<Entry[]> {
 		const at = parseInt(r.headers.get(H_AT) || "0", 10) || 0;
 		const meta = videoId ? metas.get(videoId) : undefined;
 		const sameEntry = !!meta && meta.url === k.url;
-		out.push({
+		const entry: Entry = {
 			url: k.url,
 			videoId,
 			bytes: bytes > 0 ? bytes : 0,
@@ -487,8 +716,14 @@ async function listEntries(c: Cache): Promise<Entry[]> {
 			contentType: r.headers.get("Content-Type") || (r.type === "opaque" ? "opaque" : ""),
 			// Header first; the meta index is the backup copy of the flag (G6).
 			pinned: r.headers.get(H_PINNED) === "1" || (sameEntry && meta!.pinned === true),
-		});
+		};
+		out.push(entry);
+		// Complete the index record so this entry is answered from the index next time.
+		if (sameEntry && entry.bytes > 0) {
+			await setMeta(videoId, { ...meta!, bytes: entry.bytes, at: entry.at, lastAccess: entry.lastAccess, pinned: entry.pinned, contentType: entry.contentType });
+		}
 	}
+	for (const [videoId, meta] of metas) if (!present.has(meta.url)) await deleteMeta(videoId);
 	return out;
 }
 
@@ -533,9 +768,10 @@ async function persistNowPlaying(): Promise<void> {
 		/* best effort: the in-memory copy still protects the track until the SW stops */
 	}
 }
-function isProtected(e: { url: string; videoId: string; pinned?: boolean }, keep: string): boolean {
+type Keep = string | ReadonlySet<string>;
+function isProtected(e: { url: string; videoId: string; pinned?: boolean }, keep: Keep): boolean {
 	if (e.pinned) return true; // pinned by the user (X-YTM-Pinned): only an explicit uncache removes it
-	if (keep && e.url === keep) return true;
+	if (typeof keep === "string" ? keep && e.url === keep : keep.has(e.url)) return true;
 	if (nowPlaying.url && e.url === nowPlaying.url) return true;
 	if (nowPlaying.videoId && e.videoId && e.videoId === nowPlaying.videoId) return true;
 	return false;
@@ -569,7 +805,7 @@ async function broadcastEvicted(evicted: ReadonlyArray<{ url: string; videoId: s
 // `keep` (the entry just written) nor the track being played. Serialized so
 // two concurrent callers cannot both act on a stale total and over-evict.
 let quotaLock: Promise<void> = Promise.resolve();
-function enforceQuota(c: Cache, keep: string): Promise<void> {
+function enforceQuota(c: Cache, keep: Keep): Promise<void> {
 	const run = quotaLock.then(async () => {
 		const quota = await getQuota();
 		if (!(quota > 0)) return;
@@ -593,8 +829,39 @@ function enforceQuota(c: Cache, keep: string): Promise<void> {
 	return run;
 }
 
+// K9: cacheAudio no longer enforces the quota after EVERY write (a batch of
+// M downloads cost M full listings); writes within QUOTA_DEBOUNCE_MS share
+// one run that protects every entry written in the batch. `quotaSettled()`
+// is what a message handler waits for (keeps the SW alive until it ran).
+const QUOTA_DEBOUNCE_MS = 2000;
+let quotaTimer: ReturnType<typeof setTimeout> | undefined;
+let quotaKeep = new Set<string>();
+let quotaPending: Promise<void> | null = null;
+let quotaResolve: (() => void) | undefined;
+function scheduleEnforceQuota(c: Cache, keep: string): Promise<void> {
+	if (keep) quotaKeep.add(keep);
+	if (!quotaPending) quotaPending = new Promise<void>((res) => (quotaResolve = res));
+	const pending = quotaPending;
+	clearTimeout(quotaTimer);
+	quotaTimer = setTimeout(() => {
+		const keeps = quotaKeep;
+		const done = quotaResolve;
+		quotaKeep = new Set();
+		quotaPending = null;
+		quotaResolve = undefined;
+		quotaTimer = undefined;
+		enforceQuota(c, keeps)
+			.catch(() => {})
+			.then(() => done?.());
+	}, QUOTA_DEBOUNCE_MS);
+	return pending;
+}
+function quotaSettled(): Promise<void> {
+	return quotaPending ?? Promise.resolve();
+}
+
 // Evict the `n` least recently used entries (for QuotaExceededError recovery).
-async function evictOldest(c: Cache, keep: string, n: number): Promise<number> {
+async function evictOldest(c: Cache, keep: Keep, n: number): Promise<number> {
 	await loadNowPlaying();
 	const entries = (await listEntries(c)).filter((e) => !isProtected(e, keep));
 	entries.sort((a, b) => a.lastAccess - b.lastAccess || a.at - b.at);
@@ -652,7 +919,14 @@ async function cacheAudio(rawUrl: string, videoId: string, pinNow = false): Prom
 		if (bytes > 0) {
 			if (videoId && !(await getMeta(videoId))) {
 				const at = parseInt(existing.headers.get(H_AT) || "0", 10) || Date.now();
-				await setMeta(videoId, { url: abs, bytes, at, lastAccess: Date.now() });
+				await setMeta(videoId, {
+					url: abs,
+					bytes,
+					at,
+					lastAccess: Date.now(),
+					pinned: existing.headers.get(H_PINNED) === "1",
+					contentType: existing.headers.get("Content-Type") || "",
+				});
 			}
 			return { ok: true, bytes, already: true, cachedUrl: abs };
 		}
@@ -747,8 +1021,8 @@ async function cacheAudio(rawUrl: string, videoId: string, pinNow = false): Prom
 			return { ok: false, bytes: 0, reason: "quota" + (freed ? "" : " (nothing evictable)") };
 		}
 	}
-	if (videoId) await setMeta(videoId, { url: abs, bytes: buf.byteLength, at: now, lastAccess: now, pinned });
-	await enforceQuota(c, abs);
+	if (videoId) await setMeta(videoId, { url: abs, bytes: buf.byteLength, at: now, lastAccess: now, pinned, contentType: headers.get("Content-Type") || "" });
+	void scheduleEnforceQuota(c, abs); // K9: one LRU pass per batch, 2 s after the last write
 	return { ok: true, bytes: buf.byteLength, cachedUrl: abs };
 }
 
@@ -790,7 +1064,8 @@ self.addEventListener("message", (event) => {
 		ev.waitUntil(
 			cacheAudioDeduped(data.url, videoId, pinNow)
 				.catch((e) => ({ ok: false, bytes: 0, reason: isQuotaError(e) ? "quota" : String((e && e.message) || e || "error") }))
-				.then((r) => reply(ev, { type: "audio-cached", url: data.url, videoId, ...r })),
+				.then((r) => reply(ev, { type: "audio-cached", url: data.url, videoId, ...r }))
+				.then(() => quotaSettled()), // K9: stay alive for the debounced LRU pass
 		);
 		return;
 	}

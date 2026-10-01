@@ -14,9 +14,12 @@
 	import { fly } from "svelte/transition";
 	export let main: HTMLElement;
 	export let key: string;
-	// When false (error page), the content is keyed in without the 500 ms delay
-	// + 500 ms fade: the 404 used to be captured mid-transition at 19 % opacity.
+	// When false (error page), the content is keyed in without any fade: the
+	// 404 used to be captured mid-transition at 19 % opacity.
+	// K1 (audit perf v2): 0 ms delay + 150 ms fade (was 500 + 500: every page
+	// waited half a second before appearing, then faded for another half).
 	export let animate = true;
+	const DURATION = 150;
 
 	const dispatch = createEventDispatcher<{ scrolled: boolean }>();
 </script>
@@ -33,13 +36,13 @@
 			class="app-transition-wrapper"
 			in:fly={{
 				x: -5,
-				duration: animate ? 500 : 0,
-				delay: animate ? 500 : 0,
+				duration: animate ? DURATION : 0,
+				delay: 0,
 				easing: cubicOut,
 			}}
 			out:fly={{
 				x: -5,
-				duration: animate ? 500 : 0,
+				duration: animate ? DURATION : 0,
 				easing: cubicOut,
 				opacity: 0,
 			}}
