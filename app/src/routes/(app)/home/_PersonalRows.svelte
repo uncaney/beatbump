@@ -10,6 +10,7 @@
 	import { getMix, getRecent } from "$lib/me";
 	import { settings } from "$lib/stores";
 	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
+	import { clockLabel, fetchRemoteResume, restoreRemoteResume } from "$lib/stores/nowPlayingSync";
 	import { get } from "svelte/store";
 
 	const MAX = 20;
@@ -31,6 +32,30 @@
 		} finally {
 			resuming = false;
 		}
+	}
+
+	// C2: the profile's state from ANOTHER device, newer than ours by > 2 min.
+	let remote: Awaited<ReturnType<typeof fetchRemoteResume>> = null;
+	$: remoteTrack = remote ? remote.state.mix[remote.state.position] : null;
+	let restoringRemote = false;
+	async function resumeRemote() {
+		if (!remote || restoringRemote) return;
+		restoringRemote = true;
+		const offer = remote;
+		try {
+			await restoreRemoteResume(offer);
+			remote = null;
+			try {
+				if (get(settings)?.playback?.["Remember Last Track"] === true) saved = readResumeState(localStorage);
+			} catch {
+				/* keep the previous button */
+			}
+		} finally {
+			restoringRemote = false;
+		}
+	}
+	async function loadRemote() {
+		remote = await fetchRemoteResume();
 	}
 
 	async function loadResume() {
@@ -79,16 +104,29 @@
 			saved = null;
 		}
 		void loadResume();
+		void loadRemote();
 		void loadForYou();
 		void loadAcquired();
 	});
 </script>
 
-{#if resume.length > 0 || savedTrack}
+{#if resume.length > 0 || savedTrack || remoteTrack}
 	<section
 		class="home-row"
 		data-row="reprendre"
 	>
+		{#if remote && remoteTrack}
+			<div class="resume-queue">
+				<button
+					type="button"
+					data-testid="resume-remote"
+					disabled={restoringRemote}
+					on:click={resumeRemote}
+				>
+					Reprendre depuis {remote.deviceName} : {remoteTrack.title ?? "morceau"} à {clockLabel(remote.state.currentTime)}
+				</button>
+			</div>
+		{/if}
 		{#if savedTrack}
 			<div class="resume-queue">
 				<button
