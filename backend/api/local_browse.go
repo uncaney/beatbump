@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"beatbump-server/backend/db"
 
@@ -157,11 +158,38 @@ func LocalArtistsHandler(c echo.Context) error {
 // albumDocAttrs is what localAlbumItem needs from an albums doc.
 var albumDocAttrs = []string{"id", "album", "albumArtist", "artistId", "year", "coverLid", "trackCount"}
 
+// BI4: ?filter= values of GET /local/albums, the lists behind the home rows'
+// "Voir tout". The albums index is filterable on albumArtist / artistId /
+// source only (local_covers.go), so both are materialised from a bounded
+// newest-first scan (recentAlbumDocs), sorted in Go and paged here.
+//
+//	never-played  albums none of whose tracks the profile played (the
+//	              me/never-played logic, profile cookie), up to the scan cap
+//	added-30d     albums added in the last addedRecentlyDays days
+var albumFilters = map[string]bool{"never-played": true, "added-30d": true}
+
+const (
+	albumFilterScanPage = 200
+	albumFilterScanCap  = 1000
+	addedRecentlyDays   = 30
+)
+
+// badFilter is the 400 answer for an unknown ?filter= value.
+func badFilter(c echo.Context, raw string) error {
+	return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": "unknown filter: " + raw})
+}
+
 func LocalAlbumsHandler(c echo.Context) error {
 	off, lim := pag(c, 60)
 	sortBy, ok := validSort(c.QueryParam("sort"), albumSortable, "dateAdded:desc")
 	if !ok {
 		return badSort(c, c.QueryParam("sort"))
+	}
+	if f := c.QueryParam("filter"); f != "" {
+		if !albumFilters[f] {
+			return badFilter(c, f)
+		}
+		return localAlbumsFiltered(c, f, off, lim, sortBy)
 	}
 	payload := map[string]interface{}{
 		"q": c.QueryParam("q"), "offset": off, "limit": lim, "sort": []string{sortBy},
@@ -177,6 +205,110 @@ func LocalAlbumsHandler(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"items": items, "total": total, "offset": off, "limit": lim, "sort": sortBy,
+	})
+}
+
+// recentAlbumDocs scans the albums index newest first (dateAdded desc,
+// epoch seconds) and returns the docs added since `cutoff` (0: every doc,
+// up to the cap), honouring the listing's q and artistId. Bounded by
+// albumFilterScanCap docs (five pages).
+func recentAlbumDocs(q, artistId string, cutoff int64) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0)
+	attrs := append(append([]string{}, albumDocAttrs...), "dateAdded")
+	for off := 0; off < albumFilterScanCap; off += albumFilterScanPage {
+		payload := map[string]interface{}{
+			"q": q, "offset": off, "limit": albumFilterScanPage, "sort": []string{"dateAdded:desc"},
+			"attributesToRetrieve": attrs,
+		}
+		if artistId != "" {
+			payload["filter"] = "artistId = \"" + escapeMeili(artistId) + "\""
+		}
+		hits, _ := meiliBrowse("albums", payload)
+		if len(hits) == 0 {
+			break
+		}
+		stop := false
+		for _, a := range hits {
+			if cutoff > 0 && albumDateAdded(a) < cutoff {
+				stop = true
+				break
+			}
+			out = append(out, a)
+		}
+		if stop || len(hits) < albumFilterScanPage {
+			break
+		}
+	}
+	return out
+}
+
+// sortAlbumDocs orders album docs by a validated "field:dir" (albumSortable)
+// in Go, since the filtered listings are materialised rather than paged by
+// Meili. Strings compare case-insensitively; dateAdded / trackCount as
+// numbers; year as the 4-digit string the index stores.
+func sortAlbumDocs(docs []map[string]interface{}, sortBy string) {
+	parts := strings.SplitN(sortBy, ":", 2)
+	field := parts[0]
+	desc := len(parts) == 2 && parts[1] == "desc"
+	if field == "dateAdded" && desc {
+		return // the scan order
+	}
+	less := func(a, b map[string]interface{}) bool {
+		switch field {
+		case "dateAdded":
+			return albumDateAdded(a) < albumDateAdded(b)
+		case "trackCount":
+			return mint(a, field) < mint(b, field)
+		case "year":
+			return mnumStr(a, field) < mnumStr(b, field)
+		}
+		return strings.ToLower(mstr(a, field)) < strings.ToLower(mstr(b, field))
+	}
+	sort.SliceStable(docs, func(i, j int) bool {
+		if desc {
+			return less(docs[j], docs[i])
+		}
+		return less(docs[i], docs[j])
+	})
+}
+
+// localAlbumsFiltered answers GET /local/albums?filter=never-played|added-30d.
+// `total` is exact for added-30d; for never-played it counts the survivors
+// of the play_events pair filter (an upper bound: the Meili confirmation may
+// still reject a few, the client then sees a short page and stops).
+func localAlbumsFiltered(c echo.Context, filter string, off, lim int, sortBy string) error {
+	var cutoff int64
+	if filter == "added-30d" {
+		cutoff = time.Now().Add(-addedRecentlyDays * 24 * time.Hour).Unix()
+	}
+	docs := recentAlbumDocs(c.QueryParam("q"), c.QueryParam("artistId"), cutoff)
+	sortAlbumDocs(docs, sortBy)
+	items := make([]IListItemRenderer, 0, lim)
+	total := 0
+	switch filter {
+	case "added-30d":
+		total = len(docs)
+		start, end := off, off+lim
+		if start > total {
+			start = total
+		}
+		if end > total {
+			end = total
+		}
+		for _, a := range docs[start:end] {
+			items = append(items, localAlbumItem(a))
+		}
+	case "never-played":
+		played := loadPlayedIndex(profileID(c))
+		items = neverPlayedAlbums(docs, played, off, lim)
+		for _, a := range docs {
+			if album, aa := mstr(a, "album"), mstr(a, "albumArtist"); album != "" && aa != "" && !played.knownPlayed(album, aa) {
+				total++
+			}
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"items": items, "total": total, "offset": off, "limit": lim, "sort": sortBy, "filter": filter,
 	})
 }
 
