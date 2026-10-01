@@ -752,6 +752,7 @@
 		</div>
 		<div
 			class="column container tracklist"
+			class:sheet-closed={$isMobileMQ && !sheetOpen && !sliding}
 			id="fullscreen-queue-sheet"
 			bind:clientHeight={queueHeight}
 			bind:this={tracklist}
@@ -1115,6 +1116,15 @@
 	.queue-clear-head {
 		flex: 0 0 auto;
 		margin-inline-end: 1rem;
+	}
+	// Closed sheet on phones (audit v3 3.6): only the handle row shows above
+	// the fold. The tab bar ("UP NEXT / RELATED", rendered by Tabs as a sibling
+	// of .sheet-head) and the lists are hidden until the sheet is open or being
+	// dragged; visibility (not display) keeps the list heights stable.
+	@media screen and (max-width: 719px) {
+		.tracklist.sheet-closed > :global(:not(.sheet-head)) {
+			visibility: hidden;
+		}
 	}
 	.handle-count {
 		font-weight: 500;
