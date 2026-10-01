@@ -160,16 +160,20 @@
 						class:fade-out={loading ? true : false}
 					/>
 				{:else if isPaused}
+					<!-- Solid white glyph in the desktop bar too (stroke-only at 1px read
+					     as three faint grey lines, audit v3 TOP 10 #5). -->
 					<Icon
-						fill={isQueue ? "#FFF" : "none"}
-						color="white"
+						fill="#fff"
+						color="#fff"
+						--stroke="#fff"
 						name="play"
 						size={sizes.main}
 					/>
 				{:else}
 					<Icon
-						fill={isQueue ? "#FFF" : "none"}
-						color="white"
+						fill="#fff"
+						color="#fff"
+						--stroke="#fff"
 						name="pause"
 						size={sizes.main}
 					/>
@@ -269,7 +273,7 @@
 		// native <button> reset (keeps the .player-btn look)
 		background: none;
 		border: none;
-		color: inherit;
+		color: #fff;
 		font: inherit;
 		align-items: center;
 		justify-content: center;
@@ -277,10 +281,15 @@
 		min-width: 44px;
 		min-height: 44px;
 		border-radius: 50%;
+		// the control itself is always fully opaque (only the hover halo fades)
+		opacity: 1;
 
 		&:focus-visible {
 			outline: 2px solid #fff;
 			outline-offset: 2px;
 		}
+	}
+	.player-title {
+		opacity: 1 !important;
 	}
 </style>
