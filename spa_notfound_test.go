@@ -41,6 +41,11 @@ func TestSpaNotFoundServesShellWith404(t *testing.T) {
 		{"/artist/UCxxx", http.StatusOK, "static"},
 		{"/robots.txt", http.StatusOK, "static"},
 		{"/_app/immutable/x.js", http.StatusOK, "static"},
+		{"/localf", http.StatusOK, "static"},
+		{"/aud/abc", http.StatusOK, "static"},
+		{"/vp", http.StatusOK, "static"},
+		{"/cover", http.StatusOK, "static"},
+		{"/api/v1/zzz", http.StatusOK, "static"},
 	}
 	for _, tc := range cases {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"beatbump-server/backend/api"
+
 	"github.com/labstack/echo/v4"
 )
 
@@ -50,6 +52,10 @@ func spaNotFound(buildDir string) echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			p := c.Request().URL.Path
 			if c.Request().Method != http.MethodGet && c.Request().Method != http.MethodHead {
+				return next(c)
+			}
+			// Audio reverse-proxy routes and the API are real routes, not SPA pages.
+			if api.IsAudioProxyPath(p) || strings.HasPrefix(p, "/api/") {
 				return next(c)
 			}
 			if IsKnownSPAPath(p) {
