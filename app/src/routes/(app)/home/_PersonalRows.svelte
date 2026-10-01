@@ -7,10 +7,11 @@
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
 	import { buildForYouRow, buildResumeRow, capItems, readLastTrack, sanitizeCard } from "$lib/homeRows";
-	import { getMix, getRecent } from "$lib/me";
+	import { peekHomeCache, clearHomeCache, writeHomeCache } from "$lib/homeCache";
+	import { getMix, getRecent, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
 	import { settings } from "$lib/stores";
 	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
-	import { clockLabel, fetchRemoteResume, restoreRemoteResume } from "$lib/stores/nowPlayingSync";
+	import { clockLabel, fetchRemoteResume, restoreRemoteResume, wireProfileChannel } from "$lib/stores/nowPlayingSync";
 	import { AudioPlayer } from "$lib/player";
 	import list from "$lib/stores/list";
 	import { get } from "svelte/store";
@@ -20,6 +21,94 @@
 	let resume: any[] = [];
 	let forYou: any[] = [];
 	let acquired: any[] = [];
+
+	// AP1 "instant home": which source painted each row right now, for the
+	// subtle opacity cue while a cached row is shown before the live answer
+	// replaces it in place (never a layout jump: the row stays mounted,
+	// {#if x.length > 0} never flips off between the cache and live paints).
+	type RowSource = "empty" | "cache" | "live";
+	let resumeSource: RowSource = "empty";
+	let forYouSource: RowSource = "empty";
+	let acquiredSource: RowSource = "empty";
+
+	function storageOrUndefined(): Storage | undefined {
+		try {
+			return typeof localStorage === "undefined" ? undefined : localStorage;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** Best-effort snapshot of the 3 rows into the shared localStorage cache. */
+	async function persistHomeCache() {
+		try {
+			const w = await whoami();
+			if (!w?.id) return;
+			writeHomeCache(storageOrUndefined(), w.id, { reprendre: resume, pourToi: forYou, recemmentAcquis: acquired });
+		} catch {
+			/* best-effort: offline whoami, private mode, quota, ... */
+		}
+	}
+
+	/**
+	 * AP1: paint the 3 rows instantly from the cache (any profile's: the
+	 * profile id isn't known synchronously), then drop that optimistic paint
+	 * if `whoami()` turns out to belong to a different profile - the live
+	 * loads already in flight fill the rows for the right profile moments
+	 * later either way.
+	 */
+	function paintFromCache() {
+		const snap = peekHomeCache(storageOrUndefined());
+		if (!snap) return;
+		if (snap.rows.reprendre.length) {
+			resume = snap.rows.reprendre;
+			resumeSource = "cache";
+		}
+		if (snap.rows.pourToi.length) {
+			forYou = snap.rows.pourToi;
+			forYouSource = "cache";
+		}
+		if (snap.rows.recemmentAcquis.length) {
+			acquired = snap.rows.recemmentAcquis;
+			acquiredSource = "cache";
+		}
+		void validateCacheProfile(snap.profileId);
+	}
+
+	async function validateCacheProfile(cachedProfileId: string) {
+		try {
+			const w = await whoami();
+			if (w?.id === cachedProfileId) return;
+		} catch {
+			return; // offline/failed whoami: keep the optimistic paint, nothing better to show
+		}
+		if (resumeSource === "cache") {
+			resume = [];
+			resumeSource = "empty";
+		}
+		if (forYouSource === "cache") {
+			forYou = [];
+			forYouSource = "empty";
+		}
+		if (acquiredSource === "cache") {
+			acquired = [];
+			acquiredSource = "empty";
+		}
+	}
+
+	/** L13/L14-style: a login/logout (this tab or another) invalidates the cache and this profile's rows. */
+	function onProfileChanged() {
+		clearHomeCache(storageOrUndefined());
+		resume = [];
+		forYou = [];
+		acquired = [];
+		resumeSource = "empty";
+		forYouSource = "empty";
+		acquiredSource = "empty";
+		void loadResume();
+		void loadForYou();
+		void loadAcquired();
+	}
 
 	// C1: the saved queue ("Remember Last Track"), resumed where it stopped.
 	let saved: ResumeState | null = null;
@@ -107,6 +196,8 @@
 			lastTrack = null;
 		}
 		resume = buildResumeRow(lastTrack, recent, 10).map(sanitizeCard).map(stripTrailingSeparator);
+		resumeSource = resume.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
 
 	async function loadForYou() {
@@ -118,6 +209,8 @@
 		} catch {
 			forYou = [];
 		}
+		forYouSource = forYou.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
 
 	async function loadAcquired() {
@@ -129,6 +222,8 @@
 		} catch {
 			acquired = [];
 		}
+		acquiredSource = acquired.length > 0 ? "live" : "empty";
+		void persistHomeCache();
 	}
 
 	onMount(() => {
@@ -137,10 +232,19 @@
 		} catch {
 			saved = null;
 		}
+		paintFromCache();
 		void loadResume();
 		void loadRemote();
 		void loadForYou();
 		void loadAcquired();
+		let unwireProfile: (() => void) | undefined;
+		if (typeof BroadcastChannel !== "undefined") {
+			const channel = new BroadcastChannel(PROFILE_CHANNEL_NAME);
+			unwireProfile = wireProfileChannel(channel, onProfileChanged);
+		}
+		return () => {
+			unwireProfile?.();
+		};
 	});
 </script>
 
@@ -196,12 +300,14 @@
 			</div>
 		{/if}
 		{#if resume.length > 0}
-		<Carousel
-			items={resume}
-			header={{ title: "Reprendre", subheading: "Là où tu t'es arrêté" }}
-			type="trending"
-			isBrowseEndpoint={false}
-		/>
+		<div class="row-fade" class:is-cache={resumeSource === "cache"}>
+			<Carousel
+				items={resume}
+				header={{ title: "Reprendre", subheading: "Là où tu t'es arrêté" }}
+				type="trending"
+				isBrowseEndpoint={false}
+			/>
+		</div>
 		{/if}
 	</section>
 {/if}
@@ -211,14 +317,16 @@
 		class="home-row"
 		data-row="pour-toi"
 	>
-		<Carousel
-			items={forYou}
-			header={{ title: "Pour toi", subheading: "D'après ta bibliothèque" }}
-			type="trending"
-			isBrowseEndpoint={false}
-			seeAllHref="/library/for-you"
-			seeAllLabel="Voir tout"
-		/>
+		<div class="row-fade" class:is-cache={forYouSource === "cache"}>
+			<Carousel
+				items={forYou}
+				header={{ title: "Pour toi", subheading: "D'après ta bibliothèque" }}
+				type="trending"
+				isBrowseEndpoint={false}
+				seeAllHref="/library/for-you"
+				seeAllLabel="Voir tout"
+			/>
+		</div>
 	</section>
 {/if}
 
@@ -227,20 +335,31 @@
 		class="home-row"
 		data-row="recemment-acquis"
 	>
-		<Carousel
-			items={acquired}
-			header={{ title: "Récemment acquis", subheading: "Derniers albums ajoutés à la bibliothèque" }}
-			type="trending"
-			isBrowseEndpoint={true}
-			seeAllHref="/library/albums"
-			seeAllLabel="Voir tout"
-		/>
+		<div class="row-fade" class:is-cache={acquiredSource === "cache"}>
+			<Carousel
+				items={acquired}
+				header={{ title: "Récemment acquis", subheading: "Derniers albums ajoutés à la bibliothèque" }}
+				type="trending"
+				isBrowseEndpoint={true}
+				seeAllHref="/library/albums"
+				seeAllLabel="Voir tout"
+			/>
+		</div>
 	</section>
 {/if}
 
 <style>
 	.home-row {
 		display: contents;
+	}
+	/* AP1: the row painted from the localStorage cache dims very slightly
+	   until the live answer replaces it in place (opacity only - the row
+	   itself never remounts, so there is no layout jump). */
+	.row-fade {
+		transition: opacity 220ms ease;
+	}
+	.row-fade.is-cache {
+		opacity: 0.93;
 	}
 	.resume-queue {
 		/* Audit v7 TOP 6: the pill sat at x=0 on mobile while the row cards and
