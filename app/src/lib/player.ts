@@ -8,7 +8,7 @@ import { tick } from "svelte";
 import { tweened } from "svelte/motion";
 import { writable } from "svelte/store";
 import { APIClient, PREFETCH_INIT } from "./api";
-import { announceNowPlaying, cacheTrackOffline, getCachedUrl, verifyCached } from "./offline";
+import { announceNowPlaying, cacheTrackOffline, getCachedUrl, swRequest, verifyCached } from "./offline";
 import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
@@ -16,6 +16,7 @@ import { shouldStopAtTrackEnd, trackEnded as sleepTimerTrackEnded } from "./stor
 import { syncTabs } from "./tabSync";
 import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
+import { claimMediaRetry } from "./utils/mediaRetry";
 import { setWorkerInterval } from "./utils/workerTimeout";
 
 let userSettings: UserSettings | undefined = undefined;
@@ -61,7 +62,9 @@ function metaDataHandler({
 		const position = sessionList.position;
 		const currentTrack = sessionList.mix[position];
 
-		const artwork = currentTrack?.thumbnails;
+		// Copy before reversing: `thumbnails` is the queue item's own array, and
+		// `reverse()` in place flipped the row thumbnails on every track start (F14/G14).
+		const artwork = Array.isArray(currentTrack?.thumbnails) ? [...currentTrack.thumbnails] : [];
 
 		console.debug({ currentTrack, position, mix: sessionList.mix });
 
@@ -70,11 +73,14 @@ function metaDataHandler({
 			title: currentTrack?.title,
 			artist: currentTrack?.artistInfo?.artist?.[0]?.text || "",
 			album: currentTrack?.album?.title ?? undefined,
-			artwork: artwork.reverse().map(({ url, width, height }) => ({
-				src: url,
-				sizes: `${width}x${height}`,
-				type: "image/jpeg",
-			})),
+			artwork: artwork
+				.reverse()
+				.filter((t) => t && typeof t.url === "string")
+				.map(({ url, width, height }) => ({
+					src: url,
+					sizes: `${width}x${height}`,
+					type: "image/jpeg",
+				})),
 		});
 		navigator.mediaSession.setActionHandler("play", () => {
 			AudioPlayer.play();
@@ -400,6 +406,17 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	public setVolume(value: number) {
 		if (!this.player) return;
 		this._volumeStore.set(value);
+	}
+
+	/**
+	 * Transient volume (sleep-timer fade): drives the media element only, so
+	 * neither the volume store nor `localStorage.volume` records the fade (a
+	 * tab closed mid-fade used to reopen near silent, G11). `setVolume()`
+	 * restores the persisted level afterwards.
+	 */
+	public fadeTo(value: number) {
+		if (!this.player) return;
+		this.player.volume = Math.min(1, Math.max(0, value));
 	}
 
 	public dispose() {
@@ -765,14 +782,14 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 						// MEDIA_ERR_SRC_NOT_SUPPORTED: container/MIME rejected or 4xx/5xx on the source.
 						// The first play of a fresh browser context fails ~1 run in 8 with
 						// PIPELINE_ERROR_READ and succeeds on retry: re-resolve the source once
-						// per track before giving up (toast + guarded auto-skip).
+						// per track (per 10 min window, G21) before giving up (toast + guarded
+						// auto-skip). The retry bypasses the service-worker cache (G2).
 						const cur = SessionListService.$.value.mix?.[SessionListService.$.value.position];
 						const vid = cur?.videoId ? String(cur.videoId) : "";
-						if (vid && mediaRetriedFor !== vid) {
-							mediaRetriedFor = vid;
+						if (vid && claimMediaRetry(mediaRetriedAt, vid)) {
 							console.warn("[player] source read error, retrying once", vid, message);
 							setTimeout(() => {
-								void getSrc(vid, cur?.playlistId, undefined, true).catch(() => {});
+								void retryMediaSource(vid, cur?.playlistId).catch(() => {});
 							}, 400);
 							return;
 						}
@@ -862,7 +879,7 @@ export const getSrc = async (
 	playlistId?: string,
 	params?: string,
 	shouldAutoplay = true,
-	opts?: { prefetch?: boolean },
+	opts?: { prefetch?: boolean; bypassCache?: boolean },
 ): Promise<
 	| {
 		body: ResponseBody | null;
@@ -887,7 +904,9 @@ export const getSrc = async (
 		return setTrack(formats, true, currentTrack);
 	}
 
-	const cached = await offlineFormats(videoId);
+	// bypassCache (media-error retry, G2): the SW entry is the source that just
+	// failed, so re-resolve from player.json even when the track is cached.
+	const cached = opts?.bypassCache ? null : await offlineFormats(videoId);
 	if (cached) return setTrack(cached, shouldAutoplay, currentTrack || (videoId ? { videoId } : undefined));
 
 	const res = await fetchPlayerJson(videoId, playlistId, params, 0, prefetch);
@@ -1009,8 +1028,30 @@ async function fetchPlayerJson(videoId?: string, playlistId?: string, params?: s
 	return err;
 }
 
-// One automatic source reload per track on a media read error (see the error handler).
-let mediaRetriedFor = "";
+// One automatic source reload per track per 10 min window on a media read
+// error (see the error handler): videoId -> time of the last retry (G21).
+const mediaRetriedAt = new Map<string, number>();
+
+/**
+ * Media-error retry (G2): when the service worker holds this track, the
+ * source that just failed IS that cached entry (truncated download, invalid
+ * body behind an audio Content-Type), so drop it first (`uncache-audio`; the
+ * SW re-downloads on the next play) and let `verifyCached` mark the offline
+ * entry `_cached:false`. Then re-resolve from player.json, bypassing the
+ * cache check. Best-effort: a missing SW only skips the purge.
+ */
+async function retryMediaSource(videoId: string, playlistId?: string) {
+	const cachedUrl = getCachedUrl(videoId);
+	if (cachedUrl) {
+		try {
+			await swRequest({ type: "uncache-audio", url: cachedUrl, videoId }, "audio-uncached", 3_000);
+			await verifyCached(videoId, 1_000);
+		} catch {
+			/* purge is best-effort */
+		}
+	}
+	return getSrc(videoId, playlistId, undefined, true, { bypassCache: true });
+}
 
 // Auto-skip guard: skip to the next track on a failure, but never chain skips
 // (a dead backend would otherwise race through the whole queue). The streak is

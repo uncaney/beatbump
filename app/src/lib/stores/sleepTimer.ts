@@ -117,20 +117,27 @@ async function expire() {
 		const { AudioPlayer } = await import("$lib/player");
 		const previous = AudioPlayer.volume.value;
 		const playing = !get(AudioPlayer.paused);
+		// The fade steps go through fadeTo(): media element only, so the volume
+		// store (and localStorage.volume behind it) never records a fading
+		// level (G11). The persisted level is written back once, at the end.
+		const restore = () => {
+			AudioPlayer.fadeTo(previous);
+			AudioPlayer.setVolume(previous);
+		};
 		if (playing && previous > 0) {
 			const step = FADE_MS / FADE_STEPS;
 			for (let i = 1; i <= FADE_STEPS; i++) {
 				await sleep(step);
 				if (token !== fadeToken) {
-					AudioPlayer.setVolume(previous);
+					restore();
 					return; // cancelled during the fade
 				}
-				AudioPlayer.setVolume(previous * (1 - i / FADE_STEPS));
+				AudioPlayer.fadeTo(previous * (1 - i / FADE_STEPS));
 			}
 		}
 		if (token !== fadeToken) return;
 		AudioPlayer.pause();
-		AudioPlayer.setVolume(previous);
+		restore();
 		notify("Minuterie de sommeil : lecture en pause", "success");
 	} catch {
 		/* player unavailable: nothing to pause */

@@ -77,6 +77,8 @@ export interface ISessionListService {
 	} | null>;
 	lockedSet(_mix: ISessionListProvider): Promise<ISessionListProvider>;
 	removeTrack(index: number): void;
+	/** Drag reorder: same rows in a new order, cursor kept on the playing track */
+	reorder(mix: Item[]): boolean;
 	/** "Vider la file": keep only the current track */
 	clearQueue(): Promise<boolean>;
 	setMix(mix: Item[], type?: "auto" | "playlist" | "local"): void;

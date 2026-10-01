@@ -3,7 +3,7 @@
 	generics="T extends Song | IListItemRenderer"
 >
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars, unused-imports/no-unused-imports
-	import type { Song } from "$lib/types";
+	import type { Item, Song } from "$lib/types";
 
 	// eslint-disable-next-line unused-imports/no-unused-imports, @typescript-eslint/no-unused-vars
 	import type { IListItemRenderer } from "$lib/types/musicListItemRenderer";
@@ -38,16 +38,32 @@
 	// Ghost offset: the mouse path keeps its historical 10rem; the touch path
 	// centres the ghost on the finger (half a row).
 	let ghostOffset = "10rem";
-	// The playing track when a drag starts: after the in-place swaps the cursor
-	// (position) must follow it, else the highlight and next() point at the
-	// wrong row once a row crosses the current one.
+	// The playing track when a drag starts (lists other than the queue): after
+	// the in-place swaps the cursor (position) must follow it, else the
+	// highlight and next() point at the wrong row once a row crosses the
+	// current one.
 	let dragCurrentTrack: T | null = null;
+	// True while the queue itself is being dragged (`items` is the session
+	// mix). The swaps then happen on a private copy and the queue is replaced
+	// once, on drop, through SessionListService.reorder(): the store setter
+	// runs (subscribers, tab sync) and the warm next-track URL is refreshed, so
+	// "suivant" plays the new neighbour (G1). Before, the shared array was
+	// swapped in place and no subscriber ever heard of it.
+	let queueDrag = false;
 
 	const captureCurrent = () => {
 		const s = $SessionListService;
+		queueDrag = (items as unknown) === s.mix;
+		if (queueDrag) items = items.slice();
 		dragCurrentTrack = (s.mix[s.position] as T) ?? null;
 	};
 	const syncCursor = () => {
+		if (queueDrag) {
+			queueDrag = false;
+			dragCurrentTrack = null;
+			SessionListService.reorder(items as unknown as Item[]);
+			return;
+		}
 		if (!dragCurrentTrack) return;
 		const idx = items.indexOf(dragCurrentTrack);
 		dragCurrentTrack = null;
@@ -63,7 +79,7 @@
 		ghostOffset = "10rem";
 	};
 
-	/** Swap the rows (and the session mix) the way the mouse path always did. */
+	/** Swap the rows the way the mouse path always did, then hand the result over. */
 	const commitSwap = () => {
 		if (dragOverId !== null && currentDragId !== null) {
 			[items[currentDragId], items[dragOverId]] = [
@@ -71,14 +87,6 @@
 				items[currentDragId],
 			];
 			currentDragId = dragOverId;
-
-			[
-				$SessionListService.mix[currentDragId],
-				$SessionListService.mix[dragOverId],
-			] = [
-				$SessionListService.mix[dragOverId],
-				$SessionListService.mix[currentDragId],
-			];
 		}
 		syncCursor();
 	};

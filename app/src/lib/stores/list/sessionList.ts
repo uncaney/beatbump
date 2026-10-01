@@ -19,16 +19,16 @@ import {
     seededShuffle,
     type ResponseBody,
 } from "$lib/utils";
-import { splice } from "$lib/utils/collections/array";
 import { objectKeys } from "$lib/utils/collections/objects";
 import { Mutex } from "$lib/utils/sync";
 import { tick } from "svelte";
 // eslint-disable-next-line import/no-cycle
 import { syncTabs } from "$lib/tabSync";
-import { derived } from "svelte/store";
+import { derived, get } from "svelte/store";
 import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
+import { planInsert, planReorder, removeAt } from "./queueOps";
 import { fetchNext, filterList } from "./utils.list";
 import { APIClient } from "$lib/api";
 import { SERVER_DOMAIN } from "../../../env";
@@ -617,48 +617,18 @@ export class ListService {
                 await this.updatePosition("next");
                 updatePlayerSrc({ original_url: url, url });
             } else {
+                // No warm URL (prefetch failed / expired, or next() came right
+                // after a queue edit): the queue already knows the next row, so
+                // resolve it directly. `next.json` was asked here before (G13),
+                // which rewrote a hand-built queue ("Ajouter à la file") with
+                // YouTube's own continuation; it is still used when the queue
+                // runs out (the `!nextTrack` branch above).
                 let position = await this.updatePosition("next");
                 if (position >= this._$.value.mix.length) {
                     position = this._$.value.position;
                 }
-
-                if (this.isLocal) {
-                    await getSrc(
-                        this._$.value.mix[position].videoId,
-                        this._$.value.mix[position].playlistId,
-                        undefined,
-                        true,
-                    );
-                } else {
-                    const currentTrack = this.#currentTrack(position);
-                    const data = await fetchNext({
-                        ...(this._$.value?.visitorData && {
-                            visitorData: this._$.value.visitorData,
-                        }),
-                        params: "gAQBiAQB",
-                        playlistSetVideoId: currentTrack?.playlistSetVideoId,
-                        index: position,
-                        loggingContext:
-                            currentTrack?.loggingContext?.vssLoggingContext
-                                ?.serializedContextData,
-                        videoId: currentTrack?.videoId,
-                        playlistId: this.currentMixId,
-                        ...(this?.clickTrackingParams && {
-                            clickTracking: this.clickTrackingParams,
-                        }),
-                    });
-                    if (!data) return console.log("no data on next", { data });
-
-                    const state = await this.#sanitizeAndUpdate("APPLY", data);
-                    await getSrc(
-                        state.mix[currentPosition + 1].videoId,
-                        state.mix[currentPosition + 1].playlistId,
-                        undefined,
-                        true,
-                    );
-                    // The mix was just extended: position + 1 may only exist now.
-                    this.schedulePrefetch(state.position);
-                }
+                const track = this._$.value.mix[position];
+                await getSrc(track?.videoId, track?.playlistId, undefined, true);
             }
             const position = this._$.value.position;
             if (update) {
@@ -923,22 +893,48 @@ export class ListService {
 
     /**
      * Remove the row at `index`. The cursor keeps pointing at the playing
-     * track (it shifts left by one when a row before it is removed); removing
-     * the current row leaves the cursor on the row that took its place.
+     * track (it shifts left by one when a row before it is removed). Removing
+     * the playing row leaves the cursor on the row that took its place (the
+     * previous row when it was the last one) and starts that row, so the
+     * audio never plays a track the queue no longer shows (G3). Removing the
+     * only row empties the queue; the audio is left alone.
      */
     public removeTrack(index: number) {
         const { mix, position } = this._$.value;
         if (index < 0 || index >= mix.length) return;
-        const next = [...mix.slice(0, index), ...mix.slice(index + 1)];
-        const newPosition =
-            index < position
-                ? position - 1
-                : Math.min(position, Math.max(next.length - 1, 0));
-        this._$.update((u) => ({ ...u, mix: next, position: newPosition }));
+        const plan = removeAt(mix, position, index);
+        this._$.update((u) => ({ ...u, mix: plan.mix, position: plan.position }));
         // The track after the current one may have changed.
         this.clearNextTrack();
         this.schedulePrefetch();
         syncTabs.updateSessionList(this._$.value);
+        if (plan.replay) {
+            const track = plan.mix[plan.position];
+            void Promise.resolve(
+                getSrc(track?.videoId, track?.playlistId, undefined, true),
+            ).catch(() => {});
+        }
+    }
+
+    /**
+     * Drag reorder (DraggableList): replace the queue with `mix`, the same
+     * rows in a new order, keeping the cursor on the playing track. Goes
+     * through the store setter (subscribers + tab sync are notified), drops
+     * the warm next-track URL and re-prefetches position + 1, so "suivant"
+     * plays the new neighbour instead of the old one (G1). Synchronous, so a
+     * `dragend` handler that reads the store right after sees the new order.
+     * Returns false (nothing applied) when `mix` is not a permutation of the
+     * current queue (a drag that straddled a queue change).
+     */
+    public reorder(mix: Item[]): boolean {
+        const { mix: current, position } = this._$.value;
+        const plan = planReorder(current, position, mix);
+        if (!plan) return false;
+        this._$.update((u) => ({ ...u, mix: plan.mix, position: plan.position }));
+        this.clearNextTrack();
+        this.schedulePrefetch(plan.position);
+        syncTabs.updateSessionList(this._$.value);
+        return true;
     }
 
     /**
@@ -1025,13 +1021,17 @@ export class ListService {
     /**
      * Tracks to insert for a row: local / offline items are inserted as-is (a
      * lid is not a YouTube id; the row already carries title, thumbnails and
-     * videoId, and getSrc() plays a lid or a `localUrl` directly). YouTube
-     * items go through `get_queue.json` (a playlist/album row expands to its
-     * tracks); when that returns nothing the row itself is inserted so a
-     * flaky endpoint never silently drops the action.
+     * videoId, and getSrc() plays a lid or a `localUrl` directly). A YouTube
+     * track row (videoId + title) is inserted as-is too: `get_queue.json` has
+     * nothing to add for a single track and fails upstream (G22). Only rows
+     * without a videoId (album / single / playlist) are expanded, through the
+     * album or playlist page, then `get_queue.json` as a last resort; when
+     * that returns nothing the row itself is inserted so a flaky endpoint
+     * never silently drops the action.
      */
     private async resolveQueueItems(item: Item): Promise<Item[]> {
         if (item.localUrl || isLocalTrackId(item.videoId)) return [{ ...item }];
+        if (item.videoId && item.title) return [{ ...item }];
         // Album / single / playlist rows (search results, carousels) carry no videoId:
         // expand them through the album or playlist page, which get_queue cannot do.
         const pageType = String((item as any)?.endpoint?.pageType || "");
@@ -1081,7 +1081,10 @@ export class ListService {
     /**
      * Insert `item` (or the tracks it expands to) at `key + 1`. Resolves to
      * true when something was inserted; errors are notified (in French) and
-     * resolve to false so callers can skip their success toast.
+     * resolve to false so callers can skip their success toast. With Dedupe
+     * Automix on, a track already in the queue at or before the insertion
+     * point is not inserted again: the user is told ("Déjà dans la file")
+     * and the call resolves to false instead of a silent no-op (G4).
      */
     public async setTrackWillPlayNext(item: Item, key: number): Promise<boolean> {
         await tick();
@@ -1095,12 +1098,23 @@ export class ListService {
                 notify("Impossible d'ajouter ce morceau à la file", "error");
                 return false;
             }
-            const oldLength = this._$.value.mix.length;
+            const { mix, position } = this._$.value;
+            const oldLength = mix.length;
 
-            splice(this._$.value.mix, key + 1, 0, ...itemToAdd);
+            // `filterAutoPlay` is a plain svelte derived store: read it with get().
+            const plan = planInsert(mix, position, itemToAdd, key, !!get(filterAutoPlay));
+            if (!plan.inserted) {
+                const title = item.title || itemToAdd[0]?.title;
+                notify(title ? `Déjà dans la file : « ${title} »` : "Déjà dans la file", "error");
+                return false;
+            }
 
+            // A new array (planInsert never mutates the queue) so every
+            // subscriber is notified; the cursor is re-anchored on the playing
+            // row in case the dedupe removed an older copy before it.
             const state = await this.#sanitizeAndUpdate("APPLY", {
-                mix: ["set", this._$.value.mix] satisfies MixListAppendOp,
+                mix: ["set", plan.mix] satisfies MixListAppendOp,
+                position: plan.position,
             });
 
             if (!oldLength) {
