@@ -23,6 +23,9 @@
 	import { createEventDispatcher } from "svelte";
 	import Button from "../Button";
 	import PopperButton from "../Popper/PopperButton.svelte";
+	import { page } from "$app/stores";
+	import { APIClient } from "$lib/api";
+	import { playTracks } from "../PlayAllBar/PlayAllBar.svelte";
 
 	type Button<
 		Type extends string = string,
@@ -112,6 +115,34 @@
 		playlistAdd: void;
 		addqueue: void;
 	}>();
+
+	// EQ1: "Radio" on a local album page (/release?id=lb-…) builds a targeted
+	// queue from local/related?seed=album:<id>, context "Radio : <title>".
+	$: localAlbumId =
+		type === "release" && $page.url.searchParams.get("id")?.startsWith("lb-")
+			? ($page.url.searchParams.get("id") as string)
+			: "";
+	let radioBusy = false;
+	async function startRadio() {
+		if (radioBusy || !localAlbumId) return;
+		radioBusy = true;
+		try {
+			const res = await APIClient.fetch(
+				`/api/v1/local/related?seed=album:${encodeURIComponent(localAlbumId)}`,
+			);
+			if (!res.ok) return;
+			const data = await res.json();
+			const items = Array.isArray(data.items) ? data.items : [];
+			const name = typeof data.name === "string" && data.name ? data.name : title;
+			await playTracks(items, {
+				context: { kind: "radio", title: name, href: $page.url.pathname + $page.url.search },
+			});
+		} catch (err) {
+			console.error("radio-seed: failed", err);
+		} finally {
+			radioBusy = false;
+		}
+	}
 </script>
 
 <div class="box resp-content-width">
@@ -207,12 +238,27 @@
 			{/if}
 		{/each}
 	</div>
-	{#if $$slots.actions}
+	{#if $$slots.actions || localAlbumId}
 		<!-- Audit v7 TOP 3: a second action row (Keep offline) that stays in the
 		     header grid: under Play Album / Album Radio, in the content column on
 		     desktop (not under the cover), at the 16 px gutter on phones. -->
 		<div class="actions-row">
 			<slot name="actions" />
+			{#if localAlbumId}
+				<button
+					type="button"
+					class="btn-reset btn-secondary"
+					data-testid="radio-seed"
+					disabled={radioBusy}
+					on:click={startRadio}
+				>
+					<Icon
+						name="radio"
+						size="1.1em"
+					/>
+					<span>Radio</span>
+				</button>
+			{/if}
 		</div>
 	{/if}
 </div>

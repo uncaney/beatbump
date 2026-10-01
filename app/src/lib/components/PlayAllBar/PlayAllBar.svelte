@@ -66,6 +66,7 @@
 	import { page } from "$app/stores";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { playAllContextFor } from "$lib/stores/list/playbackContext";
+	import { APIClient } from "$lib/api";
 
 	/** Rows to play (non-playable rows are ignored). */
 	export let tracks: any[] = [];
@@ -83,7 +84,20 @@
 	export { klass as class };
 
 	let busy = false;
+	let radioBusy = false;
 	let bar: HTMLElement | undefined;
+
+	// EQ1: "Radio" on Favoris (/library/saved, /favorites) and the local
+	// artist page (/artist/la-…) builds a targeted queue from local/related
+	// (seed=favorites|artist:<id>), context "Radio : <name>". No match (a
+	// YouTube artist page, any other route) -> no button.
+	function radioSeedFor(pathname: string | null | undefined): string | null {
+		const path = typeof pathname === "string" ? pathname : "";
+		if (/^\/library\/saved\/?$/.test(path) || /^\/favorites\/?$/.test(path)) return "favorites";
+		const m = path.match(/^\/(?:artist|channel)\/(la-[0-9a-f]+)\/?$/);
+		if (m) return `artist:${m[1]}`;
+		return null;
+	}
 
 	function pageHeading(): string {
 		// J16: fallback only; `.name` is also a card class and could come first.
@@ -95,6 +109,7 @@
 	$: playable = playableTracks(tracks);
 	$: count = typeof total === "number" && total > 0 ? total : playable.length;
 	$: label = `${count} titre${count > 1 ? "s" : ""}`;
+	$: radioSeed = radioSeedFor($page.url.pathname);
 
 	async function start(shuffle: boolean) {
 		if (busy) return;
@@ -113,6 +128,25 @@
 			await playTracks(list, { shuffle, context: ctx });
 		} finally {
 			busy = false;
+		}
+	}
+
+	async function startRadio() {
+		if (radioBusy || !radioSeed) return;
+		radioBusy = true;
+		try {
+			const res = await APIClient.fetch(`/api/v1/local/related?seed=${encodeURIComponent(radioSeed)}`);
+			if (!res.ok) return;
+			const data = await res.json();
+			const items = Array.isArray(data.items) ? data.items : [];
+			const name = typeof data.name === "string" && data.name ? data.name : pageHeading();
+			await playTracks(items, {
+				context: { kind: "radio", title: name, href: $page.url.pathname },
+			});
+		} catch (err) {
+			console.error("radio-seed: failed", err);
+		} finally {
+			radioBusy = false;
 		}
 	}
 </script>
@@ -153,6 +187,21 @@
 			class="pab-count"
 			data-testid="play-all-count">{label}</span
 		>
+		{#if radioSeed}
+			<button
+				type="button"
+				class="pab-btn btn-reset btn-secondary"
+				data-testid="radio-seed"
+				disabled={radioBusy}
+				on:click={startRadio}
+			>
+				<Icon
+					name="radio"
+					size="1.1em"
+				/>
+				<span>Radio</span>
+			</button>
+		{/if}
 		<slot />
 	</div>
 {/if}
