@@ -761,9 +761,24 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 					case 3: // MEDIA_ERR_DECODE: data arrived but the browser cannot decode it
 						err = new PlayerRequestError(0, "unplayable", "MEDIA_ERR_DECODE", "Format audio non supporté par ce navigateur");
 						break;
-					case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED: container/MIME rejected or 4xx/5xx on the source
+					case 4: {
+						// MEDIA_ERR_SRC_NOT_SUPPORTED: container/MIME rejected or 4xx/5xx on the source.
+						// The first play of a fresh browser context fails ~1 run in 8 with
+						// PIPELINE_ERROR_READ and succeeds on retry: re-resolve the source once
+						// per track before giving up (toast + guarded auto-skip).
+						const cur = SessionListService.$.value.mix?.[SessionListService.$.value.position];
+						const vid = cur?.videoId ? String(cur.videoId) : "";
+						if (vid && mediaRetriedFor !== vid) {
+							mediaRetriedFor = vid;
+							console.warn("[player] source read error, retrying once", vid, message);
+							setTimeout(() => {
+								void getSrc(vid, cur?.playlistId, undefined, true).catch(() => {});
+							}, 400);
+							return;
+						}
 						err = new PlayerRequestError(0, "unplayable", "MEDIA_ERR_SRC_NOT_SUPPORTED", "Source audio illisible");
 						break;
+					}
 					default:
 						err = new PlayerRequestError(0, "unknown", "MEDIA_ERR_" + String(code), message);
 				}
@@ -993,6 +1008,9 @@ async function fetchPlayerJson(videoId?: string, playlistId?: string, params?: s
 	}
 	return err;
 }
+
+// One automatic source reload per track on a media read error (see the error handler).
+let mediaRetriedFor = "";
 
 // Auto-skip guard: skip to the next track on a failure, but never chain skips
 // (a dead backend would otherwise race through the whole queue). The streak is
