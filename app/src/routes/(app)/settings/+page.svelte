@@ -184,7 +184,7 @@
 					<button
 						type="button"
 						id="pwa-install"
-						class="btn-reset btn"
+						class="btn-reset btn-secondary"
 						aria-describedby="pwa-install-desc"
 						disabled={installing}
 						on:click={install}
@@ -209,7 +209,7 @@
 					<span class="help">Taille de la bibliothèque, version, service worker, stockage persistant</span>
 				</label>
 				<a
-					class="btn"
+					class="btn-secondary"
 					href="/about"
 					data-testid="settings-about">À propos / État</a
 				>
@@ -352,39 +352,4 @@
 		min-height: max(2.75rem, 44px);
 	}
 
-	/* Same button as Settings > Offline (OfflineSettings.svelte .btn). */
-	.btn {
-		all: unset;
-		box-sizing: border-box;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		/* U11-6 (audit UX v11): 2.75rem alone is 33px at the 12px mobile root. */
-		min-height: max(2.75rem, 44px);
-		min-width: max(2.75rem, 44px);
-		padding: 0.5rem 1rem;
-		border-radius: 0.5rem;
-		font: inherit;
-		font-weight: 500;
-		color: #f2f2f2 !important;
-		background: rgb(255 255 255 / 10%);
-		cursor: pointer;
-		transition: background-color 0.15s;
-
-		&:hover:not(:disabled) {
-			background: rgb(255 255 255 / 18%);
-			color: #fff !important;
-		}
-		&:focus-visible {
-			outline: 2px solid #fff;
-			outline-offset: 2px;
-		}
-		&:disabled {
-			opacity: 1;
-			color: #9a9a9a !important;
-			background: rgb(44, 44, 44) !important;
-			border: 1px solid rgba(255, 255, 255, 0.25);
-			cursor: not-allowed;
-		}
-	}
 </style>

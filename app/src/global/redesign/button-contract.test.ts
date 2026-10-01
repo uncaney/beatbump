@@ -68,9 +68,7 @@ const LEGACY: Record<string, number> = {
  * Button-like `<a>` budget of the files that predate the contract (same
  * ratchet as LEGACY). Keys are POSIX paths relative to `src/`.
  */
-const LEGACY_LINKS: Record<string, number> = {
-	"routes/(app)/settings/+page.svelte": 1,
-};
+const LEGACY_LINKS: Record<string, number> = {};
 
 function svelteFiles(dir: string, out: string[] = []): string[] {
 	for (const name of readdirSync(dir)) {
