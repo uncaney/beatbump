@@ -338,6 +338,13 @@
 			content: "";
 			inset: 0;
 		}
+		// Audit UX v12 U12-17: the hero cover started at y = 0, under the
+		// translucent fixed nav ("Random Access Memories" behind Accueil /
+		// Explorer). A solid band of the nav height on top: the absolute cover
+		// and gradient are laid out in the padding box, so they start below it.
+		&:not(.compact) {
+			border-top: var(--top-bar-height, 56px) solid var(--base-bg);
+		}
 		// Audit v7 TOP 7: no hero image -> no image band; the initials badge
 		// and the name make the header (name at y < 200 on phones).
 		// Audit v8 TOP 4: the hero variant passes under the fixed nav with its
