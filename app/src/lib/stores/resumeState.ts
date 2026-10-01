@@ -287,7 +287,15 @@ async function doRestore(opts: { autoplay?: boolean }): Promise<boolean> {
 	AudioPlayer.primeResume(resumeSeekTime(state), state.duration, !!opts.autoplay, track.videoId);
 	let res: Awaited<ReturnType<typeof getSrc>> | undefined;
 	try {
-		res = await getSrc(track.videoId, track.playlistId, undefined, true);
+		// I5: a paused startup restore loads in prefetch mode (no server
+		// acquisition, no SW caching) until the first play.
+		res = await getSrc(
+			track.videoId,
+			track.playlistId,
+			undefined,
+			true,
+			opts.autoplay ? undefined : { prefetch: true, deferToPlay: true },
+		);
 	} catch {
 		res = undefined;
 	}

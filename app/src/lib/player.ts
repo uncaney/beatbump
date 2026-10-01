@@ -326,6 +326,9 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	// `autoplay`, stays paused (the restored queue waits for the user).
 	// I2: `videoId` = the restored track; a source for any other track clears it.
 	private _resumeAt: { time: number; duration: number; autoplay: boolean; videoId?: string } | null = null;
+	// I5: work a startup restore (prefetch load) postpones to the first play:
+	// the normal player.json (server acquisition) and the SW audio caching.
+	private _onFirstPlay: { videoId: string; run: () => void } | null = null;
 	private playerKind: "hls" | "html5" = "html5";
 	private declare unsubscriber: () => void;
 	constructor() {
@@ -475,6 +478,15 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 
 	public play() {
 		this._sleepHold = false;
+		const deferred = this._onFirstPlay;
+		this._onFirstPlay = null;
+		if (deferred) {
+			try {
+				deferred.run();
+			} catch {
+				/* never block playback */
+			}
+		}
 		this.paused.set(false);
 		// A restored (paused) track: the user asked to play, keep the seek.
 		if (this._resumeAt) this._resumeAt.autoplay = true;
@@ -575,6 +587,12 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	/** I2: a source for `videoId` is about to load; keep the restore only for its own track. */
 	public sourceLoading(videoId?: string) {
 		if (!resumeKeptFor(this._resumeAt, videoId)) this.clearResume();
+		if (this._onFirstPlay && videoId && this._onFirstPlay.videoId !== videoId) this._onFirstPlay = null;
+	}
+
+	/** I5: run `run` at the first play() of `videoId` (dropped if another track loads). */
+	public deferUntilPlay(videoId: string, run: () => void) {
+		this._onFirstPlay = { videoId, run };
 	}
 
 	/** Used when sync'ing a 'leech' tab */
@@ -1002,7 +1020,7 @@ export const getSrc = async (
 	playlistId?: string,
 	params?: string,
 	shouldAutoplay = true,
-	opts?: { prefetch?: boolean; bypassCache?: boolean },
+	opts?: { prefetch?: boolean; bypassCache?: boolean; deferToPlay?: boolean },
 ): Promise<
 	| {
 		body: ResponseBody | null;
@@ -1044,7 +1062,20 @@ export const getSrc = async (
 		dash: false,
 	});
 
-	const src = setTrack(formats, shouldAutoplay, currentTrack || (videoId ? { videoId } : undefined));
+	const track = currentTrack || (videoId ? { videoId } : undefined);
+	if (opts?.deferToPlay && prefetch && shouldAutoplay && videoId) {
+		// I5 startup restore: the source is loaded (paused) from a prefetch
+		// player.json; the normal load (acquisition) and the SW caching only
+		// happen if the user actually plays it.
+		const src = setTrack(formats, shouldAutoplay, track, true);
+		const url = src.body?.url;
+		AudioPlayer.deferUntilPlay(videoId, () => {
+			void fetchPlayerJson(videoId, playlistId, params, 1, false).catch(() => {});
+			autoCache(track, url);
+		});
+		return src;
+	}
+	const src = setTrack(formats, shouldAutoplay, track);
 	return src;
 }
 
@@ -1064,7 +1095,7 @@ function autoCache(track: { videoId?: string } | undefined, url: string | undefi
 	}
 }
 
-function setTrack(formats: PlayerFormats, shouldAutoplay: boolean, track?: { videoId?: string }) {
+function setTrack(formats: PlayerFormats, shouldAutoplay: boolean, track?: { videoId?: string }, deferAutoCache = false) {
 	let format = undefined;
 	if (userSettings?.playback?.Stream === "HLS") {
 		format = { original_url: formats?.hls || "", url: formats.hls || "" };
@@ -1079,7 +1110,7 @@ function setTrack(formats: PlayerFormats, shouldAutoplay: boolean, track?: { vid
 			url: format.url,
 			duration: formats.duration
 		}, track?.videoId);
-		autoCache(track, format.url);
+		if (!deferAutoCache) autoCache(track, format.url);
 	}
 	return {
 		body: format
