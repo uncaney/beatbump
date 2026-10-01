@@ -213,3 +213,14 @@ export async function keepItemOffline(item: any): Promise<KeepResult | null> {
 	notify(s.text, s.type);
 	return r;
 }
+
+/**
+ * V1 row state: "ready" when the track is cached (badge), "unavailable" when
+ * the device is offline and the track is not cached (muted, click = toast),
+ * "" otherwise (not a track, or online and not cached).
+ */
+export function rowOfflineState(videoId: string | null | undefined, cached: Set<string> | null | undefined, offline: boolean): "ready" | "unavailable" | "" {
+	if (!videoId) return "";
+	if (cached && cached.has(videoId)) return "ready";
+	return offline ? "unavailable" : "";
+}

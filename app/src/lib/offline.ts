@@ -9,7 +9,7 @@
 //   -> cacheTrackOffline(item, url)
 import { APIClient, PREFETCH_INIT } from "$lib/api";
 import { settings } from "$lib/stores/settings";
-import { get } from "svelte/store";
+import { derived, get, readable, writable, type Readable } from "svelte/store";
 
 const KEY = "ytm-offline-tracks";
 const ACK_TIMEOUT_MS = 120_000; // a full track fetch on a slow link can take a while
@@ -39,7 +39,42 @@ function write(list: OfflineTrack[]) {
 	} catch {
 		/* quota / private mode: the SW cache still works, only the listing is lost */
 	}
+	offlineTracksStore.set(list);
 }
+
+// V1: the "ytm-offline-tracks" list as a store (every write() above, plus
+// other tabs through the storage event), and the derived set of videoIds
+// that are really cached, for the "Prêt hors-ligne" badge on rows / cards.
+const offlineTracksStore = writable<OfflineTrack[]>([], (set) => {
+	if (typeof window === "undefined") return;
+	set(read());
+	const on = (e: StorageEvent) => {
+		if (e.key === KEY || e.key === null) set(read());
+	};
+	window.addEventListener("storage", on);
+	return () => window.removeEventListener("storage", on);
+});
+export const offlineTracks: Readable<OfflineTrack[]> = { subscribe: offlineTracksStore.subscribe };
+/** videoIds whose audio is in the SW cache per the local list (`_cached === true`). */
+export const cachedIds: Readable<Set<string>> = derived(offlineTracksStore, (list) => {
+	const ids = new Set<string>();
+	for (const t of list) if (t && t._cached === true && t.videoId) ids.add(t.videoId);
+	return ids;
+});
+/** deviceOffline() as a store: follows the window online / offline events. */
+export const networkOffline: Readable<boolean> = readable(false, (set) => {
+	if (typeof window === "undefined") return;
+	const upd = () => set(deviceOffline());
+	upd();
+	window.addEventListener("online", upd);
+	window.addEventListener("offline", upd);
+	return () => {
+		window.removeEventListener("online", upd);
+		window.removeEventListener("offline", upd);
+	};
+});
+/** Toast for a click on a row that cannot play without a connection. */
+export const UNAVAILABLE_OFFLINE_MSG = "Indisponible hors connexion";
 function patch(videoId: string, fields: Partial<OfflineTrack>) {
 	const list = read();
 	const i = list.findIndex((t) => t.videoId === videoId);

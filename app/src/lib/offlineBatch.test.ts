@@ -10,7 +10,7 @@ vi.mock("$lib/offline", () => ({
 	pinOffline: vi.fn(),
 }));
 
-import { keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, type KeepDeps } from "./offlineBatch";
+import { keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, type KeepDeps } from "./offlineBatch";
 
 const MB = 1024 * 1024;
 const tr = (id: string, extra: Record<string, unknown> = {}) => ({ videoId: id, title: "T " + id, ...extra });
@@ -131,5 +131,20 @@ describe("labels", () => {
 		expect(s.type).toBe("error");
 		expect(s.text).toBe("2 prêts sur 5 · 2 refusés : quota atteint, augmente-le dans Réglages · 1 impossible à télécharger");
 		expect(keepSummary({ ready: 2, failed: 0, refused: 0, total: 5, cancelled: true }).text).toBe("Annulé : 2 sur 5 prêts hors-ligne");
+	});
+});
+
+describe("rowOfflineState", () => {
+	const cached = new Set(["a"]);
+	it("ready when cached, online or not", () => {
+		expect(rowOfflineState("a", cached, false)).toBe("ready");
+		expect(rowOfflineState("a", cached, true)).toBe("ready");
+	});
+	it("unavailable only offline and not cached", () => {
+		expect(rowOfflineState("b", cached, true)).toBe("unavailable");
+		expect(rowOfflineState("b", cached, false)).toBe("");
+	});
+	it("no videoId (album, artist): nothing", () => {
+		expect(rowOfflineState(undefined, cached, true)).toBe("");
 	});
 });
