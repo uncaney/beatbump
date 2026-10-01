@@ -155,6 +155,8 @@ func newServer() *echo.Echo {
 	// c39b B6-1: album of the day (same for every profile, memoised per UTC date).
 	e.GET("/api/v1/local/album-of-day", api.LocalAlbumOfDayHandler)
 	e.GET("/api/v1/local/album-of-the-day", api.LocalAlbumOfDayHandler)
+	// c41b B6-19: possible duplicate albums (read-only report, memoised 10 min).
+	e.GET("/api/v1/local/duplicates", api.LocalDuplicatesHandler)
 
 	// Per-profile server state: favorites, follows, playlists (named or anonymous cookie)
 	me := e.Group("/api/v1/me")
