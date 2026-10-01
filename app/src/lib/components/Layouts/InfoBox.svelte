@@ -198,7 +198,9 @@
 			{:else}
 				<Button
 					on:click={action}
-					class={style ?? ""}
+					class={`${style ?? ""} ${
+						i === buttons.length - 1 || type === "outlined" ? "btn-reset" : ""
+					}`.trim()}
 					outlined={i === buttons.length - 1 || type === "outlined"}
 					icon={typeof icon === "string"
 						? { name: icon }

@@ -618,6 +618,7 @@
 						>
 							<button
 								type="button"
+								class="btn-reset"
 								class:active={$mode === "video"}
 								aria-pressed={$mode === "video"}
 								title="Mode vidéo"
@@ -626,6 +627,7 @@
 								}}>Vidéo</button
 							><button
 								type="button"
+								class="btn-reset"
 								class:active={$mode === "audio"}
 								aria-pressed={$mode === "audio"}
 								title="Mode audio"
@@ -971,7 +973,7 @@
 									{/if}
 										<button
 											type="button"
-											class="queue-clear"
+											class="queue-clear btn-reset"
 											data-testid="queue-clear"
 											aria-label="Vider la file d'attente (garder le morceau en cours)"
 											title="Vider la file d'attente (garder le morceau en cours)"
