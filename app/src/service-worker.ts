@@ -618,7 +618,9 @@ async function cacheAudio(rawUrl: string, videoId: string, pinNow = false): Prom
 	if (videoId) {
 		const old = await getMeta(videoId);
 		if (old) {
-			pinned = old.pinned === true;
+			// J9: a stale meta (URL rotated, entry evicted but meta kept) must
+			// never clear the pin the request (pinNow) or the previous entry carried.
+			pinned = pinNow || old.pinned === true;
 			try {
 				const oldResp = await c.match(old.url);
 				if (oldResp && oldResp.headers.get(H_PINNED) === "1") pinned = true;
