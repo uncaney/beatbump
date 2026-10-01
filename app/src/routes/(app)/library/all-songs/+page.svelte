@@ -14,16 +14,16 @@
 {#key extra}
 	<Browse
 		kind="songs"
-		title="Songs"
+		title="Titres"
 		{subtitle}
 		extraParams={extra}
 		sortOptions={[
-			{ label: "Recently added", value: "dateAdded:desc" },
-			{ label: "Title A–Z", value: "title:asc" },
-			{ label: "Artist A–Z", value: "artist:asc" },
+			{ label: "Ajoutés récemment", value: "dateAdded:desc" },
+			{ label: "Titre A–Z", value: "title:asc" },
+			{ label: "Artiste A–Z", value: "artist:asc" },
 			{ label: "Album A–Z", value: "album:asc" },
-			{ label: "Longest", value: "durationSec:desc" },
-			{ label: "Newest year", value: "year:desc" },
+			{ label: "Plus longs", value: "durationSec:desc" },
+			{ label: "Année, plus récentes", value: "year:desc" },
 		]}
 	/>
 {/key}
