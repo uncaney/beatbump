@@ -475,8 +475,10 @@
 					/>
 				</button>
 			{/if}
+			<!-- Lyrics + download are hidden from the mini-bar under 576px (both live
+			     in the fullscreen top bar) so the title column keeps >= 100px. -->
 			<a
-				class="player-btn no-style"
+				class="player-btn no-style mini-secondary"
 				href="/lyrics"
 				aria-label="Paroles"
 				title="Paroles"
@@ -498,7 +500,7 @@
 			</a>
 			<button
 				type="button"
-				class="player-btn no-style"
+				class="player-btn no-style mini-secondary"
 				aria-label="Télécharger sur l'appareil"
 				title="Télécharger sur l'appareil"
 				on:click|stopPropagation={dlDevice}
@@ -585,6 +587,8 @@
 		line-height: 1.3;
 		font-size: 0.95em;
 		gap: 0.95em;
+		// grid item: allow the text column to shrink instead of wrapping mid-word
+		min-width: 0;
 
 		@media screen and (min-width: 720px) {
 			line-height: 1.4;
@@ -595,29 +599,29 @@
 		> .container {
 			visibility: visible;
 			display: flex;
-
-			display: -webkit-box;
-			-webkit-line-clamp: 2;
-			-webkit-box-orient: vertical;
-			line-clamp: 2;
+			flex-direction: column;
+			flex: 1 1 auto;
+			min-width: 0;
 			overflow: hidden;
-			// }
 		}
 	}
-	:where(.now-playing) title {
+	// (was `:where(.now-playing) title`, a non-existent element: nothing applied
+	// and the title broke into "Aerodyna / mic" on mobile)
+	.now-playing-title {
 		display: block;
 		white-space: nowrap;
 		text-overflow: ellipsis;
-		max-width: calc(100% - 0.2em);
+		max-width: 100%;
 		overflow: hidden;
-
-		font-size: 12px;
-
-		display: -webkit-box;
-		-webkit-line-clamp: 1;
-		-webkit-box-orient: vertical;
-		line-clamp: 1;
-		overflow: hidden;
+		word-break: normal;
+		overflow-wrap: normal;
+	}
+	// < 576px: lyrics + download leave the mini-bar (available in the fullscreen)
+	.mini-secondary {
+		@media screen and (max-width: 575.75px) {
+			display: none !important;
+			visibility: hidden !important;
+		}
 	}
 	.now-playing-artist {
 		display: block;
