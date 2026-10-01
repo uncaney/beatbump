@@ -20,10 +20,33 @@ export interface ClientLogPayload {
 
 /** Server limit is 4 KB per body; the fields are clipped well under it. */
 export const CLIENT_LOG_MAX_BODY = 4 * 1024;
-const MAX_MESSAGE = 1000;
+/** L8-17: the server keeps 500 characters of message; clip here too. */
+export const CLIENT_LOG_MAX_MESSAGE = 500;
+const MAX_MESSAGE = CLIENT_LOG_MAX_MESSAGE;
 const MAX_STACK = 2000;
-const MAX_URL = 500;
+const MAX_URL = 256;
 const MAX_UA = 250;
+
+/**
+ * L8-17: only the pathname of the page is reported, never the query string
+ * (search terms, `?id=`) or the fragment. Accepts a Location-like object or
+ * a URL string; "" when nothing usable.
+ */
+export function pageLocationPath(loc: unknown): string {
+	try {
+		if (!loc) return "";
+		if (typeof loc === "string") {
+			const u = new URL(loc, "https://music.invalid/");
+			return u.pathname || "";
+		}
+		const l = loc as { pathname?: unknown; href?: unknown };
+		if (typeof l.pathname === "string") return l.pathname;
+		if (typeof l.href === "string") return pageLocationPath(l.href);
+	} catch {
+		/* unparsable */
+	}
+	return "";
+}
 
 export const CLIENT_LOG_PATH = "/api/v1/client-log";
 
@@ -128,7 +151,7 @@ export function reportClientError(kind: ClientLogKind | string, message: unknown
 		if (typeof window === "undefined") return false;
 		const payload = buildClientLogPayload(kind, message, {
 			...extra,
-			url: extra.url ?? window.location?.href,
+			url: pageLocationPath(extra.url ?? window.location),
 			ua: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
 		});
 		if (!payload) return false;

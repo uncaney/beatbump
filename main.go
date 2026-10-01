@@ -168,6 +168,8 @@ func newServer() *echo.Echo {
 	// ST2 "A propos / Etat": library size + build version (no profile data).
 	e.GET("/api/v1/stats/library", api.LibraryStatsHandler)
 	// ST3: client error reports, in-memory ring of 500 (no profile data).
+	// L8-2: POST rate limited per IP (429), GET operator only (Bearer
+	// YTM_ADMIN_TOKEN: 401, or 404 while the variable is unset).
 	e.POST("/api/v1/client-log", api.ClientLogPostHandler)
 	e.GET("/api/v1/client-log", api.ClientLogGetHandler)
 
