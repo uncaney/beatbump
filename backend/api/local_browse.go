@@ -34,10 +34,13 @@ func pag(c echo.Context, defLimit int) (int, int) {
 	return off, lim
 }
 
-// "field:dir" validated against an allow-list; falls back to def when invalid.
-func validSort(raw string, allow map[string]bool, def string) string {
+// "field[:dir]" validated against an allow-list. Empty -> def. A field outside
+// the allow-list or a direction other than asc/desc is reported (ok=false) so
+// the handler answers 400 instead of silently sorting by the default (audit
+// v3 G18).
+func validSort(raw string, allow map[string]bool, def string) (string, bool) {
 	if raw == "" {
-		return def
+		return def, true
 	}
 	parts := strings.SplitN(raw, ":", 2)
 	field := parts[0]
@@ -46,12 +49,17 @@ func validSort(raw string, allow map[string]bool, def string) string {
 		dir = parts[1]
 	}
 	if dir != "asc" && dir != "desc" {
-		dir = "asc"
+		return "", false
 	}
 	if !allow[field] {
-		return def
+		return "", false
 	}
-	return field + ":" + dir
+	return field + ":" + dir, true
+}
+
+// badSort is the 400 answer for an unknown ?sort= value.
+func badSort(c echo.Context, raw string) error {
+	return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": "unknown sort: " + raw})
 }
 
 func meiliBrowse(index string, payload map[string]interface{}) ([]map[string]interface{}, int) {
@@ -126,7 +134,10 @@ func artistCovers(arts []map[string]interface{}) map[string]string {
 
 func LocalArtistsHandler(c echo.Context) error {
 	off, lim := pag(c, 60)
-	sortBy := validSort(c.QueryParam("sort"), artistSortable, "name:asc")
+	sortBy, ok := validSort(c.QueryParam("sort"), artistSortable, "name:asc")
+	if !ok {
+		return badSort(c, c.QueryParam("sort"))
+	}
 	hits, total := meiliBrowse("artists", map[string]interface{}{
 		"q": c.QueryParam("q"), "offset": off, "limit": lim, "sort": []string{sortBy},
 		"attributesToRetrieve": []string{"id", "name", "albumCount", "trackCount"},
@@ -143,7 +154,10 @@ func LocalArtistsHandler(c echo.Context) error {
 
 func LocalAlbumsHandler(c echo.Context) error {
 	off, lim := pag(c, 60)
-	sortBy := validSort(c.QueryParam("sort"), albumSortable, "dateAdded:desc")
+	sortBy, ok := validSort(c.QueryParam("sort"), albumSortable, "dateAdded:desc")
+	if !ok {
+		return badSort(c, c.QueryParam("sort"))
+	}
 	payload := map[string]interface{}{
 		"q": c.QueryParam("q"), "offset": off, "limit": lim, "sort": []string{sortBy},
 		"attributesToRetrieve": []string{"id", "album", "albumArtist", "artistId", "year", "coverLid", "trackCount"},
@@ -163,7 +177,10 @@ func LocalAlbumsHandler(c echo.Context) error {
 
 func LocalSongsHandler(c echo.Context) error {
 	off, lim := pag(c, 60)
-	sortBy := validSort(c.QueryParam("sort"), trackSortable, "dateAdded:desc")
+	sortBy, ok := validSort(c.QueryParam("sort"), trackSortable, "dateAdded:desc")
+	if !ok {
+		return badSort(c, c.QueryParam("sort"))
+	}
 	filters := []string{}
 	if g := c.QueryParam("genre"); g != "" {
 		filters = append(filters, "genre = \""+escapeMeili(g)+"\"")
