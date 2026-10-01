@@ -301,7 +301,9 @@ self.addEventListener("fetch", (event) => {
 				const c = await caches.open(API_CACHE);
 				try {
 					const res = await fetch(req);
-					if (res.ok) c.put(req, res.clone());
+					// Only JSON is an API answer worth replaying offline: an HTML shell
+					// (SPA fallback for an unknown path) must never be cached as data.
+					if (res.ok && /json/i.test(res.headers.get("Content-Type") || "")) c.put(req, res.clone());
 					return res;
 				} catch {
 					return (await c.match(req)) || new Response('{"offline":true}', { headers: { "Content-Type": "application/json" } });
