@@ -402,12 +402,33 @@ func localRadio(seed map[string]interface{}, seedLid string) []Item {
 
 // randomLibrarySample returns localSongItems from a random library window
 // (cold-start fallback for the mix when there's no listening history yet).
+// randomLibrarySample returns n tracks spread over many albums: the index is sorted
+// by dateAdded, so one contiguous window of 40 tracks covered 3 or 4 albums and the
+// "Pour toi" row (one card per album) ended up with 3 cards (audit UX v5 regression 1).
+// We read small windows at `sampleWindows` random offsets instead.
 func randomLibrarySample(n int) []IListItemRenderer {
-	off := rand.Intn(40000)
-	hits := meiliSearchIndex("tracks", map[string]interface{}{
-		"q": "", "offset": off, "limit": n, "sort": []string{"dateAdded:desc"},
-		"attributesToRetrieve": []string{"lid", "title", "artist", "albumArtist", "track", "durationSec", "album"},
-	})
+	const perWindow = 4
+	windows := n / perWindow
+	if windows < 1 {
+		windows = 1
+	}
+	seen := map[string]bool{}
+	var hits []map[string]interface{}
+	for w := 0; w < windows && len(hits) < n; w++ {
+		off := rand.Intn(40000)
+		page := meiliSearchIndex("tracks", map[string]interface{}{
+			"q": "", "offset": off, "limit": perWindow, "sort": []string{"dateAdded:desc"},
+			"attributesToRetrieve": []string{"lid", "title", "artist", "albumArtist", "track", "durationSec", "album"},
+		})
+		for _, h := range page {
+			lid := mstr(h, "lid")
+			if lid == "" || seen[lid] {
+				continue
+			}
+			seen[lid] = true
+			hits = append(hits, h)
+		}
+	}
 	return localSongItemsWithCovers(hits)
 }
 
