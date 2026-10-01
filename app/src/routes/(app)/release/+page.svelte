@@ -67,10 +67,11 @@
 		});
 	};
 
-	// UX7: one action row (InfoBox release-actions): "Tout lire" (play icon)
-	// then "Radio" (radio icon, aria-label "Album Radio"; only when YouTube
-	// gave an autoMixId), then Garder hors-ligne / Partager / ⋮. Short labels
-	// on desktop, icon-only with the aria-label on phones.
+	// UX7: one action row (InfoBox release-actions): "Tout lire" (play icon),
+	// Garder hors-ligne (slot), then "Radio" (radio icon, aria-label "Album
+	// Radio"; only when YouTube gave an autoMixId), Partager, ⋮ (U12-4: same
+	// order as a local album). Short labels on desktop, icon-only with the
+	// aria-label on phones ("Garder" stays written).
 	$: headerButtons = [
 		{ text: "Tout lire", label: "Tout lire", action: () => playAlbum(), icon: "play" },
 		...(hasAutoMix

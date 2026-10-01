@@ -238,15 +238,15 @@
 			class="button-group release-actions"
 			data-testid="release-actions"
 		>
+			<!-- U12-4: one order for YouTube and local albums: play, keep (slot),
+			     radio (YouTube "album-radio" or local "radio-seed"), share, ⋮. -->
 			{#each buttons as { type, icon, text, action, label }, i}
 				{@const name = iconName(icon)}
-				{#if type === "icon"}
-					<!-- ⋮ always last, after the slot / share buttons below. -->
-				{:else}
+				{#if i === 0 && type !== "icon"}
 					<button
 						type="button"
-						class="ra-btn {i === 0 ? 'btn-primary' : 'btn-secondary'}"
-						data-testid={i === 0 ? "release-play" : "album-radio"}
+						class="ra-btn btn-primary"
+						data-testid="release-play"
 						aria-label={label ?? text}
 						title={label ?? text}
 						on:click={action}
@@ -262,6 +262,27 @@
 				{/if}
 			{/each}
 			<slot name="actions" />
+			{#each buttons as { type, icon, text, action, label }, i}
+				{@const name = iconName(icon)}
+				{#if i > 0 && type !== "icon"}
+					<button
+						type="button"
+						class="ra-btn btn-secondary"
+						data-testid="album-radio"
+						aria-label={label ?? text}
+						title={label ?? text}
+						on:click={action}
+					>
+						{#if name}
+							<Icon
+								{name}
+								size="1.1em"
+							/>
+						{/if}
+						<span class="ra-lbl">{text}</span>
+					</button>
+				{/if}
+			{/each}
 			{#if localAlbumId}
 				<button
 					type="button"

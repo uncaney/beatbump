@@ -538,7 +538,6 @@
 		min-height: max(2.75rem, 44px);
 		padding: 0.25rem 0;
 		background: none;
-		border: 0;
 		color: inherit;
 		font: inherit;
 		text-align: left;

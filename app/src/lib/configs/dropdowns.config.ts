@@ -100,6 +100,7 @@ export type Icons =
 	| "volume"
 	| "list-video"
 	| "download"
+	| "pin"
 	| "dots"
 	| "trash"
 	| "refresh"
@@ -144,6 +145,7 @@ const DROPDOWN_ICONS: ReadonlyArray<Icons> = [
 	"list-music",
 	"list-video",
 	"download",
+	"pin",
 	"dots",
 	"trash",
 	"refresh",
@@ -209,7 +211,7 @@ export const DROPDOWN_ITEMS: Partial<{
 	// O8: download the track (or the album's tracks) then pin it.
 	"Garder hors-ligne": {
 		text: "Garder hors-ligne",
-		icon: "download",
+		icon: "pin",
 		action: () => { },
 	},
 	"Lyrics": {

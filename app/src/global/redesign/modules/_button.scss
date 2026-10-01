@@ -114,6 +114,15 @@ button:not(.icon-btn):where(:not(.btn-reset):not(.btn-primary):not(.btn-secondar
 	@extend %button-base;
 }
 
+// U12-2: `.btn-reset` opts out of the global rule above, which also dropped
+// its `border` reset, so the UA button border (2px outset, light grey) came
+// back on every reset button that did not restate one (all Mixes cards).
+// Zero specificity: any component rule or button-system class (.btn-secondary
+// keeps its 1px border) still wins; only the UA default is beaten.
+:where(.btn-reset) {
+	border: 0;
+}
+
 button.small {
 	@extend %button-base;
 	max-width: -webkit-fit-content;

@@ -371,7 +371,6 @@
 		border-radius: 999px;
 		color: inherit;
 		background: transparent;
-		border: 0;
 		cursor: pointer;
 		opacity: 0.8;
 		&:hover,
