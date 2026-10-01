@@ -84,3 +84,40 @@ function anchor<T>(mix: T[], position: number, next: T[]): number {
 	const idx = current === undefined ? -1 : next.indexOf(current);
 	return idx >= 0 ? idx : clamp(position, next.length);
 }
+
+/**
+ * Apply a session-list mix operation (H3): `append` (continuation) adds
+ * `items` after the queue, `set` replaces it. `position` is the cursor the
+ * caller means in the resulting, not yet deduplicated list (for `append`
+ * the current cursor, for `set` the requested one). With `dedupe` (Dedupe
+ * Automix ON, both ops) a videoId is kept once, first occurrence wins, except
+ * that the playing row always survives (an earlier copy of it is dropped
+ * instead), and the cursor is re-anchored on that row by identity, so the
+ * highlight and "next" never drift onto another track. Without `dedupe` the
+ * list is kept as is (duplicates included) and the cursor is unchanged.
+ * Never mutates its inputs.
+ */
+export function applyMixOp<T extends Row>(
+	mix: T[],
+	position: number,
+	op: "append" | "set",
+	items: T[],
+	dedupe: boolean,
+): { mix: T[]; position: number } {
+	const next = op === "append" ? [...mix, ...items] : items.slice();
+	if (!dedupe) return { mix: next, position };
+	const current = position >= 0 && position < next.length ? next[position] : undefined;
+	const currentId = current?.videoId;
+	const seen = new Set<string>();
+	const kept = next.filter((row) => {
+		if (row === current) return true;
+		const id = row?.videoId;
+		if (!id) return true;
+		if (id === currentId) return false; // the playing row is this videoId's copy
+		if (seen.has(id)) return false;
+		seen.add(id);
+		return true;
+	});
+	const idx = current === undefined ? -1 : kept.indexOf(current);
+	return { mix: kept, position: idx >= 0 ? idx : clamp(position, kept.length) };
+}

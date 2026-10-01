@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planInsert, planReorder, removeAt } from "./queueOps";
+import { applyMixOp, planInsert, planReorder, removeAt } from "./queueOps";
 
 const row = (videoId: string) => ({ videoId, title: "T " + videoId });
 const ids = (list: { videoId?: string }[]) => list.map((r) => r.videoId);
@@ -108,5 +108,45 @@ describe("planReorder (G1)", () => {
 		const q = [dup, row("B"), dup];
 		expect(planReorder(q, 1, [dup, dup, q[1]])!.position).toBe(2);
 		expect(planReorder(q, 1, [dup, q[1], q[1]])).toBeNull();
+	});
+});
+
+describe("applyMixOp (H3, Dedupe Automix)", () => {
+	it("set with dedupe ON drops later duplicates (initial queue)", () => {
+		const a = row("A");
+		const r = applyMixOp([], 0, "set", [a, row("B"), row("A")], true);
+		expect(ids(r.mix)).toEqual(["A", "B"]);
+		expect(r.mix[r.position]).toBe(a);
+	});
+	it("set with dedupe OFF keeps duplicates and the requested cursor", () => {
+		const r = applyMixOp([], 2, "set", [row("A"), row("B"), row("A")], false);
+		expect(ids(r.mix)).toEqual(["A", "B", "A"]);
+		expect(r.position).toBe(2);
+	});
+	it("append with dedupe OFF keeps duplicates (continuation respects the setting)", () => {
+		const mix = [row("A"), row("B")];
+		const r = applyMixOp(mix, 1, "append", [row("B"), row("C")], false);
+		expect(ids(r.mix)).toEqual(["A", "B", "B", "C"]);
+		expect(r.position).toBe(1);
+		expect(mix.length).toBe(2); // input untouched
+	});
+	it("append with dedupe ON re-anchors on the playing row by identity", () => {
+		const mix = [row("A"), row("B"), row("A"), row("C")];
+		const playing = mix[2];
+		const r = applyMixOp(mix, 2, "append", [row("D"), row("C")], true);
+		expect(r.mix[r.position]).toBe(playing);
+		expect(ids(r.mix)).toEqual(["B", "A", "C", "D"]);
+		expect(r.mix[r.position + 1].videoId).toBe("C"); // "next" is C, not skipped
+	});
+	it("append with dedupe ON, cursor before the duplicates: stays on the same row", () => {
+		const mix = [row("A"), row("B"), row("C")];
+		const r = applyMixOp(mix, 1, "append", [row("A"), row("D")], true);
+		expect(ids(r.mix)).toEqual(["A", "B", "C", "D"]);
+		expect(r.mix[r.position]).toBe(mix[1]);
+	});
+	it("out-of-range cursor and rows without videoId are tolerated", () => {
+		const r = applyMixOp([], 5, "set", [row("A"), {} as { videoId?: string }, row("A")], true);
+		expect(r.mix.length).toBe(2);
+		expect(r.position).toBe(1);
 	});
 });
