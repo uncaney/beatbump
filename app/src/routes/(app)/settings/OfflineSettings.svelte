@@ -480,20 +480,29 @@
 		border-radius: 0.5rem;
 		font: inherit;
 		font-weight: 500;
-		color: #f2f2f2;
+		/* The global %button-base forces `color: #0f0f0f !important`, which made
+		   "Re-sync list" 1.11:1 on this translucent background (audit 1.10).
+		   #f2f2f2 on rgb(255 255 255 / 10%) over #121212 (= #2a2a2a) = 11.7:1. */
+		color: #f2f2f2 !important;
 		background: rgb(255 255 255 / 10%);
 		cursor: pointer;
 		transition: background-color 0.15s;
 
 		&:hover:not(:disabled) {
 			background: rgb(255 255 255 / 18%);
+			color: #fff !important;
 		}
 		&:focus-visible {
 			outline: 2px solid #fff;
 			outline-offset: 2px;
 		}
+		/* Disabled: inherit the shared readable style (global _button.scss):
+		   #9a9a9a on #2c2c2c = 4.96:1, no opacity stacking. */
 		&:disabled {
-			opacity: 0.5;
+			opacity: 1;
+			color: #9a9a9a !important;
+			background: rgb(44, 44, 44) !important;
+			border: 1px solid rgba(255, 255, 255, 0.25);
 			cursor: not-allowed;
 		}
 		&.danger {

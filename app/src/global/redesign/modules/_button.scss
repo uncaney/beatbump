@@ -66,14 +66,23 @@ $focus-color: #1c1c1c;
 		text-decoration: none;
 		cursor: pointer;
 	}
+	// Disabled / inactive: readable on dark backgrounds (audit 2.3, TOP 10 #3).
+	// #9a9a9a on #2c2c2c = 4.96:1, on #121212 = 6.66:1, on #000 = 7.46:1.
+	// No opacity stacking: components used to add `opacity: .5` on top of the
+	// #979797 text, which brought "Sign in" / "Clear offline cache" to 2.27:1.
 	&:disabled,
+	&[aria-disabled="true"],
 	.disabled {
 		background: rgb(44, 44, 44) !important;
-		color: #979797 !important;
+		color: #9a9a9a !important;
+		opacity: 1 !important;
 		cursor: not-allowed;
-		border-color: #444;
+		border-color: rgba(255, 255, 255, 0.25) !important;
+		box-shadow: none;
 		&:hover {
 			background: rgb(44, 44, 44) !important;
+			color: #9a9a9a !important;
+			border-color: rgba(255, 255, 255, 0.25) !important;
 		}
 	}
 	&:hover:active,
