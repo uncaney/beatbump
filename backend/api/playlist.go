@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+
 	"github.com/labstack/echo/v4"
 )
 
@@ -44,11 +46,36 @@ type PlaylistAPIResponse struct {
 	Header                map[string]interface{} `json:"header"`
 }
 
+// playlistBrowsePrefixes are the playlist id families YouTube Music exposes to
+// the client without the "VL" browse prefix (shared links, next.json playlistId,
+// album OLAK ids). The browse endpoint only accepts the VL-prefixed form.
+var playlistBrowsePrefixes = []string{"PL", "OLAK", "RDCLAK"}
+
+// normalizePlaylistBrowseID maps a playlist id to the browse id the upstream
+// expects: "PL…", "OLAK…" and "RDCLAK…" get the "VL" prefix, ids already
+// prefixed (or of another family) are returned untouched; "" stays "".
+func normalizePlaylistBrowseID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.HasPrefix(id, "VL") {
+		return id
+	}
+	for _, p := range playlistBrowsePrefixes {
+		if strings.HasPrefix(id, p) {
+			return "VL" + id
+		}
+	}
+	return id
+}
+
 func PlaylistEndpointHandler(c echo.Context) error {
 	query := c.Request().URL.Query()
-	browseID := query.Get("list")
+	browseID := normalizePlaylistBrowseID(query.Get("list"))
 	itct := query.Get("itct")
 	ctoken := query.Get("ctoken")
+
+	if browseID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": "missing list parameter"})
+	}
 
 	r, err := GetPlaylist(browseID, ctoken, itct)
 	if err != nil {
@@ -61,7 +88,7 @@ func GetPlaylist(browseID string, ctoken string, itct string) (PlaylistAPIRespon
 	var responseBytes []byte
 	var err error
 
-	if ctoken != ""  {
+	if ctoken != "" {
 		responseBytes, err = api.Browse(browseID, api.PageType_MusicPageTypePlaylist, "", nil, &itct, &ctoken, api.WebMusic)
 	} else {
 		responseBytes, err = api.Browse(browseID, api.PageType_MusicPageTypePlaylist, "", nil, nil, nil, api.WebMusic)
@@ -132,7 +159,7 @@ func parsePlaylist(playlistResponse _youtube.PlaylistResponse) PlaylistAPIRespon
 
 	if musicPlaylistShelfRenderer != nil {
 		tracks := []IListItemRenderer{}
-		
+
 		for _, musicResponsiveListItemRenderer := range musicPlaylistShelfRenderer.Contents {
 			if musicResponsiveListItemRenderer.ContinuationItemRenderer != nil {
 				continuation = musicResponsiveListItemRenderer.ContinuationItemRenderer
