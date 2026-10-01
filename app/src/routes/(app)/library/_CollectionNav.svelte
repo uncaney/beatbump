@@ -36,7 +36,9 @@
 		return () => ro?.disconnect();
 	});
 	// Pages without a chip of their own highlight the chip they belong to.
-	const ALIAS: Record<string, string> = { genres: "mixes", "my-playlists": "playlists" };
+	// U12-5: Genres highlights nothing (it used to light "Mixes", which read
+	// as being on the Mixes page).
+	const ALIAS: Record<string, string> = { "my-playlists": "playlists" };
 	$: current = ALIAS[active] ?? active;
 	const groups: { name: string; tabs: { key: string; label: string; href: string }[] }[] = [
 		{

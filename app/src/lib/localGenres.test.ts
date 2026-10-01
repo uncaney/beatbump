@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EXPLORE_GENRES_MAX, genreHref, localGenreLinks } from "./localGenres";
+import { EXPLORE_GENRES_MAX, genreHref, isJunkGenre, localGenreLinks, normalizeGenreList } from "./localGenres";
 
 describe("Explore local genres (c29b EQ2)", () => {
 	it("links to the all-songs genre view", () => {
@@ -31,5 +31,39 @@ describe("Explore local genres (c29b EQ2)", () => {
 		expect(localGenreLinks({})).toEqual([]);
 		expect(localGenreLinks(null)).toEqual([]);
 		expect(localGenreLinks("x")).toEqual([]);
+	});
+});
+
+describe("Genres page list (U12-5)", () => {
+	it("flags junk tag values", () => {
+		for (const j of ["", " ", "x", "_Soundtrack", "B.O.", "O.S.T", "b.o."]) expect(isJunkGenre(j)).toBe(true);
+		for (const ok of ["Rock", "R&B", "Hip Hop", "Électro"]) expect(isJunkGenre(ok)).toBe(false);
+	});
+
+	it("splits raw values, drops junk, merges case variants, sorts by count", () => {
+		const genres = [
+			{ name: "Acoustic Rock;Blues Rock;Rock", count: 3 },
+			{ name: "Rock", count: 10 },
+			{ name: "rock", count: 2 },
+			{ name: "_Soundtrack", count: 8 },
+			{ name: "B.O.", count: 6 },
+			{ name: "bossa nova/samba", count: 4 },
+			{ name: "", count: 1 },
+			null,
+		];
+		expect(normalizeGenreList({ genres })).toEqual([
+			{ name: "Rock", count: 15 },
+			{ name: "bossa nova", count: 4 },
+			{ name: "samba", count: 4 },
+			{ name: "Acoustic Rock", count: 3 },
+			{ name: "Blues Rock", count: 3 },
+		]);
+		expect(normalizeGenreList(null)).toEqual([]);
+		expect(normalizeGenreList({ genres: "x" })).toEqual([]);
+	});
+
+	it("keeps junk out of the Explore chips", () => {
+		const links = localGenreLinks({ genres: [{ name: "_Soundtrack", count: 9 }, { name: "B.O.", count: 8 }, { name: "Jazz", count: 1 }] });
+		expect(links.map((l) => l.name)).toEqual(["Jazz"]);
 	});
 });

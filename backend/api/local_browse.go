@@ -402,7 +402,8 @@ func LocalSongsHandler(c echo.Context) error {
 	}
 	filters := []string{}
 	if g := c.QueryParam("genre"); g != "" {
-		filters = append(filters, "genre = \""+escapeMeili(g)+"\"")
+		// U12-5: a clean genre name also matches the raw multi-valued tags holding it.
+		filters = append(filters, genreSongsFilter(g))
 	}
 	if ar := c.QueryParam("artist"); ar != "" {
 		filters = append(filters, "albumArtist = \""+escapeMeili(ar)+"\"")
@@ -423,13 +424,10 @@ func LocalSongsHandler(c echo.Context) error {
 
 // LocalGenresHandler returns genre values by track count (best-effort: the genre
 // field is free-text and frequently multi-valued/multilingual, capped to top-100
-// by Meili faceting). Good enough for a browse-by-genre entry point.
+// by Meili faceting). U12-5: raw values are split, cleaned and merged by
+// normalizeGenres (local_genres.go) before they reach /library/genres.
 func LocalGenresHandler(c echo.Context) error {
-	type genre struct {
-		Name  string `json:"name"`
-		Count int    `json:"count"`
-	}
-	genres := []genre{}
+	raw := map[string]int{}
 	out, err := meiliReq("POST", "/indexes/tracks/search", map[string]interface{}{
 		"q": c.QueryParam("q"), "limit": 0, "facets": []string{"genre"},
 	})
@@ -437,16 +435,12 @@ func LocalGenresHandler(c echo.Context) error {
 		if fd, ok := out["facetDistribution"].(map[string]interface{}); ok {
 			if g, ok := fd["genre"].(map[string]interface{}); ok {
 				for name, cnt := range g {
-					if strings.TrimSpace(name) == "" {
-						continue
-					}
-					genres = append(genres, genre{Name: name, Count: mintFloat(cnt)})
+					raw[name] = mintFloat(cnt)
 				}
 			}
 		}
 	}
-	sort.Slice(genres, func(i, j int) bool { return genres[i].Count > genres[j].Count })
-	return c.JSON(http.StatusOK, map[string]interface{}{"genres": genres})
+	return c.JSON(http.StatusOK, map[string]interface{}{"genres": normalizeGenres(raw)})
 }
 
 func mintFloat(v interface{}) int {

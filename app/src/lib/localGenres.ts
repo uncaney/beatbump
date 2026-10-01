@@ -11,6 +11,52 @@ export interface LocalGenreLink {
 
 export const EXPLORE_GENRES_MAX = 12;
 
+/**
+ * U12-5: junk tag values the backend (local/genres, normalizeGenres in
+ * backend/api/local_genres.go) already drops; kept here so an older server
+ * answer never lists them: empty, shorter than 2 characters, starting with
+ * "_" ("_Soundtrack"), dotted abbreviations ("B.O.", "O.S.T").
+ */
+export function isJunkGenre(name: string): boolean {
+	const n = name.trim();
+	return [...n].length < 2 || n.startsWith("_") || /^(\p{L}\.)+\p{L}?\.?$/u.test(n);
+}
+
+/** Split one raw tag value ("Rock;Blues Rock", "samba/bossa nova") into clean names. */
+export function splitGenreValue(raw: string): string[] {
+	return raw
+		.split(/[;/]/)
+		.map((p) => p.trim().replace(/\s+/g, " "))
+		.filter((p) => !isJunkGenre(p));
+}
+
+/**
+ * U12-5: the /library/genres list, tolerant of a raw answer: names split on
+ * ";" and "/", junk dropped, case variants merged (first spelling kept,
+ * counts summed), most tracks first then name.
+ */
+export function normalizeGenreList(resp: unknown): { name: string; count: number }[] {
+	if (!resp || typeof resp !== "object") return [];
+	const list = (resp as { genres?: unknown }).genres;
+	if (!Array.isArray(list)) return [];
+	const byKey = new Map<string, { name: string; count: number }>();
+	for (const g of list) {
+		const raw = typeof (g as { name?: unknown })?.name === "string" ? (g as { name: string }).name : "";
+		const c = Number((g as { count?: unknown })?.count);
+		const count = Number.isFinite(c) && c > 0 ? c : 0;
+		const seen = new Set<string>();
+		for (const name of splitGenreValue(raw)) {
+			const key = name.toLowerCase();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			const cur = byKey.get(key);
+			if (cur) cur.count += count;
+			else byKey.set(key, { name, count });
+		}
+	}
+	return [...byKey.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
 export function genreHref(name: string): string {
 	return `/library/all-songs?genre=${encodeURIComponent(name)}`;
 }
@@ -28,7 +74,7 @@ export function localGenreLinks(resp: unknown, max = EXPLORE_GENRES_MAX): LocalG
 	const out: LocalGenreLink[] = [];
 	for (const g of list) {
 		const name = typeof (g as { name?: unknown })?.name === "string" ? ((g as { name: string }).name).trim() : "";
-		if (!name) continue;
+		if (!name || isJunkGenre(name)) continue;
 		const key = name.toLowerCase();
 		if (seen.has(key)) continue;
 		seen.add(key);
