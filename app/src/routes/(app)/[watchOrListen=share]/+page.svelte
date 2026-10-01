@@ -1,13 +1,27 @@
 <script lang="ts">
 	import Icon from "$lib/components/Icon/Icon.svelte";
 	import Listing from "$lib/components/Item/Listing.svelte";
+	import { AudioPlayer } from "$lib/player";
 	import list from "$lib/stores/list";
 
 	import { SITE_ORIGIN_URL } from "$stores/url";
 	import type { PageData } from "./$types";
 
 	export let data: PageData;
-	const { videoId, playlist, thumbnails = [], title, related, error } = data;
+	const { videoId, playlist, thumbnails = [], title, related, error, startAt } = data;
+	// L10-2: the shared start time is applied once, on the first loadedmetadata of
+	// this track (the player's resume seek; ignored when t >= duration - 2).
+	let startApplied = false;
+	function startListening() {
+		if (startAt && !startApplied) {
+			startApplied = true;
+			AudioPlayer.primeResume(startAt, 0, true, videoId);
+		}
+		list.initAutoMixSession({
+			videoId,
+			playlistId: playlist ?? related?.currentMixId,
+		});
+	}
 	// Largest thumbnail, if any: an unplayable track has none (F13).
 	const cover = thumbnails.length ? thumbnails[thumbnails.length - 1] : undefined;
 	const pageTitle = error ? "Morceau indisponible" : title;
@@ -72,12 +86,8 @@
 		<div class="body">
 			<span class="title h4">{title}</span>
 			<button
-				on:click={() => {
-					list.initAutoMixSession({
-						videoId,
-						playlistId: playlist ?? related?.currentMixId,
-					});
-				}}
+				data-start-at={startAt ?? 0}
+				on:click={startListening}
 				><Icon
 					name="play"
 					size="1.25em"

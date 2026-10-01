@@ -65,6 +65,19 @@ export function parseStartTime(raw: string | null | undefined): number | undefin
 	return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/** Longest start offset honoured on /listen (12 h); beyond, the link starts at 0. */
+export const LISTEN_START_MAX = 12 * 3600;
+
+/**
+ * L10-2: start offset of a `/listen?id=…&t=…` page (the share target writes
+ * seconds; "1m30s" and `start=` are read too). undefined = start at 0. The
+ * player clamps again against the real duration (resume seek: `t < duration - 2`).
+ */
+export function listenStartTime(q: URLSearchParams): number | undefined {
+	const t = parseStartTime(q.get("t") ?? q.get("start"));
+	return t !== undefined && t <= LISTEN_START_MAX ? Math.floor(t) : undefined;
+}
+
 /** `v` / `list` / album / start-time out of one URL (watch?v=, youtu.be/<id>, /shorts/<id>, /listen?id=, playlist?list=, browse/MPREb_…). */
 export function idsFromUrl(raw: string): { v?: string; list?: string; album?: string; t?: number } {
 	const out: { v?: string; list?: string; album?: string; t?: number } = {};

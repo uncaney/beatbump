@@ -1,5 +1,6 @@
 import { redirect } from "@sveltejs/kit";
 import { APIClient, PREFETCH_INIT } from "$lib/api";
+import { listenStartTime } from "$lib/shareTarget";
 
 /** Structured error of /api/v1/player.json ({error, status, reason}). */
 export type ShareError = { kind: string; reason: string };
@@ -10,6 +11,8 @@ export const load = async ({ url }) => {
 		url.searchParams.get("v") ??
 		url.searchParams.get("videoId");
 	const playlist = url.searchParams.get("list") || undefined;
+	// L10-2: `t` of a shared link (share target: /listen?id=<id>&t=<s>).
+	const startAt = listenStartTime(url.searchParams);
 
 	if (!id) {
 		throw redirect(301, "/trending");
@@ -51,6 +54,7 @@ export const load = async ({ url }) => {
 		thumbnails,
 		videoId: videoId || id,
 		playlist,
+		startAt,
 		related: list,
 		data,
 		error,

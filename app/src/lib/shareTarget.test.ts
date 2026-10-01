@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { albumInfoFromBrowse, firstUrl, idsFromUrl, parseSharedLink, parseStartTime, readableShareText, resolveShareHref, urlsIn } from "./shareTarget";
+import { albumInfoFromBrowse, firstUrl, idsFromUrl, listenStartTime, parseSharedLink, parseStartTime, readableShareText, resolveShareHref, urlsIn } from "./shareTarget";
 
 describe("idsFromUrl", () => {
 	it("reads v= / list= from watch, music and playlist URLs", () => {
@@ -138,5 +138,22 @@ describe("UX10 owned album", () => {
 		const track = { kind: "track", id: "dQw4w9WgXcQ", href: "/listen?id=dQw4w9WgXcQ" } as const;
 		expect(await resolveShareHref(track, { albumInfo: async () => ((called = true), null), findOwned: async () => null })).toEqual({ href: track.href, owned: false });
 		expect(called).toBe(false);
+	});
+});
+
+describe("L10-2 listenStartTime (/listen?id=&t=)", () => {
+	const q = (s: string) => new URLSearchParams(s);
+	it("reads the seconds the share target writes, and the YouTube forms", () => {
+		expect(listenStartTime(q("id=dQw4w9WgXcQ&t=90"))).toBe(90);
+		expect(listenStartTime(q("id=dQw4w9WgXcQ&t=1m30s"))).toBe(90);
+		expect(listenStartTime(q("id=dQw4w9WgXcQ&start=30"))).toBe(30);
+	});
+	it("starts at 0 when absent, invalid, zero, negative or beyond 12 h", () => {
+		expect(listenStartTime(q("id=dQw4w9WgXcQ"))).toBeUndefined();
+		expect(listenStartTime(q("t=abc"))).toBeUndefined();
+		expect(listenStartTime(q("t=0"))).toBeUndefined();
+		expect(listenStartTime(q("t=-5"))).toBeUndefined();
+		expect(listenStartTime(q("t=43201"))).toBeUndefined();
+		expect(listenStartTime(q("t=43200"))).toBe(43200);
 	});
 });
