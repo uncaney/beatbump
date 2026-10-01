@@ -347,6 +347,11 @@
 			flex-flow: column wrap;
 			align-items: flex-start;
 			width: 80%;
+			// Audit UX v4 TOP 4: at 80% of a 390px screen the three buttons did not fit
+			// and Follow wrapped under Play Radio / Shuffle.
+			@media only screen and (max-width: 719px) {
+				width: 100%;
+			}
 
 			.content-thumbnail {
 				max-width: 6rem;
@@ -362,6 +367,15 @@
 				align-items: center;
 				gap: 0.5rem 0.75rem;
 				width: 100%;
+				// One row on phones (wrapping only below 360px); buttons may shrink.
+				@media only screen and (min-width: 360px) and (max-width: 719px) {
+					flex-wrap: nowrap;
+					gap: 0.5rem;
+					> :global(*) {
+						min-width: 0;
+						flex: 0 1 auto;
+					}
+				}
 
 				:global(.button),
 				:global(.follow-btn) {

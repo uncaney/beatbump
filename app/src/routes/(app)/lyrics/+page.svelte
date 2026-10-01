@@ -390,8 +390,9 @@
 		}
 	}
 	.fbtn {
-		min-width: 2.75rem;
-		min-height: 2.75rem;
+		// 12px root on phones: 2.75rem is 33px, keep a 44px target (audit UX v4 3.7).
+		min-width: max(2.75rem, 44px);
+		min-height: max(2.75rem, 44px);
 		padding: 0 0.6rem;
 		border-radius: 999px;
 		display: inline-flex;
@@ -425,7 +426,7 @@
 	.line {
 		display: block;
 		width: 100%;
-		min-height: 2.75rem;
+		min-height: max(2.75rem, 44px);
 		margin: 0;
 		padding: 0.35rem 0.75rem;
 		border: 0 !important;
