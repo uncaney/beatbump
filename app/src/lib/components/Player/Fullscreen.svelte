@@ -643,7 +643,7 @@
 					{/if}
 
 						{#if $mode === "audio"}
-                            <div class="thumbnail" id="img">
+                            <div class="thumbnail cover" id="img">
 							<img
 								id="img"
 								loading="lazy"
@@ -676,6 +676,47 @@
 						{/if}
 
 				</div>
+				{#if !$isMobileMQ}
+					<!-- Desktop (audit v4 3.7): title / artist / heart under the cover;
+					     before, the left panel showed the artwork alone and the track
+					     was only named in the mini bar. -->
+					<div class="now-playing-meta">
+						<div class="np-text">
+							<h2
+								class="np-title"
+								title={data?.title ?? ""}
+							>
+								{data?.title ?? ""}
+							</h2>
+							{#if data?.artistInfo?.artist?.at(0)?.text}
+								<button
+									type="button"
+									class="np-artist"
+									title="Voir l'artiste"
+									on:click|stopPropagation={mobileViewArtist}
+									>{data.artistInfo.artist.at(0)?.text}</button
+								>
+							{/if}
+						</div>
+						<button
+							type="button"
+							class="np-fav"
+							aria-label={favLabel}
+							title={favLabel}
+							aria-pressed={$currentIsFavourite}
+							on:click|stopPropagation={() => toggleCurrentFavourite($currentTrack)}
+						>
+							<Icon
+								name="heart"
+								size="1.5em"
+								color="#fff"
+								--stroke="#fff"
+								fill={$currentIsFavourite ? "#fff" : "none"}
+								strokeWidth={1.5}
+							/>
+						</button>
+					</div>
+				{/if}
 			</div>
 			{#if $isMobileMQ}
 				<div class="container controls">
@@ -1576,6 +1617,80 @@
 			margin-bottom: 0.25em;
 			height: unset;
 		}
+		// Desktop: segment, cover, then the now-playing block, stacked.
+		@media screen and (min-width: 720px) {
+			flex-direction: column;
+			align-items: center;
+		}
+	}
+
+	// Desktop now-playing block under the cover (audit v4 3.7): same width as
+	// the cover, title as a heading, artist as a link-style button, heart.
+	.now-playing-meta {
+		display: flex;
+		align-items: center;
+		gap: 0.75em;
+		width: min(360px, 42vh);
+		max-width: calc(100% - 4em);
+		margin-top: 1.25rem;
+	}
+	.np-text {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		flex: 1 1 auto;
+		gap: 0.2em;
+	}
+	.np-title {
+		margin: 0;
+		font-size: 1.35rem;
+		font-weight: 700;
+		line-height: 1.25;
+		color: #fff;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	// `all: unset` + `position: static`: the component-wide `button
+	// { position:absolute }` and the global dark `button` colours must not apply.
+	.np-artist {
+		all: unset;
+		position: static;
+		align-self: flex-start;
+		max-width: 100%;
+		font-size: 1rem;
+		color: hsla(0, 0%, 100%, 0.72);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		cursor: pointer;
+		&:hover {
+			color: #fff;
+			text-decoration: underline;
+		}
+		&:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: 2px;
+		}
+	}
+	.np-fav {
+		all: unset;
+		position: static;
+		flex: 0 0 auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 44px;
+		height: 44px;
+		border-radius: 50%;
+		cursor: pointer;
+		&:hover {
+			background: rgba(255, 255, 255, 0.12);
+		}
+		&:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: 2px;
+		}
 	}
 
 	.img-container {
@@ -1599,6 +1714,15 @@
 		@media screen and (min-width: 1800px) {
 			max-height: 45vh;
 		}
+
+		// Desktop: the container sizes to its content (segment + cover) so the
+		// now-playing block can sit right under it; the 35vh / 45vh caps move
+		// to .thumbnail (video) and the cover gets its own 360px box.
+		@media screen and (min-width: 720px) {
+			height: auto;
+			max-height: none;
+			flex: 0 0 auto;
+		}
 	}
 
 	.thumbnail {
@@ -1616,6 +1740,24 @@
 			min-height: 44vh;
 			max-height: 44vh;
 			max-width: 92vw;
+		}
+		@media screen and (min-width: 720px) {
+			height: 35vh;
+			max-height: 35vh;
+		}
+		@media screen and (min-width: 1800px) {
+			height: 45vh;
+			max-height: 45vh;
+		}
+		// Desktop audio cover: up to 360px (was ~230px at 1280x900).
+		&.cover {
+			@media screen and (min-width: 720px) {
+				width: min(360px, 42vh);
+				height: min(360px, 42vh);
+				min-height: 0;
+				max-height: none;
+				max-width: calc(100vw - 4em);
+			}
 		}
 		video,
 		img {
