@@ -205,15 +205,20 @@ func parseResponse(content []_youtube.SectionListRendererContents) ([]MusicShelf
 	return response, nil
 }
 
-// slimSearchItems drops, in place, the YouTube tracking payloads of search
-// results (K11): loggingContext, clickTrackingParams, playerParams. The front
-// reads videoId, playlistId, title, subtitle, thumbnails, artistInfo, explicit,
-// endpoint, length and musicVideoType, which stay.
+// slimSearchItems drops, in place, the two YouTube tracking blobs of search
+// results (K11): loggingContext and clickTrackingParams. Everything the front
+// reads from a search row stays: videoId, playlistId, title, subtitle,
+// thumbnails, artistInfo, explicit, endpoint, length, musicVideoType, type,
+// playlistSetVideoId, itct, params and playerParams. playerParams is short
+// and needed (L20): ListItem.svelte passes it to getSrc / initAutoMixSession
+// (config.playerParams), sessionList.ts sends it as next.json `params` and
+// compares it to APIParams.lt100 to decide playlistSetVideoId, player.ts
+// puts it on player.json (OMV / age-restricted variants) and resumeState
+// KEEP_KEYS persists it.
 func slimSearchItems(items []IListItemRenderer) {
 	for i := range items {
 		items[i].LoggingContext = nil
 		items[i].ClickTrackingParams = ""
-		items[i].PlayerParams = ""
 	}
 }
 

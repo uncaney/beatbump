@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// K11: search results carry no loggingContext / clickTrackingParams /
-// playerParams, and keep every field the front reads.
+// K11: search results carry no loggingContext / clickTrackingParams, and
+// keep every field the front reads, playerParams included (L20).
 func TestSlimSearchItemsDropsTrackingKeys(t *testing.T) {
 	vid, pl := "dQw4w9WgXcQ", "RDAMVMdQw4w9WgXcQ"
 	items := []IListItemRenderer{{
@@ -22,7 +22,7 @@ func TestSlimSearchItemsDropsTrackingKeys(t *testing.T) {
 		PlaylistId:          &pl,
 		Thumbnails:          []Thumbnail{{URL: "https://i/1", Width: 60, Height: 60}},
 		Type:                "songs",
-		PlayerParams:        strings.Repeat("p", 200),
+		PlayerParams:        "8AUB",
 		ClickTrackingParams: strings.Repeat("c", 200),
 		LoggingContext:      &ItemLoggingContext{VssLoggingContext: VssLoggingContext{SerializedContextData: strings.Repeat("z", 400)}},
 	}}
@@ -35,15 +35,19 @@ func TestSlimSearchItemsDropsTrackingKeys(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"loggingContext", "clickTrackingParams", "playerParams"} {
+	for _, k := range []string{"loggingContext", "clickTrackingParams"} {
 		if _, ok := m[k]; ok {
 			t.Fatalf("key %q still serialised: %s", k, raw)
 		}
 	}
-	for _, k := range []string{"videoId", "playlistId", "title", "subtitle", "thumbnails", "artistInfo", "explicit", "endpoint", "length", "musicVideoType", "type"} {
+	for _, k := range []string{"videoId", "playlistId", "title", "subtitle", "thumbnails", "artistInfo", "explicit", "endpoint", "length", "musicVideoType", "type", "playerParams"} {
 		if _, ok := m[k]; !ok {
 			t.Fatalf("key %q lost: %s", k, raw)
 		}
+	}
+	// L20: sessionList / player.json / resumeState read it from search rows.
+	if m["playerParams"] != "8AUB" {
+		t.Fatalf("playerParams altered: %v", m["playerParams"])
 	}
 	if len(raw) > 600 {
 		t.Fatalf("slim item is still %d bytes: %s", len(raw), raw)
