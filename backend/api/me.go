@@ -131,16 +131,21 @@ func decodeBody(c echo.Context, v interface{}) error {
 // write (new events) and at read (events stored before this change).
 var historyDropKeys = []string{"loggingContext", "clickTrackingParams", "playerParams", "playlistSetVideoId", "itct", "params", "musicVideoType", "autoMixList"}
 
+// historyMaxThumbnails: the smallest (list rows and homeRows read [0]) and
+// the largest (Fullscreen.svelte reads thumbnails.at(-1): cover, blurred
+// backdrop, media session). YouTube lists thumbnails in ascending size.
 const historyMaxThumbnails = 2
 
-// slimHistoryItem drops the replay-useless keys in place and keeps at most
-// historyMaxThumbnails thumbnails.
+// slimHistoryItem drops the replay-useless keys in place and keeps only the
+// first and the last thumbnails (L19: keeping the two FIRST ones left a
+// 120 px cover stretched over the fullscreen player when replaying from the
+// history or a "Reprendre" card).
 func slimHistoryItem(m map[string]interface{}) {
 	for _, k := range historyDropKeys {
 		delete(m, k)
 	}
 	if th, ok := m["thumbnails"].([]interface{}); ok && len(th) > historyMaxThumbnails {
-		m["thumbnails"] = th[:historyMaxThumbnails]
+		m["thumbnails"] = []interface{}{th[0], th[len(th)-1]}
 	}
 }
 

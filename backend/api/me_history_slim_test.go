@@ -32,12 +32,25 @@ func assertSlim(t *testing.T, raw json.RawMessage, where string) {
 	if len(th) != 2 {
 		t.Fatalf("%s: %d thumbnails, want 2", where, len(th))
 	}
+	// L19: smallest for list rows ([0]) and largest for the fullscreen
+	// player (thumbnails.at(-1)); the two smallest gave a blurry 120 px cover.
+	if w0, w1 := thumbWidth(th[0]), thumbWidth(th[1]); w0 != 60 || w1 != 544 {
+		t.Fatalf("%s: thumbnail widths %v/%v, want first 60 and last 544", where, w0, w1)
+	}
 	if m["title"] != "Song A" || m["videoId"] != "0123456789a" || m["length"] != "4:00" {
 		t.Fatalf("%s: display fields lost: %v", where, m)
 	}
 	if ai, ok := m["artistInfo"].(map[string]interface{}); !ok || ai["artist"] == nil {
 		t.Fatalf("%s: artistInfo lost", where)
 	}
+}
+
+func thumbWidth(v interface{}) float64 {
+	if m, ok := v.(map[string]interface{}); ok {
+		w, _ := m["width"].(float64)
+		return w
+	}
+	return -1
 }
 
 // K13: a recorded play is stored without the tracking blobs and with at most
