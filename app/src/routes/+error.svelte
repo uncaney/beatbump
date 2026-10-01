@@ -51,7 +51,7 @@
 	<h1>Uh-Oh!</h1>
 	<h5>{message}</h5>
 
-	<p>Don't worry though, we got you covered.</p>
+	<p>Pas de panique, on te ramène au bon endroit.</p>
 	<div class="actions">
 		<a
 			href="/home"

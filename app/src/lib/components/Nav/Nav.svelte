@@ -401,9 +401,14 @@
     // and the nav gear showed through the close button (mobile-04 x=700-760).
     // Opaque bar under the search field; the trending list below keeps the
     // translucent backdrop.
+    // Audit v8 TOP 10: the v7 rule painted nothing because the inline form
+    // is absolutely positioned (5em) and .nav-search had no height of its
+    // own, so the 94 % backdrop still let the gear through the close button.
     @media screen and (max-width: 719px) {
         .nav-search {
-            background: var(--top-bg, #000);
+            position: relative;
+            min-height: 5em;
+            background: #000;
         }
     }
 

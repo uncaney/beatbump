@@ -64,6 +64,36 @@
 	$: localShelves = filter !== "all" ? (results ?? []).filter(isLocalShelf) : [];
 	const search = writable<Item[]>([]);
 	$: filter !== "all" && search.set((ytShelf?.contents ?? []) as unknown as Item[]);
+
+	// Audit v8 TOP 10: with filter=all a YouTube shelf could list an entry
+	// twice ("Human After All" x2 in Albums) and the owned-library shelf
+	// repeated rows already shown by YouTube. YouTube rows win; the "Song •"
+	// rows and the inline suggestions (Search.svelte) are untouched.
+	function itemKey(it: any): string {
+		return String(it?.videoId || it?.browseId || it?.playlistId || "");
+	}
+	function dedupeShelves(shelves: MusicShelf[]): MusicShelf[] {
+		const yt = new Set<string>();
+		const uniq = (contents: any[], taken: Set<string>, collect?: Set<string>) => {
+			const seen = new Set<string>();
+			return (contents ?? []).filter((it) => {
+				const k = itemKey(it);
+				if (!k) return true;
+				if (taken.has(k) || seen.has(k)) return false;
+				seen.add(k);
+				collect?.add(k);
+				return true;
+			});
+		};
+		const none = new Set<string>();
+		const out = shelves.map((s) =>
+			isLocalShelf(s) ? s : { ...s, contents: uniq(s.contents as any[], none, yt) },
+		);
+		return out
+			.map((s) => (isLocalShelf(s) ? { ...s, contents: uniq(s.contents as any[], yt) } : s))
+			.filter((s) => (s.contents?.length ?? 0) > 0);
+	}
+	$: allResults = filter === "all" ? dedupeShelves((results ?? []) as MusicShelf[]) : [];
 	let ctoken = continuation?.continuation;
 	let itct = continuation?.clickTrackingParams;
 	let isLoading = false;
@@ -211,7 +241,7 @@
 				</div>
 			{/if}
 		{:else}
-			{#each results as result}
+			{#each allResults as result}
 				<div class="container music-shelf resp-content-width">
 					<span class="h3">{result.header.title}</span>
 					<div class="music-shelf-list">

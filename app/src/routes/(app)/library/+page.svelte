@@ -208,7 +208,8 @@
 						disabled={deletingAll}
 						on:click={() => (confirmDeleteAll = false)}>Annuler</button
 					>
-				{:else}
+				{:else if playlists.length > 0}
+					<!-- Audit v8 TOP 10: no disabled button under an empty "Your Playlists". -->
 					<button
 						type="button"
 						class="outlined"

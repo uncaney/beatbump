@@ -14,6 +14,14 @@
 	// (older API): the flat list stays.
 	let days: DayGroup[] | null = null;
 	let top: any[] = [];
+	let topCounts: any[] = [];
+	// Audit v8 TOP 10: with a single play "Most played" repeated "Recently
+	// played" (same row, same badge); the section needs at least 3 plays.
+	$: topPlays = topCounts.reduce(
+		(n: number, c: any) => n + (typeof c === "number" ? c : Number(c?.count ?? c?.plays ?? 0) || 0),
+		0,
+	);
+	$: showTop = top.length > 0 && Math.max(topPlays, top.length) >= 3;
 	let loading = true;
 	// H2: the play history lives in the profile, unreachable offline.
 	let offline = false;
@@ -39,6 +47,7 @@
 		} else if (!err) {
 			const plays = Array.isArray(r?.items) ? r.items : [];
 			top = Array.isArray(t?.items) ? t.items : [];
+			topCounts = Array.isArray(t?.counts) ? t.counts : [];
 			days = groupByDay(plays, r?.playedAt);
 			// Flat fallback (no play times): one row per title.
 			recent = playableUnique(plays);
@@ -124,7 +133,7 @@
 		{/if}
 	</section>
 
-	{#if top.length > 0}
+	{#if showTop}
 		<section>
 			<h2>Most played</h2>
 			<div class="grid">
