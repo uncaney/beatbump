@@ -19,17 +19,16 @@ import {
     seededShuffle,
     type ResponseBody,
 } from "$lib/utils";
-import { splice } from "$lib/utils/collections/array";
 import { objectKeys } from "$lib/utils/collections/objects";
 import { Mutex } from "$lib/utils/sync";
 import { tick } from "svelte";
 // eslint-disable-next-line import/no-cycle
 import { syncTabs } from "$lib/tabSync";
-import { derived } from "svelte/store";
+import { derived, get } from "svelte/store";
 import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
-import { removeAt } from "./queueOps";
+import { planInsert, removeAt } from "./queueOps";
 import { fetchNext, filterList } from "./utils.list";
 import { APIClient } from "$lib/api";
 import { SERVER_DOMAIN } from "../../../env";
@@ -1061,7 +1060,10 @@ export class ListService {
     /**
      * Insert `item` (or the tracks it expands to) at `key + 1`. Resolves to
      * true when something was inserted; errors are notified (in French) and
-     * resolve to false so callers can skip their success toast.
+     * resolve to false so callers can skip their success toast. With Dedupe
+     * Automix on, a track already in the queue at or before the insertion
+     * point is not inserted again: the user is told ("Déjà dans la file")
+     * and the call resolves to false instead of a silent no-op (G4).
      */
     public async setTrackWillPlayNext(item: Item, key: number): Promise<boolean> {
         await tick();
@@ -1075,12 +1077,23 @@ export class ListService {
                 notify("Impossible d'ajouter ce morceau à la file", "error");
                 return false;
             }
-            const oldLength = this._$.value.mix.length;
+            const { mix, position } = this._$.value;
+            const oldLength = mix.length;
 
-            splice(this._$.value.mix, key + 1, 0, ...itemToAdd);
+            // `filterAutoPlay` is a plain svelte derived store: read it with get().
+            const plan = planInsert(mix, position, itemToAdd, key, !!get(filterAutoPlay));
+            if (!plan.inserted) {
+                const title = item.title || itemToAdd[0]?.title;
+                notify(title ? `Déjà dans la file : « ${title} »` : "Déjà dans la file", "error");
+                return false;
+            }
 
+            // A new array (planInsert never mutates the queue) so every
+            // subscriber is notified; the cursor is re-anchored on the playing
+            // row in case the dedupe removed an older copy before it.
             const state = await this.#sanitizeAndUpdate("APPLY", {
-                mix: ["set", this._$.value.mix] satisfies MixListAppendOp,
+                mix: ["set", plan.mix] satisfies MixListAppendOp,
+                position: plan.position,
             });
 
             if (!oldLength) {
