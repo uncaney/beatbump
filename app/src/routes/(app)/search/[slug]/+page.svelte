@@ -8,12 +8,38 @@
 
 	import Header from "$lib/components/Layouts/Header.svelte";
 
-	import { afterNavigate } from "$app/navigation";
+	import { afterNavigate, goto } from "$app/navigation";
 	import { writable } from "svelte/store";
     import {APIClient} from "$lib/api";
 
 	export let data: PageData;
 	$: ({ results, continuation, filter } = data);
+
+	// Query echo + filter chips (audit-ux-v2 1.3 / TOP 10 #7). The `?filter=`
+	// values are the ones the backend search endpoint already accepts
+	// (backend/api/search.go: all, songs, albums, artists, all_playlists, ...).
+	// "Playlists" maps to all_playlists; the sub-filters featured_playlists /
+	// community_playlists (reachable from "Show All") highlight that same chip.
+	const filterChips: { label: string; value: string }[] = [
+		{ label: "Tout", value: "all" },
+		{ label: "Titres", value: "songs" },
+		{ label: "Albums", value: "albums" },
+		{ label: "Artistes", value: "artists" },
+		{ label: "Playlists", value: "all_playlists" },
+	];
+	$: query = decodeURIComponent($page.params.slug ?? "");
+	$: activeFilter = (filter || "all").toLowerCase();
+	$: restricted = $page.url.searchParams.get("restricted") || "";
+	function chipHref(value: string) {
+		return (
+			`/search/${encodeURIComponent(query)}?filter=${encodeURIComponent(value)}` +
+			(restricted ? `&restricted=${encodeURIComponent(restricted)}` : "")
+		);
+	}
+	function isActive(value: string) {
+		if (value === "all_playlists") return activeFilter.endsWith("playlists");
+		return activeFilter === value;
+	}
 
 	const search = writable<Item[]>();
 	$: results && filter !== "all" && search.set(results[0].contents);
@@ -91,6 +117,24 @@
 	url={$page.url.pathname}
 />
 
+<header class="search-head resp-content-width">
+	<h1 class="search-title">Résultats pour « {query} »</h1>
+	<nav
+		class="filters"
+		aria-label="Filtrer les résultats"
+	>
+		{#each filterChips as c (c.value)}
+			<a
+				class="chip"
+				class:selected={isActive(c.value)}
+				aria-current={isActive(c.value) ? "page" : undefined}
+				href={chipHref(c.value)}
+				on:click|preventDefault={() => goto(chipHref(c.value))}>{c.label}</a
+			>
+		{/each}
+	</nav>
+</header>
+
 {#if data.correction && (data.correction.correctedQuery || data.correction.showingResultsFor)}
 	<div class="search-correction resp-content-width">
 		<span
@@ -162,6 +206,64 @@
 <style lang="scss">
 	.h3 {
 		font-weight: 600;
+	}
+
+	.search-head {
+		margin: 0.75em auto 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6em;
+	}
+
+	.search-title {
+		margin: 0;
+		font-size: 1.35rem;
+		font-weight: 600;
+		line-height: 1.3;
+		overflow-wrap: anywhere;
+	}
+
+	// Filter chips: same look as the home chips (lib/components/Chips), 44px
+	// tall for touch, horizontally scrollable on narrow screens.
+	.filters {
+		display: flex;
+		gap: 0.5em;
+		overflow-x: auto;
+		padding-bottom: 0.125em;
+		scroll-behavior: smooth;
+		&::-webkit-scrollbar {
+			display: none;
+		}
+	}
+
+	.chip {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		flex: 0 0 auto;
+		min-height: 2.75rem;
+		padding: 0.5em 1em;
+		border-radius: 999rem;
+		background: rgba(255, 255, 255, 0.1);
+		color: #fff;
+		font-size: 1rem;
+		font-weight: 500;
+		text-decoration: none;
+		text-transform: none;
+		white-space: nowrap;
+		&:hover {
+			background: rgba(255, 255, 255, 0.18);
+		}
+		&:focus-visible {
+			outline: 2px solid #1ed760;
+			outline-offset: 2px;
+		}
+		&.selected {
+			background: #fff;
+			color: #131313;
+			font-weight: 600;
+		}
 	}
 
 	.search-correction {
