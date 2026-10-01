@@ -66,6 +66,15 @@
 		SessionListService.shuffle($SessionListService.position, true);
 	}
 
+	// Instance accessors for the keyboard shortcuts (Player.svelte `bind:this`):
+	// "s" toggles shuffle, "r" cycles repeat, same code paths as the buttons.
+	export function toggleShuffle() {
+		handleShuffle();
+	}
+	export function cycleRepeat() {
+		handleRepeat();
+	}
+
 	function handleRepeat() {
 		++repeatState;
 		switch (repeatState) {

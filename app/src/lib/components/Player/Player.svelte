@@ -80,6 +80,14 @@
                 const r = await downloadToDevice($currentTrack);
                 notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
             })
+            // P4 / T1 (lane c8b): both open a sheet portalled to <body>, so they
+            // work from the mini-bar and from the mobile fullscreen ⋮ alike.
+            .add("Minuterie de sommeil", () => {
+                showSleepTimerSheet.set(true);
+            })
+            .add("Raccourcis clavier", () => {
+                showShortcutsSheet.set(true);
+            })
             .build()
             .filter(Boolean);
 </script>
@@ -110,6 +118,16 @@
 	import ProgressBar from "./ProgressBar";
 	import { fullscreenStore } from "./channel";
 	import keyboardHandler from "./keyboardHandler";
+	import SleepTimerSheet, { showSleepTimerSheet } from "./SleepTimerSheet.svelte";
+	import ShortcutsSheet, {
+		showShortcutsSheet,
+	} from "$components/ShortcutsSheet/ShortcutsSheet.svelte";
+	import { cancelSleepTimer, sleepLabel } from "$stores/sleepTimer";
+	import {
+		currentIsFavourite,
+		refreshFavouriteState,
+		toggleCurrentFavourite,
+	} from "./favouriteState";
 
 	import { buildDropdown } from "$lib/configs/dropdowns.config";
 	import type { Item } from "$lib/types";
@@ -136,6 +154,14 @@
 		recordHistory($currentTrack);
 	}
 
+	// F2: favourite state of the playing track (mini-bar + fullscreen hearts).
+	let _lastFavId = "";
+	$: if (browser && ($currentTrack?.videoId ?? "") !== _lastFavId) {
+		_lastFavId = $currentTrack?.videoId ?? "";
+		refreshFavouriteState($currentTrack);
+	}
+	$: favLabel = $currentIsFavourite ? "Retirer des favoris" : "Ajouter aux favoris";
+
 	messenger.listen("player", () => {
 		AudioPlayer.play();
 	});
@@ -157,21 +183,84 @@
 		$SITE_ORIGIN_URL,
 	);
 
+	// T1: keyboard shortcuts (desktop; keyboardHandler ignores inputs / textareas /
+	// contenteditable). Letters are matched by physical key (KeyJ…) so they work
+	// on AZERTY too; "/" and "?" are matched by `event.key`. The table shown by
+	// "?" lives in ShortcutsSheet.svelte (SHORTCUT_ROWS): keep both in sync.
+	let controlsRef: Controls | undefined;
+	let mutedVolume = 0;
+
+	function togglePlay() {
+		if (!$queue.length) return;
+		if ($paused) {
+			AudioPlayer.play();
+		} else {
+			AudioPlayer.pause();
+		}
+	}
+	function prevTrack() {
+		if (!$queue.length) return;
+		SessionListService.previous();
+	}
+	function nextTrack() {
+		if (!$queue.length) return;
+		SessionListService.next();
+	}
+	function seekBy(delta: number) {
+		const duration = AudioPlayer.duration;
+		if (!duration || !$queue.length) return;
+		const to = Math.min(Math.max(0, AudioPlayer.currentTime + delta), duration);
+		AudioPlayer.seek(to);
+	}
+	function volumeBy(delta: number) {
+		const v = Math.min(1, Math.max(0, ($AudioPlayerVolume ?? 0) + delta));
+		AudioPlayer.setVolume(Math.round(v * 100) / 100);
+	}
+	function toggleMute() {
+		if (($AudioPlayerVolume ?? 0) > 0) {
+			mutedVolume = $AudioPlayerVolume;
+			AudioPlayer.setVolume(0);
+		} else {
+			AudioPlayer.setVolume(mutedVolume > 0 ? mutedVolume : 0.5);
+		}
+	}
+	function toggleFullscreen() {
+		if (!$queue.length) return;
+		fullscreenStore.toggle();
+	}
+	function focusSearch() {
+		const box = document.getElementById("searchBox") as HTMLInputElement | null;
+		if (box) {
+			box.focus();
+			box.select?.();
+			return;
+		}
+		(document.querySelector(".nav-item__search") as HTMLElement | null)?.click();
+		setTimeout(() => {
+			(document.getElementById("searchBox") as HTMLInputElement | null)?.focus();
+		}, 60);
+	}
+
 	const shortcut = {
-		Comma: () => {
-			SessionListService.previous();
-		},
-		Period: () => {
-			SessionListService.next();
-		},
-		Space: () => {
-			if (!AudioPlayer && !AudioPlayer.src) return;
-			if (AudioPlayer.paused) {
-				AudioPlayer.play();
-			} else {
-				AudioPlayer.pause();
-			}
-		},
+		Space: togglePlay,
+		KeyK: togglePlay,
+		Comma: prevTrack,
+		KeyP: prevTrack,
+		Period: nextTrack,
+		KeyN: nextTrack,
+		ArrowLeft: () => seekBy(-5),
+		ArrowRight: () => seekBy(5),
+		KeyJ: () => seekBy(-10),
+		KeyL: () => seekBy(10),
+		ArrowUp: () => volumeBy(0.05),
+		ArrowDown: () => volumeBy(-0.05),
+		KeyM: toggleMute,
+		KeyS: () => controlsRef?.toggleShuffle(),
+		KeyR: () => controlsRef?.cycleRepeat(),
+		KeyF: toggleFullscreen,
+		KeyH: () => toggleCurrentFavourite($currentTrack),
+		"/": focusSearch,
+		"?": () => showShortcutsSheet.update((v) => !v),
 	};
 </script>
 
@@ -241,6 +330,7 @@
 	>
 		{#if !$isMobileMQ}
 			<Controls
+				bind:this={controlsRef}
 				bind:isPaused={isPlaying}
 				bind:loading={$playerLoading}
 				on:play={() => AudioPlayer.play()}
@@ -324,6 +414,46 @@
 					</div>
 				{/if}
 			</div>
+			{#if !$isMobileMQ}
+				{#if $sleepLabel}
+					<!-- P4: sleep timer countdown (desktop bar only); click cancels. -->
+					<button
+						type="button"
+						class="player-btn no-style sleep-chip"
+						aria-label="Minuterie de sommeil : {$sleepLabel}. Annuler"
+						title="Minuterie de sommeil : {$sleepLabel} (cliquer pour annuler)"
+						data-testid="sleep-timer-chip"
+						on:click|stopPropagation={() => cancelSleepTimer()}
+					>
+						<Icon
+							color="#fff"
+							--stroke="#fff"
+							name="clock"
+							size="1.1em"
+						/>
+						<span>{$sleepLabel}</span>
+					</button>
+				{/if}
+				<!-- F2: favourite toggle for the playing track (desktop bar only). -->
+				<button
+					type="button"
+					class="player-btn no-style heart-btn"
+					aria-label={favLabel}
+					title={favLabel}
+					aria-pressed={$currentIsFavourite}
+					disabled={!$currentTrack?.videoId}
+					on:click|stopPropagation={() => toggleCurrentFavourite($currentTrack)}
+				>
+					<Icon
+						color="#fff"
+						--stroke="#fff"
+						name="heart"
+						fill={$currentIsFavourite ? "#fff" : "none"}
+						strokeWidth={1.5}
+						size="1.5em"
+					/>
+				</button>
+			{/if}
 			<a
 				class="player-btn no-style"
 				href="/lyrics"
@@ -418,6 +548,11 @@
 		</div>
 	</div>
 </div>
+
+<!-- Sheets are portalled to <body> (the footer has `contain: layout`), and sit
+     outside the .player div so their clicks never toggle the fullscreen. -->
+<SleepTimerSheet />
+<ShortcutsSheet />
 
 <style lang="scss">
 	@import "../../../global/stylesheet/components/player";
@@ -586,6 +721,36 @@
 		display: inline-flex;
 		align-items: center;
 		padding: 0.5em;
+	}
+	.heart-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		color: #fff;
+		&[disabled] {
+			opacity: 0.4;
+			cursor: default;
+		}
+	}
+	.sleep-chip {
+		background: rgba(255, 255, 255, 0.12);
+		border: 1px solid rgba(255, 255, 255, 0.35);
+		border-radius: 999px !important;
+		color: #fff;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35em;
+		font-size: 0.8em;
+		font-weight: 600;
+		padding: 0.35em 0.8em;
+		min-height: 2.2em;
+		white-space: nowrap;
+		&:hover {
+			background: rgba(255, 255, 255, 0.22);
+		}
 	}
 
 	.player-left,

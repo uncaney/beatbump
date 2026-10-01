@@ -50,7 +50,12 @@
 	import { progressBarSeek } from "./ProgressBar/ProgressBar.svelte";
 	import blurURL from "./blur.svg?url";
 	import { fullscreenStore } from "./channel";
+	import { cancelSleepTimer, sleepLabel } from "$stores/sleepTimer";
+	import { currentIsFavourite, toggleCurrentFavourite } from "./favouriteState";
 	export let state: "open" | "closed";
+
+	// F2: heart label (state is refreshed by Player.svelte on track change)
+	$: favLabel = $currentIsFavourite ? "Retirer des favoris" : "Ajouter aux favoris";
 
 	const {
 		paused,
@@ -450,6 +455,24 @@
 					<div style="display:flex;align-items:center;gap:0.4em;">
 						<button
 							type="button"
+							aria-label={favLabel}
+							title={favLabel}
+							aria-pressed={$currentIsFavourite}
+							class="no-style"
+							style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
+							on:click|stopPropagation={() => toggleCurrentFavourite($currentTrack)}
+						>
+							<Icon
+								name="heart"
+								size="1.6em"
+								color="#fff"
+								--stroke="#fff"
+								fill={$currentIsFavourite ? "#fff" : "none"}
+								strokeWidth={1.5}
+							/>
+						</button>
+						<button
+							type="button"
 							aria-label="Voir l'artiste"
 							title="Voir l'artiste"
 							class="no-style"
@@ -542,6 +565,25 @@
 								}}>Audio</button
 							>
 						</div>
+							{#if $sleepLabel}
+								<!-- P4: sleep timer chip; click cancels the timer. -->
+								<button
+									type="button"
+									class="sleep-chip"
+									aria-label="Minuterie de sommeil : {$sleepLabel}. Annuler"
+									title="Minuterie de sommeil : {$sleepLabel} (cliquer pour annuler)"
+									data-testid="sleep-timer-chip-fullscreen"
+									on:click|stopPropagation={() => cancelSleepTimer()}
+								>
+									<Icon
+										name="clock"
+										size="1em"
+										color="#fff"
+										--stroke="#fff"
+									/>
+									<span>{$sleepLabel}</span>
+								</button>
+							{/if}
 					</div>
 					{#if loading}
 						<Loading size="3em" />
@@ -1103,6 +1145,38 @@
 
 		100% {
 			background-color: hsl(0deg 0% 0% / 58.7%);
+		}
+	}
+
+	// P4 sleep timer chip, next to the Vidéo / Audio segment (static: the
+	// component-wide `button { position: absolute }` rule below must not apply).
+	.sleep-chip {
+		position: static;
+		all: unset;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35em;
+		margin-left: 0.75rem;
+		align-self: center;
+		padding: 0.35em 0.8em;
+		min-height: 2.2em;
+		border-radius: 999px;
+		border: 1px solid rgba(255, 255, 255, 0.4);
+		background: rgba(0, 0, 0, 0.35);
+		color: #fff;
+		font-size: 0.85rem;
+		font-weight: 600;
+		white-space: nowrap;
+		cursor: pointer;
+		&:hover {
+			background: rgba(255, 255, 255, 0.2);
+		}
+		&:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: 2px;
+		}
+		@media screen and (max-width: 719px) {
+			margin-bottom: 0.75rem;
 		}
 	}
 
