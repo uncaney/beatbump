@@ -11,6 +11,7 @@
 	// `!important` only where the global rule itself uses it) so labels stay
 	// readable on the dark background and titles can stack on mobile.
 	import Icon from "$components/Icon/Icon.svelte";
+	import EmptyState from "$components/EmptyState/EmptyState.svelte";
 	import AlbumCard from "$components/Offline/AlbumCard.svelte";
 	import OfflineTrackRow from "$components/Offline/OfflineTrackRow.svelte";
 	import { getOfflineTracks, removeOffline, reconcileOfflineList } from "$lib/offline";
@@ -166,15 +167,20 @@
 			class:off={!online}>{online ? "● En ligne" : "● Hors-ligne"}</span
 		>
 	</header>
-	<p class="note">
-		Chaque morceau que tu écoutes est enregistré ici automatiquement et se joue sans connexion.
-	</p>
-
 	{#if tracks.length === 0}
-		<p class="state">
-			Rien pour l'instant. Lance une écoute : le morceau sera gardé ici et disponible sans réseau.
-		</p>
+		<!-- Empty state with one action (audit 2.4): the explanation lives here
+		     instead of the .note above so it is not said twice on an empty page. -->
+		<EmptyState
+			icon="download"
+			title="Aucun morceau hors-ligne pour l'instant"
+			text="Chaque morceau que tu écoutes est enregistré ici automatiquement et se joue ensuite sans connexion."
+			cta="Explorer"
+			href="/home"
+		/>
 	{:else}
+		<p class="note">
+			Chaque morceau que tu écoutes est enregistré ici automatiquement et se joue sans connexion.
+		</p>
 		<div
 			class="actions"
 			role="group"
@@ -422,10 +428,6 @@
 	}
 	.dot {
 		margin: 0 0.3em;
-	}
-	.state {
-		color: #999;
-		margin: 1.5rem 0;
 	}
 	.actions {
 		display: flex;

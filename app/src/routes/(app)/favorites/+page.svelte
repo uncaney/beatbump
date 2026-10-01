@@ -4,6 +4,7 @@
 	import list from "$lib/stores/list";
 	import type { Item } from "$lib/types";
     import Button from "$components/Button/Button.svelte";
+	import EmptyState from "$components/EmptyState/EmptyState.svelte";
 	import DraggableList from "$components/DraggableList/DraggableList.svelte";
 	import ListItem, { listItemPageContext } from "$components/ListItem/ListItem.svelte";
 	import { CTX_ListItem } from "$lib/contexts";
@@ -67,23 +68,25 @@
 <main class="resp-content-width">
 	<h1>Your Favorites</h1>
 	<section>
-		<div class="filter">
-			<div class="ctx-item">
-				<label for="select">Sort</label>
-				<div class="select">
-					<select
-						id="select"
-						bind:value
-						on:change={options[value].action}
-					>
-						{#each options as option, i (option.params)}
-							<option value={i}>{option.label}</option>
-						{/each}
-					</select>
+		<!-- Sorting an empty list is noise (audit 2.4): the control only shows with content. -->
+		{#if songs && songs.length > 0}
+			<div class="filter">
+				<div class="ctx-item">
+					<label for="select">Sort</label>
+					<div class="select">
+						<select
+							id="select"
+							bind:value
+							on:change={options[value].action}
+						>
+							{#each options as option, i (option.params)}
+								<option value={i}>{option.label}</option>
+							{/each}
+						</select>
+					</div>
 				</div>
 			</div>
-
-		</div>
+		{/if}
 		<section>
 			{#if songs && songs.length > 0}
 				<DraggableList items={songs}>
@@ -105,9 +108,13 @@
 					/>
 				</DraggableList>
 			{:else}
-				<div class="empty-state">
-					<p>No favorites yet. Add some songs to your favorites to see them here!</p>
-				</div>
+				<EmptyState
+					icon="heart"
+					title="Aucun favori pour l'instant"
+					text="Ajoute un morceau aux favoris depuis son menu « ⋮ » : il apparaîtra ici."
+					cta="Explorer"
+					href="/home"
+				/>
 			{/if}
 		</section>
 	</section>
@@ -131,9 +138,4 @@
 		}
 	}
 
-	.empty-state {
-		text-align: center;
-		padding: $lg-spacing;
-		color: var(--text-secondary);
-	}
 </style>

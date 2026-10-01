@@ -2,6 +2,7 @@
 	import { currentTrack } from "$lib/stores/list";
 	import { AudioPlayer } from "$lib/player";
 	import { APIClient } from "$lib/api";
+	import EmptyState from "$components/EmptyState/EmptyState.svelte";
 
 	const { currentTimeStore } = AudioPlayer;
 
@@ -64,7 +65,7 @@
 	{/if}
 
 	{#if loading}
-		<p class="state">Loading lyrics…</p>
+		<p class="state">Chargement des paroles…</p>
 	{:else if lyrics?.found}
 		{#if lines}
 			<div class="synced">
@@ -82,9 +83,15 @@
 		{/if}
 		<small class="src">via {lyrics.source}</small>
 	{:else if $currentTrack}
-		<p class="state">No lyrics found for this track.</p>
+		<p class="state">Pas de paroles trouvées pour ce morceau.</p>
 	{:else}
-		<p class="state">Play a track to see its lyrics.</p>
+		<EmptyState
+			icon="play"
+			title="Lance un morceau pour voir ses paroles"
+			text="Les paroles du morceau en cours s'affichent ici, synchronisées quand elles existent."
+			cta="Explorer"
+			href="/home"
+		/>
 	{/if}
 </main>
 
