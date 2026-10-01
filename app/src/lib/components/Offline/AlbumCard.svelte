@@ -182,7 +182,8 @@
 				class="btn pin"
 				class:on={allPinned}
 				aria-pressed={allPinned}
-				aria-label={allPinned ? "Désépingler l'album" : "Épingler l'album hors-ligne"}
+				aria-label={allPinned ? "Ne plus garder l'album hors-ligne" : "Garder l'album hors-ligne"}
+				title={allPinned ? "Ne plus garder hors-ligne (l'album pourra être effacé)" : "Garder hors-ligne (jamais effacé)"}
 				on:click={() => dispatch("pin", { tracks: album.tracks, pinned: !allPinned })}>
 				<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill={allPinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="2"><path d="M16 3l5 5-4 1-5 5 1 5-3 3-4-6-4 4-1-1 4-4-6-4 3-3 5 1 5-5z"/></svg>
 			</button>

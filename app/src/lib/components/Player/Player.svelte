@@ -2,6 +2,8 @@
     context="module"
     lang="ts"
 >
+    import { keepItemOffline } from "$lib/offlineBatch";
+
     const volumeMenuHandler = (callback: () => void, delay: number) => {
         let timer: ReturnType<typeof setTimeout> | undefined;
         const toggle = () => {
@@ -75,6 +77,13 @@
             )
             .add("Shuffle", () => {
                 list.shuffle($queuePosition, true);
+            })
+            // U11-7 (audit UX v11): one name for keeping music offline. The SW
+            // keep is "Garder hors-ligne" everywhere else (row menus, album
+            // button, offline page); the player menu only offered the file
+            // download, which stays a distinct action ("Download to device").
+            .add("Garder hors-ligne", () => {
+                void keepItemOffline($currentTrack);
             })
             .add("Download to device", async () => {
                 const r = await downloadToDevice($currentTrack);

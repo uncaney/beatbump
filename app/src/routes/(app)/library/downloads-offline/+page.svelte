@@ -424,8 +424,9 @@
 					bind:this={mixtapeBtn}
 					on:click={openMixtape}
 				>
+					<!-- U11-7: not the Radio icon (one icon per concept). -->
 					<Icon
-						name="radio"
+						name="music"
 						size="1em"
 					/>
 					Mixtape
