@@ -489,6 +489,7 @@
 										on:click|preventDefault|stopPropagation={() =>
 											goto(`/release?id=${artist?.browseId}`)}
 										href={`/release?id=${artist?.browseId}`}
+										data-sveltekit-preload-data="tap"
 										><span>{artist.text}</span></a
 									>
 								{:else}
@@ -497,6 +498,7 @@
 										on:click|preventDefault|stopPropagation={() =>
 											goto(`/artist/${artist?.browseId}`)}
 										href={`/artist/${artist?.browseId}`}
+										data-sveltekit-preload-data="tap"
 										><span>{artist.text}</span></a
 									>
 								{/if}

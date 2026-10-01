@@ -433,7 +433,8 @@
 								goto("/artist/" + sub?.browseId);
 							}}
 							rel={nofollow ? "nofollow" : ""}
-							href={"/artist/" + sub?.browseId}><span>{sub.text}</span></a
+							href={"/artist/" + sub?.browseId}
+							data-sveltekit-preload-data="tap"><span>{sub.text}</span></a
 						>
 					{/if}
 				{/each}
