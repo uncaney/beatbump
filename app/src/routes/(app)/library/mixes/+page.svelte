@@ -17,6 +17,11 @@
 	// KeepOfflineButton) instead of a full-width pill under every card, which
 	// doubled the grid height; titles clamp to two lines with a tooltip and
 	// every card of a grid has the same height.
+	// c39b B6-2 "Croisements": up to 6 decade x genre mixes (local/mixes
+	// `crossovers`, >= 15 albums each), context "Mix : Rock des années 1990".
+	// c39b B6-3 "Années": the 8 release years with the most albums (local/mixes
+	// `years`), local/mix?year=, context "Année : 1997". Release year, not the
+	// acquisition date (mostly the June 2026 migration).
 	import { APIClient } from "$lib/api";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
 	import KeepOfflineButton from "$lib/components/ListItem/KeepOfflineButton.svelte";
@@ -62,6 +67,8 @@
 
 	$: decades = cards.filter((c) => c.kind === "decade");
 	$: genres = cards.filter((c) => c.kind === "genre");
+	$: crossovers = cards.filter((c) => c.kind === "crossover");
+	$: years = cards.filter((c) => c.kind === "year");
 	$: empty = cards.length === 0 && artistCards.length === 0;
 
 	onMount(async () => {
@@ -141,7 +148,7 @@
 		<!-- F4: one word per concept. A Mix is a fixed list of 40 titles sampled
 		     from a slice of the library (a Radio is endless from a seed, Pour
 		     toi is personal, a Mixtape is offline). -->
-		<span class="sub">Un mix = 40 titres tirés de ta bibliothèque, par décennie ou par genre</span>
+		<span class="sub">Un mix = 40 titres tirés de ta bibliothèque, par décennie, par année ou par genre</span>
 		<a
 			class="genres-link"
 			href="/library/genres"
@@ -159,7 +166,7 @@
 			Pas encore assez d'albums pour un mix : il en faut 15 d'une même décennie, ou 200 titres d'un même genre sur 15 albums.
 		</p>
 	{:else}
-		{#each [{ id: "mixes-decades", title: "Décennies", list: decades }, { id: "mixes-genres", title: "Genres", list: genres }, { id: "mixes-artists", title: "Tes artistes", list: artistCards }] as sec (sec.id)}
+		{#each [{ id: "mixes-decades", title: "Décennies", list: decades }, { id: "mixes-crossovers", title: "Croisements", list: crossovers }, { id: "mixes-years", title: "Années", list: years }, { id: "mixes-genres", title: "Genres", list: genres }, { id: "mixes-artists", title: "Tes artistes", list: artistCards }] as sec (sec.id)}
 			{#if sec.list.length > 0}
 				<section
 					class="group"
@@ -168,6 +175,10 @@
 					<h2>{sec.title}</h2>
 					{#if sec.id === "mixes-artists"}
 						<p class="group-sub">Une radio à partir de chaque artiste que tu écoutes le plus</p>
+					{:else if sec.id === "mixes-crossovers"}
+						<p class="group-sub">Un genre dans une décennie : les couples les mieux fournis</p>
+					{:else if sec.id === "mixes-years"}
+						<p class="group-sub">Les années de sortie les mieux représentées dans ta bibliothèque</p>
 					{/if}
 					<div class="grid">
 						{#each sec.list as card (card.key)}
@@ -175,8 +186,8 @@
 							     corner, the HL6 keep icon; two sibling buttons, never nested. -->
 							<div
 								class="mix-tile"
-								class:is-decade={card.kind === "decade"}
-								class:is-genre={card.kind === "genre"}
+								class:is-decade={card.kind === "decade" || card.kind === "year"}
+								class:is-genre={card.kind === "genre" || card.kind === "crossover"}
 								class:is-artist={card.kind === "artist"}
 							>
 								<button

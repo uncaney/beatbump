@@ -5,9 +5,14 @@ package api
 //
 //	GET /api/v1/local/mix?decade=1990        -> {"items":[...40 songs], "decade":1990, "albums":N}
 //	GET /api/v1/local/mix?genre=Rock         -> {"items":[...40 songs], "genre":"Rock", "albums":N}
-//	GET /api/v1/local/mixes                  -> {"decades":[{"decade":1990,"albums":52}], "genres":[{"name":"Rock","count":1234,"albums":48}]}
+//	GET /api/v1/local/mix?decade=1990&genre=Rock -> {"items":[...], "decade":1990, "genre":"Rock", "albums":N}   (c39b B6-2)
+//	GET /api/v1/local/mix?year=1997          -> {"items":[...40 songs], "year":1997, "albums":N}             (c39b B6-3)
+//	GET /api/v1/local/mixes                  -> {"decades":[{"decade":1990,"albums":52}], "genres":[{"name":"Rock","count":1234,"albums":48}],
+//	                                             "years":[{"year":1997,"albums":31}], "crossovers":[{"decade":1990,"genre":"Rock","count":420,"albums":22}]}
 //
-// Exactly one of decade / genre is required (400 otherwise). A slice holding
+// At least one of decade / year / genre is required, decade and year are
+// exclusive (400 otherwise); genre combines with either: the filters are
+// ANDed, "(year IN [...]) AND (genre = "Rock")". A slice holding
 // fewer than mixMinAlbums distinct albums answers {"items":[],"reason":"too_small"}:
 // a mix over 3 albums is an album, not a mix.
 //
@@ -33,6 +38,16 @@ package api
 // the decade cards come from one bounded scan of the albums index (id + year
 // only, pages of mixAlbumPage). The cards listing is cheap enough for the
 // 5 min response cache main.go wraps it in.
+//
+// c39b: the same albums scan counts albums per release year; `years` lists
+// the mixYearMax years with the most albums (>= mixMinAlbums each), newest
+// first. Release year, not acquisition date: dateAdded is mostly the June
+// 2026 migration. `crossovers` lists up to mixCrossMax (decade, genre) pairs
+// with >= mixMinAlbums albums: one genre facet per listed decade ranks the
+// pairs by tracks, the mixCrossCandidates best are surveyed (memoised like
+// every survey) and at most mixCrossPerKey cards share a decade or a genre
+// while others are left. The list itself is memoised mixSurveyTTL. The genre
+// facet reads Meili's top-100 values per decade, as the genre cards do.
 
 import (
 	"math/rand"
@@ -47,18 +62,22 @@ import (
 )
 
 const (
-	mixSize           = 40  // tracks per mix
-	mixMinAlbums      = 15  // distinct albums a slice needs before it is a mix
-	mixGenreMin       = 200 // tracks a genre needs before it gets a card
-	mixAlbumPage      = 1000
-	mixAlbumPages     = 12 // albums index maxTotalHits is 12000
-	mixSurveyLimit    = 1000
-	mixPerWindow      = 4
-	mixDecadeMinY     = 1900
-	mixDecadeMaxY     = 2090
-	mixSurveyTTL      = 5 * time.Minute // L8-9: in-process memo of mixSurvey
-	mixSurveyMemoMax  = 256             // filters kept (decades + genres << this)
-	mixGenreSurveyPar = 4               // concurrent genre surveys in /local/mixes
+	mixSize            = 40  // tracks per mix
+	mixMinAlbums       = 15  // distinct albums a slice needs before it is a mix
+	mixGenreMin        = 200 // tracks a genre needs before it gets a card
+	mixAlbumPage       = 1000
+	mixAlbumPages      = 12 // albums index maxTotalHits is 12000
+	mixSurveyLimit     = 1000
+	mixPerWindow       = 4
+	mixDecadeMinY      = 1900
+	mixDecadeMaxY      = 2090
+	mixSurveyTTL       = 5 * time.Minute // L8-9: in-process memo of mixSurvey
+	mixSurveyMemoMax   = 256             // filters kept (decades + genres << this)
+	mixGenreSurveyPar  = 4               // concurrent genre surveys in /local/mixes
+	mixYearMax         = 8               // c39b: year cards
+	mixCrossMax        = 6               // c39b: crossover cards
+	mixCrossCandidates = 18              // pairs surveyed for the crossovers
+	mixCrossPerKey     = 2               // first-pass cap per decade / per genre
 )
 
 var mixTrackAttrs = []string{"lid", "title", "artist", "albumArtist", "track", "durationSec", "album"}
@@ -85,6 +104,38 @@ func decadeFilter(decade int) string {
 	return "year IN [" + strings.Join(years, ",") + "]"
 }
 
+// parseYear validates ?year= (a 4-digit release year).
+func parseYear(raw string) (int, bool) {
+	raw = strings.TrimSpace(raw)
+	if len(raw) != 4 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < mixDecadeMinY || n > mixDecadeMaxY+9 {
+		return 0, false
+	}
+	return n, true
+}
+
+// yearFilter is the one-year list filter (`year` is a string field: a
+// numeric equality or range matches nothing, an IN list does).
+func yearFilter(year int) string {
+	return "year IN [" + strconv.Itoa(year) + "]"
+}
+
+// mixFilter ANDs the slice filters; a single one is returned as is (the
+// survey memo keys of the one-param mixes do not change).
+func mixFilter(parts ...string) string {
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	wrapped := make([]string, len(parts))
+	for i, p := range parts {
+		wrapped[i] = "(" + p + ")"
+	}
+	return strings.Join(wrapped, " AND ")
+}
+
 // genreFilter is the exact-match genre filter LocalSongsHandler uses.
 func genreFilter(genre string) string {
 	return "genre = \"" + escapeMeili(genre) + "\""
@@ -93,6 +144,13 @@ func genreFilter(genre string) string {
 // decadeOf maps a year string ("1994", "1994-03-01", 1994.0) to its decade
 // (1990); 0 when the value carries no 4-digit year.
 func decadeOf(year string) int {
+	n := yearOf(year)
+	return n - n%10
+}
+
+// yearOf maps a year string ("1994", "1994-03-01") to its year; 0 when the
+// value carries no 4-digit year in range.
+func yearOf(year string) int {
 	year = strings.TrimSpace(year)
 	if len(year) < 4 {
 		return 0
@@ -101,7 +159,7 @@ func decadeOf(year string) int {
 	if err != nil || n < mixDecadeMinY || n > mixDecadeMaxY+9 {
 		return 0
 	}
-	return n - n%10
+	return n
 }
 
 // mixSurvey answers how big a slice is: the (estimated) track total and the
@@ -261,26 +319,44 @@ func mixSample(filter string, total, n int) []IListItemRenderer {
 	return localSongItemsWithCovers(hits)
 }
 
-// LocalMixHandler: GET /api/v1/local/mix?decade=1990 | ?genre=Rock.
+// LocalMixHandler: GET /api/v1/local/mix?decade=1990 | ?year=1997 | ?genre=Rock,
+// genre combinable with decade or year.
 func LocalMixHandler(c echo.Context) error {
 	rawDecade := strings.TrimSpace(c.QueryParam("decade"))
+	rawYear := strings.TrimSpace(c.QueryParam("year"))
 	genre := strings.TrimSpace(c.QueryParam("genre"))
-	if (rawDecade == "") == (genre == "") {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": "exactly one of decade or genre is required"})
+	bad := func(reason string) error {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": reason})
+	}
+	if rawDecade == "" && rawYear == "" && genre == "" {
+		return bad("one of decade, year or genre is required")
+	}
+	if rawDecade != "" && rawYear != "" {
+		return bad("decade and year are exclusive")
 	}
 	resp := map[string]interface{}{}
-	var filter string
+	var parts []string
 	if rawDecade != "" {
 		decade, ok := parseDecade(rawDecade)
 		if !ok {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": "decade must be a 4-digit year ending in 0: " + rawDecade})
+			return bad("decade must be a 4-digit year ending in 0: " + rawDecade)
 		}
-		filter = decadeFilter(decade)
+		parts = append(parts, decadeFilter(decade))
 		resp["decade"] = decade
-	} else {
-		filter = genreFilter(genre)
+	}
+	if rawYear != "" {
+		year, ok := parseYear(rawYear)
+		if !ok {
+			return bad("year must be a 4-digit year: " + rawYear)
+		}
+		parts = append(parts, yearFilter(year))
+		resp["year"] = year
+	}
+	if genre != "" {
+		parts = append(parts, genreFilter(genre))
 		resp["genre"] = genre
 	}
+	filter := mixFilter(parts...)
 	total, albums := mixSurveyCached(filter)
 	resp["albums"] = albums
 	if albums < mixMinAlbums {
@@ -304,10 +380,24 @@ type genreCard struct {
 	Albums int    `json:"albums"`
 }
 
-// decadeAlbumCounts scans the albums index (id + year, pages of mixAlbumPage,
-// at most mixAlbumPages) and counts distinct albums per decade.
-func decadeAlbumCounts() map[int]int {
+// yearCard / crossoverCard are the c39b /local/mixes rows.
+type yearCard struct {
+	Year   int `json:"year"`
+	Albums int `json:"albums"`
+}
+
+type crossoverCard struct {
+	Decade int    `json:"decade"`
+	Genre  string `json:"genre"`
+	Count  int    `json:"count"`
+	Albums int    `json:"albums"`
+}
+
+// albumYearCounts scans the albums index (id + year, pages of mixAlbumPage,
+// at most mixAlbumPages) and counts distinct albums per decade and per year.
+func albumYearCounts() (decades map[int]int, years map[int]int) {
 	counts := map[int]int{}
+	years = map[int]int{}
 	seen := map[string]bool{}
 	for page := 0; page < mixAlbumPages; page++ {
 		hits := meiliSearchIndex("albums", map[string]interface{}{
@@ -320,15 +410,38 @@ func decadeAlbumCounts() map[int]int {
 				continue
 			}
 			seen[id] = true
-			if d := decadeOf(mnumStr(a, "year")); d != 0 {
-				counts[d]++
+			if y := yearOf(mnumStr(a, "year")); y != 0 {
+				counts[y-y%10]++
+				years[y]++
 			}
 		}
 		if len(hits) < mixAlbumPage {
 			break
 		}
 	}
-	return counts
+	return counts, years
+}
+
+// yearCards: the mixYearMax years with the most albums (>= mixMinAlbums),
+// newest first.
+func yearCards(years map[int]int) []yearCard {
+	out := make([]yearCard, 0, len(years))
+	for y, n := range years {
+		if n >= mixMinAlbums {
+			out = append(out, yearCard{Year: y, Albums: n})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Albums != out[j].Albums {
+			return out[i].Albums > out[j].Albums
+		}
+		return out[i].Year > out[j].Year
+	})
+	if len(out) > mixYearMax {
+		out = out[:mixYearMax]
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Year > out[j].Year })
+	return out
 }
 
 // genreTrackCounts is the facet LocalGenresHandler reads (top-100 genre
@@ -414,15 +527,171 @@ func mixCards(decades map[int]int, genres map[string]int, genreAlbums map[string
 	return dc, gc
 }
 
+// genreCountsIn is the genre facet (name -> tracks) inside one slice filter.
+func genreCountsIn(filter string) map[string]int {
+	counts := map[string]int{}
+	out, err := meiliReq("POST", "/indexes/tracks/search", map[string]interface{}{
+		"q": "", "filter": filter, "limit": 0, "facets": []string{"genre"},
+	})
+	if err != nil || out == nil {
+		return counts
+	}
+	fd, _ := out["facetDistribution"].(map[string]interface{})
+	g, _ := fd["genre"].(map[string]interface{})
+	for name, cnt := range g {
+		if strings.TrimSpace(name) != "" {
+			counts[name] = mintFloat(cnt)
+		}
+	}
+	return counts
+}
+
+// crossFilter is the filter of a (decade, genre) mix, the very string the
+// handler builds for ?decade=&genre= (shared survey memo).
+func crossFilter(decade int, genre string) string {
+	return mixFilter(decadeFilter(decade), genreFilter(genre))
+}
+
+// crossoverCandidates ranks the (decade, genre) pairs by tracks (then newer
+// decade, then name) and keeps the `max` best with at least mixMinAlbums
+// tracks (fewer tracks cannot span 15 albums).
+func crossoverCandidates(perDecade map[int]map[string]int, max int) []crossoverCard {
+	var out []crossoverCard
+	for d, genres := range perDecade {
+		for g, n := range genres {
+			if n >= mixMinAlbums {
+				out = append(out, crossoverCard{Decade: d, Genre: g, Count: n})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		if out[i].Decade != out[j].Decade {
+			return out[i].Decade > out[j].Decade
+		}
+		return strings.ToLower(out[i].Genre) < strings.ToLower(out[j].Genre)
+	})
+	if len(out) > max {
+		out = out[:max]
+	}
+	return out
+}
+
+// pickCrossovers keeps the surveyed pairs with >= mixMinAlbums albums, most
+// albums first, at most mixCrossMax: a first pass allows mixCrossPerKey
+// cards per decade and per genre, a second pass fills from the rest.
+func pickCrossovers(cands []crossoverCard) []crossoverCard {
+	ok := make([]crossoverCard, 0, len(cands))
+	for _, c := range cands {
+		if c.Albums >= mixMinAlbums {
+			ok = append(ok, c)
+		}
+	}
+	sort.SliceStable(ok, func(i, j int) bool {
+		if ok[i].Albums != ok[j].Albums {
+			return ok[i].Albums > ok[j].Albums
+		}
+		return ok[i].Count > ok[j].Count
+	})
+	out := make([]crossoverCard, 0, mixCrossMax)
+	used := make([]bool, len(ok))
+	perDecade, perGenre := map[int]int{}, map[string]int{}
+	for i, c := range ok {
+		if len(out) >= mixCrossMax {
+			break
+		}
+		if perDecade[c.Decade] >= mixCrossPerKey || perGenre[c.Genre] >= mixCrossPerKey {
+			continue
+		}
+		perDecade[c.Decade]++
+		perGenre[c.Genre]++
+		used[i] = true
+		out = append(out, c)
+	}
+	for i, c := range ok {
+		if len(out) >= mixCrossMax {
+			break
+		}
+		if !used[i] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+var (
+	crossMu   sync.Mutex
+	crossMemo []crossoverCard
+	crossAt   time.Time
+)
+
+func resetCrossoverMemo() {
+	crossMu.Lock()
+	defer crossMu.Unlock()
+	crossMemo, crossAt = nil, time.Time{}
+}
+
+// crossoverCards builds (or reads from its mixSurveyTTL memo) the crossover
+// cards over the listed decades. An empty list is not memoised.
+func crossoverCards(decades []decadeCard) []crossoverCard {
+	now := mixSurveyNow()
+	crossMu.Lock()
+	if crossMemo != nil && now.Sub(crossAt) < mixSurveyTTL {
+		out := crossMemo
+		crossMu.Unlock()
+		return out
+	}
+	crossMu.Unlock()
+	perDecade := make(map[int]map[string]int, len(decades))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, mixGenreSurveyPar)
+	for _, d := range decades {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(decade int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			counts := genreCountsIn(decadeFilter(decade))
+			mu.Lock()
+			perDecade[decade] = counts
+			mu.Unlock()
+		}(d.Decade)
+	}
+	wg.Wait()
+	cands := crossoverCandidates(perDecade, mixCrossCandidates)
+	for i := range cands {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			_, cands[i].Albums = mixSurveyCached(crossFilter(cands[i].Decade, cands[i].Genre))
+		}(i)
+	}
+	wg.Wait()
+	out := pickCrossovers(cands)
+	if len(out) > 0 {
+		crossMu.Lock()
+		crossMemo, crossAt = out, now
+		crossMu.Unlock()
+	}
+	return out
+}
+
 // LocalMixesHandler: GET /api/v1/local/mixes (the cards).
 func LocalMixesHandler(c echo.Context) error {
-	var decades map[int]int
+	var decades, years map[int]int
 	var genres map[string]int
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); decades = decadeAlbumCounts() }()
+	go func() { defer wg.Done(); decades, years = albumYearCounts() }()
 	go func() { defer wg.Done(); genres = genreTrackCounts() }()
 	wg.Wait()
 	dc, gc := mixCards(decades, genres, genreAlbumCounts(genreCandidates(genres)))
-	return c.JSON(http.StatusOK, map[string]interface{}{"decades": dc, "genres": gc})
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"decades": dc, "genres": gc, "years": yearCards(years), "crossovers": crossoverCards(dc),
+	})
 }

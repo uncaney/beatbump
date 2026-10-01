@@ -105,3 +105,19 @@ describe("I8: context after a continuation and on Lire tout", () => {
 		expect(describeContext(art, [t("a"), t("b")], 0)!.label).toBe("Artiste : Daft Punk · 1/2");
 	});
 });
+
+describe("crossover kind (c39b B6-2)", () => {
+	it("reads Mix : <genre> des années <decade>", () => {
+		const c = makeContext({ kind: "crossover", title: "Rock des années 1990", href: "/library/mixes" }, [{ videoId: "a1" }, { videoId: "a2" }]);
+		expect(normalizeContext(c)?.kind).toBe("crossover");
+		expect(describeContext(c, [{ videoId: "a1" }, { videoId: "a2" }], 0)?.label).toBe("Mix : Rock des années 1990 · 1/2");
+	});
+});
+
+describe("year kind (c39b B6-3)", () => {
+	it("reads Année : 1997", () => {
+		const c = makeContext({ kind: "year", title: "1997", href: "/library/mixes" }, [{ videoId: "a1" }]);
+		expect(normalizeContext(c)?.kind).toBe("year");
+		expect(describeContext(c, [{ videoId: "a1" }], 0)?.label).toBe("Année : 1997 · 1/1");
+	});
+});

@@ -7,6 +7,10 @@
 	// c30a F1 + F2: arrangeHomeRows ($lib/homeRows) shows a card in one row
 	// only and paints at most 4 rows above the first YouTube row; the others
 	// fold behind "Plus pour toi" ([data-testid=home-more-rows]).
+	// c39b B6-1: "Album du jour" ([data-testid=album-of-day]), one local
+	// album per UTC day for every profile (anonymous included), painted right
+	// after Pour toi on a bonus slot: the 4-row cap stays 4 personal rows +
+	// this card.
 	import { NNBSP, formatCountFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 	import { APIClient } from "$lib/api";
@@ -36,6 +40,8 @@
 	import { clockLabel, fetchRemoteResume, restoreRemoteResume, wireProfileChannel } from "$lib/stores/nowPlayingSync";
 	import { AudioPlayer } from "$lib/player";
 	import list from "$lib/stores/list";
+	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
+	import { ALBUM_OF_DAY_ROW, ALBUM_OF_DAY_URL, albumOfDayFrom, albumOfDayHref, albumOfDayLine, type AlbumOfDay } from "$lib/albumOfDay";
 	import { get } from "svelte/store";
 
 	const MAX = 20;
@@ -61,6 +67,42 @@
 	// or one of the profile's top 20 artists (GET me/new-in-library). Local
 	// only, nothing is acquired. Hidden when empty.
 	let newInLibrary: any[] = [];
+
+	// c39b B6-1: the album of the day (GET local/album-of-day), null = no card.
+	let albumDay: AlbumOfDay | null = null;
+	// c39b item 4: painted from the home cache (v3) on its own UTC day, then
+	// replaced in place by the live answer (same AP1 opacity cue).
+	let albumDaySource: "empty" | "cache" | "live" = "empty";
+	async function loadAlbumOfDay() {
+		try {
+			const res = await APIClient.fetch(ALBUM_OF_DAY_URL);
+			if (!res.ok) return;
+			const next = albumOfDayFrom(await res.json());
+			if (next) {
+				albumDay = next;
+				albumDaySource = "live";
+				homeCachePersist.schedule();
+			}
+		} catch {
+			/* keep what is shown (cache paint or nothing) */
+		}
+	}
+	let albumDayBusy = false;
+	async function playAlbumOfDay() {
+		if (!albumDay || albumDayBusy) return;
+		albumDayBusy = true;
+		try {
+			// A cached paint carries no tracks: ask again (memoised server side).
+			if (!albumDay.tracks.length) await loadAlbumOfDay();
+			const a = albumDay;
+			if (!a?.tracks.length) return;
+			await playTracks(a.tracks, { context: { kind: "album", title: String(a.album.title ?? ""), href: albumOfDayHref(a) } });
+		} catch (err) {
+			console.error("album-of-day play failed", err);
+		} finally {
+			albumDayBusy = false;
+		}
+	}
 
 	// ST1: a compact weekly recap card in the Reprendre area, Mondays only
 	// (local time), until dismissed for that ISO week. Hidden when the
@@ -135,7 +177,7 @@
 				redecouvrir: rediscover,
 				nouveautes: newInLibrary,
 				jamaisEcoute: neverPlayed,
-			});
+			}, albumDay);
 		} catch {
 			/* best-effort: offline whoami, private mode, quota, ... */
 		}
@@ -178,6 +220,12 @@
 		if (snap.rows.jamaisEcoute.length) {
 			neverPlayed = snap.rows.jamaisEcoute;
 			neverPlayedSource = "cache";
+		}
+		// The album of the day is the same for every profile: a profile
+		// mismatch (validateCacheProfile) does not drop it.
+		if (snap.albumOfDay && !albumDay) {
+			albumDay = snap.albumOfDay;
+			albumDaySource = "cache";
 		}
 		void validateCacheProfile(snap.profileId);
 	}
@@ -425,6 +473,7 @@
 	$: arranged = arrangeHomeRows([
 		{ key: "reprendre", items: resume, keepEmpty: reprendreHasExtras },
 		{ key: "pour-toi", items: forYou },
+		{ key: ALBUM_OF_DAY_ROW, items: albumDay ? [albumDay.album] : [], bonusSlot: true },
 		{ key: "recemment-acquis", items: acquired, max: MAX, minAfterDedupe: ALBUM_ROW_MIN },
 		{ key: "nouveautes-artistes", items: newInLibrary, minAfterDedupe: ALBUM_ROW_MIN },
 		{ key: "redecouvrir", items: rediscover },
@@ -531,6 +580,7 @@
 		void loadRediscover();
 		void loadNewInLibrary();
 		void loadWeekCard();
+		void loadAlbumOfDay();
 		let unwireProfile: (() => void) | undefined;
 		if (typeof BroadcastChannel !== "undefined") {
 			const channel = new BroadcastChannel(PROFILE_CHANNEL_NAME);
@@ -710,6 +760,69 @@
 				seeAllHref="/library/for-you"
 				seeAllLabel="Voir tout"
 			/>
+		</div>
+	</section>
+{/if}
+
+{#if visibleKeys.has(ALBUM_OF_DAY_ROW) && albumDay}
+	<section
+		class="home-row"
+		data-row={ALBUM_OF_DAY_ROW}
+	>
+		<div
+			class="row-fade"
+			class:is-cache={albumDaySource === "cache"}
+			data-testid="album-of-day"
+			data-album={albumDay.album.browseId}
+			data-date={albumDay.date}
+		>
+			<div class="header resp-content-width">
+				<p class="subheading">Un album de ta bibliothèque, le même pour tout le monde aujourd'hui</p>
+				<span class="h2">Album du jour</span>
+			</div>
+			<article class="resume-card aod-card">
+				<a
+					class="aod-cover-link"
+					href={albumOfDayHref(albumDay)}
+					aria-label="Ouvrir l'album {albumDay.album.title ?? ''}"
+				>
+					{#if thumbnailUrl(albumDay.album)}
+						<img
+							class="resume-card-cover"
+							src={thumbnailUrl(albumDay.album)}
+							width="64"
+							height="64"
+							loading="lazy"
+							decoding="async"
+							alt=""
+						/>
+					{:else}
+						<span
+							class="resume-card-cover placeholder"
+							aria-hidden="true"
+						/>
+					{/if}
+				</a>
+				<div class="resume-card-text">
+					<a
+						class="resume-card-title aod-title"
+						href={albumOfDayHref(albumDay)}
+						title={albumDay.album.title ?? ""}>{albumDay.album.title ?? ""}</a
+					>
+					{#if albumOfDayLine(artistName(albumDay.album), albumDay.year)}
+						<p class="resume-card-artist">{albumOfDayLine(artistName(albumDay.album), albumDay.year)}</p>
+					{/if}
+					<p class="aod-next">Demain un autre</p>
+				</div>
+				<button
+					type="button"
+					class="btn-reset btn-primary resume-card-play"
+					data-testid="album-of-day-play"
+					aria-label="Écouter {albumDay.album.title ?? ''}"
+					disabled={albumDayBusy}
+					on:click={playAlbumOfDay}>Écouter</button
+				>
+			</article>
 		</div>
 	</section>
 {/if}
@@ -931,6 +1044,27 @@
 	.resume-card-play {
 		flex: 0 0 auto;
 		white-space: nowrap;
+	}
+	/* c39b B6-1: the album-of-day card reuses the compact resume card;
+	   cover and title are links to the album page. */
+	.aod-cover-link {
+		flex: 0 0 auto;
+		display: block;
+		line-height: 0;
+	}
+	.aod-title {
+		display: block;
+		color: inherit;
+		text-decoration: none;
+	}
+	.aod-title:hover {
+		text-decoration: underline;
+	}
+	.aod-next {
+		margin: 0.15em 0 0;
+		/* 12px floor at the 12px mobile root */
+		font-size: max(0.8rem, 12px);
+		opacity: 0.6;
 	}
 	.resume-card-play:disabled {
 		cursor: progress;

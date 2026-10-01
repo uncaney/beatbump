@@ -74,10 +74,12 @@ describe("writeHomeCache / readHomeCache", () => {
 		expect(rows?.reprendre).toEqual([]);
 		expect(HOME_CACHE_ROW_KEYS).toEqual(["reprendre", "pourToi", "recemmentAcquis", "redecouvrir", "nouveautes", "jamaisEcoute"]);
 	});
-	it("ignores a v1 (three-row) envelope: the version is now 2", () => {
-		expect(HOME_CACHE_VERSION).toBe(2);
+	it("ignores v1 (three-row) and v2 (no album of the day) envelopes: the version is now 3", () => {
+		expect(HOME_CACHE_VERSION).toBe(3);
 		const v1 = { v: 1, savedAt: Date.now(), profileId: "p1", rows: { reprendre: [card("r1")], pourToi: [], recemmentAcquis: [] } };
 		expect(readHomeCache({ getItem: () => JSON.stringify(v1) }, "p1")).toBeNull();
+		const v2 = { v: 2, savedAt: Date.now(), profileId: "p1", rows: { ...emptyHomeCacheRows(), reprendre: [card("r1")] } };
+		expect(readHomeCache({ getItem: () => JSON.stringify(v2) }, "p1")).toBeNull();
 	});
 	it("returns null for a different profile (never leaks another profile's rows)", () => {
 		const storage = memoryStorage();
@@ -191,5 +193,49 @@ describe("L9-8 debounced home cache writes", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+describe("album of the day in the cache (c39b v3)", () => {
+	const aod = (date: string) => ({
+		album: { title: "Discovery", browseId: "lb-0123456789ab", subtitle: [{ text: "Daft Punk" }], thumbnails: [{ url: "/cover?lid=a" }, { url: "/cover?lid=b" }], loggingContext: { x: 1 } },
+		year: "2001",
+		date,
+		tracks: [card("t1"), card("t2")],
+	});
+	const at = (iso: string) => new Date(iso).getTime();
+
+	it("round-trips the card (slim, no tracks) and paints it on its own UTC day", () => {
+		const storage = memoryStorage();
+		writeHomeCache(storage, "p1", { reprendre: [card("r1")] }, aod(new Date().toISOString().slice(0, 10)));
+		const snap = peekHomeCache(storage);
+		expect(snap?.albumOfDay?.album.browseId).toBe("lb-0123456789ab");
+		expect(snap?.albumOfDay?.album.thumbnails).toHaveLength(1);
+		expect(snap?.albumOfDay?.album).not.toHaveProperty("loggingContext");
+		expect(snap?.albumOfDay?.year).toBe("2001");
+		expect(snap?.albumOfDay?.tracks).toEqual([]);
+		expect(JSON.parse(storage.getItem(HOME_CACHE_KEY)!).albumOfDay.tracks).toEqual([]);
+	});
+
+	it("drops yesterday's card at UTC midnight, keeps the rows", () => {
+		const storage = memoryStorage();
+		writeHomeCache(storage, "p1", { reprendre: [card("r1")] }, aod("2026-10-01"));
+		const raw = JSON.parse(storage.getItem(HOME_CACHE_KEY)!);
+		raw.savedAt = at("2026-10-01T20:00:00Z");
+		storage.setItem(HOME_CACHE_KEY, JSON.stringify(raw));
+		expect(peekHomeCache(storage, at("2026-10-01T23:59:00Z"))?.albumOfDay?.date).toBe("2026-10-01");
+		const next = peekHomeCache(storage, at("2026-10-02T00:01:00Z"));
+		expect(next?.albumOfDay).toBeNull();
+		expect(next?.rows.reprendre.map((c) => c.videoId)).toEqual(["r1"]);
+	});
+
+	it("no card written, or a malformed one, reads null", () => {
+		const storage = memoryStorage();
+		writeHomeCache(storage, "p1", { reprendre: [card("r1")] });
+		expect(peekHomeCache(storage)?.albumOfDay).toBeNull();
+		const raw = JSON.parse(storage.getItem(HOME_CACHE_KEY)!);
+		raw.albumOfDay = { album: { title: "YT", browseId: "MPREb_x" }, date: new Date().toISOString().slice(0, 10) };
+		storage.setItem(HOME_CACHE_KEY, JSON.stringify(raw));
+		expect(peekHomeCache(storage)?.albumOfDay).toBeNull();
 	});
 });
