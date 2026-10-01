@@ -53,6 +53,7 @@
 	import { fullscreenStore } from "./channel";
 	import { cancelSleepTimer, sleepLabel } from "$stores/sleepTimer";
 	import { currentIsFavourite, toggleCurrentFavourite } from "./favouriteState";
+	import { describeContext } from "$lib/stores/list/playbackContext";
 	export let state: "open" | "closed";
 
 	// F2: heart label (state is refreshed by Player.svelte on track change)
@@ -418,6 +419,13 @@
 	}, 100);
 
 	$: $progressBarSeek && setVideoTime();
+
+	// P2: "Album : Discovery · 4/14" (link to the source), "Revenir à l'album".
+	$: playbackContext = describeContext(
+		$SessionListService.context ?? null,
+		$SessionListService.mix,
+		$SessionListService.position,
+	);
 </script>
 
 {#if $queue.length && state === "open"}
@@ -702,6 +710,31 @@
 									>{data.artistInfo.artist.at(0)?.text}</button
 								>
 							{/if}
+							{#if playbackContext}
+							<p
+								class="playback-context"
+								data-testid="playback-context"
+							>
+								{#if playbackContext.href}
+									<a
+										href={playbackContext.href}
+										on:click|stopPropagation={() => fullscreenStore.set("closed")}
+										>{playbackContext.label}</a
+									>
+								{:else}
+									<span>{playbackContext.label}</span>
+								{/if}
+								{#if playbackContext.returnLabel}
+									<button
+										type="button"
+										class="context-return"
+										data-testid="playback-context-return"
+										on:click|stopPropagation={() => SessionListService.returnToContext()}
+										>{playbackContext.returnLabel}</button
+									>
+								{/if}
+							</p>
+						{/if}
 						</div>
 						<button
 							type="button"
@@ -751,6 +784,31 @@
 								? data?.artistInfo?.artist?.at(0)?.text
 								: ""}</span
 						>
+						{#if playbackContext}
+							<p
+								class="playback-context"
+								data-testid="playback-context"
+							>
+								{#if playbackContext.href}
+									<a
+										href={playbackContext.href}
+										on:click|stopPropagation={() => fullscreenStore.set("closed")}
+										>{playbackContext.label}</a
+									>
+								{:else}
+									<span>{playbackContext.label}</span>
+								{/if}
+								{#if playbackContext.returnLabel}
+									<button
+										type="button"
+										class="context-return"
+										data-testid="playback-context-return"
+										on:click|stopPropagation={() => SessionListService.returnToContext()}
+										>{playbackContext.returnLabel}</button
+									>
+								{/if}
+							</p>
+						{/if}
 					</div>
 					<div
 						class="container"
@@ -1078,6 +1136,45 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+	.playback-context {
+		margin: 0.35em auto 0;
+		max-width: 85vw;
+		font-size: 0.8125rem;
+		line-height: 1.3;
+		color: hsla(0, 0%, 100%, 0.7);
+		text-align: center;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5em;
+		a,
+		span {
+			color: inherit;
+			text-decoration: none;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			max-width: 100%;
+		}
+		a:hover {
+			text-decoration: underline;
+		}
+	}
+	.now-playing-meta .playback-context {
+		justify-content: flex-start;
+		text-align: start;
+		margin-inline: 0;
+	}
+	.context-return {
+		font-size: 0.75rem;
+		padding: 0.2em 0.7em;
+		border-radius: 999px;
+		border: 1px solid hsla(0, 0%, 100%, 0.35) !important;
+		background: hsla(0, 0%, 100%, 0.12) !important;
+		color: #fff !important;
+		cursor: pointer;
 	}
 	.next-up-label {
 		font-weight: 600;

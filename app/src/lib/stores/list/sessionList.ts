@@ -29,6 +29,12 @@ import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
 import { applyMixOp, planInsert, planReorder, removeAt } from "./queueOps";
+import {
+    describeContext,
+    makeContext,
+    type PlaybackContext,
+    type PlaybackContextInput,
+} from "./playbackContext";
 import { fetchNext } from "./utils.list";
 import { APIClient } from "$lib/api";
 import { SERVER_DOMAIN } from "../../../env";
@@ -74,7 +80,11 @@ const VALID_KEYS = [
     "related",
     "mix",
     "position",
+    "context",
 ] as const;
+
+/** Playlist ids compare without YouTube's "VL" browse prefix. */
+const normPlaylistId = (id: string) => (id.startsWith("VL") ? id.slice(2) : id);
 
 export class ListService {
     private isLocal = false;
@@ -93,7 +103,15 @@ export class ListService {
             mix: [],
             position: 0,
             related: null,
+            context: null,
         });
+
+    /**
+     * Context offered by the page on screen (P2): the release page registers
+     * its album here, and a playlist / automix session started on that
+     * playlist id (Play Album button or a track row) takes it as its context.
+     */
+    private _offeredContext: { playlistId: string; ctx: PlaybackContextInput } | null = null;
 
     constructor() {
         this._$.set(this._state);
@@ -429,6 +447,7 @@ export class ListService {
                         mix: ["append", data.results],
                     },
                 );
+                this.setContext(makeContext(this.offeredContextFor(playlistId), state.mix));
                 await tick();
                 const selectedVideoId = videoId ||
                     item?.videoId ||
@@ -523,6 +542,7 @@ export class ListService {
                     mix: ["set", data.results],
                     currentMixType: "playlist",
                 });
+                this.setContext(makeContext(this.offeredContextFor(playlistId), state.mix));
 
                 const playbackIndex =
                     index === 0
@@ -993,7 +1013,46 @@ export class ListService {
         return true;
     }
 
-    public async setMix(mix: Item[], type?: "auto" | "playlist" | "local") {
+    /** The page on screen offers its playlist as the context of a session started on it (P2). */
+    public offerContext(playlistId: string | undefined | null, ctx: PlaybackContextInput | null) {
+        this._offeredContext = playlistId && ctx ? { playlistId: normPlaylistId(playlistId), ctx } : null;
+    }
+
+    private offeredContextFor(playlistId: string | undefined): PlaybackContextInput | null {
+        const o = this._offeredContext;
+        return o && playlistId && normPlaylistId(playlistId) === o.playlistId ? o.ctx : null;
+    }
+
+    private setContext(context: PlaybackContext | null) {
+        this._$.update((s) => ({ ...s, context }));
+    }
+
+    /**
+     * "Revenir à l'album" (P2): a track outside the context ("Lire ensuite")
+     * is playing; jump to the next context track in the queue.
+     */
+    public async returnToContext(): Promise<boolean> {
+        const view = describeContext(this._state.context ?? null, this._state.mix, this._state.position);
+        if (!view || view.returnIndex < 0) return false;
+        const position = await this.updatePosition(view.returnIndex);
+        const track = this._state.mix[position];
+        await getSrc(track?.videoId, track?.playlistId, undefined, true);
+        if (groupSession?.initialized && groupSession?.hasActiveSession) {
+            updateGroupPosition(undefined, position);
+        }
+        syncTabs.updatePosition(position);
+        return true;
+    }
+
+    /**
+     * Replace the queue. `context` (P2) names the source shown by the player
+     * ("Album : Discovery · 4/14", link back to it); omitted = plain queue.
+     */
+    public async setMix(
+        mix: Item[],
+        type?: "auto" | "playlist" | "local",
+        context?: PlaybackContextInput | PlaybackContext | null,
+    ) {
         this.invalidatePrefetch();
         const guard = await mutex.do(async () => {
             await tick();
@@ -1002,6 +1061,7 @@ export class ListService {
                     ...this._state,
                     mix: ["set", mix],
                     currentMixType: type,
+                    context: makeContext(context ?? null, mix),
                 }),
                     resolve(this._state);
             });
@@ -1259,6 +1319,7 @@ export class ListService {
             visitorData: "",
             position: 0,
             related: null,
+            context: null,
         });
         return this._state;
     }

@@ -97,7 +97,7 @@
 						idx={index}
 						slot="item"
 						on:initLocalPlaylist={async ({ detail }) => {
-							await list.setMix(songs.map(item => ({ ...item, IS_LOCAL: true })), "local");
+							await list.setMix(songs.map(item => ({ ...item, IS_LOCAL: true })), "local", { kind: "favorites", title: "Favoris", href: "/favorites" });
 							await list.updatePosition(detail.idx);
 							isPagePlaying.add("favorites");
 							await getSrc($list.mix[detail.idx]?.videoId);

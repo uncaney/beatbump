@@ -45,7 +45,7 @@
 			const currentId = $queue[$SessionListService.position]?.videoId;
 			original = [];
 			originalType = undefined;
-			SessionListService.setMix(restored, type).then(() => {
+			SessionListService.setMix(restored, type, $SessionListService.context).then(() => {
 				// Keep the playing track as the cursor: its index differs once
 				// the original order is back (updatePosition only moves the
 				// cursor + prefetch, it does not start playback).

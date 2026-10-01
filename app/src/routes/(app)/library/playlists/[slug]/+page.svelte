@@ -122,7 +122,7 @@
 					action: async () => {
 						list.updatePosition(0);
 
-						list.setMix([...items], "local");
+						list.setMix([...items], "local", { kind: "playlist", title: playlist?.name ?? "", href: `/library/playlists/${encodeURIComponent(playlistName)}` });
 						isPagePlaying.add(playlistName);
 						await getSrc(items[0]?.videoId);
 					},
@@ -188,6 +188,7 @@
 						(await list.setMix(
 							items.map((item) => ({ ...item, IS_LOCAL: true })),
 							"local",
+							{ kind: "playlist", title: playlist?.name ?? "", href: `/library/playlists/${encodeURIComponent(playlistName)}` },
 						));
 
 					await tick();
