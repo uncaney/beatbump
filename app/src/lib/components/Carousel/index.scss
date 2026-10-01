@@ -6,6 +6,18 @@
 	font-weight: 500;
 }
 
+// "Voir tout" / "See All" (audit v4 TOP 10 / 3.1): 11.7px capitals in a
+// 16px tall link on mobile. 13px floor and a 28px tall box (padding kept
+// inside the box, so the header row does not grow much).
+.header a > small {
+	display: inline-flex;
+	align-items: center;
+	box-sizing: border-box;
+	min-height: 28px;
+	padding: 0.25rem 0;
+	font-size: max(0.8125rem, 13px);
+}
+
 .c-group {
 	display: flex;
 

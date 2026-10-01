@@ -233,6 +233,14 @@
 		margin-bottom: 4.5rem;
 	}
 
+	// "Delete All Playlists" disabled (no playlist) looked identical to the
+	// active "Export Data" (audit v4 3.4 / TOP 10): the global %button-base
+	// pins opacity: 1 !important on :disabled, hence the !important here.
+	button.outlined:disabled {
+		opacity: 0.45 !important;
+		cursor: not-allowed;
+	}
+
 	.list {
 		min-height: 15%;
 		margin-bottom: 1rem;

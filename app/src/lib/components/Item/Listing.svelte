@@ -54,6 +54,10 @@
 	import { showDownloadSongPopper } from "$lib/stores";
 
 	export let data: Item;
+	// Row index in a long list (_Browse passes it): the first 12 covers load
+	// eagerly with a high fetch priority, the rest lazily (audit v4 TOP 6: the
+	// first rows of /library/albums on mobile rendered with naturalWidth 0).
+	export let index: number | undefined = undefined;
 
 	const dispatch = createEventDispatcher();
 
@@ -306,6 +310,9 @@
 	// Cover placeholder (initials on a deterministic hue) once the <img> errors;
 	// the tile overlays the 5rem box, so the row does not move.
 	let imgBroken = false;
+	$: eager = index !== undefined && index < 12;
+	let imgLoading: "eager" | "lazy" | undefined;
+	$: imgLoading = index === undefined ? undefined : eager ? "eager" : "lazy";
 	$: coverName = coverLabel(data);
 	$: coverInitials = initials(coverName);
 	$: coverHue = hueFor(coverName);
@@ -387,9 +394,11 @@
 						width={srcImg.width}
 						height={srcImg.height}
 						src={srcImg.url}
+						loading={imgLoading}
+						fetchpriority={eager ? "high" : undefined}
 						on:error={() => (imgBroken = true)}
 					/>
-					{#if imgBroken && coverInitials}
+					{#if (imgBroken || !srcImg.url) && coverInitials}
 						<span
 							class="cover-initials"
 							aria-hidden="true"
@@ -587,8 +596,14 @@
 			margin: 0;
 			pointer-events: none;
 
+			// 26px tap box on the 14px text (audit v4 TOP 8): vertical padding
+			// cancelled by a negative margin, so neither the line box nor the
+			// text position moves.
 			> span {
 				pointer-events: auto;
+				display: inline-block;
+				padding: 6px 0;
+				margin: -6px 0;
 			}
 		}
 	}
@@ -641,6 +656,12 @@
 		// max-width: calc(100% - 4.45em);max-width
 		@media screen and (min-width: 640px) {
 			padding: 0.2rem 0;
+			// Desktop (audit v4 TOP 8 / 3.2): the text column is sized to its
+			// content (capped by the row), so the kebab sits right after the
+			// text instead of 600px away at the far edge of a 1280px row.
+			grid-template-columns: minmax(0, max-content) auto;
+			justify-content: start;
+			column-gap: 0.25rem;
 		}
 	}
 
@@ -659,6 +680,11 @@
 
 		// line-height: 2;line-height
 		display: inherit;
+		// The grid column already stops at the kebab on desktop (see
+		// .innercard), so the text may use the whole column.
+		@media screen and (min-width: 640px) {
+			max-width: none;
+		}
 	}
 
 	.img-container {

@@ -91,7 +91,7 @@
 
 		{#if msg}<p class="msg">{msg}</p>{/if}
 		<p class="note">
-			Profiles are name-based (no password) — same name = same library. Anyone on the instance can use any
+			Profiles are name-based (no password) · same name = same library. Anyone on the instance can use any
 			name; this is meant for a trusted/household instance.
 		</p>
 	{/if}

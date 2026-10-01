@@ -94,8 +94,14 @@ overflow:hidden;
 		padding: 0;
 		margin: 0;
 		pointer-events: none;
+		/* 26px tap box on the 14px text (audit v4 TOP 8): vertical padding
+		   cancelled by a negative margin, so the line box and the text
+		   position do not move. */
 		> span {
 			pointer-events: auto;
+			display: inline-block;
+			padding: 6px 0;
+			margin: -6px 0;
 		}
 	}
 }

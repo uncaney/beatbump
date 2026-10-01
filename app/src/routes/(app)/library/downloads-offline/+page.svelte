@@ -286,10 +286,10 @@
 	<header class="head">
 		<div class="titles">
 			<h1>Hors-ligne</h1>
-			<p class="stats">
-				{#if tracks.length === 0}
-					Aucun morceau en cache
-				{:else}
+			<!-- No counter on an empty cache (audit v4 3.6): the EmptyState below
+			     already says it, "Aucun morceau en cache" was the same message twice. -->
+			{#if tracks.length > 0}
+				<p class="stats">
 					{tracks.length} {tracks.length > 1 ? "morceaux" : "morceau"}
 					{#if size}<span class="dot">·</span>{size}{/if}
 					{#if albums.length}<span class="dot">·</span>{albums.length} {albums.length > 1 ? "albums" : "album"}{/if}
@@ -299,13 +299,14 @@
 					{#if evictedCount}<span class="dot">·</span><span class="evicted"
 							>{evictedCount} à retélécharger</span
 						>{/if}
-				{/if}
-			</p>
+				</p>
+			{/if}
 		</div>
-		<span
-			class="status"
-			class:off={!online}>{online ? "● En ligne" : "● Hors-ligne"}</span
-		>
+		<!-- Only the offline state is worth a badge (audit v4 3.6): "● En ligne"
+		     was a 10.8px green line under the counter with nothing to act on. -->
+		{#if !online}
+			<span class="status off">● Hors-ligne</span>
+		{/if}
 	</header>
 	{#if tracks.length === 0}
 		<!-- Empty state with one action (audit 2.4): the explanation lives here
@@ -651,7 +652,7 @@
 		justify-content: center;
 		gap: 0.45rem;
 		padding: 0.55rem 1rem;
-		min-height: 2.75rem; // 44px touch target
+		min-height: max(2.75rem, 44px); // px floor: mobile root font is 12px (audit v4 TOP 3)
 		border-radius: 999px;
 		border: 1px solid rgba(255, 255, 255, 0.18) !important;
 		background: rgba(255, 255, 255, 0.08) !important;
@@ -710,7 +711,8 @@
 			}
 		}
 	}
-	// View switcher: label always visible (light text) and 44px tall.
+	// View switcher: label always visible (light text) and 44px tall
+	// (px floor, audit v4 TOP 3: 2.75rem alone was 33px on mobile).
 	.views {
 		display: flex;
 		flex-wrap: wrap;
@@ -719,7 +721,7 @@
 		button {
 			display: inline-flex;
 			align-items: center;
-			min-height: 2.75rem;
+			min-height: max(2.75rem, 44px);
 			padding: 0 0.95rem;
 			border: 1px solid transparent !important;
 			border-radius: 1.4rem;
@@ -783,7 +785,7 @@
 		min-width: 0;
 		max-width: 100%;
 		box-sizing: border-box;
-		min-height: 2.75rem;
+		min-height: max(2.75rem, 44px);
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -856,13 +858,15 @@
 		flex: 0 0 auto;
 		margin-left: auto;
 	}
-	// Round icon button, 44px, light icon (overrides the global dark-text rule).
+	// Round icon button, 44px (px floor, audit v4 TOP 3), light icon
+	// (overrides the global dark-text rule).
 	.btn {
 		flex: 0 0 auto;
 		box-sizing: border-box;
-		width: 2.75rem;
-		min-width: 2.75rem;
-		height: 2.75rem;
+		width: auto;
+		height: auto;
+		min-width: max(2.75rem, 44px);
+		min-height: max(2.75rem, 44px);
 		padding: 0;
 		border-radius: 999px;
 		display: grid;

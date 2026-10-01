@@ -21,19 +21,21 @@
 // own ::before is the gradient (z-index 10), the badge sits above it. Artist
 // rows (.artist-img) navigate instead of playing, so they get none.
 @media (hover: none) {
+	// 36px in the bottom-right corner (audit v4 TOP 6 / 3.2): a 40px badge
+	// centred on the 60px (5rem at the 12px mobile root) thumbnail hid the
+	// cover; 36x36 covers 36% of it and leaves the artwork recognisable.
 	.innercard .img-container:not(.artist-img)::after {
 		content: "";
 		position: absolute;
-		inset: 0;
-		margin: auto;
-		width: 40px;
-		height: 40px;
+		inset: auto 2px 2px auto;
+		width: 36px;
+		height: 36px;
 		border-radius: 50%;
 		z-index: 11;
 		pointer-events: none;
 		background: rgba(0, 0, 0, 0.55)
 			url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff'><path d='M8 5v14l11-7z'/></svg>")
-			center / 18px 18px no-repeat;
+			center / 16px 16px no-repeat;
 		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
 	}
 }

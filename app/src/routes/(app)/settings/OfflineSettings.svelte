@@ -424,7 +424,7 @@
 		position: relative;
 		display: inline-flex;
 		align-items: center;
-		min-height: 2.75rem; /* 44px hit area */
+		min-height: max(2.75rem, 44px); /* 44px hit area, px floor (mobile root font 12px) */
 		flex-shrink: 0;
 	}
 
@@ -482,8 +482,10 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-height: 2.75rem; /* 44px */
-		min-width: 2.75rem;
+		/* 44px with a px floor: the mobile root font is 12px, so 2.75rem alone
+		   gave 33px tall buttons / selects (audit v4 TOP 3). */
+		min-height: max(2.75rem, 44px);
+		min-width: max(2.75rem, 44px);
 		padding: 0.5rem 1rem;
 		border-radius: 0.5rem;
 		font: inherit;
@@ -522,7 +524,7 @@
 	}
 
 	.select select {
-		min-height: 2.75rem;
+		min-height: max(2.75rem, 44px);
 		&:focus-visible {
 			outline: 2px solid #fff;
 			outline-offset: 2px;

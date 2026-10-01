@@ -99,8 +99,8 @@
 	</header>
 
 	<section class="grid">
-		{#each items as item (item.browseId || item.videoId || item.title)}
-			<div class="cell"><Listing data={item} /></div>
+		{#each items as item, i (item.browseId || item.videoId || item.title)}
+			<div class="cell"><Listing data={item} index={i} /></div>
 		{/each}
 	</section>
 
