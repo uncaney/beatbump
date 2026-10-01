@@ -2,14 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
 	albumInfo,
 	artistName,
+	durationOf,
 	formatBytes,
+	formatDuration,
 	groupByAlbum,
 	groupByArtist,
 	mixtape,
+	notPlayedSince,
 	recentlyCached,
 	shuffle,
 	toPlayableItems,
 	totalBytes,
+	totalDuration,
 } from "./offlineQueue";
 
 function track(id: string, artist: string, extra: Record<string, unknown> = {}) {
@@ -116,6 +120,86 @@ describe("mixtape", () => {
 		const mix = mixtape(heavy, { seed: 3 });
 		expect(mix).toHaveLength(4);
 		expect(mix.map((t) => t.videoId).sort()).toEqual(["h1", "h2", "h3", "o1"]);
+	});
+
+	// 60 tracks, 6 artists, lengths 3:00 .. 4:50 (m:ss strings like real items).
+	const big = Array.from({ length: 60 }, (_, i) => {
+		const sec = 180 + (i * 11) % 111;
+		return track("t" + i, "Art" + (i % 6), { length: `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` });
+	});
+
+	it("hits a target duration within +10 % (30 / 60 / 90 min) and keeps artists apart", () => {
+		for (const minutes of [30, 60, 90]) {
+			for (let seed = 1; seed <= 20; seed++) {
+				const mix = mixtape(big, { targetSec: minutes * 60, seed });
+				const sum = totalDuration(mix);
+				expect(sum).toBeGreaterThanOrEqual(minutes * 60 * 0.9);
+				expect(sum).toBeLessThanOrEqual(minutes * 60 * 1.1);
+				for (let i = 1; i < mix.length; i++) expect(artistName(mix[i])).not.toBe(artistName(mix[i - 1]));
+				expect(new Set(mix.map((t) => t.videoId)).size).toBe(mix.length);
+			}
+		}
+	});
+
+	it("respects the target in free order too", () => {
+		for (let seed = 1; seed <= 20; seed++) {
+			const mix = mixtape(big, { targetSec: 1800, seed, avoidSameArtistInARow: false });
+			const sum = totalDuration(mix);
+			expect(sum).toBeGreaterThanOrEqual(1620);
+			expect(sum).toBeLessThanOrEqual(1980);
+		}
+	});
+
+	it("never exceeds +10 % even when the pool runs short, and counts unknown lengths as 3:30", () => {
+		const short = [track("x1", "X"), track("y1", "Y"), track("x2", "X")]; // no length -> 210 s each
+		const mix = mixtape(short, { targetSec: 400, seed: 2 });
+		expect(mix).toHaveLength(2); // 420 s <= 440, a third one (630) would not fit
+		const whole = mixtape(short, { targetSec: 60 * 60, seed: 2 });
+		expect(whole).toHaveLength(3); // pool exhausted: shorter than the target, never longer
+		expect(totalDuration(whole)).toBe(630);
+	});
+
+	it("is reproducible for a seed and changes with the seed", () => {
+		const a = mixtape(big, { targetSec: 3600, seed: 11 }).map((t) => t.videoId);
+		const b = mixtape(big, { targetSec: 3600, seed: 11 }).map((t) => t.videoId);
+		const c = mixtape(big, { targetSec: 3600, seed: 12 }).map((t) => t.videoId);
+		expect(a).toEqual(b);
+		expect(a).not.toEqual(c);
+	});
+
+	it("leaves out tracks played in the last 30 days when lastPlayed is known", () => {
+		const now = 1_700_000_000_000;
+		const day = 86_400_000;
+		const lastPlayed = new Map<string, number>([
+			["a1", now - 2 * day], // recent -> out
+			["a2", now - 31 * day], // old -> in
+			["b1", now - 29.5 * day], // recent -> out
+			// a3, b2, c1, d1 unknown -> in
+		]);
+		const ids = mixtape(lib, { seed: 5, lastPlayed, notPlayedSinceMs: 30 * day, now }).map((t) => t.videoId).sort();
+		expect(ids).toEqual(["a2", "a3", "b2", "c1", "d1"]);
+		expect(notPlayedSince(lib, lastPlayed, 30 * day, now)).toHaveLength(5);
+		// Without a map the rule is a no-op.
+		expect(mixtape(lib, { seed: 5, notPlayedSinceMs: 30 * day, now })).toHaveLength(lib.length);
+		expect(notPlayedSince(lib, undefined, 30 * day, now)).toHaveLength(lib.length);
+	});
+});
+
+describe("durations", () => {
+	it("reads every duration shape and falls back to unknown", () => {
+		expect(durationOf({ length: "3:45" })).toBe(225);
+		expect(durationOf({ length: "1:02:03" })).toBe(3723);
+		expect(durationOf({ durationSec: 200 })).toBe(200);
+		expect(durationOf({ lengthSeconds: "95" })).toBe(95);
+		expect(durationOf({ length: "" })).toBeUndefined();
+		expect(durationOf({})).toBeUndefined();
+		expect(totalDuration([{ length: "1:00" }, {}])).toBe(60 + 210);
+	});
+	it("formats in French", () => {
+		expect(formatDuration(45)).toBe("45 s");
+		expect(formatDuration(1800)).toBe("30 min");
+		expect(formatDuration(3900)).toBe("1 h 05 min");
+		expect(formatDuration(7200)).toBe("2 h 00 min");
 	});
 });
 
