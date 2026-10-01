@@ -397,6 +397,16 @@
         }
     }
 
+    // Audit v7 item 10: on phones the overlay bar inherited the 94 % backdrop
+    // and the nav gear showed through the close button (mobile-04 x=700-760).
+    // Opaque bar under the search field; the trending list below keeps the
+    // translucent backdrop.
+    @media screen and (max-width: 719px) {
+        .nav-search {
+            background: var(--top-bg, #000);
+        }
+    }
+
     .backdrop {
         position: fixed;
         inset: 0;

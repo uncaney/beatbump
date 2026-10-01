@@ -50,10 +50,15 @@
 	// did not answer ("Unknown"): Re-sync stays available as a retry.
 	$: nothingCached = !loading && !(error && !entries.length) && cachedTracks === 0;
 
+	// French units (audit v7 item 10): "2 Mo utilisés sur 11 Go", like the
+	// Hors-ligne page ("56 Mo"); decimal comma for the fractional Go.
 	function fmtBytes(bytes: number): string {
-		if (!(bytes > 0)) return "0 MB";
-		if (bytes >= GB) return `${(bytes / GB).toFixed(bytes >= 10 * GB ? 0 : 1)} GB`;
-		return `${Math.max(1, Math.round(bytes / MB))} MB`;
+		if (!(bytes > 0)) return "0 Mo";
+		if (bytes >= GB) {
+			const go = (bytes / GB).toFixed(bytes >= 10 * GB ? 0 : 1).replace(".", ",");
+			return `${go} Go`;
+		}
+		return `${Math.max(1, Math.round(bytes / MB))} Mo`;
 	}
 	function fmtQuota(q: number): string {
 		return q > 0 ? fmtBytes(q) : "unlimited";

@@ -164,7 +164,14 @@
             </div>-->
 
 			<div class="setting">
-                <label for="lasttrack">Remember Last Track</label>
+                <!-- Audit v7 item 10: the help sits under the title like the
+                     other rows (was a full-width <p> under the switch). -->
+                <label for="lasttrack"
+                    >Remember Last Track
+                    <span class="help"
+                        >À la réouverture, la file et la position reviennent telles quelles, en pause</span
+                    >
+                </label>
                 <input
                     name="lasttrack"
                     id="lasttrack"
@@ -176,7 +183,6 @@
                     class="switch"
                 />
             </div>
-            <p class="help">À la réouverture, la file et la position reviennent telles quelles, en pause.</p>
 			<!-- <div class="setting">
                 <label for="stream">Stream </label>
                 <div class="select">

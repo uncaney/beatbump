@@ -228,6 +228,17 @@
 		letter-spacing: -0.01em;
 		max-width: 40ch;
 	}
+	/* Audit v7 item 10: long album titles clamp to two lines with an
+	   ellipsis (listPages.scss sets text-overflow on a block with no
+	   overflow, so nothing was ever clipped). */
+	.box-title {
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		overflow: hidden;
+		max-width: 100%;
+		overflow-wrap: anywhere;
+	}
 	/* Audit v6 TOP 9: below 513 px the title is centred (listPages.scss) but
 	   the 40ch meta block started at the left edge, so artist + info line sat
 	   41 px left of the title centre. Centre the block itself. */

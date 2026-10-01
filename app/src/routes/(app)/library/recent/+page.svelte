@@ -141,6 +141,16 @@
 		min-height: 100%;
 		padding-bottom: 5rem;
 	}
+	/* Audit v7 item 10: the headings and the day groups sat at x=1 on phones
+	   (the other library pages get their gutter from their layout). The
+	   CollectionNav chips carry their own 16 px gutter, so pad the content
+	   only; 16 px floor because the mobile root font is 12 px. */
+	@media screen and (max-width: 575.98px) {
+		h1,
+		main > section {
+			padding-inline: max(1rem, 16px);
+		}
+	}
 	h2 {
 		margin: 1.25rem 0 0.5rem;
 	}
