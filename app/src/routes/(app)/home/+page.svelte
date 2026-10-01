@@ -8,6 +8,7 @@
 	import ErrorState from "$lib/components/EmptyState/ErrorState.svelte";
 	import PersonalRows from "./_PersonalRows.svelte";
 	import FirstRun from "./_FirstRun.svelte";
+	import WeekendCard from "./_WeekendCard.svelte";
 	import { homeChipContext } from "$lib/contexts";
 	import type { PageData } from "./$types";
     import {APIClient} from "$lib/api";
@@ -188,6 +189,7 @@
 		}}
 	/>
 	<FirstRun />
+	<WeekendCard />
 	<PersonalRows />
 	{#if !homeReady}
 		<div
