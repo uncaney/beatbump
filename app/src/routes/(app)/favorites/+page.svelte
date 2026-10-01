@@ -10,6 +10,8 @@
 	import { CTX_ListItem } from "$lib/contexts";
 	import { isPagePlaying } from "$lib/stores/stores";
 	import { getSrc } from "$lib/player";
+	import { playAllMixType } from "$lib/stores/list/queueOps";
+	import { playAllContextFor } from "$lib/stores/list/playbackContext";
 
 	let value: number = 0;
 	let songs: Item[] = [];
@@ -97,7 +99,9 @@
 						idx={index}
 						slot="item"
 						on:initLocalPlaylist={async ({ detail }) => {
-							await list.setMix(songs.map(item => ({ ...item, IS_LOCAL: true })), "local", { kind: "favorites", title: "Favoris", href: "/favorites" });
+							// I8 / I20: no forced IS_LOCAL; "local" only when every row is a
+							// library row (else a YouTube queue), Favoris context.
+							await list.setMix(songs, playAllMixType(songs), playAllContextFor("/favorites", "Favoris"), { fresh: true });
 							await list.updatePosition(detail.idx);
 							isPagePlaying.add("favorites");
 							await getSrc($list.mix[detail.idx]?.videoId);
