@@ -218,7 +218,7 @@ func autoCacheOnPlay(videoId string, playlistId string, playerResponse _youtube.
 		// the album + lookahead below.
 		title := playerResponse.VideoDetails.Title
 		author := playerResponse.VideoDetails.Author
-		owned := meiliOwnsTrack(videoId, title, author)
+		owned := cachedOwnsTrack(videoId, title, author)
 
 		// (b) Resolve + enqueue the whole album this track belongs to --
 		// unless we already own this track by content (P2a). Owning the track
@@ -282,6 +282,39 @@ func autoCacheSeen(key string) bool {
 	}
 	autoCacheDebounce.Store(key, now)
 	return false
+}
+
+// ---- owned verdict memo (K14) ----
+// autoCacheOnPlay asked Meili 1-2 searches per lookahead track on every
+// player.json of a radio (up to 20 tracks); the same tracks come back on
+// every replay. The verdict is memoised per videoId for ownedVerdictTTL.
+const ownedVerdictTTL = time.Hour
+
+type ownedVerdict struct {
+	owned bool
+	at    time.Time
+}
+
+var (
+	ownedVerdicts sync.Map         // videoId -> ownedVerdict
+	ownsTrackFn   = meiliOwnsTrack // seam for tests
+	ownedNow      = time.Now       // seam for tests
+)
+
+// cachedOwnsTrack is meiliOwnsTrack memoised per videoId for one hour.
+func cachedOwnsTrack(videoId, title, artist string) bool {
+	if videoId == "" {
+		return ownsTrackFn(videoId, title, artist)
+	}
+	now := ownedNow()
+	if v, ok := ownedVerdicts.Load(videoId); ok {
+		if e, ok := v.(ownedVerdict); ok && now.Sub(e.at) < ownedVerdictTTL {
+			return e.owned
+		}
+	}
+	owned := ownsTrackFn(videoId, title, artist)
+	ownedVerdicts.Store(videoId, ownedVerdict{owned: owned, at: now})
+	return owned
 }
 
 // meiliOwnsVideo reports whether a YT videoId is already in the owned library
@@ -361,7 +394,7 @@ func enqueueLookahead(videoId string, playlistId string, limit int) {
 		if vid == "" || vid == videoId || isLid(vid) || !ytVideoRe.MatchString(vid) {
 			continue
 		}
-		if autoCacheSeen("v:"+vid) || meiliOwnsTrack(vid, it.Title, itemArtist(it)) {
+		if autoCacheSeen("v:"+vid) || cachedOwnsTrack(vid, it.Title, itemArtist(it)) {
 			continue
 		}
 		enqueueYubal(vid) // 409 -> silent drop
