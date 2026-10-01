@@ -6,7 +6,7 @@
 	import { browser } from "$app/environment";
 	import Header from "$components/Layouts/Header.svelte";
 	import { APIClient } from "$lib/api";
-	import { storageStatus } from "$lib/offline";
+	import { requestPersistentStorage, storageStatus } from "$lib/offline";
 	import { formatBytesFr, formatIntFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 
@@ -30,13 +30,18 @@
 	let usage = 0;
 	let quota = 0;
 	let probing = true;
+	// UX6: "Protéger le stockage" (same call as Réglages > Hors-ligne,
+	// OfflineSettings.svelte). `protectResult` is the last answer of the
+	// browser, shown under the button: "" = not asked yet.
+	let protectBusy = false;
+	let protectResult: "" | "granted" | "denied" | "unsupported" = "";
 	// F13: "Copier le diagnostic" feedback (no recipient configured).
 	let copied: "" | "ok" | "fail" = "";
 	let copiedTimer: ReturnType<typeof setTimeout>;
 
 	/** The diagnostic block: what a report needs, no profile data. */
 	const diagText = () =>
-		`Version serveur : ${stats?.version ?? "?"}\nVersion app : ${servedVersion || "?"}\nPage : ${
+		`Version serveur : ${stats?.version ?? "?"}\nBuild app : ${servedVersion || "?"}\nPage : ${
 			browser ? location.pathname : ""
 		}\nService worker : ${!swSupported ? "non pris en charge" : swWaiting ? "mise à jour en attente" : swController ? "actif" : "inactif"}\nStockage persistant : ${
 			persisted === null ? "inconnu" : persisted ? "oui" : "non"
@@ -126,6 +131,18 @@
 		quota = s.quota;
 	}
 
+	async function protectStorage() {
+		if (protectBusy) return;
+		protectBusy = true;
+		try {
+			const r = await requestPersistentStorage(true);
+			await probeStorage();
+			protectResult = r === true || persisted === true ? "granted" : r === null ? "unsupported" : "denied";
+		} finally {
+			protectBusy = false;
+		}
+	}
+
 	onMount(async () => {
 		await Promise.all([loadStats(), loadServedVersion(), probeServiceWorker(), probeStorage()]);
 		probing = false;
@@ -182,10 +199,16 @@
 				class="facts"
 				aria-busy={probing}
 			>
-				<dt>Version du serveur</dt>
-				<dd data-testid="about-server-version">{stats?.version ?? (statsError ? "inconnue" : "…")}</dd>
-				<dt>Version servie (app)</dt>
-				<dd data-testid="about-served-version">{servedVersion || (probing ? "…" : "inconnue")}</dd>
+				<!-- UX6: the server short SHA (stats/library `version`, main.version)
+				     is THE version; the SvelteKit build id (/_app/version.json, a
+				     timestamp) is only a secondary "build" line. -->
+				<dt>Version</dt>
+				<dd>
+					<span data-testid="about-server-version">{stats?.version ?? (statsError ? "inconnue" : "…")}</span>
+					<span class="build muted"
+						>build <span data-testid="about-served-version">{servedVersion || (probing ? "…" : "inconnu")}</span></span
+					>
+				</dd>
 				<dt>Service worker</dt>
 				<dd data-testid="about-sw">
 					{#if !swSupported}
@@ -212,6 +235,41 @@
 					{/if}
 				</dd>
 			</dl>
+			{#if persisted === false || protectResult}
+				<div
+					class="protect"
+					data-testid="about-protect-block"
+				>
+					<p class="hint">
+						Sans protection, le navigateur peut effacer la musique hors-ligne quand l'appareil manque de place.
+					</p>
+					{#if persisted !== true}
+						<button
+							type="button"
+							class="btn-secondary"
+							data-testid="about-protect"
+							disabled={protectBusy}
+							on:click={protectStorage}>{protectBusy ? "Demande en cours…" : "Protéger le stockage"}</button
+						>
+					{/if}
+					{#if protectResult}
+						<p
+							class="protect-state"
+							data-testid="about-protect-state"
+							data-result={protectResult}
+							role="status"
+						>
+							{#if protectResult === "granted"}
+								Stockage protégé : la musique hors-ligne ne sera plus effacée.
+							{:else if protectResult === "denied"}
+								Le navigateur a refusé : installe l'app sur l'écran d'accueil puis réessaie.
+							{:else}
+								Ce navigateur ne permet pas de protéger le stockage.
+							{/if}
+						</p>
+					{/if}
+				</div>
+			{/if}
 			<p class="hint">Le stockage hors-ligne se règle dans <a href="/settings">Réglages</a>.</p>
 		</section>
 
@@ -312,6 +370,16 @@
 	}
 	.muted {
 		color: #999;
+	}
+	.build {
+		display: block;
+		font-size: var(--text-secondary-size);
+	}
+	.protect {
+		margin-top: 0.75rem;
+	}
+	.protect-state {
+		margin: 0.5rem 0 0;
 	}
 	.state,
 	.hint {
