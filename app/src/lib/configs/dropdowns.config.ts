@@ -29,7 +29,10 @@ export type Label =
 	| "Lyrics"
 	| "Invite Group Session"
 	| "Album Radio"
-	| "Remove from Queue";
+	| "Remove from Queue"
+	// Player ⋮ menu (lane c8b): sleep timer sheet + keyboard cheat sheet
+	| "Minuterie de sommeil"
+	| "Raccourcis clavier";
 
 export type Dropdown = TypedDropdownItem<Label>[];
 const DROPDOWN_TEXTS: ReadonlyArray<Label> = [
@@ -58,7 +61,9 @@ const DROPDOWN_TEXTS: ReadonlyArray<Label> = [
 	"Download",
 	"Download to device",
 	"Download offline",
-	"Lyrics"
+	"Lyrics",
+	"Minuterie de sommeil",
+	"Raccourcis clavier",
 ];
 
 export type Icons =
@@ -215,6 +220,16 @@ export const DROPDOWN_ITEMS: Partial<{
 	"Remove from Queue": {
 		icon: "x",
 		text: "Remove from Queue",
+		action: () => { },
+	},
+	"Minuterie de sommeil": {
+		icon: "clock",
+		text: "Minuterie de sommeil",
+		action: () => { },
+	},
+	"Raccourcis clavier": {
+		icon: "list",
+		text: "Raccourcis clavier",
 		action: () => { },
 	},
 };

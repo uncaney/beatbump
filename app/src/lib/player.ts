@@ -12,6 +12,7 @@ import { announceNowPlaying, cacheTrackOffline, getCachedUrl, verifyCached } fro
 import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
+import { shouldStopAtTrackEnd, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
 import { syncTabs } from "./tabSync";
 import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
@@ -290,6 +291,10 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	private declare player: HTMLAudioElement;
 	private declare videoPlayer: HTMLVideoElement | undefined;
 	private _repeat: string = "off";
+	// Sleep timer "fin du morceau": set when playback was paused at the end of
+	// the track so the (still satisfied) end-of-track test does not auto-advance
+	// on the trailing timeupdate; cleared by the next play().
+	private _sleepHold = false;
 	private playerKind: "hls" | "html5" = "html5";
 	private declare unsubscriber: () => void;
 	constructor() {
@@ -427,6 +432,7 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	}
 
 	public play() {
+		this._sleepHold = false;
 		this.paused.set(false);
 		if (!this.player) {
 			this.addTaskToTaskQueue("play");
@@ -680,6 +686,17 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 			// (prefetched / cached sources carry no duration) and `currentTime >= -1` would skip tracks.
 			const knownDuration = this.duration > 0 ? this.duration : (isFinite(this.player.duration) ? this.player.duration : 0);
 			if (knownDuration > 0 && this.player.currentTime >= knownDuration - 1.0 && !locked) {
+				// Sleep timer "fin du morceau" (P4): this track is the last one. Pause
+				// instead of advancing; repeat / shuffle state is left untouched and the
+				// normal auto-advance resumes on the next play().
+				if (this._sleepHold) return;
+				if (shouldStopAtTrackEnd()) {
+					this._sleepHold = true;
+					this.nextSrc.url = undefined;
+					this.pause();
+					sleepTimerTrackEnded();
+					return;
+				}
 				try {
 					if (this._repeat !== "off") {
 						const allowContinuation = await this.handleRepeat();
