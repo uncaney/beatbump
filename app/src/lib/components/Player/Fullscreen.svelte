@@ -504,13 +504,16 @@
 						aria-label="Fermer le lecteur"
 						title="Fermer le lecteur"
 						class="no-style"
-						style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
+						style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;min-width:44px;min-height:44px;filter:drop-shadow(0 1px 2px rgb(0 0 0 / 60%));"
 						on:click={() => fullscreenStore.set("closed")}
 					>
+						<!-- `--stroke`: the svg stroke otherwise resolves to currentColor,
+						     which the global button rule forces to #0f0f0f (grey on the cover). -->
 						<Icon
 							name="chevron-left"
 							size="1.8em"
 							color="#fff"
+							--stroke="#fff"
 						/>
 					</button>
 					<div style="display:flex;align-items:center;gap:0.4em;">
@@ -1210,9 +1213,11 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.5em;
-		padding: 0.35em 0.75em;
+		padding: 0.5em 0.75em;
 		// keeps the button inside the panel (desktop panel edge)
 		padding-inline-end: 1rem;
+		box-sizing: border-box;
+		max-width: 100%;
 	}
 	.queue-count {
 		font-size: 0.8em;
@@ -1222,6 +1227,13 @@
 	// (`color: #0f0f0f !important`, capitalize, light hover/focus/disabled
 	// backgrounds): it rendered "Vider La File" dark-on-grey at 1.05:1.
 	.queue-clear {
+		// The component-wide `button { position: absolute; top: 0; right: 0 }`
+		// pinned it to the scroller corner: it hung off the panel edge and over
+		// the first queue row. Keep it in the toolbar flow.
+		position: static;
+		z-index: auto;
+		flex: 0 0 auto;
+		margin-inline-end: 12px;
 		display: inline-flex;
 		align-items: center;
 		gap: 0.4em;
