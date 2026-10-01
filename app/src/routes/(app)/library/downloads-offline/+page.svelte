@@ -186,7 +186,7 @@
 				type="button"
 				title={playTitle}
 				aria-disabled={!canPlay || starting}
-				aria-describedby="offline-ready"
+				aria-describedby={readyCount < tracks.length ? "offline-ready" : undefined}
 				disabled={starting}
 				on:click={playAll}
 			>
@@ -203,7 +203,7 @@
 				type="button"
 				title={shuffleTitle}
 				aria-disabled={!canShuffle || starting}
-				aria-describedby="offline-ready"
+				aria-describedby={readyCount < tracks.length ? "offline-ready" : undefined}
 				disabled={starting}
 				on:click={playShuffle}
 			>
@@ -219,7 +219,7 @@
 				type="button"
 				title={mixtapeTitle}
 				aria-disabled={!canMixtape || starting}
-				aria-describedby="offline-ready"
+				aria-describedby={readyCount < tracks.length ? "offline-ready" : undefined}
 				disabled={starting}
 				on:click={playMixtape}
 			>
@@ -230,20 +230,24 @@
 				Mixtape
 			</button>
 		</div>
-		<p
-			class="ready"
-			class:none={readyCount === 0}
-			id="offline-ready"
-			aria-live="polite"
-		>
-			{#if readyCount === 0}
-				Aucun morceau prêt pour l'instant : {pendingCount || tracks.length} en cours de mise en cache. Ils
-				apparaîtront ici dès qu'ils seront enregistrés.
-			{:else}
-				{readyHint}{#if pendingCount}<span class="dot">·</span>{pendingCount} en cours de mise en cache{/if}
-				{#if !canShuffle}<span class="dot">·</span>aléatoire et mixtape dès 2 morceaux prêts{/if}
-			{/if}
-		</p>
+		<!-- "N prêts sur M" only while some tracks are still being cached; when
+		     every track is ready the header counter already says it all. -->
+		{#if readyCount < tracks.length}
+			<p
+				class="ready"
+				class:none={readyCount === 0}
+				id="offline-ready"
+				aria-live="polite"
+			>
+				{#if readyCount === 0}
+					Aucun morceau prêt pour l'instant : {pendingCount || tracks.length} en cours de mise en cache. Ils
+					apparaîtront ici dès qu'ils seront enregistrés.
+				{:else}
+					{readyHint}{#if pendingCount}<span class="dot">·</span>{pendingCount} en cours de mise en cache{/if}
+					{#if !canShuffle}<span class="dot">·</span>aléatoire et mixtape dès 2 morceaux prêts{/if}
+				{/if}
+			</p>
+		{/if}
 
 		<nav
 			class="views"
@@ -561,16 +565,26 @@
 			color: $accent;
 		}
 	}
+	// Group header: name button + round action buttons. Sized to its container
+	// (border-box, width 100%, inline-end padding) and allowed to wrap so the
+	// action buttons never cross the viewport edge on 390px screens.
 	.artist-head {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.5rem;
+		box-sizing: border-box;
+		width: 100%;
+		max-width: 100%;
+		padding-inline-end: 0.5rem;
 	}
 	// Artist toggle: chevron + (name / meta). Meta sits beside the name on wide
 	// screens and stacks under it on mobile; the name never overlaps the meta.
 	.artist-name {
-		flex: 1;
+		flex: 1 1 10rem;
 		min-width: 0;
+		max-width: 100%;
+		box-sizing: border-box;
 		min-height: 2.75rem;
 		display: flex;
 		align-items: center;
@@ -642,10 +656,14 @@
 		display: flex;
 		gap: 0.3rem;
 		flex: 0 0 auto;
+		margin-left: auto;
 	}
 	// Round icon button, 44px, light icon (overrides the global dark-text rule).
 	.btn {
+		flex: 0 0 auto;
+		box-sizing: border-box;
 		width: 2.75rem;
+		min-width: 2.75rem;
 		height: 2.75rem;
 		padding: 0;
 		border-radius: 999px;
