@@ -30,6 +30,7 @@ import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
 import { applyMixOp, planInsert, planReorder, removeAt } from "./queueOps";
 import {
+    continuedContext,
     describeContext,
     makeContext,
     type PlaybackContext,
@@ -696,6 +697,9 @@ export class ListService {
         await this.#sanitizeAndUpdate("APPLY", {
             mix: ["append", picked] satisfies MixListAppendOp,
         });
+        // I8: the appended rows are not part of the album / playlist the
+        // queue came from: the context becomes the extended queue.
+        this.setContext(continuedContext(this._state.context ?? null, this._state.mix));
         notify("Suite : dans ta bibliothèque", "success");
         let position = await this.updatePosition("next");
         if (position >= this._state.mix.length) position = this._state.position;
