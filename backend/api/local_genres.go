@@ -106,7 +106,20 @@ func rawGenresFor(name string, raw map[string]int) []string {
 // `genre IN [...]` over every raw value that contains it otherwise.
 func genreFilterFor(name string, raw map[string]int) string {
 	values := rawGenresFor(name, raw)
-	if len(values) == 0 || (len(values) == 1 && values[0] == name) {
+	// Audit L11-1 (P1): the facet only exposes the first values (alphabetical, capped), so a
+	// genre whose plain value is beyond the cap was reduced to its combined tags only
+	// (Rock: 75 tracks instead of thousands). The exact name is ALWAYS part of the filter.
+	hasExact := false
+	for _, v := range values {
+		if v == name {
+			hasExact = true
+			break
+		}
+	}
+	if !hasExact {
+		values = append(values, name)
+	}
+	if len(values) == 1 {
 		return "genre = \"" + escapeMeili(name) + "\""
 	}
 	quoted := make([]string, len(values))

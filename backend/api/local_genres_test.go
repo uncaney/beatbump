@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -62,7 +63,8 @@ func TestGenreFilterFor(t *testing.T) {
 	if f := genreFilterFor("House", raw); f != `genre IN ["Electronic/House", "House"]` {
 		t.Fatalf("House filter = %s", f)
 	}
-	if f := genreFilterFor("blues rock", raw); f != `genre IN ["Blues Rock;Rock"]` {
+	// L11-1: the exact value is always part of the list, even when the facet does not list it.
+	if f := genreFilterFor("blues rock", raw); f != `genre IN ["Blues Rock;Rock", "blues rock"]` {
 		t.Fatalf("blues rock filter = %s", f)
 	}
 	if f := genreFilterFor(`Say "Hi"`, raw); f != `genre = "Say \"Hi\""` {
@@ -98,5 +100,21 @@ func TestLocalGenresHandlerNormalizes(t *testing.T) {
 	want := []genreEntry{{Name: "Rock", Count: 13}, {Name: "Acoustic Rock", Count: 3}, {Name: "Blues Rock", Count: 3}}
 	if !reflect.DeepEqual(body.Genres, want) {
 		t.Fatalf("genres = %+v, want %+v", body.Genres, want)
+	}
+}
+
+// Audit L11-1: the exact genre value must always be matched, even when the facet
+// (alphabetical, capped at 100 values) does not list it and only shows combined tags.
+func TestGenreFilterAlwaysIncludesExactName(t *testing.T) {
+	raw := map[string]int{"Alternative Rock;Rock": 12, "Blues Rock": 3} // facet truncated before "Rock"
+	f := genreFilterFor("Rock", raw)
+	if !strings.Contains(f, "\"Rock\"") {
+		t.Fatalf("exact genre missing from filter: %s", f)
+	}
+	if !strings.Contains(f, "genre IN [") {
+		t.Fatalf("expected an IN filter with the combined tags too: %s", f)
+	}
+	if got := genreFilterFor("Jazz", map[string]int{}); got != "genre = \"Jazz\"" {
+		t.Fatalf("empty facet: %s", got)
 	}
 }
