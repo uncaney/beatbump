@@ -490,6 +490,21 @@ async function deleteEntry(c: Cache, e: { url: string; videoId: string }): Promi
 	return ok;
 }
 
+// J11 / I14 multi-tab: an eviction (LRU, QuotaExceededError recovery or a
+// lowered quota) is told to EVERY window, not only the tab whose request
+// triggered it, so the "Prêt hors-ligne" badges of the other tabs follow.
+// SW -> every page { type: "audio-evicted", videoIds, count }.
+async function broadcastEvicted(evicted: ReadonlyArray<{ url: string; videoId: string }>): Promise<void> {
+	if (!evicted.length) return;
+	const videoIds = evicted.map((e) => e.videoId).filter((id) => !!id);
+	try {
+		const cs = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+		for (const cl of cs) cl.postMessage({ type: "audio-evicted", videoIds, count: evicted.length });
+	} catch {
+		/* no client to tell: the next list-audio answer carries the truth */
+	}
+}
+
 // LRU by lastAccess (refreshed on every served hit, throttled), never evicting
 // `keep` (the entry just written) nor the track being played. Serialized so
 // two concurrent callers cannot both act on a stale total and over-evict.
@@ -503,11 +518,16 @@ function enforceQuota(c: Cache, keep: string): Promise<void> {
 		let total = entries.reduce((s, e) => s + e.bytes, 0);
 		if (total <= quota) return;
 		entries.sort((a, b) => a.lastAccess - b.lastAccess || a.at - b.at);
+		const evicted: Entry[] = [];
 		for (const e of entries) {
 			if (total <= quota) break;
 			if (isProtected(e, keep)) continue;
-			if (await deleteEntry(c, e)) total -= e.bytes;
+			if (await deleteEntry(c, e)) {
+				total -= e.bytes;
+				evicted.push(e);
+			}
 		}
+		await broadcastEvicted(evicted);
 	});
 	quotaLock = run.catch(() => {});
 	return run;
@@ -519,7 +539,14 @@ async function evictOldest(c: Cache, keep: string, n: number): Promise<number> {
 	const entries = (await listEntries(c)).filter((e) => !isProtected(e, keep));
 	entries.sort((a, b) => a.lastAccess - b.lastAccess || a.at - b.at);
 	let freed = 0;
-	for (const e of entries.slice(0, n)) if (await deleteEntry(c, e)) freed += e.bytes;
+	const evicted: Entry[] = [];
+	for (const e of entries.slice(0, n)) {
+		if (await deleteEntry(c, e)) {
+			freed += e.bytes;
+			evicted.push(e);
+		}
+	}
+	await broadcastEvicted(evicted);
 	return freed;
 }
 

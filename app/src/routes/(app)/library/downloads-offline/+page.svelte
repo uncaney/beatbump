@@ -121,15 +121,24 @@
 		const visible = () => {
 			if (document.visibilityState === "visible") refresh();
 		};
+		// J11: the SW tells every tab when it evicted entries (playback in
+		// another tab may have triggered the LRU): re-list so the rows flip
+		// to "à retélécharger" here too.
+		const sw = typeof navigator !== "undefined" && "serviceWorker" in navigator ? navigator.serviceWorker : null;
+		const evicted = (e: MessageEvent) => {
+			if (e.data && e.data.type === "audio-evicted") refresh();
+		};
 		window.addEventListener("online", on);
 		window.addEventListener("offline", off);
 		window.addEventListener("storage", storage);
 		document.addEventListener("visibilitychange", visible);
+		sw?.addEventListener("message", evicted);
 		return () => {
 			window.removeEventListener("online", on);
 			window.removeEventListener("offline", off);
 			window.removeEventListener("storage", storage);
 			document.removeEventListener("visibilitychange", visible);
+			sw?.removeEventListener("message", evicted);
 		};
 	});
 

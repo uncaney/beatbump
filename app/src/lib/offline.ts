@@ -129,11 +129,43 @@ export function scheduleSwAudioRefresh(): void {
 			.catch(() => {});
 	}, SW_REFRESH_DEBOUNCE_MS);
 }
-const CACHE_CHANGE_REPLIES = new Set(["audio-cached", "audio-pinned", "audio-uncached", "audio-quota"]);
+const CACHE_CHANGE_REPLIES = new Set(["audio-cached", "audio-pinned", "audio-uncached", "audio-quota", "audio-evicted"]);
+
+/**
+ * J11 / I14 multi-tab: the SW broadcast `audio-evicted { videoIds }` (sent to
+ * every window after an LRU / quota eviction). Applied at once, before the
+ * debounced `list-audio` refresh: the ids leave the SW snapshot (badges), and
+ * the local list marks them `_cached: false` (+ `_evicted` when the URL is
+ * stable, so the Offline page says "à retélécharger", like reconcile).
+ */
+export function applySwEviction(videoIds: ReadonlyArray<unknown>): void {
+	const ids = new Set<string>();
+	for (const id of videoIds) if (typeof id === "string" && id) ids.add(id);
+	if (ids.size === 0) return;
+	swAudioSnapshot.update((s) => {
+		if (!s) return s;
+		let changed = false;
+		const next = new Set(s.ids);
+		for (const id of ids) if (next.delete(id)) changed = true;
+		return changed ? { ids: next, at: s.at } : s;
+	});
+	const list = read();
+	let changed = false;
+	for (let i = 0; i < list.length; i++) {
+		const t = list[i];
+		if (!t || !ids.has(t.videoId)) continue;
+		const evicted = isStableAudioUrl(t._offlineUrl);
+		if (t._cached === false && (!evicted || t._evicted === true)) continue;
+		list[i] = evicted ? { ...t, _cached: false, _evicted: true } : { ...t, _cached: false };
+		changed = true;
+	}
+	if (changed) write(list);
+}
 if (typeof navigator !== "undefined" && typeof window !== "undefined" && "serviceWorker" in navigator) {
 	try {
 		navigator.serviceWorker.addEventListener("message", (ev: MessageEvent) => {
 			const t = ev.data && ev.data.type;
+			if (t === "audio-evicted" && Array.isArray(ev.data.videoIds)) applySwEviction(ev.data.videoIds);
 			if (typeof t === "string" && CACHE_CHANGE_REPLIES.has(t)) scheduleSwAudioRefresh();
 		});
 	} catch {
