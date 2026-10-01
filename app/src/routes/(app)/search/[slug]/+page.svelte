@@ -5,6 +5,7 @@
 	import Listing from "$components/Item/Listing.svelte";
 	import VirtualList from "$lib/components/SearchList/VirtualList.svelte";
 	import type { Item } from "$lib/types";
+	import type { MusicShelf } from "$lib/types/musicShelf";
 
 	import Header from "$lib/components/Layouts/Header.svelte";
 
@@ -50,8 +51,19 @@
 		return activeFilter === value;
 	}
 
-	const search = writable<Item[]>();
-	$: results && filter !== "all" && search.set(results[0].contents);
+	// F1 (audit-features-v2): a filtered search answers with the paginated
+	// YouTube shelf PLUS the owned-library shelf ("Your Library", `local: true`,
+	// appended last by backend/api/search.go). Only the YouTube shelf feeds the
+	// `search` store behind the VirtualList (continuation pages append to it);
+	// every local shelf renders its own contents once, as a plain list, above it.
+	// With filter=all every shelf already renders its own contents.
+	function isLocalShelf(s: MusicShelf | undefined): boolean {
+		return !!s && (s.local === true || s.header?.title === "Your Library");
+	}
+	$: ytShelf = filter !== "all" ? (results ?? []).find((s) => !isLocalShelf(s)) : undefined;
+	$: localShelves = filter !== "all" ? (results ?? []).filter(isLocalShelf) : [];
+	const search = writable<Item[]>([]);
+	$: filter !== "all" && search.set((ytShelf?.contents ?? []) as unknown as Item[]);
 	let ctoken = continuation?.continuation;
 	let itct = continuation?.clickTrackingParams;
 	let isLoading = false;
@@ -165,13 +177,20 @@
 	class:max-height={filter !== "all"}
 >
 	{#key data}
-		{#each results as result}
-			<div
-				class="container music-shelf resp-content-width"
-				class:max-height={filter !== "all"}
-			>
-				<span class="h3">{result.header.title}</span>
-				{#if filter !== "all"}
+		{#if filter !== "all"}
+			{#each localShelves as shelf}
+				<section class="container music-shelf local-shelf resp-content-width">
+					<span class="h3">{shelf.header?.title}</span>
+					<div class="music-shelf-list local-shelf-list">
+						{#each shelf.contents as item}
+							<Listing data={item} />
+						{/each}
+					</div>
+				</section>
+			{/each}
+			{#if ytShelf}
+				<div class="container music-shelf yt-shelf resp-content-width">
+					<span class="h3">{ytShelf.header?.title}</span>
 					<div
 						class="music-shelf-list"
 						style:margin-bottom|important={0}
@@ -189,13 +208,18 @@
 							<Listing data={item} />
 						</VirtualList>
 					</div>
-				{:else}
+				</div>
+			{/if}
+		{:else}
+			{#each results as result}
+				<div class="container music-shelf resp-content-width">
+					<span class="h3">{result.header.title}</span>
 					<div class="music-shelf-list">
 						{#each result.contents as item}
 							<Listing data={item} />
 						{/each}
 					</div>
-					{#if result.contents.length !== 1}
+					{#if result.contents.length !== 1 && !isLocalShelf(result)}
 						<div class="show-more">
 							<a
 								data-testid=""
@@ -206,9 +230,9 @@
 							>
 						</div>
 					{/if}
-				{/if}
-			</div>
-		{/each}
+				</div>
+			{/each}
+		{/if}
 	{/key}
 </main>
 
@@ -291,6 +315,33 @@
 
 	.max-height {
 		height: calc(100% - var(--player-bar-height) + var(--top-bar-height));
+	}
+
+	// Filtered view: the local shelf (<= 12 owned hits) sits above the paginated
+	// YouTube shelf, which takes the remaining height so the VirtualList keeps a
+	// bounded scroll box for its end-of-list pagination.
+	.parent.max-height {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+	}
+
+	.local-shelf {
+		flex: 0 0 auto;
+		max-height: 40%;
+		margin-bottom: 1em;
+		overflow-y: auto;
+	}
+
+	.local-shelf-list {
+		height: auto;
+		margin-bottom: 0;
+	}
+
+	.yt-shelf {
+		flex: 1 1 auto;
+		min-height: 0;
+		height: auto;
 	}
 
 	.music-shelf {
