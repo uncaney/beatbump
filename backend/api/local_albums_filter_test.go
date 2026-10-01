@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -122,5 +123,78 @@ func TestLocalAlbumsUnknownFilterIs400(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unknown filter: bogus") {
 		t.Fatalf("expected 400 unknown filter, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// L9-2: a deep page of never-played costs about what the first one costs:
+// the Meili confirmations only cover the requested window (offset is a
+// candidate index, nextOffset tells the client where to continue) and the
+// newest-first scan is memoised per profile, so page 5 neither rescans the
+// albums index nor re-confirms pages 1-4.
+func TestLocalAlbumsNeverPlayedPagingCostIsFlat(t *testing.T) {
+	useTestDB(t)
+	stub := &neverPlayedStub{}
+	for i := 0; i < 300; i++ {
+		lid := fmt.Sprintf("lidp%07d", i)
+		a := map[string]interface{}{"id": fmt.Sprintf("lb-p%03d", i), "album": fmt.Sprintf("Album %03d", i), "albumArtist": "Artist", "coverLid": lid, "dateAdded": float64(1_700_000_000 - i)}
+		stub.albums = append(stub.albums, a)
+		stub.tracks = append(stub.tracks, map[string]interface{}{"lid": lid, "title": "t", "album": a["album"], "albumArtist": "Artist", "artist": "Artist", "track": 1.0})
+	}
+	srv := httptest.NewServer(stub.handler())
+	t.Cleanup(srv.Close)
+	t.Setenv("MEILI_URL", srv.URL)
+	// one album in every ten was played through its lid only (no album label):
+	// only Meili can reject it, the pair filter keeps it as a candidate
+	seed := []db.PlayEvent{}
+	for i := 5; i < 300; i += 10 {
+		seed = append(seed, db.PlayEvent{ProfileID: "p-test", Ref: fmt.Sprintf("lidp%07d", i), Title: "t", Source: "local"})
+	}
+	if err := db.DB.Create(&seed).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	cost := func(off int) (tracks, albums int, resp map[string]interface{}) {
+		t0, a0 := stub.trackCalls, stub.albumCalls
+		resp = getJSON(t, LocalAlbumsHandler, fmt.Sprintf("/api/v1/local/albums?filter=never-played&offset=%d&limit=20", off))
+		return stub.trackCalls - t0, stub.albumCalls - a0, resp
+	}
+	tr1, al1, p1 := cost(0)
+	if len(albumTitles(p1)) != 20 || al1 != 2 { // 300 docs = 2 scan pages of 200
+		t.Fatalf("page 1: %d items, %d album scans", len(albumTitles(p1)), al1)
+	}
+	next := int(p1["nextOffset"].(float64))
+	if next != 22 { // two rejects (5, 15) inside the first window
+		t.Fatalf("page 1 nextOffset = %d", next)
+	}
+	seen := map[string]bool{}
+	for _, ti := range albumTitles(p1) {
+		seen[ti] = true
+	}
+	var pageN map[string]interface{}
+	var trN, alN int
+	for page := 2; page <= 5; page++ {
+		trN, alN, pageN = cost(next)
+		next = int(pageN["nextOffset"].(float64))
+		// each page starts where the previous one stopped: no album twice, no played one
+		for _, ti := range albumTitles(pageN) {
+			if seen[ti] || strings.HasSuffix(ti, "5") {
+				t.Fatalf("page %d: %q repeated or played", page, ti)
+			}
+			seen[ti] = true
+		}
+	}
+	if got := albumTitles(pageN); len(got) != 20 || alN != 0 {
+		t.Fatalf("page 5: %d items, %d album scans (memo expected)", len(got), alN)
+	}
+	if trN > tr1+3 {
+		t.Fatalf("page 5 cost %d tracks queries, page 1 cost %d", trN, tr1)
+	}
+	if pageN["total"].(float64) != 300 {
+		t.Fatalf("total = %v", pageN["total"])
+	}
+	// an offset past the cap is refused before any Meili work
+	c, rec := ctxFor(http.MethodGet, "/api/v1/local/albums?filter=never-played&offset=2001", "", nil)
+	if err := LocalAlbumsHandler(c); err != nil || rec.Code != http.StatusBadRequest {
+		t.Fatalf("offset cap: err %v code %d", err, rec.Code)
 	}
 }

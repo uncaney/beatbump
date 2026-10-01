@@ -32,6 +32,7 @@ func useTestDB(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	db.DB = d
+	resetNeverPlayedMemo()
 	t.Cleanup(func() { db.DB = prev; _ = sqlDB.Close() })
 }
 

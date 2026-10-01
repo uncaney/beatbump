@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"beatbump-server/backend/db"
@@ -277,16 +278,13 @@ func sortAlbumDocs(docs []map[string]interface{}, sortBy string) {
 // of the play_events pair filter (an upper bound: the Meili confirmation may
 // still reject a few, the client then sees a short page and stops).
 func localAlbumsFiltered(c echo.Context, filter string, off, lim int, sortBy string) error {
-	var cutoff int64
-	if filter == "added-30d" {
-		cutoff = time.Now().Add(-addedRecentlyDays * 24 * time.Hour).Unix()
-	}
-	docs := recentAlbumDocs(c.QueryParam("q"), c.QueryParam("artistId"), cutoff)
-	sortAlbumDocs(docs, sortBy)
 	items := make([]IListItemRenderer, 0, lim)
 	total := 0
 	switch filter {
 	case "added-30d":
+		cutoff := time.Now().Add(-addedRecentlyDays * 24 * time.Hour).Unix()
+		docs := recentAlbumDocs(c.QueryParam("q"), c.QueryParam("artistId"), cutoff)
+		sortAlbumDocs(docs, sortBy)
 		total = len(docs)
 		start, end := off, off+lim
 		if start > total {
@@ -299,17 +297,119 @@ func localAlbumsFiltered(c echo.Context, filter string, off, lim int, sortBy str
 			items = append(items, localAlbumItem(a))
 		}
 	case "never-played":
-		played := loadPlayedIndex(profileID(c))
-		items = neverPlayedAlbums(docs, played, off, lim)
-		for _, a := range docs {
-			if album, aa := mstr(a, "album"), mstr(a, "albumArtist"); album != "" && aa != "" && !played.knownPlayed(album, aa) {
-				total++
-			}
+		if off > neverPlayedMaxOffset {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": "offset too large"})
 		}
+		scan := neverPlayedScanFor(profileID(c), c.QueryParam("q"), c.QueryParam("artistId"), sortBy)
+		var next int
+		items, next = neverPlayedWindow(scan.candidates, scan.refs, off, lim)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"items": items, "total": len(scan.candidates), "offset": off, "limit": lim, "sort": sortBy, "filter": filter,
+			"nextOffset": next,
+		})
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"items": items, "total": total, "offset": off, "limit": lim, "sort": sortBy, "filter": filter,
 	})
+}
+
+// L9-2: the never-played list pages over the CANDIDATES (the albums the
+// play_events pair filter keeps, no Meili involved), not over the confirmed
+// albums: `offset` is a candidate index, each page confirms with Meili only
+// the candidates it walks from `offset` until `limit` albums are found, and
+// answers `nextOffset` (the candidate index to ask next; the client follows
+// it). A page therefore costs `limit` + the rejects inside its own window,
+// whatever its depth, instead of re-confirming every earlier album. `total`
+// is the candidate count (the same space as offset). The scan itself
+// (recentAlbumDocs + loadPlayedIndex + pair filter + sort) is memoised 60 s
+// per (profile, q, artistId, sort) in a bounded map, so infinite scroll does
+// not rescan five Meili pages per page either.
+const (
+	neverPlayedMaxOffset = 2000
+	neverPlayedMemoTTL   = 60 * time.Second
+	neverPlayedMemoMax   = 128
+)
+
+type neverPlayedScan struct {
+	candidates []map[string]interface{}
+	refs       map[string]bool
+	at         time.Time
+}
+
+var (
+	neverPlayedMemoMu sync.Mutex
+	neverPlayedMemo   = map[string]*neverPlayedScan{}
+)
+
+// resetNeverPlayedMemo empties the scan memo (tests).
+func resetNeverPlayedMemo() {
+	neverPlayedMemoMu.Lock()
+	neverPlayedMemo = map[string]*neverPlayedScan{}
+	neverPlayedMemoMu.Unlock()
+}
+
+// neverPlayedScanFor returns the memoised candidate scan of a profile's
+// never-played listing, computing it on a miss or after neverPlayedMemoTTL.
+// When the map is full, expired entries are dropped first, then the oldest.
+func neverPlayedScanFor(pid, q, artistId, sortBy string) *neverPlayedScan {
+	key := pid + "\x00" + q + "\x00" + artistId + "\x00" + sortBy
+	now := time.Now()
+	neverPlayedMemoMu.Lock()
+	if s, ok := neverPlayedMemo[key]; ok && now.Sub(s.at) < neverPlayedMemoTTL {
+		neverPlayedMemoMu.Unlock()
+		return s
+	}
+	neverPlayedMemoMu.Unlock()
+
+	docs := recentAlbumDocs(q, artistId, 0)
+	sortAlbumDocs(docs, sortBy)
+	played := loadPlayedIndex(pid)
+	cands := make([]map[string]interface{}, 0, len(docs))
+	for _, a := range docs {
+		if album, aa := mstr(a, "album"), mstr(a, "albumArtist"); album != "" && aa != "" && !played.knownPlayed(album, aa) {
+			cands = append(cands, a)
+		}
+	}
+	s := &neverPlayedScan{candidates: cands, refs: played.refs, at: now}
+
+	neverPlayedMemoMu.Lock()
+	defer neverPlayedMemoMu.Unlock()
+	if len(neverPlayedMemo) >= neverPlayedMemoMax {
+		for k, v := range neverPlayedMemo {
+			if now.Sub(v.at) >= neverPlayedMemoTTL {
+				delete(neverPlayedMemo, k)
+			}
+		}
+		for len(neverPlayedMemo) >= neverPlayedMemoMax {
+			oldK, oldAt := "", now
+			for k, v := range neverPlayedMemo {
+				if oldK == "" || v.at.Before(oldAt) {
+					oldK, oldAt = k, v.at
+				}
+			}
+			delete(neverPlayedMemo, oldK)
+		}
+	}
+	neverPlayedMemo[key] = s
+	return s
+}
+
+// neverPlayedWindow confirms candidates from index `off` until `limit`
+// never-played albums are collected (or the candidates run out) and returns
+// them with the candidate index right after the last one examined.
+func neverPlayedWindow(cands []map[string]interface{}, refs map[string]bool, off, limit int) ([]IListItemRenderer, int) {
+	items := make([]IListItemRenderer, 0, limit)
+	i := off
+	for ; i < len(cands) && len(items) < limit; i++ {
+		a := cands[i]
+		if albumNeverPlayed(mstr(a, "album"), mstr(a, "albumArtist"), refs) {
+			items = append(items, localAlbumItem(a))
+		}
+	}
+	if i < off {
+		i = off
+	}
+	return items, i
 }
 
 func LocalSongsHandler(c echo.Context) error {

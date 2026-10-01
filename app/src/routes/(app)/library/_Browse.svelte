@@ -91,7 +91,9 @@
 			const got = Array.isArray(data.items) ? data.items : [];
 			items = reset ? got : [...items, ...got];
 			total = data.total ?? items.length;
-			offset += got.length;
+			// L9-2: the never-played list pages over candidates and says where
+			// to continue (nextOffset); the other lists page by row count.
+			offset = typeof data.nextOffset === "number" ? data.nextOffset : offset + got.length;
 			done = got.length < pageSize || offset >= total;
 		} catch (err) {
 			console.error("collection load failed", err);
