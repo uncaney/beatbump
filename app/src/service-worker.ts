@@ -112,6 +112,17 @@ export function shellCachesToDelete(keys: readonly string[], current: string): s
 	return others.slice(1);
 }
 
+/**
+ * L10-4: a missing build file used to come back as the SPA shell (200 text/html,
+ * immutable for a year). An HTML body is never a valid answer for a script,
+ * stylesheet or font: such a response must not be stored in the shell cache
+ * (it would be served as that asset for the whole life of the build).
+ */
+export function isHtmlForAsset(pathname: string, contentType: string | null): boolean {
+	if (!/\.(?:m?js|css|woff2?|json|map)$/i.test(pathname)) return false;
+	return /^\s*text\/html\b/i.test(contentType ?? "");
+}
+
 export function carryOverPaths(oldPaths: Iterable<string>, buildSet: ReadonlySet<string>, have: ReadonlySet<string>): string[] {
 	const out = new Set<string>();
 	for (const p of oldPaths) {
@@ -160,7 +171,10 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 async function addIfMissing(c: Cache, path: string): Promise<boolean> {
 	try {
 		if (await c.match(path)) return true;
-		await c.add(path);
+		const res = await fetch(path);
+		// Same contract as Cache.add (non-2xx rejects) plus L10-4: never an HTML body for an asset.
+		if (!res.ok || isHtmlForAsset(path, res.headers.get("Content-Type"))) return false;
+		await c.put(path, res);
 		return true;
 	} catch {
 		return false; // L4: the caller decides whether a partial precache still "finished"
@@ -806,7 +820,14 @@ self.addEventListener("fetch", (event) => {
 				const res = await fetch(req);
 				// PF3-7: static files are no longer all precached; keep the ones
 				// fetched so the next offline boot has them (own build / static files only).
-				if (res.ok && res.status === 200 && (BUILD_SET.has(url.pathname) || FILES_SET.has(url.pathname))) {
+				// L10-4: an HTML body for a .js/.css request is the shell fallback of a
+				// missing file: returned as is, never stored.
+				if (
+					res.ok &&
+					res.status === 200 &&
+					(BUILD_SET.has(url.pathname) || FILES_SET.has(url.pathname)) &&
+					!isHtmlForAsset(url.pathname, res.headers.get("Content-Type"))
+				) {
 					const copy = res.clone();
 					event.waitUntil(caches.open(SHELL).then((c) => c.put(req, copy)).catch(() => {}));
 				}

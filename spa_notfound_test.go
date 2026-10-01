@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
 
 func TestIsKnownSPAPath(t *testing.T) {
@@ -32,6 +33,8 @@ func TestSpaNotFoundServesShellWith404(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>shell</html>"), 0o644)
 	os.WriteFile(filepath.Join(dir, "robots.txt"), []byte("ok"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "_app", "immutable"), 0o755)
+	os.WriteFile(filepath.Join(dir, "_app", "immutable", "x.js"), []byte("js"), 0o644)
 	e := echo.New()
 	e.Use(spaNotFound(dir))
 	e.GET("/*", func(c echo.Context) error { return c.String(http.StatusOK, "static") })
@@ -197,5 +200,48 @@ func TestDeriveRootsDetectsDrift(t *testing.T) {
 	deriveRoots(t, dir, got)
 	if !got["newroot"] || !got["deep"] || got["api"] || len(got) != 2 {
 		t.Fatalf("deriveRoots = %v, want newroot+deep only", got)
+	}
+}
+
+// L10-4: a missing /_app/ file must not reach the HTML5 fallback of the static
+// handler (200 text/html with the one-year immutable policy, prod-confirmed);
+// it answers 404 no-store. Existing build files keep the immutable policy.
+func TestMissingAppAssetIs404NoStore(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!DOCTYPE html><html>shell</html>"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "_app", "immutable", "chunks"), 0o755)
+	os.WriteFile(filepath.Join(dir, "_app", "immutable", "chunks", "real.abc.js"), []byte("export{}"), 0o644)
+	os.WriteFile(filepath.Join(dir, "_app", "version.json"), []byte(`{"version":"1"}`), 0o644)
+	e := echo.New()
+	e.Use(cacheControlMiddleware)
+	e.Use(spaNotFound(dir))
+	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{Root: dir, IgnoreBase: true, HTML5: true}))
+	for _, tc := range []struct {
+		method, path string
+		code         int
+		cc           string
+		html         bool
+	}{
+		{http.MethodGet, "/_app/immutable/chunks/doesnotexist-abc123.js", http.StatusNotFound, "no-store", false},
+		{http.MethodHead, "/_app/immutable/chunks/doesnotexist-abc123.js", http.StatusNotFound, "no-store", false},
+		{http.MethodGet, "/_app/immutable/assets/gone.css", http.StatusNotFound, "no-store", false},
+		{http.MethodGet, "/_app/immutable/chunks", http.StatusNotFound, "no-store", false},
+		{http.MethodGet, "/_app/nope.json", http.StatusNotFound, "no-store", false},
+		{http.MethodGet, "/_app/immutable/chunks/real.abc.js", http.StatusOK, "public, max-age=31536000, immutable", false},
+		{http.MethodGet, "/_app/version.json", http.StatusOK, "", false},
+		{http.MethodGet, "/home", http.StatusOK, "no-cache", true},
+	} {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != tc.code {
+			t.Errorf("%s %s: status %d, want %d", tc.method, tc.path, rec.Code, tc.code)
+		}
+		if got := rec.Header().Get("Cache-Control"); got != tc.cc {
+			t.Errorf("%s %s: Cache-Control %q, want %q", tc.method, tc.path, got, tc.cc)
+		}
+		isHTML := strings.HasPrefix(rec.Header().Get(echo.HeaderContentType), echo.MIMETextHTML) || strings.Contains(rec.Body.String(), "<!DOCTYPE")
+		if isHTML != tc.html {
+			t.Errorf("%s %s: html=%v, want %v (ct %q)", tc.method, tc.path, isHTML, tc.html, rec.Header().Get(echo.HeaderContentType))
+		}
 	}
 }

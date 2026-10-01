@@ -65,9 +65,16 @@ func spaNotFound(buildDir string) echo.MiddlewareFunc {
 			}
 			clean := path.Clean("/" + p)
 			// PF3-9: build assets (every /_app/ request) never fall back to
-			// the shell, so they skip the os.Stat below.
+			// the shell. L10-4: a missing one used to reach the HTML5 fallback
+			// of the static handler and answer 200 text/html with the
+			// one-year immutable policy (a chunk frozen as HTML in the browser
+			// cache and the SW shell); it is now a plain 404 never stored.
 			if strings.HasPrefix(clean, "/_app/") {
-				return next(c)
+				if st, err := os.Stat(filepath.Join(buildDir, filepath.FromSlash(clean))); err == nil && !st.IsDir() {
+					return next(c)
+				}
+				c.Response().Header().Set("Cache-Control", "no-store")
+				return c.NoContent(http.StatusNotFound)
 			}
 			if st, err := os.Stat(filepath.Join(buildDir, filepath.FromSlash(clean))); err == nil && !st.IsDir() {
 				return next(c)

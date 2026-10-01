@@ -92,3 +92,21 @@ describe("shellCachesToDelete (DS1: keep the previous shell cache)", () => {
 		expect(shellCachesToDelete(["ytm-shell-400", "ytm-shell-300", "ytm-shell-200"], "ytm-shell-300")).toEqual(["ytm-shell-200"]);
 	});
 });
+
+describe("isHtmlForAsset (L10-4: the shell fallback is never stored as a chunk)", () => {
+	it("flags an HTML answer for a script, stylesheet or font", async () => {
+		const { isHtmlForAsset } = await import("./service-worker");
+		expect(isHtmlForAsset("/_app/immutable/chunks/doesnotexist-abc123.js", "text/html; charset=UTF-8")).toBe(true);
+		expect(isHtmlForAsset("/_app/immutable/assets/0.8ac991bc.css", "text/html")).toBe(true);
+		expect(isHtmlForAsset("/_app/immutable/assets/commissioner-latin-wght-normal.956dca77.woff2", "TEXT/HTML")).toBe(true);
+	});
+	it("accepts the real content types and leaves HTML documents alone", async () => {
+		const { isHtmlForAsset } = await import("./service-worker");
+		expect(isHtmlForAsset("/_app/immutable/chunks/a.js", "application/javascript")).toBe(false);
+		expect(isHtmlForAsset("/_app/immutable/chunks/a.js", "text/javascript; charset=utf-8")).toBe(false);
+		expect(isHtmlForAsset("/_app/immutable/assets/a.css", "text/css")).toBe(false);
+		expect(isHtmlForAsset("/_app/immutable/chunks/a.js", null)).toBe(false);
+		expect(isHtmlForAsset("/", "text/html")).toBe(false);
+		expect(isHtmlForAsset("/logo.svg", "text/html")).toBe(false);
+	});
+});
