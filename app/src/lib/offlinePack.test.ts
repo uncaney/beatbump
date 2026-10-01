@@ -13,7 +13,7 @@ vi.mock("$lib/offline", () => ({
 	abortCacheAudio: vi.fn(),
 }));
 
-import { PACK_EST_BYTES, packLabel, packSizeOf, planPack } from "./offlinePack";
+import { PACK_EST_BYTES, PACK_EST_SECONDS, packDurationText, packLabel, packSecondsOf, packSizeOf, parsePackChoice, planPack } from "./offlinePack";
 
 const MB = 1024 * 1024;
 const tr = (id: string, extra: Record<string, unknown> = {}) => ({ videoId: id, title: "T " + id, ...extra });
@@ -77,6 +77,61 @@ describe("planPack", () => {
 	it("packSizeOf prefers _bytes over the sizes map and ignores bad numbers", () => {
 		expect(packSizeOf(tr("a", { _bytes: -1 }), new Map([["a", 3 * MB]]))).toEqual({ bytes: 3 * MB, estimated: false });
 		expect(packSizeOf(tr("a", { _bytes: "nope" }), null)).toEqual({ bytes: PACK_EST_BYTES, estimated: true });
+	});
+});
+
+describe("planPack by duration (trip pack)", () => {
+	it("fills up to the target seconds with the same order and dedup, unknown lengths at 4 min", () => {
+		const p = planPack(
+			{
+				favorites: [tr("f1", { duration: 600 }), tr("f2", { length: "5:00" })],
+				recent: [tr("f1", { duration: 600 }), tr("r1")],
+				mix: [tr("m1", { duration: 1200 }), tr("m2", { duration: 300 })],
+			},
+			1800,
+			"seconds",
+		);
+		expect(p.mode).toBe("seconds");
+		// 600 + 300 + 240 = 1140; m1 (1200) does not fit; m2 (300) does: 1440.
+		expect(p.items.map((x) => [x.videoId, x.seconds])).toEqual([
+			["f1", 600],
+			["f2", 300],
+			["r1", PACK_EST_SECONDS],
+			["m2", 300],
+		]);
+		expect(p.seconds).toBe(1440);
+		expect(p.target).toBe(1800);
+		expect(p.left).toBe(1);
+		expect(p.bytes).toBe(4 * PACK_EST_BYTES);
+	});
+
+	it("a 1 h pack of unknown-length tracks holds 15 of them, sizes ignored", () => {
+		const favs = Array.from({ length: 40 }, (_, i) => tr("t" + i, { _bytes: 50 * MB }));
+		const p = planPack({ favorites: favs }, 3600, "seconds");
+		expect(p.count).toBe(15);
+		expect(p.seconds).toBe(3600);
+		expect(p.left).toBe(25);
+	});
+
+	it("packSecondsOf reads duration / durationSec / length and falls back to 4 min", () => {
+		expect(packSecondsOf(tr("a", { durationSec: 181.4 }))).toBe(181);
+		expect(packSecondsOf(tr("a", { length: "1:02:03" }))).toBe(3723);
+		expect(packSecondsOf(tr("a", { duration: "nope" }))).toBe(PACK_EST_SECONDS);
+	});
+
+	it("parsePackChoice accepts the offered sizes and durations only", () => {
+		expect(parsePackChoice("250")).toEqual({ kind: "bytes", mb: 250 });
+		expect(parsePackChoice(100)).toEqual({ kind: "bytes", mb: 100 });
+		expect(parsePackChoice("dur:7200")).toEqual({ kind: "seconds", seconds: 7200 });
+		expect(parsePackChoice("dur:999")).toBeNull();
+		expect(parsePackChoice("42")).toBeNull();
+		expect(parsePackChoice(null)).toBeNull();
+	});
+
+	it("packDurationText reads done/total and minutes on the target", () => {
+		expect(packDurationText(12, 30, 48 * 60, 3600)).toBe("12/30 · 48 min sur 1 h");
+		expect(packDurationText(0, 30, 0, 7200)).toBe("0/30 · 0 min sur 2 h");
+		expect(packDurationText(0, 0, 0, 1800)).toBe("Aucun morceau à préparer");
 	});
 });
 
