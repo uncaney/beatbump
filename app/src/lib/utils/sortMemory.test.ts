@@ -7,6 +7,7 @@ import {
 	isTitleSort,
 	letterRank,
 	loadSortPrefs,
+	SORT_Q_TTL_MS,
 	saveSortPrefs,
 	seekShouldContinue,
 	seekStep,
@@ -79,21 +80,35 @@ describe("BI2 remembered sort: key + round trip", () => {
 	});
 	it("round-trips sort and filter per route", () => {
 		const s = mem();
-		saveSortPrefs("/library/albums", { sort: "album:asc", q: "daft" }, s);
-		saveSortPrefs("/library/artists", { sort: "name:desc", q: "" }, s);
-		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s)).toEqual({ sort: "album:asc", q: "daft" });
-		expect(loadSortPrefs("/library/artists", ["name:asc", "name:desc"], "name:asc", s)).toEqual({ sort: "name:desc", q: "" });
-		expect(s.map.get("ytm-sort:/library/albums")).toBe(JSON.stringify({ sort: "album:asc", q: "daft" }));
+		const t = 1_800_000_000_000;
+		saveSortPrefs("/library/albums", { sort: "album:asc", q: "daft" }, s, t);
+		saveSortPrefs("/library/artists", { sort: "name:desc", q: "" }, s, t);
+		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s, t + 1000)).toEqual({ sort: "album:asc", q: "daft" });
+		expect(loadSortPrefs("/library/artists", ["name:asc", "name:desc"], "name:asc", s, t)).toEqual({ sort: "name:desc", q: "" });
+		expect(s.map.get("ytm-sort:/library/albums")).toBe(JSON.stringify({ sort: "album:asc", q: "daft", savedAt: t }));
 	});
 	it("falls back to the default when nothing / garbage / an unknown sort is stored", () => {
 		const s = mem();
 		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s)).toEqual({ sort: "dateAdded:desc", q: "" });
 		s.setItem("ytm-sort:/library/albums", "{not json");
 		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s).sort).toBe("dateAdded:desc");
-		s.setItem("ytm-sort:/library/albums", JSON.stringify({ sort: "zz:desc", q: "ok" }));
-		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s)).toEqual({ sort: "dateAdded:desc", q: "ok" });
+		s.setItem("ytm-sort:/library/albums", JSON.stringify({ sort: "zz:desc", q: "ok", savedAt: 1000 }));
+		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s, 2000)).toEqual({ sort: "dateAdded:desc", q: "ok" });
 		s.setItem("ytm-sort:/library/albums", JSON.stringify({ sort: 3, q: 4 }));
 		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s)).toEqual({ sort: "dateAdded:desc", q: "" });
+	});
+	it("forgets the text filter after an hour, keeps the sort (L8-11)", () => {
+		const s = mem();
+		const t = 1_800_000_000_000;
+		saveSortPrefs("/library/albums", { sort: "album:asc", q: "daft" }, s, t);
+		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s, t + SORT_Q_TTL_MS - 1).q).toBe("daft");
+		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s, t + SORT_Q_TTL_MS)).toEqual({ sort: "album:asc", q: "" });
+		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s, t + 3 * 86400000)).toEqual({ sort: "album:asc", q: "" });
+		// a clock gone backwards does not revive it forever either
+		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s, t - 1).q).toBe("");
+		// legacy entries (no savedAt) keep their sort, drop their q
+		s.setItem("ytm-sort:/library/albums", JSON.stringify({ sort: "album:asc", q: "old" }));
+		expect(loadSortPrefs("/library/albums", albumSorts, "dateAdded:desc", s, t)).toEqual({ sort: "album:asc", q: "" });
 	});
 	it("never throws on a broken or missing storage", () => {
 		const broken: PrefStorage = {

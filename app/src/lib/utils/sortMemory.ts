@@ -18,6 +18,13 @@ export interface PrefStorage {
 
 export const SORT_KEY_PREFIX = "ytm-sort:";
 
+/**
+ * L8-11: the remembered text filter `q` is only restored within this window
+ * after it was saved (a filter typed days ago would silently hide most of
+ * the collection). The sort has no expiry.
+ */
+export const SORT_Q_TTL_MS = 60 * 60 * 1000;
+
 /** localStorage key of a route: `ytm-sort:<pathname>` (query/hash dropped). */
 export function sortKey(pathname: string): string {
 	const p = String(pathname || "/").split(/[?#]/)[0] || "/";
@@ -45,16 +52,20 @@ export function loadSortPrefs(
 	allowedSorts: string[],
 	fallback: string,
 	storage: PrefStorage | null = browserStorage(),
+	now: number = Date.now(),
 ): SortPrefs {
 	const out: SortPrefs = { sort: fallback, q: "" };
 	if (!storage) return out;
 	try {
 		const raw = storage.getItem(sortKey(pathname));
 		if (!raw) return out;
-		const parsed = JSON.parse(raw) as Partial<SortPrefs> | null;
+		const parsed = JSON.parse(raw) as (Partial<SortPrefs> & { savedAt?: unknown }) | null;
 		if (!parsed || typeof parsed !== "object") return out;
 		if (typeof parsed.sort === "string" && allowedSorts.includes(parsed.sort)) out.sort = parsed.sort;
-		if (typeof parsed.q === "string") out.q = parsed.q.slice(0, 200);
+		// L8-11: q only within SORT_Q_TTL_MS of its save (no stamp = legacy entry, expired)
+		const savedAt = typeof parsed.savedAt === "number" ? parsed.savedAt : NaN;
+		const fresh = now - savedAt >= 0 && now - savedAt < SORT_Q_TTL_MS;
+		if (typeof parsed.q === "string" && fresh) out.q = parsed.q.slice(0, 200);
 	} catch {
 		/* corrupt JSON or blocked storage: defaults */
 	}
@@ -62,10 +73,15 @@ export function loadSortPrefs(
 }
 
 /** Persist the prefs of `pathname` (defaults are stored too: "I chose Recently added" is a choice). Never throws. */
-export function saveSortPrefs(pathname: string, prefs: SortPrefs, storage: PrefStorage | null = browserStorage()): void {
+export function saveSortPrefs(
+	pathname: string,
+	prefs: SortPrefs,
+	storage: PrefStorage | null = browserStorage(),
+	now: number = Date.now(),
+): void {
 	if (!storage) return;
 	try {
-		storage.setItem(sortKey(pathname), JSON.stringify({ sort: prefs.sort, q: prefs.q ?? "" }));
+		storage.setItem(sortKey(pathname), JSON.stringify({ sort: prefs.sort, q: prefs.q ?? "", savedAt: now }));
 	} catch {
 		/* quota / private mode: the choice just is not remembered */
 	}
