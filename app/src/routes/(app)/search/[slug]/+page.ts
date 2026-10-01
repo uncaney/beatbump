@@ -66,7 +66,10 @@ export const load: PageLoad = async ({
 	}${restricted ? `&restricted=${restricted}` : ""}`;
 	const response = await APIClient.fetch(apiUrl);
 	const data = (await response.json()) as SearchResponse;
-	Object.assign(data, { filter, correction: extractSearchCorrection(data) });
+	// PF3-3: search.json no longer echoes the raw YouTube "response"; the
+	// server sends the parsed correction (the walk stays as a fallback for an
+	// older backend still sending "response").
+	Object.assign(data, { filter, correction: data.correction ?? extractSearchCorrection(data) });
 	// if (response.ok) {
 	return data;
 	// }

@@ -57,10 +57,41 @@ func SearchEndpointHandler(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
 	}
 
+	payload, err := searchPayload(searchResponse, filter, func() *MusicShelf { return localShelf(queryUnescape, filter) })
+	if err != nil {
+		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
+	}
+	return c.JSON(http.StatusOK, payload)
+}
+
+// searchContinuationPayload / searchResultsPayload are the search.json
+// shapes. PF3-3 (K11): the raw YouTube response used to be echoed back under
+// "response" (~640 KB of the 680 KB for "daft punk", menus, modals and
+// tracking params the front never reads); the only thing the front took from
+// it was the spelling correction, which the server already extracts into
+// "correction".
+type searchContinuationPayload struct {
+	ContinuationResults []IListItemRenderer            `json:"results"`
+	Continuation        *_youtube.NextContinuationData `json:"continuation,omitempty"`
+	Type                *string                        `json:"type,omitempty"`
+}
+
+type searchResultsPayload struct {
+	Results      []MusicShelf                   `json:"results"`
+	Continuation *_youtube.NextContinuationData `json:"continuation,omitempty"`
+	Type         *string                        `json:"type,omitempty"`
+	Correction   *SearchCorrection              `json:"correction,omitempty"`
+}
+
+// searchPayload turns a parsed YouTube search answer into the slim
+// search.json body. local (may be nil) supplies the owned-library shelf of a
+// first page.
+func searchPayload(searchResponse _youtube.SearchResponse, filter string, local func() *MusicShelf) (interface{}, error) {
 	var regularResponse []MusicShelf
 	var continuationResponse []IListItemRenderer
 	var continuation _youtube.NextContinuationData
 	var responseType *string = nil
+	var err error
 	// continuation mode
 	if len(searchResponse.ContinuationContents.MusicShelfContinuation.Continuations) != 0 {
 		searchContinuationContent := searchResponse.ContinuationContents.MusicShelfContinuation
@@ -78,56 +109,40 @@ func SearchEndpointHandler(c echo.Context) error {
 			continuation = searchContent[0].MusicShelfRenderer.Continuations[0].NextContinuationData
 		}
 	} else {
-		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
+		return nil, fmt.Errorf("no search contents")
 	}
 
 	if err != nil {
-		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
+		return nil, err
 	}
 
-	// K11: 605 KB raw search.json parsed on the main thread; the tracking blobs
-	// of every item are never read by the front (historyOutbox drops them too).
+	// K11: the tracking blobs of every item are never read by the front
+	// (historyOutbox drops them too).
 	slimSearchItems(continuationResponse)
 	for i := range regularResponse {
 		slimSearchItems(regularResponse[i].Contents)
 	}
 
 	if continuationResponse != nil {
-		r := struct {
-			ContinuationResults []IListItemRenderer            `json:"results"`
-			Response            _youtube.SearchResponse        `json:"response"`
-			Continuation        *_youtube.NextContinuationData `json:"continuation,omitempty"`
-			Type                *string                        `json:"type,omitempty"`
-		}{
+		return searchContinuationPayload{
 			ContinuationResults: continuationResponse,
-			Response:            searchResponse,
 			Continuation:        &continuation,
 			Type:                responseType,
-		}
-		return c.JSON(http.StatusOK, r)
-	} else {
-		// YouTube shelves first; the owned-library shelf goes LAST (append) and
-		// follows the filter (albums / artists hits, none for playlists).
-		if ls := localShelf(queryUnescape, filter); ls != nil {
+		}, nil
+	}
+	// YouTube shelves first; the owned-library shelf goes LAST (append) and
+	// follows the filter (albums / artists hits, none for playlists).
+	if local != nil {
+		if ls := local(); ls != nil {
 			regularResponse = append(regularResponse, *ls)
 		}
-		correction := extractCorrection(searchResponse)
-		r := struct {
-			Results      []MusicShelf                   `json:"results"`
-			Response     _youtube.SearchResponse        `json:"response"`
-			Continuation *_youtube.NextContinuationData `json:"continuation,omitempty"`
-			Type         *string                        `json:"type,omitempty"`
-			Correction   *SearchCorrection              `json:"correction,omitempty"`
-		}{
-			Results:      regularResponse,
-			Response:     searchResponse,
-			Continuation: &continuation,
-			Type:         responseType,
-			Correction:   correction,
-		}
-		return c.JSON(http.StatusOK, r)
 	}
-
+	return searchResultsPayload{
+		Results:      regularResponse,
+		Continuation: &continuation,
+		Type:         responseType,
+		Correction:   extractCorrection(searchResponse),
+	}, nil
 }
 
 func parseContinuationResponse(content []_youtube.MusicShelfContinuationContent, filter string) ([]IListItemRenderer, error) {
@@ -215,10 +230,16 @@ func parseResponse(content []_youtube.SectionListRendererContents) ([]MusicShelf
 // compares it to APIParams.lt100 to decide playlistSetVideoId, player.ts
 // puts it on player.json (OMV / age-restricted variants) and resumeState
 // KEEP_KEYS persists it.
+//
+// PF3-3: a row keeps only its first and last thumbnail (smallest for lists,
+// largest for the art the player / fullscreen pick with the last one).
 func slimSearchItems(items []IListItemRenderer) {
 	for i := range items {
 		items[i].LoggingContext = nil
 		items[i].ClickTrackingParams = ""
+		if t := items[i].Thumbnails; len(t) > 2 {
+			items[i].Thumbnails = []Thumbnail{t[0], t[len(t)-1]}
+		}
 	}
 }
 
@@ -255,10 +276,16 @@ func extractCorrection(sr _youtube.SearchResponse) *SearchCorrection {
 			for _, r := range srr.SearchInsteadFor.Runs {
 				instead += r.Text
 			}
-			for _, r := range srr.OriginalQuery.Runs {
-				original += r.Text
+			if q := srr.OriginalQueryEndpoint.SearchEndpoint.Query; q != "" {
+				original = q
+			} else {
+				for _, r := range srr.OriginalQuery.Runs {
+					original += r.Text
+				}
 			}
-			if corrected != "" || showing != "" || instead != "" || original != "" {
+			// Same rule as the front's former extractor: a hint needs the
+			// corrected query or the "showing results for" text.
+			if corrected != "" || showing != "" {
 				return &SearchCorrection{
 					CorrectedQuery:    corrected,
 					ShowingResultsFor: showing,
