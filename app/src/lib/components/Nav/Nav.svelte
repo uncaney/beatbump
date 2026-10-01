@@ -50,6 +50,7 @@
 				}}
                 class="nav-icon icon-btn no-style"
                 aria-label="Back"
+                title="Back"
             >
                 <Icon
                     name="chevron-left"
@@ -104,6 +105,7 @@
             use:tooltip
             data-tooltip="Home"
             aria-label="Home"
+            title="Home"
             class:active={key.includes("home")}
         >
             <Icon
@@ -122,6 +124,7 @@
             use:tooltip
             data-tooltip="Trending"
             aria-label="Trending"
+            title="Trending"
             class:active={key.includes("trending")}
         >
             <Icon
@@ -137,7 +140,8 @@
 				goto("/library");
 			}}
             data-tooltip="Library"
-            aria-label="library"
+            aria-label="Library"
+            title="Library"
             class="nav-icon icon-btn no-style"
             class:active={key.includes("library")}
         >
@@ -154,7 +158,8 @@
 				goto("/favorites");
 			}}
             data-tooltip="Favorites"
-            aria-label="favorites"
+            aria-label="Favorites"
+            title="Favorites"
             class="nav-icon icon-btn no-style"
             class:active={key.includes("favorites")}
         >
@@ -171,7 +176,8 @@
 					goto("/library/account");
 				}}
             data-tooltip="Account"
-            aria-label="account"
+            aria-label="Account"
+            title="Account"
             class="nav-icon icon-btn no-style"
             class:active={key.includes("account")}
         >
@@ -192,6 +198,7 @@
 				fullscreenStore.set("closed");
 			}}
             aria-label="Search"
+            title="Search"
         >
             <Icon
                 name="search"
@@ -201,6 +208,7 @@
 
         <button
             aria-label="Settings"
+            title="Settings"
             class="icon-btn btn-settings"
             on:click={() => {
 				$fullscreenStore && fullscreenStore.set("closed");

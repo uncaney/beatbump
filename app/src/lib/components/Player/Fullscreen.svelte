@@ -1265,9 +1265,12 @@
 		overscroll-behavior: contain;
 		max-height: 35vh;
 
+		// Phones: the 28vh cap + 12vh margin left a ~30vh dead band between the
+		// transport controls and the queue sheet (audit mobile-17). Let the
+		// artwork take the height; the sheet handle sits at windowHeight-65.
 		@media screen and (max-width: 719px) {
-			max-height: 28vh;
-			margin-bottom: 12vh;
+			max-height: none;
+			margin-bottom: 1.5vh;
 		}
 
 		@media screen and (min-width: 1800px) {
@@ -1282,6 +1285,15 @@
 		min-height: 20vh;
 		max-height: inherit;
 		height: 100%;
+		// Phones (390x844 / 360x780): 44vh artwork + ~9.5vh selector block +
+		// ~22vh title/progress/controls still clears the queue handle without
+		// scrolling; 92vw keeps a square cover inside the viewport in landscape.
+		@media screen and (max-width: 719px) {
+			height: 44vh;
+			min-height: 44vh;
+			max-height: 44vh;
+			max-width: 92vw;
+		}
 		video,
 		img {
 			touch-action: none;
