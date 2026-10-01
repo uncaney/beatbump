@@ -43,6 +43,7 @@
 	import { addToQueueEnd, playNext } from "$lib/queueActions";
 	import type { Item } from "$lib/types";
 	import { IsoBase64, Logger, filter, notify } from "$lib/utils";
+	import { coverLabel, hueFor, initials } from "$lib/utils/initials";
 	import {
 		showAddToPlaylistPopper,
 		showGroupSessionCreator,
@@ -302,6 +303,13 @@
 
 	let pressing = false;
 
+	// Cover placeholder (initials on a deterministic hue) once the <img> errors;
+	// the tile overlays the 5rem box, so the row does not move.
+	let imgBroken = false;
+	$: coverName = coverLabel(data);
+	$: coverInitials = initials(coverName);
+	$: coverHue = hueFor(coverName);
+
 	// Accessible name of the thumbnail (the permanent play badge is a CSS
 	// ::after on .img-container, see global/redesign/modules/_item.scss; the
 	// row's click is the real action). Audit v3 1.7 / TOP 10 #8.
@@ -379,7 +387,15 @@
 						width={srcImg.width}
 						height={srcImg.height}
 						src={srcImg.url}
+						on:error={() => (imgBroken = true)}
 					/>
+					{#if imgBroken && coverInitials}
+						<span
+							class="cover-initials"
+							aria-hidden="true"
+							style="--cover-hue: {coverHue};">{coverInitials}</span
+						>
+					{/if}
 				</div>
 			</div>
 			<div class="title">
@@ -676,10 +692,16 @@
 			z-index: 10;
 		}
 		> .thumbnail {
+			position: relative;
 			width: 100%;
 			height: 100%;
 			background: rgb(13 13 15 / 19.2%);
 			border-radius: inherit;
+
+			// Shared look in global/redesign/modules/_item.scss; 5rem-box letters here.
+			.cover-initials {
+				font-size: 1.7em;
+			}
 
 			img {
 				border-radius: inherit;

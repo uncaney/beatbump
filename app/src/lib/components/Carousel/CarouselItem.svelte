@@ -179,6 +179,7 @@
 	import type { BuildMenuParams } from "$lib/types/common";
 	import type { IListItemRenderer } from "$lib/types/musicListItemRenderer";
 	import { IsoBase64, noop, notify } from "$lib/utils";
+	import { coverLabel, hueFor, initials } from "$lib/utils/initials";
 	import { groupSession } from "$stores/sessions";
 	import {
 		showAddToPlaylistPopper,
@@ -310,6 +311,13 @@
 			: srcImg.url;
 
 	$: isArtistKind = kind === "Fans might also like";
+
+	// Cover placeholder (initials on a deterministic hue) once the <img> errors;
+	// the tile overlays the image box, so nothing moves.
+	let imgBroken = false;
+	$: coverName = coverLabel(item);
+	$: coverInitials = initials(coverName);
+	$: coverHue = hueFor(coverName);
 </script>
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -339,7 +347,10 @@
 				{/if}
 				<img
 					alt="thumbnail img{ASPECT_RATIO}"
-					on:error={(e) => imageErrorHandler(e)}
+					on:error={(e) => {
+						imageErrorHandler(e);
+						imgBroken = true;
+					}}
 					loading={index >= 3 ? "lazy" : "eager"}
 					decoding="async"
 					width={srcImg.width}
@@ -347,6 +358,13 @@
 					src={index >= 3 ? srcImg.placeholder : srcImg.url}
 					data-src={index >= 3 ? srcImg.url : null}
 				/>
+				{#if imgBroken && coverInitials}
+					<span
+						class="cover-initials"
+						aria-hidden="true"
+						style="--cover-hue: {coverHue};">{coverInitials}</span
+					>
+				{/if}
 			</div>
 			<div class="item-menu">
 				<PopperButton
@@ -708,5 +726,10 @@
 		&:focus {
 			outline: none;
 		}
+	}
+
+	// Shared look in global/redesign/modules/_item.scss; card-sized letters here.
+	.cover-initials {
+		font-size: 2.4em;
 	}
 </style>

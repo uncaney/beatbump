@@ -8,6 +8,7 @@
 	import { page as SPage } from "$app/stores";
 	import type { Item } from "$lib/types";
 	import { notify } from "$lib/utils";
+	import { coverLabel, hueFor, initials } from "$lib/utils/initials";
 
 	import { createEventDispatcher, tick } from "svelte";
 	import Icon from "../Icon/Icon.svelte";
@@ -46,6 +47,12 @@
 
 	let isHovering = false;
 	let width = 640;
+
+	// Cover placeholder (initials on a deterministic hue) once the <img> errors.
+	let imgBroken = false;
+	$: coverName = coverLabel(item);
+	$: coverInitials = initials(coverName);
+	$: coverHue = hueFor(coverName);
 	let DropdownItems = [
 		{
 			text: "View Artist",
@@ -237,7 +244,15 @@
 					width={item.thumbnails?.[0]?.width}
 					height={item.thumbnails?.[0]?.height}
 					alt="thumbnail"
+					on:error={() => (imgBroken = true)}
 				/>
+				{#if imgBroken && coverInitials}
+					<span
+						class="cover-initials"
+						aria-hidden="true"
+						style="--cover-hue: {coverHue}; font-size: 1.5em;">{coverInitials}</span
+					>
+				{/if}
 			</div>
 		{/if}
 		<div class="column">

@@ -37,3 +37,23 @@
 		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
 	}
 }
+
+// Cover placeholder (CarouselItem, Listing, LocalListItem): once the cover
+// <img> errors, two initials of the album / artist on a hue derived from the
+// name (lib/utils/initials.ts) overlay the image box. Absolute inside the
+// positioned thumbnail box, so no layout shift; each component sets the
+// letter size for its box.
+.cover-initials {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	border-radius: inherit;
+	background: hsl(var(--cover-hue, 220) 32% 30%);
+	color: hsl(var(--cover-hue, 220) 55% 88%);
+	font-weight: 700;
+	line-height: 1;
+	letter-spacing: 0.04em;
+	user-select: none;
+	pointer-events: none;
+}
