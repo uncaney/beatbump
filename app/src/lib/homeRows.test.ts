@@ -17,6 +17,11 @@ import {
 	thumbnailUrl,
 	isoWeekKey,
 	shouldShowWeekCard,
+	arrangeHomeRows,
+	readMoreRowsOpen,
+	HOME_MAX_VISIBLE_ROWS,
+	HOME_MORE_ROWS_KEY,
+	ALBUM_ROW_MIN,
 } from "./homeRows";
 
 const song = (id: string, title = id) => ({ videoId: id, title, thumbnails: [] });
@@ -232,5 +237,137 @@ describe("Redécouvrir row (c29b D3)", () => {
 		const items = ["a", "b", "c", "d", "e", "f"].map((id) => ({ ...song(id), subtitle: [{ text: undefined }] }));
 		const row = buildRediscoverRow(items);
 		expect(row[0].subtitle).toEqual([{ text: UNKNOWN_ARTIST }]);
+	});
+});
+
+describe("arrangeHomeRows (c30a F1 + F2)", () => {
+	const album = (id: string) => ({ browseId: `lb-${id}`, title: `Album ${id}`, thumbnails: [], type: "album" });
+	const albums = (...ids: string[]) => ids.map(album);
+	const songs = (...ids: string[]) => ids.map((id) => song(id));
+	const keys = (rows: { key: string }[]) => rows.map((r) => r.key);
+	const refs = (rows: { key: string; items: any[] }[], key: string) => rows.find((r) => r.key === key)?.items.map(rowItemRef);
+
+	it("shows an album in one row only, Nouveautés > Jamais écouté > Récemment acquis", () => {
+		const { visible, more } = arrangeHomeRows([
+			{ key: "recemment-acquis", items: albums("a", "b", "c", "d", "e", "f") },
+			{ key: "nouveautes-artistes", items: albums("a", "b", "x", "y", "z") },
+			{ key: "jamais-ecoute", items: albums("a", "c", "x", "p", "q") },
+		]);
+		const all = [...visible, ...more];
+		expect(refs(all, "nouveautes-artistes")).toEqual(["lb-a", "lb-b", "lb-x", "lb-y", "lb-z"]);
+		expect(refs(all, "jamais-ecoute")).toEqual(["lb-c", "lb-p", "lb-q"]);
+		expect(refs(all, "recemment-acquis")).toEqual(["lb-d", "lb-e", "lb-f"]);
+		// the intersection of the three rows is empty
+		const seen = new Set<string>();
+		for (const r of all) for (const it of r.items) {
+			expect(seen.has(rowItemRef(it))).toBe(false);
+			seen.add(rowItemRef(it));
+		}
+	});
+
+	it("Reprendre and Pour toi keep their cards before any album row", () => {
+		const { visible } = arrangeHomeRows([
+			{ key: "jamais-ecoute", items: [...albums("a"), song("s1"), ...albums("b", "c", "d")] },
+			{ key: "reprendre", items: songs("s1", "s2") },
+			{ key: "redecouvrir", items: songs("s2", "s3") },
+			{ key: "pour-toi", items: songs("s3", "s4") },
+		]);
+		expect(refs(visible, "reprendre")).toEqual(["s1", "s2"]);
+		expect(refs(visible, "pour-toi")).toEqual(["s3", "s4"]);
+		expect(refs(visible, "redecouvrir")).toBeUndefined(); // lost both cards: dropped
+		expect(refs(visible, "jamais-ecoute")).toEqual(["lb-a", "lb-b", "lb-c", "lb-d"]);
+	});
+
+	it("hides an album row that lost cards and fell under ALBUM_ROW_MIN, keeps an untouched small row", () => {
+		const out = arrangeHomeRows([
+			{ key: "nouveautes-artistes", items: albums("a", "b", "c", "d"), minAfterDedupe: ALBUM_ROW_MIN },
+			{ key: "jamais-ecoute", items: albums("a", "b", "e", "f"), minAfterDedupe: ALBUM_ROW_MIN },
+			{ key: "recemment-acquis", items: albums("g", "h"), minAfterDedupe: ALBUM_ROW_MIN },
+		]);
+		expect(keys([...out.visible, ...out.more])).toEqual(["recemment-acquis", "nouveautes-artistes"]);
+		expect(ALBUM_ROW_MIN).toBe(4);
+	});
+
+	it("caps the visible rows to 4: pinned first, then the best filled, the rest folded in display order", () => {
+		const { visible, more } = arrangeHomeRows([
+			{ key: "jamais-ecoute", items: albums("j1", "j2", "j3", "j4", "j5", "j6", "j7") },
+			{ key: "redecouvrir", items: songs("r1", "r2", "r3", "r4", "r5", "r6") },
+			{ key: "nouveautes-artistes", items: albums("n1", "n2", "n3") },
+			{ key: "recemment-acquis", items: albums("a1", "a2", "a3", "a4", "a5") },
+			{ key: "pour-toi", items: songs("p1") },
+			{ key: "reprendre", items: songs("x1") },
+		]);
+		expect(visible).toHaveLength(HOME_MAX_VISIBLE_ROWS);
+		expect(keys(visible)).toEqual(["reprendre", "pour-toi", "redecouvrir", "jamais-ecoute"]);
+		expect(keys(more)).toEqual(["recemment-acquis", "nouveautes-artistes"]);
+	});
+
+	it("gives the free slots to the discovery rows when Reprendre / Pour toi are empty", () => {
+		const { visible, more } = arrangeHomeRows([
+			{ key: "reprendre", items: [] },
+			{ key: "pour-toi", items: undefined },
+			{ key: "recemment-acquis", items: albums("a1", "a2") },
+			{ key: "nouveautes-artistes", items: albums("n1", "n2", "n3") },
+			{ key: "redecouvrir", items: songs("r1") },
+			{ key: "jamais-ecoute", items: albums("j1", "j2", "j3", "j4") },
+		]);
+		expect(keys(visible)).toEqual(["recemment-acquis", "nouveautes-artistes", "redecouvrir", "jamais-ecoute"]);
+		expect(more).toEqual([]);
+	});
+
+	it("keeps an empty Reprendre row when asked (pills / week card) and counts it as a slot", () => {
+		const { visible, more } = arrangeHomeRows([
+			{ key: "reprendre", items: [], keepEmpty: true },
+			{ key: "recemment-acquis", items: albums("a1") },
+			{ key: "nouveautes-artistes", items: albums("n1", "n2") },
+			{ key: "redecouvrir", items: songs("r1", "r2", "r3") },
+			{ key: "jamais-ecoute", items: albums("j1", "j2", "j3", "j4") },
+		]);
+		expect(keys(visible)).toEqual(["reprendre", "nouveautes-artistes", "redecouvrir", "jamais-ecoute"]);
+		expect(keys(more)).toEqual(["recemment-acquis"]);
+	});
+
+	it("returns the very same array for a row the dedupe did not touch and never mutates inputs", () => {
+		const acquired = albums("a", "b");
+		const fresh = albums("a", "c");
+		const { visible } = arrangeHomeRows([
+			{ key: "recemment-acquis", items: acquired },
+			{ key: "nouveautes-artistes", items: fresh },
+		]);
+		expect(visible.find((r) => r.key === "nouveautes-artistes")?.items).toBe(fresh);
+		expect(acquired).toHaveLength(2);
+		expect(refs(visible, "recemment-acquis")).toEqual(["lb-b"]);
+	});
+
+	it("caps a row AFTER the dedupe (Récemment acquis fetched longer than shown)", () => {
+		const acquired = albums("a", "b", "c", "d", "e", "f", "g", "h");
+		const { visible } = arrangeHomeRows([
+			{ key: "nouveautes-artistes", items: albums("a", "b", "c") },
+			{ key: "recemment-acquis", items: acquired, max: 4, minAfterDedupe: ALBUM_ROW_MIN },
+		]);
+		expect(refs(visible, "recemment-acquis")).toEqual(["lb-d", "lb-e", "lb-f", "lb-g"]);
+		expect(acquired).toHaveLength(8);
+		// an untouched row that fits its max keeps its array
+		const small = albums("x", "y");
+		expect(arrangeHomeRows([{ key: "recemment-acquis", items: small, max: 4 }]).visible[0].items).toBe(small);
+	});
+
+	it("honours maxVisible and dedupes inside a single row too", () => {
+		const out = arrangeHomeRows([{ key: "recemment-acquis", items: albums("a", "a", "b") }], { maxVisible: 0 });
+		expect(out.visible).toEqual([]);
+		expect(refs(out.more, "recemment-acquis")).toEqual(["lb-a", "lb-b"]);
+	});
+
+	it("reads the folded-rows toggle from storage without throwing", () => {
+		expect(readMoreRowsOpen({ getItem: (k) => (k === HOME_MORE_ROWS_KEY ? "1" : null) })).toBe(true);
+		expect(readMoreRowsOpen({ getItem: () => null })).toBe(false);
+		expect(readMoreRowsOpen(undefined)).toBe(false);
+		expect(
+			readMoreRowsOpen({
+				getItem: () => {
+					throw new Error("blocked");
+				},
+			}),
+		).toBe(false);
 	});
 });
