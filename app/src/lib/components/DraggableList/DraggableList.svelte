@@ -394,7 +394,10 @@
 				handleDragStart(event, index);
 			}}
 		>
-			{#if swipeToRemove}
+			<!-- Rendered only while a swipe reveals it: at rest the 0-width strip
+			     (plus its padding) used to bleed a 10px red band down the desktop
+			     queue, and the min-content button overflowed the panel. -->
+			{#if swipeToRemove && rowReveal(index, swipeX, swipeIndex, openIndex) > 0}
 				<div
 					class="swipe-backdrop"
 					aria-hidden={openIndex !== index}
@@ -484,33 +487,48 @@
 		bottom: 0;
 		right: 0;
 		width: 0;
+		// no padding: with border-box a 0-width strip still rendered its padding
+		padding: 0;
 		overflow: hidden;
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		padding-right: 0.75em;
 		box-sizing: border-box;
-		background: hsl(0, 70%, 42%);
+		background: #c62828;
 		color: #fff;
 		pointer-events: none;
 	}
 	.list-item.open .swipe-backdrop {
 		pointer-events: auto;
 	}
+	// Absolutely positioned inside the clipped backdrop: it no longer sets the
+	// strip's min-content width, and is revealed progressively by the swipe.
+	// The `!important`s beat the global `button` rule (dark text on light
+	// background), which measured "Retirer" at 2.01:1 on the red strip.
 	.swipe-remove {
+		position: absolute;
+		right: 0.75em;
+		top: 50%;
+		transform: translateY(-50%);
 		display: inline-flex;
 		align-items: center;
 		gap: 0.4em;
 		min-width: 5.5em;
 		min-height: 2.75em;
 		padding: 0.4em 0.8em;
-		border: 0;
+		border: 0 !important;
 		border-radius: 999px;
-		background: hsla(0, 0%, 0%, 0.25);
-		color: #fff;
+		background: hsla(0, 0%, 0%, 0.3) !important;
+		color: #fff !important;
+		text-transform: none !important;
+		box-shadow: none !important;
+		white-space: nowrap;
 		font-weight: 600;
 		font-size: 0.9em;
 		cursor: pointer;
+		&:hover,
+		&:focus,
+		&:active {
+			background: hsla(0, 0%, 0%, 0.45) !important;
+			color: #fff !important;
+		}
 		&:focus-visible {
 			outline: 2px solid #fff;
 			outline-offset: 2px;
