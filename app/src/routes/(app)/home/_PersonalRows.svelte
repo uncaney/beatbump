@@ -12,6 +12,7 @@
 	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
 	import { clockLabel, fetchRemoteResume, restoreRemoteResume } from "$lib/stores/nowPlayingSync";
 	import { AudioPlayer } from "$lib/player";
+	import list from "$lib/stores/list";
 	import { get } from "svelte/store";
 
 	const MAX = 20;
@@ -23,6 +24,19 @@
 	// C1: the saved queue ("Remember Last Track"), resumed where it stopped.
 	let saved: ResumeState | null = null;
 	$: savedTrack = saved ? saved.mix[saved.position] : null;
+	// Audit v8 TOP 5 / 3.1: the pill showed while the very same queue was
+	// already loaded, even playing ("Reprendre la file : Aerodynamic (1/50)"
+	// next to a mini-bar playing 2/50 of that file). The saved state IS the
+	// session's own queue (resumeState writes it every 5 s), so compare it to
+	// the live session: same length, same first and last videoId = same queue.
+	// Shown only while paused and when the saved queue is not the loaded one;
+	// `$paused` drops it the moment playback starts, without a navigation.
+	function isCurrentQueue(s: ResumeState | null, mix: unknown[] | null | undefined): boolean {
+		if (!s || !Array.isArray(mix) || !mix.length || mix.length !== s.mix.length) return false;
+		const id = (row: unknown) => (row && typeof row === "object" ? (row as { videoId?: unknown }).videoId : undefined);
+		return id(mix[0]) === id(s.mix[0]) && id(mix[mix.length - 1]) === id(s.mix[s.mix.length - 1]);
+	}
+	$: showSavedPill = !!savedTrack && $paused && !isCurrentQueue(saved, $list?.mix);
 	const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 	let resuming = false;
 	async function resumeQueue() {
@@ -130,7 +144,7 @@
 	});
 </script>
 
-{#if resume.length > 0 || savedTrack || remoteTrack}
+{#if resume.length > 0 || showSavedPill || remoteTrack}
 	<section
 		class="home-row"
 		data-row="reprendre"
@@ -166,7 +180,7 @@
 				</button>
 			</div>
 		{/if}
-		{#if savedTrack}
+		{#if showSavedPill && savedTrack}
 			<div class="resume-queue">
 				<button
 					type="button"
