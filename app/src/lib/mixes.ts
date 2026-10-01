@@ -3,10 +3,11 @@
 // No Svelte or store import so the page logic is unit-testable.
 
 export interface MixCard {
-	/** "decade:1990" | "genre:Rock" | "artist:la-…" (the data-mix attribute of the card). */
+	/** "decade:1990" | "genre:Rock" | "decade:1990|genre:Rock" | "artist:la-…" (the data-mix attribute of the card). */
 	key: string;
-	kind: "decade" | "genre" | "artist";
-	/** "Années 1990" | "Rock" | "Daft Punk" */
+	/** c39b: "crossover" = a decade x genre mix (local/mix?decade=&genre=). */
+	kind: "decade" | "genre" | "crossover" | "artist";
+	/** "Années 1990" | "Rock" | "Rock des années 1990" | "Daft Punk" */
 	title: string;
 	/** "52 albums" | "1 234 titres · 20 albums" (genre albums since L8-6) | "12 écoutes" */
 	subtitle: string;
@@ -58,6 +59,11 @@ export function decadeLabel(decade: number): string {
 	return `Années ${decade}`;
 }
 
+/** c39b B6-2: "Rock des années 1990". */
+export function crossoverLabel(decade: number, genre: string): string {
+	return `${genre} des années ${decade}`;
+}
+
 const nf = (n: number): string => {
 	try {
 		return new Intl.NumberFormat("fr-FR").format(n);
@@ -76,11 +82,12 @@ export function tracksLabel(n: number): string {
 
 /**
  * Cards from the local/mixes answer: decades first (as listed, newest first),
- * then genres. Malformed rows are dropped; unknown shapes give no card.
+ * then genres, then (c39b) the decade x genre crossovers. Malformed rows are
+ * dropped; unknown shapes give no card.
  */
 export function mixCardsFrom(resp: unknown): MixCard[] {
 	if (!resp || typeof resp !== "object") return [];
-	const r = resp as { decades?: unknown; genres?: unknown };
+	const r = resp as { decades?: unknown; genres?: unknown; crossovers?: unknown };
 	const out: MixCard[] = [];
 	if (Array.isArray(r.decades)) {
 		for (const d of r.decades) {
@@ -110,6 +117,21 @@ export function mixCardsFrom(resp: unknown): MixCard[] {
 				// over how many albums; older answers (no `albums`) keep the count.
 				subtitle: albums > 0 ? `${tracksLabel(count)} · ${albumsLabel(albums)}` : tracksLabel(count),
 				query: `genre=${encodeURIComponent(name)}`,
+			});
+		}
+	}
+	if (Array.isArray(r.crossovers)) {
+		for (const x of r.crossovers) {
+			const decade = Number((x as { decade?: unknown })?.decade);
+			const genre = (x as { genre?: unknown })?.genre;
+			const albums = Number((x as { albums?: unknown })?.albums);
+			if (!Number.isInteger(decade) || decade % 10 !== 0 || typeof genre !== "string" || genre.trim() === "" || !(albums > 0)) continue;
+			out.push({
+				key: `decade:${decade}|genre:${genre}`,
+				kind: "crossover",
+				title: crossoverLabel(decade, genre),
+				subtitle: albumsLabel(albums),
+				query: `decade=${decade}&genre=${encodeURIComponent(genre)}`,
 			});
 		}
 	}

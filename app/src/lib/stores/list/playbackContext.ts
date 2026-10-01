@@ -18,7 +18,9 @@ export type PlaybackContextKind =
 	// c28c EQ1: targeted radio (favorites/album/artist seed, local/related?seed=).
 	| "radio"
 	// c29b D1: decade mix (/library/mixes, local/mix?decade=).
-	| "decade";
+	| "decade"
+	// c39b B6-2: decade x genre mix (local/mix?decade=&genre=), "Mix : Rock des années 1990".
+	| "crossover";
 
 export interface PlaybackContextInput {
 	kind: PlaybackContextKind;
@@ -45,6 +47,7 @@ const KIND_LABEL: Record<PlaybackContextKind, string> = {
 	genre: "Genre",
 	radio: "Radio",
 	decade: "Décennie",
+	crossover: "Mix",
 };
 
 const RETURN_LABEL: Partial<Record<PlaybackContextKind, string>> = {

@@ -120,6 +120,7 @@ func newMixStub(t *testing.T) *mixStub {
 	t.Helper()
 	resetAlbumCoverMemo()
 	resetMixSurveyMemo()
+	resetCrossoverMemo()
 	s := &mixStub{}
 	n := 0
 	add := func(album, artist, year, genre string, tracks int) {
@@ -163,9 +164,10 @@ func TestParseDecade(t *testing.T) {
 	}
 }
 
-func TestLocalMixRequiresExactlyOneOf(t *testing.T) {
+func TestLocalMixParamValidation(t *testing.T) {
 	newMixStub(t)
-	for _, q := range []string{"", "decade=1990&genre=Rock", "decade=1995", "decade=abc"} {
+	// c39b: decade + genre is allowed now.
+	for _, q := range []string{"", "decade=1995", "decade=abc"} {
 		c, rec := ctxFor(http.MethodGet, "/api/v1/local/mix?"+q, "", nil)
 		if err := LocalMixHandler(c); err != nil {
 			t.Fatal(err)
@@ -277,6 +279,7 @@ func newMixStubGenres(t *testing.T) *mixStub {
 	t.Helper()
 	resetAlbumCoverMemo()
 	resetMixSurveyMemo()
+	resetCrossoverMemo()
 	s := &mixStub{}
 	n := 0
 	add := func(album, artist, year, genre string, tracks int) {
@@ -361,5 +364,148 @@ func TestLocalMixSurveyMemo(t *testing.T) {
 	getJSON(t, LocalMixHandler, "/api/v1/local/mix?genre=Rock")
 	if stub.surveyCalls(rock) != 2 {
 		t.Fatalf("memo did not expire: %d calls", stub.surveyCalls(rock))
+	}
+}
+
+// newMixStubCross (c39b): Rock 1990s = 20 albums, Rock 2000s = 16, Pop 1997
+// = 15, Jazz 1995 = 5 (3 tracks each). Years: 1997 = 17 albums (15 Pop + 2
+// Rock), every other year <= 7.
+func newMixStubCross(t *testing.T) *mixStub {
+	t.Helper()
+	resetAlbumCoverMemo()
+	resetMixSurveyMemo()
+	resetCrossoverMemo()
+	s := &mixStub{}
+	n := 0
+	add := func(album, artist, year, genre string, tracks int) {
+		for i := 0; i < tracks; i++ {
+			n++
+			s.tracks = append(s.tracks, map[string]interface{}{
+				"lid": fmt.Sprintf("%011x", n), "title": fmt.Sprintf("%s %d", album, i+1), "artist": artist, "albumArtist": artist,
+				"album": album, "track": float64(i + 1), "durationSec": 200.0, "year": year, "genre": genre,
+			})
+		}
+		s.albums = append(s.albums, map[string]interface{}{"id": albumID(artist, album), "album": album, "albumArtist": artist, "year": year, "coverLid": fmt.Sprintf("%011x", n)})
+	}
+	for a := 0; a < 20; a++ {
+		add(fmt.Sprintf("R90 %d", a), fmt.Sprintf("Band %d", a), fmt.Sprintf("%d", 1990+a%10), "Rock", 3)
+	}
+	for a := 0; a < 16; a++ {
+		add(fmt.Sprintf("R00 %d", a), fmt.Sprintf("Crew %d", a), fmt.Sprintf("%d", 2000+a%10), "Rock", 3)
+	}
+	for a := 0; a < 15; a++ {
+		add(fmt.Sprintf("P97 %d", a), fmt.Sprintf("Singer %d", a), "1997", "Pop", 3)
+	}
+	for a := 0; a < 5; a++ {
+		add(fmt.Sprintf("J95 %d", a), fmt.Sprintf("Trio %d", a), "1995", "Jazz", 3)
+	}
+	srv := httptest.NewServer(s.handler())
+	t.Cleanup(srv.Close)
+	t.Setenv("MEILI_URL", srv.URL)
+	return s
+}
+
+func TestMixFilterComposition(t *testing.T) {
+	if mixFilter(decadeFilter(1990)) != decadeFilter(1990) {
+		t.Fatalf("a single filter must stay as is: %s", mixFilter(decadeFilter(1990)))
+	}
+	want := `(year IN [1990,1991,1992,1993,1994,1995,1996,1997,1998,1999]) AND (genre = "Rock")`
+	if got := crossFilter(1990, "Rock"); got != want {
+		t.Fatalf("crossFilter = %s", got)
+	}
+}
+
+func TestLocalMixDecadeAndGenre(t *testing.T) {
+	stub := newMixStubCross(t)
+	resp := getJSON(t, LocalMixHandler, "/api/v1/local/mix?decade=1990&genre=Rock")
+	items, _ := resp["items"].([]interface{})
+	if len(items) != 40 || resp["decade"] != 1990.0 || resp["genre"] != "Rock" || resp["albums"] != 20.0 {
+		t.Fatalf("1990s Rock: %d items, %v", len(items), resp)
+	}
+	for _, it := range items {
+		if title := it.(map[string]interface{})["title"].(string); !strings.HasPrefix(title, "R90 ") {
+			t.Fatalf("track outside 1990s Rock: %s", title)
+		}
+	}
+	if stub.surveyCalls(crossFilter(1990, "Rock")) != 1 {
+		t.Fatalf("the combined filter was not surveyed as such: %v", stub.surveys)
+	}
+	// Each slice alone is bigger than the crossing.
+	decade := getJSON(t, LocalMixHandler, "/api/v1/local/mix?decade=1990")
+	if decade["albums"].(float64) <= 20 {
+		t.Fatalf("decade alone should hold more albums: %v", decade["albums"])
+	}
+	small := getJSON(t, LocalMixHandler, "/api/v1/local/mix?decade=1990&genre=Jazz")
+	if small["reason"] != "too_small" || small["albums"] != 5.0 {
+		t.Fatalf("1990s Jazz should be too_small: %v", small)
+	}
+	none := getJSON(t, LocalMixHandler, "/api/v1/local/mix?decade=2000&genre=Pop")
+	if none["reason"] != "too_small" {
+		t.Fatalf("2000s Pop should be too_small: %v", none)
+	}
+}
+
+func TestLocalMixesYearsAndCrossovers(t *testing.T) {
+	stub := newMixStubCross(t)
+	resp := getJSON(t, LocalMixesHandler, "/api/v1/local/mixes")
+	cross, _ := resp["crossovers"].([]interface{})
+	var got []string
+	for _, c := range cross {
+		m := c.(map[string]interface{})
+		got = append(got, fmt.Sprintf("%v:%v:%v", m["decade"], m["genre"], m["albums"]))
+	}
+	if strings.Join(got, ",") != "1990:Rock:20,2000:Rock:16,1990:Pop:15" {
+		t.Fatalf("crossovers = %v", got)
+	}
+	// Every listed crossover plays.
+	for _, c := range cross {
+		m := c.(map[string]interface{})
+		mix := getJSON(t, LocalMixHandler, fmt.Sprintf("/api/v1/local/mix?decade=%v&genre=%v", m["decade"], m["genre"]))
+		if items, _ := mix["items"].([]interface{}); len(items) == 0 {
+			t.Fatalf("crossover %v does not play: %v", m, mix["reason"])
+		}
+	}
+	// Memoised: a second build sends no Meili request.
+	stub.mu.Lock()
+	before := len(stub.filters)
+	stub.mu.Unlock()
+	crossoverCards([]decadeCard{{Decade: 1990, Albums: 40}, {Decade: 2000, Albums: 16}})
+	stub.mu.Lock()
+	after := len(stub.filters)
+	stub.mu.Unlock()
+	if after != before {
+		t.Fatalf("crossovers rebuilt within the TTL: %d requests", after-before)
+	}
+}
+
+func TestPickCrossoversSpread(t *testing.T) {
+	var cands []crossoverCard
+	for i, d := range []int{2020, 2010, 2000, 1990, 1980, 1970, 1960} {
+		cands = append(cands, crossoverCard{Decade: d, Genre: "Rock", Count: 900 - i, Albums: 60 - i})
+	}
+	cands = append(cands,
+		crossoverCard{Decade: 2020, Genre: "Pop", Count: 500, Albums: 40},
+		crossoverCard{Decade: 2020, Genre: "Jazz", Count: 400, Albums: 30},
+		crossoverCard{Decade: 1990, Genre: "Pop", Count: 300, Albums: 20},
+		crossoverCard{Decade: 1980, Genre: "Soul", Count: 300, Albums: 14},
+	)
+	out := pickCrossovers(cands)
+	if len(out) != mixCrossMax {
+		t.Fatalf("want %d cards, got %v", mixCrossMax, out)
+	}
+	perGenre := map[string]int{}
+	for _, c := range out {
+		perGenre[c.Genre]++
+		if c.Albums < mixMinAlbums {
+			t.Fatalf("card under the album threshold: %v", c)
+		}
+	}
+	// First pass: Rock 2020, Rock 2010, Pop 2020, (Jazz 2020 skipped: 2020
+	// holds 2), Pop 1990; the fill then adds Rock 2000 and Rock 1990.
+	if out[0] != cands[0] || out[1] != cands[1] || perGenre["Rock"] < 2 || perGenre["Pop"] != 2 {
+		t.Fatalf("spread = %v", out)
+	}
+	if c := crossoverCandidates(map[int]map[string]int{1990: {"Rock": 60, "Jazz": 14}, 2000: {"Rock": 60}}, 5); len(c) != 2 || c[0].Decade != 2000 {
+		t.Fatalf("candidates = %v", c)
 	}
 }

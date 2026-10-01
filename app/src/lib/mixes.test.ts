@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeUnavailable, albumsLabel, artistCardsFrom, MIX_UNAVAILABLE_TTL_MS, mixCardAriaLabel, decadeLabel, mixCardUrl, mixCardsFrom, playsLabel, tracksLabel } from "./mixes";
+import { activeUnavailable, albumsLabel, crossoverLabel, artistCardsFrom, MIX_UNAVAILABLE_TTL_MS, mixCardAriaLabel, decadeLabel, mixCardUrl, mixCardsFrom, playsLabel, tracksLabel } from "./mixes";
 
 describe("mixes cards (c29b D1)", () => {
 	it("labels", () => {
@@ -77,5 +77,24 @@ describe("L10-13 mix card accessible name", () => {
 		expect(mixCardAriaLabel({ kind: "artist", title: "Daft Punk" })).toBe("Lancer la radio Daft Punk");
 		expect(mixCardAriaLabel({ kind: "artist", title: "Daft Punk" }, "unavailable")).toBe("Lancer la radio Daft Punk : radio indisponible, toucher pour réessayer");
 		expect(mixCardAriaLabel({ kind: "decade", title: "Années 1990" }, "too_small")).toBe("Lire le mix Années 1990 : pas assez d'albums");
+	});
+});
+
+describe("crossover cards (c39b B6-2)", () => {
+	it("builds decade x genre cards after the genres", () => {
+		const cards = mixCardsFrom({
+			decades: [{ decade: 1990, albums: 600 }],
+			genres: [{ name: "Rock", count: 3000, albums: 48 }],
+			crossovers: [
+				{ decade: 1990, genre: "Alternative Rock", count: 420, albums: 22 },
+				{ decade: 1995, genre: "Rock", albums: 30 },
+				{ decade: 2000, genre: "", albums: 30 },
+				{ decade: 2000, genre: "Pop", albums: 0 },
+			],
+		});
+		expect(cards.map((c) => c.key)).toEqual(["decade:1990", "genre:Rock", "decade:1990|genre:Alternative Rock"]);
+		expect(cards[2]).toMatchObject({ kind: "crossover", title: "Alternative Rock des années 1990", subtitle: "22 albums", query: "decade=1990&genre=Alternative%20Rock" });
+		expect(mixCardUrl(cards[2])).toBe("/api/v1/local/mix?decade=1990&genre=Alternative%20Rock");
+		expect(crossoverLabel(2000, "Pop")).toBe("Pop des années 2000");
 	});
 });
