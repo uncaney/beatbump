@@ -86,22 +86,10 @@
 {/if}
 
 <main class="resp-content-width">
+	<!-- The chips are the only navigation: the 9 hub cards that used to follow
+	     them (audit v3 3.8, double navigation) pointed at destinations the chips
+	     already list, "Ton mois" and "Hors-ligne" included. -->
 	<CollectionNav active="playlists" />
-
-	<section class="hub">
-		{#each [{ href: "/library/for-you", icon: "radio", label: "Made for you" }, { href: "/library/artists", icon: "artist", label: "Artists" }, { href: "/library/albums", icon: "album", label: "Albums" }, { href: "/library/all-songs", icon: "music", label: "Songs" }, { href: "/library/genres", icon: "list", label: "Genres" }, { href: "/library/saved", icon: "heart", label: "Saved" }, { href: "/library/recent", icon: "clock", label: "Listening" }, { href: "/library/downloads-offline", icon: "download", label: "Offline" }, { href: "/library/account", icon: "user", label: "Account" }] as c (c.href)}
-			<a
-				class="hub-card"
-				href={c.href}
-			>
-				<Icon
-					name={c.icon}
-					size="1.5em"
-				/>
-				<span>{c.label}</span>
-			</a>
-		{/each}
-	</section>
 
 	<header>
 		<h1>Your Library</h1>
@@ -196,29 +184,6 @@
 </main>
 
 <style lang="scss">
-	.hub {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
-		gap: 0.6rem;
-		margin: 0 0 2rem;
-	}
-	.hub-card {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		padding: 1.1rem 0.5rem;
-		border-radius: 0.6rem;
-		background: rgba(255, 255, 255, 0.06);
-		color: inherit;
-		text-decoration: none;
-		font-weight: 500;
-		transition: background 0.15s;
-	}
-	.hub-card:hover {
-		background: rgba(255, 255, 255, 0.14);
-	}
 	section:not(:last-of-type) {
 		margin-top: 1rem;
 		margin-bottom: 4.5rem;
