@@ -106,9 +106,11 @@
 			min-width: 0;
 		}
 	}
+	// U12-16: the subtitle sat 6 px right of the h1 and "40 titres"; one
+	// left edge for the whole head.
 	.sub {
+		display: block;
 		color: #999;
-		margin-left: 0.5rem;
 	}
 	.btn {
 		white-space: nowrap;
