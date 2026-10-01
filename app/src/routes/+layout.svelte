@@ -24,7 +24,7 @@
     import {restoreResumeState, resumeShortcutClaimed, startResumePersistence} from "$lib/stores/resumeState";
     import {startNowPlayingSync} from "$lib/stores/nowPlayingSync";
     import {onDestroy, onMount} from "svelte";
-    import {get, writable} from "svelte/store";
+    import {get} from "svelte/store";
 
     export let data;
 
@@ -36,17 +36,18 @@
     // start as '' and get the pathname in onMount, which recreated the whole
     // page once after its first mount (every entry page's onMount ran twice:
     // me/mix, me/stats/recent, local/albums, me/nowplaying each x2 per GET /).
-    // Initialised synchronously, the first value is already the final one.
-    const ua = browser ? navigator.userAgent : "";
-    const layoutData = writable({
-        key: browser ? location.pathname : '',
-        page: browser ? location.pathname : '',
-        origin: browser ? location.origin : '',
-        iOS: ua.includes('iPhone') || ua.includes('iPad'),
-        Android: ua.includes('Android'),
-    });
-
-    $: ({key} = $layoutData);
+    // $page is populated synchronously (SSR/hydration), so the first value is
+    // already the final one: no extra remount at startup.
+    //
+    // L17 (audit v7, P2): `key` used to be set once from `location.pathname`
+    // and never updated again, so the Back button (Nav.svelte, keyed off
+    // `!key.includes("home")`) reflected the page the app was OPENED on, not
+    // the current one, and the K1 150ms transition never replayed on
+    // navigation. Deriving it from `$page.url.pathname` keeps the synchronous
+    // first value AND makes both correct per-navigation (the Wrapper's
+    // `{#key key}` now remounts its slot on every route change - that is the
+    // point of K1's transition, not a regression).
+    $: key = $page.url.pathname;
     let main: HTMLElement;
 
     // L16 (audit v7, P1): reload-on-update shared with the lazyComponent error
