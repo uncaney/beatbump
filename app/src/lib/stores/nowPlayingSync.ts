@@ -12,13 +12,24 @@
  * The top half is pure (unit-tested); the runtime half loads the player,
  * the session list and the API client lazily.
  */
-import { buildResumeState, parseResumeState, type ResumeState } from "./resumeState";
+import {
+	RESUME_KEY,
+	buildResumeState,
+	parseResumeState,
+	readResumeState,
+	resumeSignature,
+	shouldSaveResume,
+	writeResumeState,
+	type ResumeState,
+} from "./resumeState";
 
 export const DEVICE_ID_KEY = "ytm-device-id";
 export const REMOTE_CONSUMED_KEY = "ytm-remote-consumed";
 export const NOWPLAYING_SYNC_MS = 15000;
 /** The server state must be this much newer than the local one to be offered. */
 export const REMOTE_NEWER_MS = 2 * 60 * 1000;
+/** J6: between two pushes of the same queue, the position must move more than this (s). */
+export const NOWPLAYING_MIN_TIME_DELTA = 10;
 /** Server limit on the payload (413 above); a long queue is cut to fit. */
 export const NOWPLAYING_MAX_BYTES = 64 * 1024;
 /** keepalive fetches (page hidden) are capped by browsers around 64 KB in total. */
@@ -27,6 +38,7 @@ const KEEPALIVE_MAX_BYTES = 60 * 1024;
 interface StorageLike {
 	getItem(key: string): string | null;
 	setItem(key: string, value: string): void;
+	removeItem?(key: string): void;
 }
 
 /** A short human name for this device, from its user agent. */
@@ -62,12 +74,37 @@ export function getDeviceId(storage: StorageLike | undefined, make: () => string
 	}
 }
 
+/** Row keys that only mean something on the device that wrote them (J1). */
+const DEVICE_ROW_KEYS = ["localUrl", "_offlineUrl"] as const;
+
 /**
- * The resume state, cut around the cursor until its JSON fits `maxBytes`
- * (the server refuses more). null when even the current track alone does
- * not fit or the queue is empty.
+ * J1: the queue sent to `me/nowplaying` must not carry this device's cache
+ * URLs (`localUrl` / `_offlineUrl`: `/aud/<id>`, `/localf?...`, a signed
+ * `/vp?u=`); the other device resolves each row by `videoId` (offlineFormats,
+ * then player.json). The local C1 state keeps them. Same object back when
+ * nothing had to be removed.
  */
-export function fitResumeState(state: ResumeState | null, maxBytes = NOWPLAYING_MAX_BYTES): ResumeState | null {
+export function stripDeviceUrls(state: ResumeState | null): ResumeState | null {
+	if (!state) return null;
+	let changed = false;
+	const mix = state.mix.map((row) => {
+		if (!row || typeof row !== "object" || !DEVICE_ROW_KEYS.some((k) => k in row)) return row;
+		changed = true;
+		const out = { ...row };
+		for (const k of DEVICE_ROW_KEYS) delete out[k];
+		return out;
+	});
+	return changed ? { ...state, mix } : state;
+}
+
+/**
+ * The resume state as sent to the server: device URLs removed (J1), then
+ * cut around the cursor until its JSON fits `maxBytes` (the server refuses
+ * more). null when even the current track alone does not fit or the queue
+ * is empty.
+ */
+export function fitResumeState(input: ResumeState | null, maxBytes = NOWPLAYING_MAX_BYTES): ResumeState | null {
+	const state = stripDeviceUrls(input);
 	if (!state || !state.mix.length) return null;
 	const size = (s: ResumeState) => new TextEncoder().encode(JSON.stringify(s)).length;
 	if (size(state) <= maxBytes) return state;
@@ -90,11 +127,28 @@ export interface RemoteNowPlaying {
 	updatedAt: number;
 }
 
+/** J3: the `ytm-remote-consumed` value, per device: "<deviceId>|<updatedAt>". */
+export function consumedMarker(deviceId: string, updatedAt: number): string {
+	return `${deviceId}|${updatedAt}`;
+}
+
+/** Parse a consumed marker; a legacy value is the bare updatedAt (no device). */
+function parseConsumed(raw: string | null | undefined): { deviceId: string | null; at: number } | null {
+	if (!raw) return null;
+	const i = raw.lastIndexOf("|");
+	const at = Number(i >= 0 ? raw.slice(i + 1) : raw);
+	if (!isFinite(at) || at <= 0) return null;
+	return { deviceId: i > 0 ? raw.slice(0, i) : null, at };
+}
+
 /**
  * The card rule: offer the server state when it comes from ANOTHER device,
- * is more than REMOTE_NEWER_MS newer than the local `resumeState.savedAt`
- * (0 when there is none), carries a playable queue and was not already
- * consumed on this device. Returns the parsed state (position applied), else null.
+ * is more than REMOTE_NEWER_MS newer than the LIVE local `resumeState.savedAt`
+ * (0 when there is none; with I7 it only moves when playback moves, so a
+ * device that is listening never sees the card), carries a playable queue
+ * and was not consumed on this device: after a click on device X's offer,
+ * X's next pushes are ignored until they are REMOTE_NEWER_MS past the
+ * consumed one (J3). Returns the parsed state (position applied), else null.
  */
 export function remoteResumeOffer(
 	remote: RemoteNowPlaying | null | undefined,
@@ -106,7 +160,10 @@ export function remoteResumeOffer(
 	if (!remote.deviceId || remote.deviceId === localDeviceId) return null;
 	const at = Number(remote.updatedAt);
 	if (!isFinite(at) || at <= 0) return null;
-	if (consumed && consumed === String(at)) return null;
+	const c = parseConsumed(consumed);
+	if (c) {
+		if (c.deviceId === null ? c.at === at : c.deviceId === remote.deviceId && at - c.at < REMOTE_NEWER_MS) return null;
+	}
 	const local = typeof localSavedAt === "number" && isFinite(localSavedAt) ? localSavedAt : 0;
 	if (at - local <= REMOTE_NEWER_MS) return null;
 	let state: ResumeState | null;
@@ -119,6 +176,59 @@ export function remoteResumeOffer(
 	const pos = Number(remote.position);
 	if (isFinite(pos) && pos >= 0) state.currentTime = pos;
 	return state;
+}
+
+export interface NowPlayingBody {
+	deviceId: string;
+	deviceName: string;
+	position: number;
+	payload: ResumeState;
+}
+
+export interface NowPlayingPusherDeps {
+	device: { deviceId: string; deviceName: string };
+	/** The session list and player time, read at each push. */
+	snapshot: () => { list: Parameters<typeof buildResumeState>[0]; currentTime: number; duration: number };
+	loggedIn: () => Promise<boolean>;
+	/** The PUT; resolves the HTTP status (0 = network error). */
+	put: (body: NowPlayingBody, keepalive: boolean) => Promise<number>;
+	online?: () => boolean;
+}
+
+/**
+ * J6: the push used by startNowPlayingSync, as a pure factory. A PUT only
+ * goes out when the queue signature (rows, cursor, type, context:
+ * `resumeSignature`) or the position (more than NOWPLAYING_MIN_TIME_DELTA s)
+ * changed since the last PUT that succeeded; a paused or stalled player
+ * stops rewriting the same row every 15 s. A failed PUT keeps the last
+ * sent snapshot so the next tick retries. One push in flight at a time.
+ */
+export function makeNowPlayingPusher(deps: NowPlayingPusherDeps): (hidden?: boolean) => Promise<"sent" | "skipped"> {
+	let inflight = false;
+	let last: { sig: string; t: number } | null = null;
+	return async (hidden = false) => {
+		if (inflight) return "skipped";
+		if (deps.online && !deps.online()) return "skipped";
+		inflight = true;
+		try {
+			const { list, currentTime, duration } = deps.snapshot();
+			const sig = resumeSignature(list);
+			if (!shouldSaveResume(last, sig, currentTime, NOWPLAYING_MIN_TIME_DELTA)) return "skipped";
+			if (!(await deps.loggedIn())) return "skipped";
+			const state = fitResumeState(buildResumeState(list, currentTime, duration));
+			if (!state) return "skipped";
+			const body: NowPlayingBody = { ...deps.device, position: state.currentTime, payload: state };
+			const keepalive = hidden && JSON.stringify(body).length <= KEEPALIVE_MAX_BYTES;
+			const status = await deps.put(body, keepalive);
+			if (status < 200 || status >= 300) return "skipped";
+			last = { sig, t: state.currentTime };
+			return "sent";
+		} catch {
+			return "skipped"; // best-effort, nothing queued
+		} finally {
+			inflight = false;
+		}
+	};
 }
 
 /** "m:ss" for the card. */
@@ -145,22 +255,9 @@ export function localDevice(): { deviceId: string; deviceName: string } {
 	};
 }
 
-// The local resumeState.savedAt as it was when the app started, before the
-// C1 persistence (which rewrites savedAt every 5 s, even paused) bumps it.
-let startupSavedAt: number | null | undefined;
-function snapshotStartupSavedAt() {
-	if (startupSavedAt !== undefined) return;
-	try {
-		const raw = browserStorage()?.getItem("resumeState");
-		startupSavedAt = parseResumeState(raw)?.savedAt ?? null;
-	} catch {
-		startupSavedAt = null;
-	}
-}
-/** The local C1 savedAt at startup (null when there was no saved state). */
-export function localStartupSavedAt(): number | null {
-	snapshotStartupSavedAt();
-	return startupSavedAt ?? null;
+/** J3: the local C1 savedAt as it is NOW (null when nothing is saved). */
+export function localSavedAt(): number | null {
+	return readResumeState(browserStorage())?.savedAt ?? null;
 }
 
 const loadRuntime = () =>
@@ -175,7 +272,6 @@ const loadRuntime = () =>
  */
 export function startNowPlayingSync(): () => void {
 	if (typeof window === "undefined") return () => {};
-	snapshotStartupSavedAt();
 	let stopped = false;
 	const cleanups: Array<() => void> = [];
 	void loadRuntime().then(async ({ SessionListService, AudioPlayer, me }) => {
@@ -192,26 +288,19 @@ export function startNowPlayingSync(): () => void {
 			}
 			return named;
 		};
-		const { deviceId, deviceName } = localDevice();
-		let inflight = false;
+		const pusher = makeNowPlayingPusher({
+			device: localDevice(),
+			snapshot: () => ({
+				list: SessionListService.value,
+				currentTime: AudioPlayer.currentTime,
+				duration: AudioPlayer.duration,
+			}),
+			loggedIn,
+			put: (body, keepalive) => me.putNowPlaying(body, keepalive),
+			online: () => typeof navigator === "undefined" || navigator.onLine !== false,
+		});
 		const push = async (hidden = false) => {
-			if (stopped || inflight) return;
-			if (typeof navigator !== "undefined" && navigator.onLine === false) return;
-			inflight = true;
-			try {
-				if (!(await loggedIn())) return;
-				const state = fitResumeState(
-					buildResumeState(SessionListService.value, AudioPlayer.currentTime, AudioPlayer.duration),
-				);
-				if (!state) return;
-				const body = { deviceId, deviceName, position: state.currentTime, payload: state };
-				const keepalive = hidden && JSON.stringify(body).length <= KEEPALIVE_MAX_BYTES;
-				await me.putNowPlaying(body, keepalive);
-			} catch {
-				/* best-effort, nothing queued */
-			} finally {
-				inflight = false;
-			}
+			if (!stopped) await pusher(hidden);
 		};
 		let playing = false;
 		let first = true;
@@ -249,7 +338,12 @@ export function startNowPlayingSync(): () => void {
  * The remote state to offer on the home page, or null (see remoteResumeOffer).
  * Only online; never throws.
  */
-export async function fetchRemoteResume(): Promise<{ state: ResumeState; deviceName: string; updatedAt: number } | null> {
+export async function fetchRemoteResume(): Promise<{
+	state: ResumeState;
+	deviceId: string;
+	deviceName: string;
+	updatedAt: number;
+} | null> {
 	if (typeof window === "undefined") return null;
 	if (typeof navigator !== "undefined" && navigator.onLine === false) return null;
 	try {
@@ -261,37 +355,84 @@ export async function fetchRemoteResume(): Promise<{ state: ResumeState; deviceN
 		} catch {
 			consumed = null;
 		}
-		const state = remoteResumeOffer(row, localDevice().deviceId, localStartupSavedAt(), consumed);
+		const state = remoteResumeOffer(row, localDevice().deviceId, localSavedAt(), consumed);
 		if (!state || !row) return null;
-		return { state, deviceName: row.deviceName || "Appareil", updatedAt: Number(row.updatedAt) };
+		return {
+			state,
+			deviceId: String(row.deviceId),
+			deviceName: row.deviceName || "Appareil",
+			updatedAt: Number(row.updatedAt),
+		};
 	} catch {
 		return null;
 	}
 }
 
+/** What `restoreRemoteResume` needs from the runtime (injected by the tests). */
+export interface RestoreRemoteDeps {
+	storage: StorageLike | undefined;
+	restoreInFlight: () => Promise<boolean> | null;
+	restoreResumeState: (opts: { autoplay?: boolean }) => Promise<boolean>;
+	notify: (msg: string, type: "success" | "error") => void;
+	now?: () => number;
+}
+
+const runtimeRestoreDeps = async (): Promise<RestoreRemoteDeps> => {
+	const [rs, utils] = await Promise.all([import("./resumeState"), import("$lib/utils")]);
+	return {
+		storage: browserStorage(),
+		restoreInFlight: rs.restoreInFlight,
+		restoreResumeState: rs.restoreResumeState,
+		notify: utils.notify,
+	};
+};
+
 /**
  * Click on the card: the remote state becomes the local C1 state and goes
  * through the C1 restoration (restoreSession + primed PAUSED at the
- * position, never auto-plays); the offer is marked consumed.
+ * position, never auto-plays). J2: a startup restoration still in flight
+ * would be shared and bring back the OLD local state, so it is awaited
+ * first, then ours runs exactly once. On failure the local state is put
+ * back as it was, a toast says so and the offer is NOT consumed (the card
+ * stays for a retry).
  */
-export async function restoreRemoteResume(offer: { state: ResumeState; updatedAt: number }): Promise<boolean> {
-	const storage = browserStorage();
+export async function restoreRemoteResume(
+	offer: { state: ResumeState; deviceId: string; updatedAt: number; deviceName?: string },
+	deps?: RestoreRemoteDeps,
+): Promise<boolean> {
+	const d = deps ?? (await runtimeRestoreDeps());
+	const inflight = d.restoreInFlight();
+	if (inflight) await inflight.catch(() => false);
+	const storage = d.storage;
+	let previous: string | null = null;
 	try {
-		storage?.setItem(REMOTE_CONSUMED_KEY, String(offer.updatedAt));
+		previous = storage?.getItem(RESUME_KEY) ?? null;
+	} catch {
+		previous = null;
+	}
+	const fail = () => {
+		try {
+			if (previous === null) storage?.removeItem?.(RESUME_KEY);
+			else storage?.setItem(RESUME_KEY, previous);
+		} catch {
+			/* best-effort */
+		}
+		d.notify(`Reprise depuis ${offer.deviceName || "l'autre appareil"} impossible`, "error");
+		return false;
+	};
+	const state: ResumeState = { ...offer.state, savedAt: (d.now ?? Date.now)() };
+	if (!writeResumeState(storage, state)) return fail();
+	let ok = false;
+	try {
+		ok = await d.restoreResumeState({ autoplay: false });
+	} catch {
+		ok = false;
+	}
+	if (!ok) return fail();
+	try {
+		storage?.setItem(REMOTE_CONSUMED_KEY, consumedMarker(offer.deviceId, offer.updatedAt));
 	} catch {
 		/* best-effort */
 	}
-	const rs = await import("./resumeState");
-	const state: ResumeState = { ...offer.state, savedAt: Date.now() };
-	if (!rs.writeResumeState(storage, state)) return false;
-	let ok = await rs.restoreResumeState({ autoplay: false });
-	// A startup restoration still in flight was shared and restored the OLD
-	// local state: run ours once it is done.
-	const { SessionListService } = await import("$lib/stores/list/sessionList");
-	const cur = SessionListService.value.mix[SessionListService.value.position];
-	if (cur?.videoId !== state.mix[state.position]?.videoId) {
-		rs.writeResumeState(storage, state);
-		ok = await rs.restoreResumeState({ autoplay: false });
-	}
-	return ok;
+	return true;
 }

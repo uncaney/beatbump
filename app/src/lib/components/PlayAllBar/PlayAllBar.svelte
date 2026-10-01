@@ -74,8 +74,9 @@
 	/** Optional loader for the full list (local artist: every title, not the preview). */
 	export let loadAll: (() => Promise<any[]>) | undefined = undefined;
 	/**
-	 * I8: source shown by the player. Default: derived from the page
-	 * (Favoris, playlist, artist) with the page heading as the title.
+	 * I8: source shown by the player. Pages that know their title pass it
+	 * (J16: server playlist, artist); otherwise it is derived from the page
+	 * path with the page `h1` as the title.
 	 */
 	export let context: PlaybackContextInput | null | undefined = undefined;
 	let klass = "";
@@ -85,8 +86,9 @@
 	let bar: HTMLElement | undefined;
 
 	function pageHeading(): string {
+		// J16: fallback only; `.name` is also a card class and could come first.
 		const root = bar?.closest(".fix-width, main") ?? null;
-		const el = root?.querySelector("h1, .name") ?? null;
+		const el = root?.querySelector("h1") ?? null;
 		return el?.textContent?.trim() ?? "";
 	}
 

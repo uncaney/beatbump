@@ -54,7 +54,11 @@
 		{#if tracks.length === 0}
 			<p class="state">No tracks in this playlist.</p>
 		{:else}
-			<PlayAllBar {tracks} />
+			<!-- J16: the context comes from the page data, not from the DOM heading. -->
+			<PlayAllBar
+				{tracks}
+				context={{ kind: "playlist", title: String(pl?.name ?? ""), href: $page.url.pathname }}
+			/>
 			<section>
 				{#each tracks as item (item.videoId || item.title)}
 					<Listing data={item} />

@@ -329,6 +329,11 @@ export function restoreResumeState(opts: { autoplay?: boolean } = {}): Promise<b
 }
 let restoring: Promise<boolean> | null = null;
 
+/** J2: the restoration in flight (startup or home button), or null. */
+export function restoreInFlight(): Promise<boolean> | null {
+	return restoring;
+}
+
 async function doRestore(opts: { autoplay?: boolean }): Promise<boolean> {
 	const state = readResumeState(browserStorage());
 	if (!state) return false;

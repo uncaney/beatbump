@@ -134,10 +134,12 @@
 
 					</div>
 					{#if seeAllUrl}
+						<!-- J16: the context comes from the page header, not from the DOM. -->
 						<PlayAllBar
 							tracks={shownSongs}
 							total={songsTotal}
 							loadAll={fetchAllSongs}
+							context={{ kind: "artist", title: String(header?.name ?? ""), href: $page.url.pathname }}
 						/>
 					{/if}
 					<section class="songs">
