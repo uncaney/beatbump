@@ -43,7 +43,8 @@
 		restoringRemote = true;
 		const offer = remote;
 		try {
-			await restoreRemoteResume(offer);
+			// J2: a failed restoration toasts and keeps the card for a retry.
+			if (!(await restoreRemoteResume(offer))) return;
 			remote = null;
 			try {
 				if (get(settings)?.playback?.["Remember Last Track"] === true) saved = readResumeState(localStorage);

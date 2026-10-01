@@ -1,15 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	DEVICE_ID_KEY,
+	REMOTE_CONSUMED_KEY,
 	REMOTE_NEWER_MS,
 	clockLabel,
 	deviceNameFromUA,
 	fitResumeState,
 	getDeviceId,
 	remoteResumeOffer,
+	restoreRemoteResume,
 	stripDeviceUrls,
+	type RestoreRemoteDeps,
 } from "./nowPlayingSync";
-import { buildResumeState } from "./resumeState";
+import { RESUME_KEY, buildResumeState } from "./resumeState";
 
 const track = (i: number, pad = 0) => ({
 	videoId: "0123456789" + (i % 10),
@@ -21,7 +24,12 @@ const stateOf = (n: number, position = 0, pad = 0) =>
 
 const memStorage = () => {
 	const m = new Map<string, string>();
-	return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), m };
+	return {
+		getItem: (k: string) => m.get(k) ?? null,
+		setItem: (k: string, v: string) => void m.set(k, v),
+		removeItem: (k: string) => void m.delete(k),
+		m,
+	};
 };
 
 describe("deviceNameFromUA", () => {
@@ -148,6 +156,82 @@ describe("fitResumeState", () => {
 	it("null for an empty or impossible state", () => {
 		expect(fitResumeState(null)).toBeNull();
 		expect(fitResumeState(stateOf(3, 0, 2000), 100)).toBeNull();
+	});
+});
+
+describe("restoreRemoteResume", () => {
+	const offer = () => ({ state: stateOf(3, 1), updatedAt: 777, deviceName: "iPhone" });
+	const makeDeps = (over: Partial<RestoreRemoteDeps> = {}) => {
+		const storage = memStorage();
+		const calls: string[] = [];
+		const deps: RestoreRemoteDeps & { storage: ReturnType<typeof memStorage>; calls: string[] } = {
+			storage,
+			calls,
+			restoreInFlight: () => null,
+			restoreResumeState: async () => {
+				calls.push("restore");
+				return true;
+			},
+			notify: vi.fn(),
+			now: () => 5000,
+			...over,
+		};
+		return deps;
+	};
+	it("waits for the in-flight startup restoration, then restores exactly once", async () => {
+		const d = makeDeps();
+		const inflight = new Promise<boolean>((resolve) =>
+			setTimeout(() => {
+				d.calls.push("inflight-done");
+				resolve(true);
+			}, 50),
+		);
+		d.restoreInFlight = () => inflight;
+		expect(await restoreRemoteResume(offer(), d)).toBe(true);
+		expect(d.calls).toEqual(["inflight-done", "restore"]);
+		const saved = JSON.parse(d.storage.m.get(RESUME_KEY)!);
+		expect(saved.savedAt).toBe(5000);
+		expect(saved.position).toBe(1);
+		expect(saved.mix[1].title).toBe("T1");
+		expect(d.storage.m.get(REMOTE_CONSUMED_KEY)).toBe("777");
+		expect(d.notify).not.toHaveBeenCalled();
+	});
+	it("restores once with no restoration in flight", async () => {
+		const d = makeDeps();
+		expect(await restoreRemoteResume(offer(), d)).toBe(true);
+		expect(d.calls).toEqual(["restore"]);
+	});
+	it("ignores a rejected in-flight restoration and still restores ours", async () => {
+		const d = makeDeps({ restoreInFlight: () => Promise.reject(new Error("startup failed")) });
+		expect(await restoreRemoteResume(offer(), d)).toBe(true);
+		expect(d.calls).toEqual(["restore"]);
+	});
+	it("on failure: toast, the previous local state is back, nothing consumed", async () => {
+		const d = makeDeps({ restoreResumeState: async () => false });
+		const before = JSON.stringify(stateOf(2, 0));
+		d.storage.setItem(RESUME_KEY, before);
+		expect(await restoreRemoteResume(offer(), d)).toBe(false);
+		expect(d.storage.m.get(RESUME_KEY)).toBe(before);
+		expect(d.storage.m.has(REMOTE_CONSUMED_KEY)).toBe(false);
+		expect(d.notify).toHaveBeenCalledTimes(1);
+		expect(d.notify).toHaveBeenCalledWith(expect.stringContaining("iPhone"), "error");
+	});
+	it("a throwing restoration is a failure too; a device without saved state stays without", async () => {
+		const d = makeDeps({
+			restoreResumeState: async () => {
+				throw new Error("boom");
+			},
+		});
+		expect(await restoreRemoteResume(offer(), d)).toBe(false);
+		expect(d.storage.m.has(RESUME_KEY)).toBe(false);
+		expect(d.storage.m.has(REMOTE_CONSUMED_KEY)).toBe(false);
+		expect(d.notify).toHaveBeenCalledTimes(1);
+	});
+	it("fails cleanly without storage", async () => {
+		const d = makeDeps();
+		expect(await restoreRemoteResume(offer(), { ...d, storage: undefined })).toBe(false);
+		expect(d.calls).toEqual([]);
+		expect(d.notify).toHaveBeenCalledTimes(1);
 	});
 });
 

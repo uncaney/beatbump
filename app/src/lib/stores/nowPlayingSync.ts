@@ -12,7 +12,7 @@
  * The top half is pure (unit-tested); the runtime half loads the player,
  * the session list and the API client lazily.
  */
-import { buildResumeState, parseResumeState, type ResumeState } from "./resumeState";
+import { RESUME_KEY, buildResumeState, parseResumeState, writeResumeState, type ResumeState } from "./resumeState";
 
 export const DEVICE_ID_KEY = "ytm-device-id";
 export const REMOTE_CONSUMED_KEY = "ytm-remote-consumed";
@@ -27,6 +27,7 @@ const KEEPALIVE_MAX_BYTES = 60 * 1024;
 interface StorageLike {
 	getItem(key: string): string | null;
 	setItem(key: string, value: string): void;
+	removeItem?(key: string): void;
 }
 
 /** A short human name for this device, from its user agent. */
@@ -294,29 +295,71 @@ export async function fetchRemoteResume(): Promise<{ state: ResumeState; deviceN
 	}
 }
 
+/** What `restoreRemoteResume` needs from the runtime (injected by the tests). */
+export interface RestoreRemoteDeps {
+	storage: StorageLike | undefined;
+	restoreInFlight: () => Promise<boolean> | null;
+	restoreResumeState: (opts: { autoplay?: boolean }) => Promise<boolean>;
+	notify: (msg: string, type: "success" | "error") => void;
+	now?: () => number;
+}
+
+const runtimeRestoreDeps = async (): Promise<RestoreRemoteDeps> => {
+	const [rs, utils] = await Promise.all([import("./resumeState"), import("$lib/utils")]);
+	return {
+		storage: browserStorage(),
+		restoreInFlight: rs.restoreInFlight,
+		restoreResumeState: rs.restoreResumeState,
+		notify: utils.notify,
+	};
+};
+
 /**
  * Click on the card: the remote state becomes the local C1 state and goes
  * through the C1 restoration (restoreSession + primed PAUSED at the
- * position, never auto-plays); the offer is marked consumed.
+ * position, never auto-plays). J2: a startup restoration still in flight
+ * would be shared and bring back the OLD local state, so it is awaited
+ * first, then ours runs exactly once. On failure the local state is put
+ * back as it was, a toast says so and the offer is NOT consumed (the card
+ * stays for a retry).
  */
-export async function restoreRemoteResume(offer: { state: ResumeState; updatedAt: number }): Promise<boolean> {
-	const storage = browserStorage();
+export async function restoreRemoteResume(
+	offer: { state: ResumeState; updatedAt: number; deviceName?: string },
+	deps?: RestoreRemoteDeps,
+): Promise<boolean> {
+	const d = deps ?? (await runtimeRestoreDeps());
+	const inflight = d.restoreInFlight();
+	if (inflight) await inflight.catch(() => false);
+	const storage = d.storage;
+	let previous: string | null = null;
+	try {
+		previous = storage?.getItem(RESUME_KEY) ?? null;
+	} catch {
+		previous = null;
+	}
+	const fail = () => {
+		try {
+			if (previous === null) storage?.removeItem?.(RESUME_KEY);
+			else storage?.setItem(RESUME_KEY, previous);
+		} catch {
+			/* best-effort */
+		}
+		d.notify(`Reprise depuis ${offer.deviceName || "l'autre appareil"} impossible`, "error");
+		return false;
+	};
+	const state: ResumeState = { ...offer.state, savedAt: (d.now ?? Date.now)() };
+	if (!writeResumeState(storage, state)) return fail();
+	let ok = false;
+	try {
+		ok = await d.restoreResumeState({ autoplay: false });
+	} catch {
+		ok = false;
+	}
+	if (!ok) return fail();
 	try {
 		storage?.setItem(REMOTE_CONSUMED_KEY, String(offer.updatedAt));
 	} catch {
 		/* best-effort */
 	}
-	const rs = await import("./resumeState");
-	const state: ResumeState = { ...offer.state, savedAt: Date.now() };
-	if (!rs.writeResumeState(storage, state)) return false;
-	let ok = await rs.restoreResumeState({ autoplay: false });
-	// A startup restoration still in flight was shared and restored the OLD
-	// local state: run ours once it is done.
-	const { SessionListService } = await import("$lib/stores/list/sessionList");
-	const cur = SessionListService.value.mix[SessionListService.value.position];
-	if (cur?.videoId !== state.mix[state.position]?.videoId) {
-		rs.writeResumeState(storage, state);
-		ok = await rs.restoreResumeState({ autoplay: false });
-	}
-	return ok;
+	return true;
 }
