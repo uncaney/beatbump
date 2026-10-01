@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -20,7 +21,8 @@ import (
 type neverPlayedStub struct {
 	albums     []map[string]interface{} // already in dateAdded:desc order
 	tracks     []map[string]interface{}
-	trackCalls int
+	trackCalls int // every tracks query (batched or per album)
+	batchCalls int // the batched ones (PF4-3)
 	albumCalls int
 }
 
@@ -53,11 +55,22 @@ func (s *neverPlayedStub) handler() http.Handler {
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
 			filter, _ := body["filter"].(string)
-			album, aa := parseAlbumFilter(filter)
 			hits := []interface{}{}
-			for _, tr := range s.tracks {
-				if mstr(tr, "album") == album && mstr(tr, "albumArtist") == aa {
-					hits = append(hits, tr)
+			if albums, artists, ok := parseAlbumInFilter(filter); ok {
+				// PF4-3 batch: `album IN [...] AND albumArtist IN [...]`,
+				// case-insensitive like Meili, cross pairs included.
+				s.batchCalls++
+				for _, tr := range s.tracks {
+					if albums[strings.ToLower(mstr(tr, "album"))] && artists[strings.ToLower(mstr(tr, "albumArtist"))] {
+						hits = append(hits, tr)
+					}
+				}
+			} else {
+				album, aa := parseAlbumFilter(filter)
+				for _, tr := range s.tracks {
+					if mstr(tr, "album") == album && mstr(tr, "albumArtist") == aa {
+						hits = append(hits, tr)
+					}
 				}
 			}
 			json.NewEncoder(w).Encode(map[string]interface{}{"hits": hits})
@@ -65,6 +78,32 @@ func (s *neverPlayedStub) handler() http.Handler {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
+}
+
+var (
+	inListRe = map[string]*regexp.Regexp{
+		"album":       regexp.MustCompile(`(?:^|\s)album IN \[([^\]]*)\]`),
+		"albumArtist": regexp.MustCompile(`(?:^|\s)albumArtist IN \[([^\]]*)\]`),
+	}
+	quotedRe = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"`)
+)
+
+// parseAlbumInFilter reads the two lists of an `album IN ["A",...] AND
+// albumArtist IN ["B",...]` filter (albumsNeverPlayed), lower-cased.
+func parseAlbumInFilter(filter string) (albums, artists map[string]bool, ok bool) {
+	list := func(key string) map[string]bool {
+		m := inListRe[key].FindStringSubmatch(filter)
+		if m == nil {
+			return nil
+		}
+		out := map[string]bool{}
+		for _, q := range quotedRe.FindAllStringSubmatch(m[1], -1) {
+			out[strings.ToLower(strings.NewReplacer(`\"`, `"`, `\\`, `\`).Replace(q[1]))] = true
+		}
+		return out
+	}
+	albums, artists = list("album"), list("albumArtist")
+	return albums, artists, albums != nil && artists != nil
 }
 
 // parseAlbumFilter reads the two `key = "value"` clauses out of a

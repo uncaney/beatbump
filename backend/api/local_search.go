@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -106,6 +107,24 @@ func escapeMeili(s string) string {
 }
 
 // ---- meili helpers ----
+
+// meiliClient is shared by every Meili call (PF4-2, audit perf v4): one
+// transport whose keep-alive pool is sized for the backend's concurrency
+// (http.DefaultTransport keeps only 2 idle connections per host), so a
+// handler that chains Meili queries reuses a warm connection instead of
+// paying a new TCP handshake (and the ~40 ms delayed-ACK quantum measured
+// between two sequential queries) each time.
+var meiliClient = &http.Client{
+	Timeout: 6 * time.Second,
+	Transport: &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		MaxIdleConns:        64,
+		MaxIdleConnsPerHost: 32,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  true, // loopback network: gzip costs more CPU than it saves
+	},
+}
+
 func meiliReq(method, path string, body interface{}) (map[string]interface{}, error) {
 	mu := os.Getenv("MEILI_URL")
 	if mu == "" {
@@ -126,11 +145,17 @@ func meiliReq(method, path string, body interface{}) (map[string]interface{}, er
 	if k := os.Getenv("MEILI_KEY"); k != "" {
 		req.Header.Set("Authorization", "Bearer "+k)
 	}
-	resp, err := (&http.Client{Timeout: 6 * time.Second}).Do(req)
+	resp, err := meiliClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	// The body is always read to EOF before Close: json.Decoder stops at the
+	// end of the value, and a body closed unread makes the transport drop the
+	// connection instead of returning it to the keep-alive pool.
+	defer func() {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+	}()
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("meili %d", resp.StatusCode)
 	}
@@ -154,20 +179,18 @@ func meiliSearchIndex(index string, payload map[string]interface{}) []map[string
 	return res
 }
 
-// artistCoverRounds caps the follow-up queries of artistCoverLids.
+// artistCoverRounds caps the follow-up queries of artistCoverLidsRounds.
 const artistCoverRounds = 3
 
 // artistCoverLids maps each artist id to the coverLid of its newest album.
-// PF3-8 (audit perf v3): it used to ask Meili for up to 2000 albums of the
-// page's artists (20 on /library/artists, 3 per keystroke in the search
-// overlay) and keep one per artist: 60-96 ms. A round now asks for
-// 2*len(pending) albums (artistId + coverLid only); when that limit is
-// filled (an artist with many albums crowding the others out) the artists
-// still without a hit get another round, filtered on them only. A round
-// that returns fewer hits than its limit has seen every album of its
-// artists, so the remaining ones have none.
+// PF4-2 (audit perf v4): ONE Meili query with the `distinct: "artistId"`
+// search parameter (Meili >= 1.11; artistId is a filterable attribute of
+// the albums index, which is all `distinct` needs, no distinctAttribute
+// setting): Meili keeps the first album per artist in year:desc order, so
+// `limit = len(ids)` covers every artist however many albums a prolific one
+// has. If Meili refuses the parameter (older engine, attribute no longer
+// filterable) the PF3-8 bounded rounds below answer instead.
 func artistCoverLids(ids []string) map[string]string {
-	m := map[string]string{}
 	pending := make([]string, 0, len(ids))
 	seen := map[string]bool{}
 	for _, id := range ids {
@@ -176,11 +199,53 @@ func artistCoverLids(ids []string) map[string]string {
 			pending = append(pending, id)
 		}
 	}
+	m := map[string]string{}
+	if len(pending) == 0 {
+		return m
+	}
+	quoted := make([]string, len(pending))
+	for i, id := range pending {
+		quoted[i] = "\"" + escapeMeili(id) + "\""
+	}
+	out, err := meiliReq("POST", "/indexes/albums/search", map[string]interface{}{
+		"q": "", "filter": "artistId IN [" + strings.Join(quoted, ",") + "]",
+		"distinct": "artistId", "limit": len(pending), "sort": []string{"year:desc"},
+		"attributesToRetrieve": []string{"artistId", "coverLid"},
+	})
+	if err != nil || out == nil {
+		return artistCoverLidsRounds(pending)
+	}
+	raw, _ := out["hits"].([]interface{})
+	for _, r := range raw {
+		h, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		aid := mstr(h, "artistId")
+		if aid == "" || !seen[aid] {
+			continue
+		}
+		if _, done := m[aid]; !done {
+			m[aid] = mstr(h, "coverLid")
+		}
+	}
+	return m
+}
+
+// artistCoverLidsRounds is the PF3-8 fallback of artistCoverLids (no
+// `distinct`): a round asks for 2*len(pending) albums (artistId + coverLid
+// only); when that limit is filled (an artist with many albums crowding the
+// others out) the artists still without a hit get another round, filtered
+// on them only. A round that returns fewer hits than its limit has seen
+// every album of its artists, so the remaining ones have none. `pending`
+// is already deduplicated.
+func artistCoverLidsRounds(pending []string) map[string]string {
+	m := map[string]string{}
 	for round := 0; round < artistCoverRounds && len(pending) > 0; round++ {
 		quoted := make([]string, len(pending))
 		want := make(map[string]bool, len(pending))
 		for i, id := range pending {
-			quoted[i] = "\"" + id + "\""
+			quoted[i] = "\"" + escapeMeili(id) + "\""
 			want[id] = true
 		}
 		limit := 2 * len(pending)

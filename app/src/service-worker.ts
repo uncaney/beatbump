@@ -85,14 +85,17 @@ export function isOnDemandOnly(path: string): boolean {
 // offline boot or the PWA install prompt needs is taken now: the manifest,
 // the favicons the shell HTML links, the logo the nav paints and the icons
 // the manifest lists. The rest is cached on demand by the fetch handler.
+// PF4-6 (audit perf v4): of the manifest icons, only the 192 and 512 sizes
+// (launcher and maskable) are what installability needs; the 48-144
+// launcher sizes (64 KB) are cached on demand like the other static files.
 export function staticPrecacheList(all: readonly string[]): string[] {
 	const wanted = (f: string) =>
 		f === "/manifest.json" ||
 		f === "/favicon.ico" ||
 		f === "/logo.svg" ||
 		/^\/assets\/favicon-\d+x\d+\.png$/.test(f) ||
-		/^\/android\/android-launchericon-\d+-\d+\.png$/.test(f) ||
-		/^\/maskable-icon-\d+x\d+\.png$/.test(f);
+		/^\/android\/android-launchericon-(?:192-192|512-512)\.png$/.test(f) ||
+		/^\/maskable-icon-(?:192x192|512x512)\.png$/.test(f);
 	return all.filter(wanted);
 }
 
@@ -128,6 +131,77 @@ async function swapLastActiveShell(): Promise<string | null> {
 	} catch {
 		return null;
 	}
+}
+
+// PF4-6: "/" and the install's static files are not content-hashed, so a
+// deploy used to download them all again (14 requests, ~140 KB per device).
+// They are now carried from the previous shell cache like the hashed assets,
+// but revalidated before use: a conditional request answers 304 (no body)
+// when the file is unchanged (the Go server sends a content ETag on every
+// non-hashed build file, static_etag.go) and the new file otherwise. Pure:
+// which of the install's non-hashed paths an old cache can provide.
+export function carryOverStaticPaths(oldPaths: Iterable<string>, wanted: readonly string[], have: ReadonlySet<string>): string[] {
+	const old = new Set<string>(oldPaths);
+	return [...new Set(wanted)].filter((p) => !p.startsWith(IMMUTABLE) && old.has(p) && !have.has(p));
+}
+
+// Pure: the conditional request headers revalidating a cached response
+// (ETag first; Last-Modified only when there is no ETag, the build sets
+// every mtime to the build time so it alone never matches across deploys).
+// null: nothing to revalidate with, the file is downloaded again.
+export function conditionalHeaders(headers: { get(name: string): string | null }): Record<string, string> | null {
+	const etag = headers.get("ETag");
+	if (etag) return { "If-None-Match": etag };
+	const lm = headers.get("Last-Modified");
+	if (lm) return { "If-Modified-Since": lm };
+	return null;
+}
+
+// Carry "/" and the static files of `wanted` from the most recent older
+// shell cache into `c`, each revalidated (best effort, never throws): 304 ->
+// the old copy, 200 -> the new file, network error -> the old copy (an
+// offline boot still works), anything else -> nothing (addIfMissing then
+// tries the plain download).
+async function carryOverStatics(c: Cache, wanted: readonly string[]): Promise<number> {
+	let reused = 0;
+	try {
+		const names = (await caches.keys()).filter((k) => k.startsWith("ytm-shell-") && k !== SHELL);
+		if (!names.length) return 0;
+		const ver = (k: string) => Number(k.slice("ytm-shell-".length)) || 0;
+		names.sort((a, b) => ver(b) - ver(a));
+		const old = await caches.open(names[0]);
+		const byPath = new Map<string, Request>();
+		for (const k of await old.keys()) byPath.set(new URL(k.url).pathname, k);
+		const have = new Set((await c.keys()).map((k) => new URL(k.url).pathname));
+		await Promise.all(
+			carryOverStaticPaths(byPath.keys(), wanted, have).map(async (p) => {
+				try {
+					const prev = await old.match(byPath.get(p)!);
+					if (!prev || !prev.ok) return;
+					const cond = conditionalHeaders(prev.headers);
+					if (!cond) return;
+					let res: Response;
+					try {
+						res = await fetch(p, { headers: cond, cache: "no-store" });
+					} catch {
+						await c.put(p, prev);
+						return;
+					}
+					if (res.status === 304) {
+						await c.put(p, prev);
+						reused++;
+					} else if (res.ok && res.status === 200 && !isHtmlForAsset(p, res.headers.get("Content-Type"))) {
+						await c.put(p, res);
+					}
+				} catch {
+					/* skip this entry */
+				}
+			}),
+		);
+	} catch {
+		/* best effort */
+	}
+	return reused;
 }
 
 // PF3-5: a deploy gives the SW a new SHELL cache name; hashed immutable
@@ -310,11 +384,15 @@ self.addEventListener("install", (event) => {
 		caches.open(SHELL).then(async (c) => {
 			// PF3-5: unchanged hashed assets come from the previous shell cache.
 			await carryOverShell();
+			// PF4-6: "/" and the static files too, revalidated (304 when
+			// unchanged); "/" before shellBuildAssets reads it.
+			const statics = ["/", ...staticPrecacheList(files)];
+			await carryOverStatics(c, statics);
 			// Shell only (K3): "/", the static files an offline boot needs
 			// (PF3-7) and the build assets the shell / root layout / home route
 			// need; each cached independently.
 			const shell = await shellBuildAssets(c);
-			await Promise.all([...new Set<string>(["/", ...staticPrecacheList(files), ...shell])].map((a) => addIfMissing(c, a)));
+			await Promise.all([...new Set<string>([...statics, ...shell])].map((a) => addIfMissing(c, a)));
 			await self.skipWaiting();
 		}).catch(() => {}),
 	);

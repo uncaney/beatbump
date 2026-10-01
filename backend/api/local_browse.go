@@ -389,19 +389,128 @@ func neverPlayedScanFor(pid, q, artistId, sortBy string, memo bool) *neverPlayed
 // neverPlayedWindow confirms candidates from index `off` until `limit`
 // never-played albums are collected (or the candidates run out) and returns
 // them with the candidate index right after the last one examined.
+// PF4-3 (audit perf v4): the candidates are confirmed in batches, one Meili
+// query each (albumsNeverPlayed), instead of one query per album. A batch
+// takes exactly the number of albums still missing (never more, so
+// nextOffset stays "right after the last album examined") within a
+// trackCount budget; the rejects of a batch are made up by the next one. A
+// page with no reject therefore costs one query, a 200-album page about
+// three (the budget), instead of one per album.
 func neverPlayedWindow(cands []map[string]interface{}, refs map[string]bool, off, limit int) ([]IListItemRenderer, int) {
 	items := make([]IListItemRenderer, 0, limit)
 	i := off
-	for ; i < len(cands) && len(items) < limit; i++ {
-		a := cands[i]
-		if albumNeverPlayed(mstr(a, "album"), mstr(a, "albumArtist"), refs) {
-			items = append(items, localAlbumItem(a))
+	for i < len(cands) && len(items) < limit {
+		need := limit - len(items)
+		j, budget := i, 0
+		for j < len(cands) && j-i < need {
+			tc := mint(cands[j], "trackCount")
+			if tc <= 0 {
+				tc = neverPlayedDefaultTracks
+			}
+			if j > i && budget+tc > neverPlayedBatchTracks {
+				break
+			}
+			budget += tc
+			j++
 		}
+		ok := albumsNeverPlayed(cands[i:j], refs)
+		for k, a := range cands[i:j] {
+			if ok[k] {
+				items = append(items, localAlbumItem(a))
+			}
+		}
+		i = j
 	}
 	if i < off {
 		i = off
 	}
 	return items, i
+}
+
+const (
+	// neverPlayedBatchTracks is the trackCount budget of one batched
+	// confirmation query (albumsNeverPlayed).
+	neverPlayedBatchTracks = 4000
+	// neverPlayedBatchLimit is that query's hit limit; a batch that fills
+	// it may be truncated and is confirmed album by album instead. The
+	// tracks index allows 60000 (pagination.maxTotalHits).
+	neverPlayedBatchLimit = 5000
+	// neverPlayedDefaultTracks stands for an album doc without trackCount.
+	neverPlayedDefaultTracks = 15
+)
+
+// neverPlayedTrackAttrs is all a confirmation needs from a track.
+var neverPlayedTrackAttrs = []string{"lid", "videoId", "album", "albumArtist"}
+
+// albumsNeverPlayed is albumNeverPlayed for a batch of album docs in ONE
+// Meili query: `album IN [...] AND albumArtist IN [...]` (Meili string
+// filters are case-insensitive, like the per-album `=` filter), the tracks
+// grouped back per (album, albumArtist) in Go (the cross pairs the two IN
+// lists also match are ignored). The answer is aligned with `batch`. An
+// album that gets no track back from the batch is re-checked on its own
+// with albumNeverPlayed, so an album whose Meili filter match and Go key
+// disagree (normalisation) keeps the old verdict; a truncated batch is
+// confirmed album by album; a Meili error rejects the batch, as the
+// per-album query did.
+func albumsNeverPlayed(batch []map[string]interface{}, played map[string]bool) []bool {
+	res := make([]bool, len(batch))
+	if len(batch) == 1 {
+		res[0] = albumNeverPlayed(mstr(batch[0], "album"), mstr(batch[0], "albumArtist"), played)
+		return res
+	}
+	if len(batch) == 0 {
+		return res
+	}
+	albums, artists := []string{}, []string{}
+	seenAlbum, seenArtist := map[string]bool{}, map[string]bool{}
+	for _, a := range batch {
+		if v := mstr(a, "album"); !seenAlbum[v] {
+			seenAlbum[v] = true
+			albums = append(albums, "\""+escapeMeili(v)+"\"")
+		}
+		if v := mstr(a, "albumArtist"); !seenArtist[v] {
+			seenArtist[v] = true
+			artists = append(artists, "\""+escapeMeili(v)+"\"")
+		}
+	}
+	hits := meiliSearchIndex("tracks", map[string]interface{}{
+		"q": "", "filter": "album IN [" + strings.Join(albums, ",") + "] AND albumArtist IN [" + strings.Join(artists, ",") + "]",
+		"limit": neverPlayedBatchLimit, "attributesToRetrieve": neverPlayedTrackAttrs,
+	})
+	if hits == nil {
+		return res
+	}
+	truncated := len(hits) >= neverPlayedBatchLimit
+	type group struct {
+		tracks int
+		played bool
+	}
+	groups := map[string]*group{}
+	if !truncated {
+		for _, t := range hits {
+			k := albumPairKey(mstr(t, "album"), mstr(t, "albumArtist"))
+			g := groups[k]
+			if g == nil {
+				g = &group{}
+				groups[k] = g
+			}
+			g.tracks++
+			if played[mstr(t, "lid")] {
+				g.played = true
+			} else if vid := mstr(t, "videoId"); vid != "" && played[vid] {
+				g.played = true
+			}
+		}
+	}
+	for i, a := range batch {
+		album, aa := mstr(a, "album"), mstr(a, "albumArtist")
+		if g := groups[albumPairKey(album, aa)]; g != nil && g.tracks > 0 {
+			res[i] = !g.played
+			continue
+		}
+		res[i] = albumNeverPlayed(album, aa, played)
+	}
+	return res
 }
 
 func LocalSongsHandler(c echo.Context) error {

@@ -62,8 +62,18 @@ function writeWhoamiMemo(w: Who | null): void {
 		/* private mode / no sessionStorage: no memo */
 	}
 }
+// PF4-4 (audit perf v4): the memo above only holds a SETTLED answer, so the
+// parallel callers of a cold home (_PersonalRows x4, _FirstRun,
+// nowPlayingSync) each sent their own GET me/whoami (4 in 160 ms). The
+// pending request is shared instead; forgetWhoami (login / logout / another
+// tab) drops it and bumps the generation so an answer for the previous
+// profile is neither shared nor memoised.
+let whoamiInflight: Promise<Who> | null = null;
+let whoamiGen = 0;
 /** Drop the memoised whoami (next call asks the server). */
 export function forgetWhoami(): void {
+	whoamiGen++;
+	whoamiInflight = null;
 	writeWhoamiMemo(null);
 	forgetRecent(); // another profile: its history is not this one's
 }
@@ -106,11 +116,23 @@ export async function whoami(opts: { fresh?: boolean } = {}): Promise<Who> {
 		const memo = readWhoamiMemo();
 		if (memo) return memo;
 	}
-	const w = await (await APIClient.fetch(`/api/v1/me/whoami`)).json();
-	if (w && typeof w === "object" && typeof w.id === "string") {
-		writeWhoamiMemo({ id: w.id, name: typeof w.name === "string" ? w.name : "" });
-	}
-	return w;
+	// A request already on the wire answers fresh callers too: it started
+	// after the memo was found missing or stale.
+	if (whoamiInflight) return whoamiInflight;
+	const gen = whoamiGen;
+	const p: Promise<Who> = (async () => {
+		const w = await (await APIClient.fetch(`/api/v1/me/whoami`)).json();
+		if (gen === whoamiGen && w && typeof w === "object" && typeof w.id === "string") {
+			writeWhoamiMemo({ id: w.id, name: typeof w.name === "string" ? w.name : "" });
+		}
+		return w;
+	})();
+	whoamiInflight = p;
+	const settle = () => {
+		if (whoamiInflight === p) whoamiInflight = null;
+	};
+	p.then(settle, settle);
+	return p;
 }
 /** true when the profile is known to be anonymous (no name); false when named or when whoami fails. */
 export async function isAnonymousProfile(): Promise<boolean> {

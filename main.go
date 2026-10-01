@@ -95,6 +95,8 @@ func newServer() *echo.Echo {
 	e.Use(api.OGPreview())
 	// Unknown SPA routes get the shell with a real 404 status (spa_notfound.go).
 	e.Use(spaNotFound("./build"))
+	// PF4-6: content ETag + 304 for the non-hashed build files (static_etag.go).
+	e.Use(staticETag("./build"))
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
 		Root: "./build",
 		// Audio reverse-proxy paths must bypass the SPA static handler: with IgnoreBase
