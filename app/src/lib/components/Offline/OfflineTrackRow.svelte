@@ -1,7 +1,10 @@
 <script lang="ts">
-	// One cached track. Click = play (event "play"), ✕ = remove (event "remove").
+	// One cached track. Click = play (event "play"), ✕ = remove (event "remove"),
+	// pin (event "pin"), "Retélécharger" on an evicted entry (event "recache").
 	// Deliberately not Item/Listing: its click path calls the network mix API,
 	// while this row must start playback from the cached copy only.
+	// States: ready (default), pending (`_cached === false`, download in flight)
+	// and evicted (`_evicted`, F5/G8: the SW dropped the entry, re-downloadable).
 	import Icon from "$components/Icon/Icon.svelte";
 	import { artistName, thumbnailOf } from "$lib/offlineQueue";
 	import { createEventDispatcher } from "svelte";
@@ -11,12 +14,13 @@
 	export let number: number | undefined = undefined;
 	export let showArtist = true;
 
-	const dispatch = createEventDispatcher<{ play: any; remove: any; pin: any }>();
+	const dispatch = createEventDispatcher<{ play: any; remove: any; pin: any; recache: any }>();
 
 	$: thumb = thumbnailOf(track);
 	$: artist = artistName(track);
 	$: length = (track?.length && (track.length.text || track.length)) || "";
-	$: pending = track?._cached === false;
+	$: evicted = track?._evicted === true;
+	$: pending = track?._cached === false && !evicted;
 	$: title = track?.title || track?.videoId;
 	let imgBroken = false;
 </script>
@@ -25,9 +29,14 @@
 	class="row"
 	class:active
 	class:pending
+	class:evicted
 	role="button"
 	tabindex="0"
-	title={pending ? "Mise en cache en cours : lecture possible dès la fin du téléchargement" : "Lire"}
+	title={evicted
+		? "À retélécharger : le cache a évincé ce morceau, clique sur Retélécharger"
+		: pending
+			? "Mise en cache en cours : lecture possible dès la fin du téléchargement"
+			: "Lire"}
 	on:click={() => dispatch("play", track)}
 	on:keydown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), dispatch("play", track))}
 >
@@ -62,11 +71,23 @@
 			{#if showArtist}<span class="artist">{artist}</span>{/if}
 			{#if showArtist && length}<span class="dot">·</span>{/if}
 			{#if length}{length}{/if}
-			{#if pending}<span class="pending-label"
+			{#if evicted}<span class="evicted-label"
+					>{#if showArtist || length}<span class="dot">·</span>{/if}À retélécharger</span
+				>{:else if pending}<span class="pending-label"
 					>{#if showArtist || length}<span class="dot">·</span>{/if}mise en cache en cours</span
 				>{/if}
 		</p>
 	</div>
+	{#if evicted}
+		<button
+			type="button"
+			class="btn recache"
+			title="Retélécharger ce morceau évincé du cache"
+			aria-label="Retélécharger"
+			on:click|stopPropagation={() => dispatch("recache", track)}>
+			<Icon name="download" size="1em" />
+		</button>
+	{/if}
 	<button
 		type="button"
 		class="btn pin"
@@ -184,12 +205,20 @@
 	.pending-label {
 		color: $warn;
 	}
+	.evicted .title {
+		opacity: 0.75;
+	}
+	.evicted-label {
+		color: $warn;
+		font-weight: 600;
+	}
 	// Pin + remove buttons (audit v3 1.8 / TOP 10 #9): outline boxes, 44x36
 	// minimum, transparent background with a 1px rgba(255,255,255,.35) border
 	// (the global %button-base paints a solid white pill, which made the
 	// unpinned pin look "active"). Pinned = green border + icon.
 	.pin,
-	.rm {
+	.rm,
+	.recache {
 		flex: 0 0 auto;
 		box-sizing: border-box;
 		min-width: 2.75rem; // 44px
@@ -226,6 +255,14 @@
 			outline-offset: 2px;
 		}
 	}
+	.recache,
+	.recache:hover,
+	.recache:focus,
+	.recache:focus-within,
+	.recache:active {
+		color: $warn !important;
+		border-color: rgba(224, 160, 0, 0.7) !important;
+	}
 	.pin.on,
 	.pin.on:hover,
 	.pin.on:focus,
@@ -259,7 +296,8 @@
 			box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
 		}
 		.row.active .lead.has-thumb::after,
-		.row.pending .lead.has-thumb::after {
+		.row.pending .lead.has-thumb::after,
+		.row.evicted .lead.has-thumb::after {
 			display: none;
 		}
 	}

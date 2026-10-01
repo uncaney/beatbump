@@ -22,6 +22,7 @@
 		play: { tracks: any[]; index: number; shuffle?: boolean };
 		remove: any;
 		pin: any;
+		recache: any;
 	}>();
 
 	let imgBroken = false;
@@ -126,6 +127,7 @@
 					on:play={() => dispatch("play", { tracks: album.tracks, index: i })}
 					on:remove={(e) => dispatch("remove", e.detail)}
 					on:pin={(e) => dispatch("pin", e.detail)}
+					on:recache={(e) => dispatch("recache", e.detail)}
 				/>
 			{/each}
 		</div>
