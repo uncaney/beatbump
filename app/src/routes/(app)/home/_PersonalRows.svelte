@@ -80,6 +80,7 @@
 			if (!shouldShowWeekCard(new Date(), dismissed)) return;
 			const [summary, top] = await Promise.all([getStatsSummary(7), getTopBy("artists", 7, 1)]);
 			if (!summary || !(summary.plays > 0)) return;
+			if (!shouldShowWeekCard(new Date(), dismissed, summary.minutes)) return;
 			weekCard = {
 				minutes: Math.round(summary.minutes),
 				topArtist: top?.rows?.[0]?.title ?? "",
@@ -816,9 +817,10 @@
 	.week-card-stats {
 		margin: 0;
 		opacity: 0.85;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		/* L8-19: the top artist is never cut with an ellipsis: the line
+		   wraps (two lines on a phone), a very long name breaks anywhere. */
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
 	.week-card-link {
 		flex: 0 0 auto;

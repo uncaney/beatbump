@@ -362,9 +362,17 @@ export function isoWeekKey(d: Date): string {
 /**
  * ST1: the week card shows only on Monday, viewer's local time (`now.getDay()`,
  * not UTC), and only until it is dismissed for THAT ISO week - a dismissal
- * from a previous week never hides it again.
+ * from a previous week never hides it again. With `minutes` (the week's
+ * listening time, once loaded) it also stays hidden when that rounds to 0.
  */
-export function shouldShowWeekCard(now: Date, dismissedWeekKey: string | null | undefined): boolean {
+export function shouldShowWeekCard(
+	now: Date,
+	dismissedWeekKey: string | null | undefined,
+	minutes?: number,
+): boolean {
 	if (now.getDay() !== 1) return false;
+	// L8-19: once the week's listening time is known, a card that would read
+	// "0 min écoutées" (a few short plays) is not worth showing.
+	if (minutes !== undefined && !(Math.round(minutes) > 0)) return false;
 	return dismissedWeekKey !== isoWeekKey(now);
 }
