@@ -134,13 +134,15 @@
 		gap: 0.75rem;
 		margin-bottom: 1rem;
 	}
+	// U12-22: subtitle under the h1 (it started right of it, then wrapped
+	// under it), same as Pour toi and Mixes.
 	h1 {
-		display: inline;
-		margin-right: 0.5rem;
+		margin: 0 0 0.25rem;
 	}
 	.sub {
+		display: block;
 		color: #999;
-		font-size: 0.95rem;
+		font-size: var(--text-secondary-size);
 	}
 	.grid {
 		display: grid;
