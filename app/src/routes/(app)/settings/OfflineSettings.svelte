@@ -21,9 +21,9 @@
 	const GB = 1024 * MB;
 	const QUOTA_OPTIONS: { label: string; bytes: number }[] = [
 		{ label: "500 MB", bytes: 500 * MB },
-		{ label: "1 GB", bytes: 1 * GB },
-		{ label: "2 GB", bytes: 2 * GB },
-		{ label: "5 GB", bytes: 5 * GB },
+		{ label: "1 Go", bytes: 1 * GB },
+		{ label: "2 Go", bytes: 2 * GB },
+		{ label: "5 Go", bytes: 5 * GB },
 		{ label: "Unlimited", bytes: 0 },
 	];
 	const SW_UNAVAILABLE =
@@ -61,7 +61,7 @@
 		return `${Math.max(1, Math.round(bytes / MB))} Mo`;
 	}
 	function fmtQuota(q: number): string {
-		return q > 0 ? fmtBytes(q) : "unlimited";
+		return q > 0 ? fmtBytes(q) : "illimité";
 	}
 
 	// O10: persistent storage (navigator.storage.persist) + estimate().
@@ -199,7 +199,7 @@
 				error = SW_UNAVAILABLE;
 			} else {
 				await refresh();
-				message = `Offline list re-synced: ${l.length} track${l.length === 1 ? "" : "s"} listed.`;
+				message = `Offline list re-synced: ${l.length} morceau${l.length > 1 ? "x" : ""} listed.`;
 			}
 		} catch (e) {
 			error = `Could not re-sync the offline list: ${(e as Error)?.message ?? e}`;
@@ -265,7 +265,9 @@
 				{:else if error && !entries.length}
 					Unknown
 				{:else}
-					{cachedTracks} track{cachedTracks === 1 ? "" : "s"} · {fmtBytes(total)} of {fmtQuota(
+					<!-- Audit v8 TOP 9: same words and units as the Hors-ligne page
+					     ("4 morceaux · 40 Mo"): morceau / Mo / Go / sur. -->
+					{cachedTracks} morceau{cachedTracks > 1 ? "x" : ""} · {fmtBytes(total)} sur {fmtQuota(
 						quota,
 					)}{#if pinnedBytes > 0}<span id="offline-pinned">, dont {fmtBytes(pinnedBytes)} épinglés</span>{/if}
 				{/if}
@@ -375,7 +377,7 @@
 				aria-labelledby="offline-clear-confirm-text"
 			>
 				<span id="offline-clear-confirm-text"
-					>Delete {cachedTracks} cached track{cachedTracks === 1 ? "" : "s"} ({fmtBytes(
+					>Delete {cachedTracks} cached morceau{cachedTracks > 1 ? "x" : ""} ({fmtBytes(
 						total,
 					)})? This cannot be undone.</span
 				>
@@ -476,6 +478,15 @@
 			font-size: 0.875em;
 			color: hsla(0, 0%, 100%, 0.7);
 			line-height: 1.2;
+		}
+	}
+
+	/* "Stockage protégé : non · 2 Mo utilisés sur 10 Go" on one line beside
+	   the Protéger button (audit v8 TOP 9). */
+	@media screen and (min-width: 40em) {
+		#offline-persisted,
+		#offline-storage-usage {
+			white-space: nowrap;
 		}
 	}
 

@@ -61,6 +61,8 @@
 
 <main class="resp-content-width">
 	<CollectionNav active="account" />
+	<h1>Account</h1>
+	<!-- Audit v8 TOP 9: the card belongs to this screen, under its h1. -->
 	<a
 		class="stats-card"
 		href="/library/stats"
@@ -70,7 +72,6 @@
 		<span class="stats-sub">Écoutes, minutes, top titres / artistes / albums sur 7, 30 ou 365 jours</span>
 		<span class="stats-go" aria-hidden="true">›</span>
 	</a>
-	<h1>Account</h1>
 
 	{#if loading}
 		<p class="state">Loading…</p>
@@ -122,11 +123,8 @@
 	main {
 		min-height: 100%;
 		padding-bottom: 5rem;
-		/* Mobile gutter comes from the shared .resp-content-width (16px); on
-		   larger screens keep the narrow readable column it always had. */
-		@media screen and (min-width: 640px) {
-			max-width: 40rem !important;
-		}
+		/* Same .resp-content-width column as the other library tabs (audit v8
+		   TOP 9: the 40rem centred column read as another screen). */
 	}
 	.who {
 		margin: 0.5rem 0 1rem;
