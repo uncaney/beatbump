@@ -24,6 +24,7 @@
     import {Logger, notify} from "$lib/utils";
     import {SessionListService} from "$stores/list/sessionList";
     import {restoreResumeState, resumeShortcutClaimed, startResumePersistence} from "$lib/stores/resumeState";
+    import {startNowPlayingSync} from "$lib/stores/nowPlayingSync";
     import {onDestroy, onMount} from "svelte";
     import {get, writable} from "svelte/store";
 
@@ -119,6 +120,9 @@
 
     let stopResumePersistence: (() => void) | undefined;
     onDestroy(() => stopResumePersistence?.());
+    // C2: push this device's resume state to me/nowplaying (named profile, online).
+    let stopNowPlayingSync: (() => void) | undefined;
+    onDestroy(() => stopNowPlayingSync?.());
 
     let scrollTop = 0;
     // Offline banner: the service worker answers API calls with {"offline":true}
@@ -152,6 +156,7 @@
         // `lastTrack` alone (state saved before C1) keeps the old behaviour.
         const remember = () => get(settings)?.playback?.["Remember Last Track"] === true;
         stopResumePersistence = startResumePersistence(remember);
+        stopNowPlayingSync = startNowPlayingSync();
         if (remember()) {
             void restoreResumeState({autoplay: false})
                 .then((restored) => {

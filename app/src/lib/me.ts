@@ -140,3 +140,40 @@ export async function removeFromPlaylist(id: number | string, item: any) {
 	if (!ref) return;
 	return APIClient.del(`/api/v1/me/playlists/${id}/items?ref=${encodeURIComponent(ref)}`);
 }
+
+// ---- C2 multi-device resume (me/nowplaying) ----
+export interface NowPlayingRow {
+	deviceId: string;
+	deviceName: string;
+	position: number; // seconds
+	payload: any; // C1 resume state (slim)
+	updatedAt: number; // unix ms (server clock)
+}
+/** Upsert this device's resume state; resolves the HTTP status (0 = network error). */
+export async function putNowPlaying(
+	body: { deviceId: string; deviceName: string; position: number; payload: unknown },
+	keepalive = false,
+): Promise<number> {
+	try {
+		const r = await APIClient.fetch(`/api/v1/me/nowplaying`, {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+			keepalive,
+		});
+		return Number(r?.status) || 0;
+	} catch {
+		return 0;
+	}
+}
+/** The profile's last resume state from any device; null when none (404) or on error. */
+export async function getNowPlaying(): Promise<NowPlayingRow | null> {
+	try {
+		const r = await APIClient.fetch(`/api/v1/me/nowplaying`);
+		if (!r?.ok) return null;
+		const j = await r.json();
+		return j && typeof j === "object" && j.payload ? (j as NowPlayingRow) : null;
+	} catch {
+		return null;
+	}
+}
