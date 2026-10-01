@@ -199,6 +199,22 @@ export function diversify(items: RowItem[], max: number, perAlbum = 2, perArtist
 	return out;
 }
 
+// ---- D3 "Redécouvrir" (c29b) ----
+/** Fewer rows than this and the "Redécouvrir" row is not shown at all. */
+export const REDISCOVER_MIN = 6;
+
+/**
+ * "Redécouvrir": the me/stats/rediscover items (tracks played >= 3 times
+ * more than 60 days ago and not once in the last 30 days), renderable,
+ * deduped, subtitles sanitized, capped to `max`. Under REDISCOVER_MIN
+ * usable rows the row is empty (hidden), so a fresh or light profile never
+ * sees a two-card row.
+ */
+export function buildRediscoverRow(items: unknown, max = 12, min = REDISCOVER_MIN): RowItem[] {
+	const rows = capItems(items, max).map(sanitizeCard);
+	return rows.length >= min ? rows : [];
+}
+
 // ---- ST1 "Ta semaine" card ----
 // localStorage key: the dismissed ISO week ("YYYY-Www"); the card shows again
 // once a new week starts even if the previous one was dismissed.
