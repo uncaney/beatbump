@@ -5,6 +5,7 @@ import {
 	REMEMBER_MIGRATED_KEY,
 	buildResumeState,
 	migrateRememberLastTrack,
+	resumeKeptFor,
 	parseResumeState,
 	readResumeState,
 	resumeSeekTime,
@@ -128,7 +129,7 @@ describe("read / write", () => {
 describe("migrateRememberLastTrack (I1)", () => {
 	it("turns a stored false into true once, then keeps later choices", () => {
 		const s = memory();
-		const settings = { playback: { "Remember Last Track": false } as Record<string, unknown> };
+		const settings = { playback: { "Remember Last Track": false } as { "Remember Last Track"?: boolean } };
 		expect(migrateRememberLastTrack(settings, s)).toBe(true);
 		expect(settings.playback["Remember Last Track"]).toBe(true);
 		expect(s.getItem(REMEMBER_MIGRATED_KEY)).toBe("1");
@@ -138,13 +139,27 @@ describe("migrateRememberLastTrack (I1)", () => {
 	});
 	it("sets the flag without change when already true (fresh install)", () => {
 		const s = memory();
-		const settings = { playback: { "Remember Last Track": true } as Record<string, unknown> };
+		const settings = { playback: { "Remember Last Track": true } as { "Remember Last Track"?: boolean } };
 		expect(migrateRememberLastTrack(settings, s)).toBe(false);
 		expect(s.getItem(REMEMBER_MIGRATED_KEY)).toBe("1");
 	});
 	it("is a no-op without storage", () => {
-		const settings = { playback: { "Remember Last Track": false } as Record<string, unknown> };
+		const settings = { playback: { "Remember Last Track": false } as { "Remember Last Track"?: boolean } };
 		expect(migrateRememberLastTrack(settings, undefined)).toBe(false);
 		expect(settings.playback["Remember Last Track"]).toBe(false);
+	});
+});
+
+describe("resumeKeptFor (I2)", () => {
+	it("drops a pending restore when another track loads", () => {
+		expect(resumeKeptFor({ videoId: "aaaaaaaaaaa" }, "bbbbbbbbbbb")).toBe(false);
+	});
+	it("keeps it for its own track or an unknown id", () => {
+		expect(resumeKeptFor({ videoId: "aaaaaaaaaaa" }, "aaaaaaaaaaa")).toBe(true);
+		expect(resumeKeptFor({ videoId: "aaaaaaaaaaa" }, undefined)).toBe(true);
+		expect(resumeKeptFor({}, "bbbbbbbbbbb")).toBe(true);
+	});
+	it("is false without a pending restore", () => {
+		expect(resumeKeptFor(null, "aaaaaaaaaaa")).toBe(false);
 	});
 });

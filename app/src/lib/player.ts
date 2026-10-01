@@ -28,6 +28,7 @@ import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
 import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from "./utils/mediaRetry";
 import { setWorkerInterval } from "./utils/workerTimeout";
+import { resumeKeptFor } from "./stores/resumeState";
 import { MEDIA_SEEK_OFFSET_S, mediaArtwork, positionState, seekTarget } from "./stores/list/mediaSession";
 
 let userSettings: UserSettings | undefined = undefined;
@@ -323,7 +324,8 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	private _sleepHold = false;
 	// C1 exact resume: the next loadedmetadata seeks here and, unless
 	// `autoplay`, stays paused (the restored queue waits for the user).
-	private _resumeAt: { time: number; duration: number; autoplay: boolean } | null = null;
+	// I2: `videoId` = the restored track; a source for any other track clears it.
+	private _resumeAt: { time: number; duration: number; autoplay: boolean; videoId?: string } | null = null;
 	private playerKind: "hls" | "html5" = "html5";
 	private declare unsubscriber: () => void;
 	constructor() {
@@ -542,17 +544,32 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	 * `time` on loadedmetadata and stay paused unless `autoplay`. Call before
 	 * getSrc() so the flag is set when the metadata arrives.
 	 */
-	public primeResume(time: number, duration: number, autoplay = false) {
+	public primeResume(time: number, duration: number, autoplay = false, videoId?: string) {
 		if (!this.player) this.createAudioNode();
 		const t = isFinite(time) && time > 0 ? time : 0;
 		const d = isFinite(duration) && duration > 0 ? duration : 0;
-		this._resumeAt = { time: t, duration: d, autoplay };
+		this._resumeAt = { time: t, duration: d, autoplay, videoId };
 		if (!autoplay) {
 			this.player.autoplay = false;
 			this._paused.set(true);
 		}
 		this._currentTimeStore.set(t);
 		if (d) this._durationStore.set(d);
+	}
+
+	/**
+	 * I2: drop a pending restore (the restored source failed, or another
+	 * track is loading) so the next source starts at 0 and plays.
+	 */
+	public clearResume() {
+		if (!this._resumeAt) return;
+		this._resumeAt = null;
+		if (this.player) this.player.autoplay = true;
+	}
+
+	/** I2: a source for `videoId` is about to load; keep the restore only for its own track. */
+	public sourceLoading(videoId?: string) {
+		if (!resumeKeptFor(this._resumeAt, videoId)) this.clearResume();
 	}
 
 	/** Used when sync'ing a 'leech' tab */
@@ -944,11 +961,12 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 export const AudioPlayer = new AudioPlayerImpl();
 
 /** Updates the current track for the audio player */
-export function updatePlayerSrc({ url, video_url,duration }: SrcDict): void {
+export function updatePlayerSrc({ url, video_url,duration }: SrcDict, videoId?: string): void {
+	const cur = browser ? SessionListService.value?.mix?.[SessionListService.value?.position ?? -1] : undefined;
+	AudioPlayer.sourceLoading(videoId ?? cur?.videoId);
 	AudioPlayer.updateSrc({ url, videoUrl: video_url,duration });
 	// The SW's LRU must never evict what is playing right now.
 	if (browser) {
-		const cur = SessionListService.value?.mix?.[SessionListService.value?.position ?? -1];
 		announceNowPlaying(url, cur?.videoId);
 	}
 }
@@ -1055,7 +1073,7 @@ function setTrack(formats: PlayerFormats, shouldAutoplay: boolean, track?: { vid
 			original_url: format.original_url,
 			url: format.url,
 			duration: formats.duration
-		});
+		}, track?.videoId);
 		autoCache(track, format.url);
 	}
 	return {

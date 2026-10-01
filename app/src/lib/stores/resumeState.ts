@@ -196,6 +196,20 @@ export function writeResumeState(storage: StorageLike | undefined, state: Resume
 }
 
 /**
+ * I2: whether a pending restore (primed for `resume.videoId`) still applies
+ * when a source for `loadingVideoId` loads. Another track drops it, so it
+ * starts at 0 and plays; an unknown id (same-track media retry) keeps it.
+ */
+export function resumeKeptFor(
+	resume: { videoId?: string } | null | undefined,
+	loadingVideoId: string | null | undefined,
+): boolean {
+	if (!resume) return false;
+	if (!resume.videoId || !loadingVideoId) return true;
+	return resume.videoId === loadingVideoId;
+}
+
+/**
  * I1: "Remember Last Track" used to default to `false` with its switch
  * hidden, so a stored `false` was never a choice. Once per device (flag
  * REMEMBER_MIGRATED_KEY), a stored `false` becomes `true`; after the flag
@@ -204,7 +218,7 @@ export function writeResumeState(storage: StorageLike | undefined, state: Resume
  */
 export const REMEMBER_MIGRATED_KEY = "ytm-remember-migrated";
 export function migrateRememberLastTrack(
-	settings: { playback?: Record<string, unknown> } | null | undefined,
+	settings: { playback?: { "Remember Last Track"?: boolean } } | null | undefined,
 	storage: StorageLike | undefined,
 ): boolean {
 	if (!storage) return false;
@@ -258,8 +272,17 @@ export async function restoreResumeState(opts: { autoplay?: boolean } = {}): Pro
 	});
 	const track = SessionListService.value.mix[position];
 	if (!track) return false;
-	AudioPlayer.primeResume(resumeSeekTime(state), state.duration, !!opts.autoplay);
-	await getSrc(track.videoId, track.playlistId, undefined, true);
+	AudioPlayer.primeResume(resumeSeekTime(state), state.duration, !!opts.autoplay, track.videoId);
+	let res: Awaited<ReturnType<typeof getSrc>> | undefined;
+	try {
+		res = await getSrc(track.videoId, track.playlistId, undefined, true);
+	} catch {
+		res = undefined;
+	}
+	// I2: a failed restore must not leak its seek/pause into the next source.
+	// The queue itself is restored (true: no lastTrack fallback over it); the
+	// home "Reprendre la file" button retries the source (I4).
+	if (!res || res.error || !res.body) AudioPlayer.clearResume();
 	return true;
 }
 
