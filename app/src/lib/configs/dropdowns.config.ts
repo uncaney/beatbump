@@ -37,7 +37,10 @@ export type Label =
 	| "Raccourcis clavier"
 	// Queue actions on every track row (lane c9b, P1): French labels.
 	| "Lire ensuite"
-	| "Ajouter à la file";
+	| "Ajouter à la file"
+	// Album / playlist header ⋮ menu (InfoBox, lane c31a): French labels.
+	| "Ajouter à une playlist"
+	| "Lecture aléatoire";
 
 export type Dropdown = TypedDropdownItem<Label>[];
 const DROPDOWN_TEXTS: ReadonlyArray<Label> = [
@@ -71,6 +74,8 @@ const DROPDOWN_TEXTS: ReadonlyArray<Label> = [
 	"Raccourcis clavier",
 	"Lire ensuite",
 	"Ajouter à la file",
+	"Ajouter à une playlist",
+	"Lecture aléatoire",
 ];
 
 export type Icons =
