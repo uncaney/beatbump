@@ -7,6 +7,7 @@
 	import Header from "$components/Layouts/Header.svelte";
 	import { APIClient } from "$lib/api";
 	import { storageStatus } from "$lib/offline";
+	import { formatBytesFr, formatIntFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 
 	interface LibraryStats {
@@ -77,12 +78,9 @@
 		copiedTimer = setTimeout(() => (copied = ""), 2500);
 	}
 
-	const fmtInt = (n: number) => new Intl.NumberFormat("fr-FR").format(Math.round(n || 0));
-	const fmtBytes = (b: number) => {
-		if (!b) return "0 Mo";
-		const mb = b / (1024 * 1024);
-		return mb >= 1024 ? `${(mb / 1024).toFixed(1)} Go` : `${Math.round(mb)} Mo`;
-	};
+	// c31a: one French formatter for sizes and numbers ("1,2 Go", "1 234").
+	const fmtInt = formatIntFr;
+	const fmtBytes = formatBytesFr;
 	const fmtDate = (iso: string) => {
 		if (!iso) return "inconnu";
 		const d = new Date(iso);

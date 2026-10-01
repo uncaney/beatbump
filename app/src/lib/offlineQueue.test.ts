@@ -252,8 +252,8 @@ describe("sizes", () => {
 		expect(totalBytes(lib)).toBe(350);
 		expect(totalBytes([track("z", "Z")])).toBeUndefined();
 		expect(formatBytes(undefined)).toBe("");
-		expect(formatBytes(512)).toBe("512 o");
-		expect(formatBytes(3.5 * 1024 * 1024)).toBe("3,5 Mo");
-		expect(formatBytes(200 * 1024 * 1024)).toBe("200 Mo");
+		expect(formatBytes(512)).toBe("512\u202fo");
+		expect(formatBytes(3.5 * 1024 * 1024)).toBe("3,5\u202fMo");
+		expect(formatBytes(200 * 1024 * 1024)).toBe("200\u202fMo");
 	});
 });

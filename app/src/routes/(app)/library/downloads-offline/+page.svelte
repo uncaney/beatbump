@@ -39,6 +39,7 @@
 	import { currentTrack } from "$lib/stores/list";
 	import { markOfflineSuccess } from "$lib/stores/pwa";
 	import { notify } from "$lib/utils";
+	import { formatCountFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 	import SpaceCard from "./_SpaceCard.svelte";
@@ -92,9 +93,9 @@
 	// Header counter (audit v5 3.7): parts joined by " · " (one space each side),
 	// rendered on one line so the template adds no stray whitespace.
 	$: statParts = [
-		{ text: `${tracks.length} ${tracks.length > 1 ? "morceaux" : "morceau"}`, cls: "" },
+		{ text: formatCountFr(tracks.length, "morceau", "morceaux"), cls: "" },
 		{ text: size, cls: "" },
-		{ text: albums.length ? `${albums.length} ${albums.length > 1 ? "albums" : "album"}` : "", cls: "" },
+		{ text: albums.length ? formatCountFr(albums.length, "album") : "", cls: "" },
 		{ text: pendingCount ? `${pendingCount} en cours de mise en cache` : "", cls: "pending" },
 		{ text: evictedCount ? `${evictedCount} à retélécharger` : "", cls: "evicted" },
 	].filter((p) => p.text);
@@ -552,8 +553,8 @@
 									<span class="sub"
 										>{[
 											soloAlbum,
-											`${artist.tracks.length} ${artist.tracks.length > 1 ? "pistes" : "piste"}`,
-											artist.albums.length > 1 ? `${artist.albums.length} albums` : "",
+											formatCountFr(artist.tracks.length, "morceau", "morceaux"),
+											artist.albums.length > 1 ? formatCountFr(artist.albums.length, "album") : "",
 											formatBytes(artist.bytes),
 										]
 											.filter(Boolean)

@@ -83,6 +83,6 @@ describe("planPack", () => {
 describe("packLabel", () => {
 	it("reads count + Mo in French", () => {
 		expect(packLabel(0, 0, 0, 100 * MB)).toBe("Aucun morceau à préparer");
-		expect(packLabel(3, 12, 12.4 * MB, 100 * MB)).toBe("3/12 · 12 Mo sur 100 Mo");
+		expect(packLabel(3, 12, 12.4 * MB, 100 * MB)).toBe("3/12 · 12\u202fMo sur 100\u202fMo");
 	});
 });

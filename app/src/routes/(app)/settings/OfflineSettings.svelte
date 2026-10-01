@@ -18,14 +18,15 @@
 		type AudioListEntry,
 	} from "$lib/offline";
 	import { notify } from "$lib/utils";
+	import { formatBytesFr, formatCountFr } from "$lib/utils/formatFr";
 
 	const MB = 1024 * 1024;
 	const GB = 1024 * MB;
 	const QUOTA_OPTIONS: { label: string; bytes: number }[] = [
-		{ label: "500 MB", bytes: 500 * MB },
-		{ label: "1 Go", bytes: 1 * GB },
-		{ label: "2 Go", bytes: 2 * GB },
-		{ label: "5 Go", bytes: 5 * GB },
+		{ label: formatBytesFr(500 * MB), bytes: 500 * MB },
+		{ label: formatBytesFr(1 * GB), bytes: 1 * GB },
+		{ label: formatBytesFr(2 * GB), bytes: 2 * GB },
+		{ label: formatBytesFr(5 * GB), bytes: 5 * GB },
 		{ label: "Unlimited", bytes: 0 },
 	];
 	const SW_UNAVAILABLE =
@@ -52,16 +53,9 @@
 	// did not answer ("Unknown"): Re-sync stays available as a retry.
 	$: nothingCached = !loading && !(error && !entries.length) && cachedTracks === 0;
 
-	// French units (audit v7 item 10): "2 Mo utilisés sur 11 Go", like the
-	// Hors-ligne page ("56 Mo"); decimal comma for the fractional Go.
-	function fmtBytes(bytes: number): string {
-		if (!(bytes > 0)) return "0 Mo";
-		if (bytes >= GB) {
-			const go = (bytes / GB).toFixed(bytes >= 10 * GB ? 0 : 1).replace(".", ",");
-			return `${go} Go`;
-		}
-		return `${Math.max(1, Math.round(bytes / MB))} Mo`;
-	}
+	// French units (audit v7 item 10, c31a): "2 Mo utilisés sur 11 Go", the same
+	// helper as the Hors-ligne page ($lib/utils/formatFr).
+	const fmtBytes = formatBytesFr;
 	function fmtQuota(q: number): string {
 		return q > 0 ? fmtBytes(q) : "illimité";
 	}
@@ -201,7 +195,7 @@
 				error = SW_UNAVAILABLE;
 			} else {
 				await refresh();
-				message = `Offline list re-synced: ${l.length} morceau${l.length > 1 ? "x" : ""} listed.`;
+				message = `Offline list re-synced: ${formatCountFr(l.length, "morceau", "morceaux")} listed.`;
 			}
 		} catch (e) {
 			error = `Could not re-sync the offline list: ${(e as Error)?.message ?? e}`;
@@ -269,7 +263,7 @@
 				{:else}
 					<!-- Audit v8 TOP 9: same words and units as the Hors-ligne page
 					     ("4 morceaux · 40 Mo"): morceau / Mo / Go / sur. -->
-					{cachedTracks} morceau{cachedTracks > 1 ? "x" : ""} · {fmtBytes(total)} sur {fmtQuota(
+					{formatCountFr(cachedTracks, "morceau", "morceaux")} · {fmtBytes(total)} sur {fmtQuota(
 						quota,
 					)}{#if pinnedBytes > 0}<span id="offline-pinned">, dont {fmtBytes(pinnedBytes)} épinglés</span>{/if}
 				{/if}
@@ -379,7 +373,7 @@
 				aria-labelledby="offline-clear-confirm-text"
 			>
 				<span id="offline-clear-confirm-text"
-					>Delete {cachedTracks} cached morceau{cachedTracks > 1 ? "x" : ""} ({fmtBytes(
+					>Delete {formatCountFr(cachedTracks, "cached morceau", "cached morceaux")} ({fmtBytes(
 						total,
 					)})? This cannot be undone.</span
 				>

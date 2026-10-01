@@ -4,6 +4,7 @@
 // ($lib/offline AudioListEntry) go in, the entries to uncache come out; the
 // settings page applies the plan (uncache-audio per entry + applySwEviction so
 // the "Prêt hors-ligne" badges follow at once).
+import { formatBytesFr, formatCountFr } from "$lib/utils/formatFr";
 
 export type FreeUpCandidate = {
 	videoId?: string;
@@ -79,9 +80,8 @@ export function planFreeUp<T extends FreeUpCandidate>(entries: ReadonlyArray<T |
 	return { entries: out, bytes, count: out.length, target, reached: bytes >= target && target > 0, protectedBytes };
 }
 
-/** "3 morceaux · 12 Mo" (French, decimal comma above 10 Mo is not needed: whole Mo). */
+/** "3 morceaux · 12 Mo" ($lib/utils/formatFr: no-break spaces, decimal comma). */
 export function freeUpSummary(plan: Pick<FreeUpPlan, "count" | "bytes">): string {
 	if (!plan.count) return "Rien à libérer";
-	const mb = Math.max(1, Math.round(plan.bytes / (1024 * 1024)));
-	return `${plan.count} morceau${plan.count > 1 ? "x" : ""} · ${mb} Mo`;
+	return `${formatCountFr(plan.count, "morceau", "morceaux")} · ${formatBytesFr(plan.bytes)}`;
 }
