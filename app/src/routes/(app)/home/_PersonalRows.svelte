@@ -6,9 +6,9 @@
 	import { onMount } from "svelte";
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
-	import { buildForYouRow, buildResumeRow, capItems, readLastTrack, sanitizeCard } from "$lib/homeRows";
+	import { buildForYouRow, buildResumeRow, capItems, isoWeekKey, readLastTrack, sanitizeCard, shouldShowWeekCard, WEEK_CARD_DISMISS_KEY } from "$lib/homeRows";
 	import { peekHomeCache, clearHomeCache, writeHomeCache } from "$lib/homeCache";
-	import { getMix, getRecent, isAnonymousProfile, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
+	import { getMix, getRecent, getStatsSummary, getTopBy, isAnonymousProfile, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
 	import { settings } from "$lib/stores";
 	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
 	import { clockLabel, fetchRemoteResume, restoreRemoteResume, wireProfileChannel } from "$lib/stores/nowPlayingSync";
@@ -27,6 +27,45 @@
 	// the other personal rows; no localStorage cache (AP1 covers reprendre/
 	// pour-toi/recemment-acquis only).
 	let neverPlayed: any[] = [];
+
+	// ST1: a compact weekly recap card in the Reprendre area, Mondays only
+	// (local time), until dismissed for that ISO week. Hidden when the
+	// profile has no plays in the window (anonymous included: me/stats
+	// answers an empty summary for it).
+	interface WeekCard {
+		minutes: number;
+		topArtist: string;
+		newAlbums: number;
+	}
+	let weekCard: WeekCard | null = null;
+
+	async function loadWeekCard() {
+		weekCard = null;
+		try {
+			const dismissed = storageOrUndefined()?.getItem(WEEK_CARD_DISMISS_KEY) ?? null;
+			if (!shouldShowWeekCard(new Date(), dismissed)) return;
+			const [summary, top] = await Promise.all([getStatsSummary(7), getTopBy("artists", 7, 1)]);
+			if (!summary || !(summary.plays > 0)) return;
+			weekCard = {
+				minutes: Math.round(summary.minutes),
+				topArtist: top?.rows?.[0]?.title ?? "",
+				// me/stats/summary carries distinctAlbums (ST1); not in the
+				// StatsSummary type yet elsewhere in the app, read defensively.
+				newAlbums: Number((summary as unknown as { distinctAlbums?: number })?.distinctAlbums) || 0,
+			};
+		} catch {
+			weekCard = null;
+		}
+	}
+
+	function dismissWeekCard() {
+		try {
+			storageOrUndefined()?.setItem(WEEK_CARD_DISMISS_KEY, isoWeekKey(new Date()));
+		} catch {
+			/* no-op: worst case it shows again this session */
+		}
+		weekCard = null;
+	}
 
 	// AP1 "instant home": which source painted each row right now, for the
 	// subtle opacity cue while a cached row is shown before the live answer
@@ -112,10 +151,12 @@
 		forYouSource = "empty";
 		acquiredSource = "empty";
 		neverPlayed = [];
+		weekCard = null;
 		void loadResume();
 		void loadForYou();
 		void loadAcquired();
 		void loadNeverPlayed();
+		void loadWeekCard();
 	}
 
 	// C1: the saved queue ("Remember Last Track"), resumed where it stopped.
@@ -265,6 +306,7 @@
 		void loadForYou();
 		void loadAcquired();
 		void loadNeverPlayed();
+		void loadWeekCard();
 		let unwireProfile: (() => void) | undefined;
 		if (typeof BroadcastChannel !== "undefined") {
 			const channel = new BroadcastChannel(PROFILE_CHANNEL_NAME);
@@ -276,11 +318,37 @@
 	});
 </script>
 
-{#if resume.length > 0 || showSavedPill || remoteTrack}
+{#if resume.length > 0 || showSavedPill || remoteTrack || weekCard}
 	<section
 		class="home-row"
 		data-row="reprendre"
 	>
+		{#if weekCard}
+			<div
+				class="week-card"
+				data-testid="week-card"
+			>
+				<div class="week-card-body">
+					<p class="week-card-title">Ta semaine</p>
+					<p class="week-card-stats">
+						{weekCard.minutes} min écoutées{#if weekCard.topArtist} · artiste n°1 : {weekCard.topArtist}{/if}{#if weekCard.newAlbums > 0}
+							· {weekCard.newAlbums} nouveaux albums{/if}
+					</p>
+				</div>
+				<a
+					class="btn-reset btn-secondary week-card-link"
+					href="/library/stats">Voir mes stats</a
+				>
+				<button
+					type="button"
+					class="btn-reset week-card-dismiss"
+					aria-label="Fermer la carte Ta semaine"
+					on:click={dismissWeekCard}
+				>
+					✕
+				</button>
+			</div>
+		{/if}
 		{#if remote && remoteTrack && $paused}
 			<div class="resume-queue">
 				<button
@@ -404,6 +472,44 @@
 	}
 	.row-fade.is-cache {
 		opacity: 0.93;
+	}
+	/* ST1: the compact weekly recap. Same 1rem gutter as .resume-queue;
+	   colours/radius/44px tap target come from .btn-secondary and
+	   .btn-reset (global/redesign/modules/_button.scss) - only the card
+	   layout itself lives here. */
+	.week-card {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin: 0.5em 1rem 0;
+		padding: 0.75rem 1rem;
+		border-radius: 0.9rem;
+		background: hsl(0deg 0% 100% / 6%);
+	}
+	.week-card-body {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.week-card-title {
+		font-weight: 600;
+		margin: 0 0 0.15em;
+	}
+	.week-card-stats {
+		margin: 0;
+		opacity: 0.85;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.week-card-link {
+		flex: 0 0 auto;
+		white-space: nowrap;
+	}
+	.week-card-dismiss {
+		flex: 0 0 auto;
+		width: 2.75rem;
+		height: 2.75rem;
+		opacity: 0.7;
 	}
 	.resume-queue {
 		/* Audit v7 TOP 6: the pill sat at x=0 on mobile while the row cards and
