@@ -9,11 +9,13 @@
 //   programmatic `volume`), there is no fade: a 5 s visual countdown
 //   (`sleepCountdown`, toast in SleepTimerSheet) runs before the deadline and
 //   playback pauses exactly at it.
-// - Track-end modes ("track", "album", "tracks"): `sleepDeadline()` fixes the
-//   queue index after which playback stops; player.ts asks
-//   `shouldStopAtTrackEnd(position)` on its end-of-track path and calls
+// - Track-end modes ("track", "album", "tracks"): player.ts asks
+//   `shouldStopAtTrackEnd(position, queue)` on its end-of-track path and calls
 //   `trackEnded()` after pausing (the auto-advance is skipped for that one
-//   track only; repeat / shuffle semantics are untouched).
+//   track only; repeat / shuffle semantics are untouched). "tracks" counts
+//   track ends, "album" stops when the next row leaves the starting album
+//   (L12-1); player.ts forwards queue changes to `sleepQueueChanged()`, which
+//   cancels an "album" timer (with a toast) once another album plays.
 // - "+10 min" (`extendSleepTimer`) pushes a minute deadline back, or starts a
 //   10 min timer when none (or a track-end one) is running.
 //
@@ -73,6 +75,12 @@ export function modeLabel(mode: SleepMode): string {
 
 // ---------------------------------------------------------------------------
 // Pure deadline computation (vitest: sleepTimer.deadline.test.ts)
+//
+// L12-1 (audit logic v12): track-end modes no longer freeze a queue INDEX at
+// the start (wrong as soon as the queue is replaced, shuffled or gets a
+// "Lire ensuite" row). "tracks" counts track ENDS; "album" remembers the
+// album of the track playing at the start and stops at the end of a track
+// whose NEXT row is from another album (or when the queue ends).
 
 type QueueRow = { videoId?: unknown; album?: unknown } | null | undefined;
 export interface SleepQueueState {
@@ -91,9 +99,19 @@ export type SleepKind =
 	| "album";
 export type SleepDeadline =
 	| { at: "time"; endsAt: number }
-	| { at: "trackEnd"; stopAfter: number };
+	/** Stop at the end of whatever track is playing. */
+	| { at: "trackEnd"; mode: "track" }
+	/** `left` track ends to go (the current track counts as one). */
+	| { at: "trackEnd"; mode: "tracks"; left: number; lastEnd: string; lastAt: number }
+	/** Album of the starting track: `key` (albumKey) and/or the album context ids. */
+	| { at: "trackEnd"; mode: "album"; key: string; ids: string[] };
 
-function albumKey(row: QueueRow): string {
+/** Same track end reported twice within this window counts once. */
+export const TRACK_END_DEDUPE_MS = 5000;
+
+const rowVid = (r: QueueRow) => (r && typeof r.videoId === "string" ? r.videoId : "");
+
+export function albumKey(row: QueueRow): string {
 	const al = row && row.album && typeof row.album === "object" ? (row.album as Record<string, unknown>) : null;
 	if (!al) return "";
 	const id = typeof al.browseId === "string" ? al.browseId.trim() : "";
@@ -102,45 +120,89 @@ function albumKey(row: QueueRow): string {
 	return t.trim() ? `t:${t.trim().toLowerCase()}` : "";
 }
 
-/**
- * Last queue index of the album the current track belongs to: the run of
- * consecutive rows from `position` that are in the album queue's source list
- * (playback context "album"), or that share the current row's album. The
- * current index when neither tells (stop at the end of this track).
- */
-export function albumEndIndex(state: Pick<SleepQueueState, "position" | "mix" | "context">): number {
-	const mix = Array.isArray(state.mix) ? state.mix : [];
-	const p = Math.max(0, Math.floor(Number(state.position) || 0));
-	const cur = mix[p];
-	if (!cur) return p;
-	const ctx = state.context;
-	const vid = (r: QueueRow) => (r && typeof r.videoId === "string" ? r.videoId : "");
-	let belongs: ((r: QueueRow) => boolean) | null = null;
-	if (ctx && ctx.kind === "album" && Array.isArray(ctx.ids)) {
-		const ids = new Set((ctx.ids as unknown[]).filter((x): x is string => typeof x === "string" && x !== ""));
-		if (ids.has(vid(cur))) belongs = (r) => ids.has(vid(r));
-	}
-	if (!belongs) {
-		const key = albumKey(cur);
-		if (key) belongs = (r) => albumKey(r) === key;
-	}
-	if (!belongs) return p;
-	let end = p;
-	while (end + 1 < mix.length && belongs(mix[end + 1])) end++;
-	return end;
+function clampPos(position: unknown): number {
+	return Math.max(0, Math.floor(Number(position) || 0));
+}
+
+/** True when `row` belongs to the album an "album" deadline remembers. */
+export function inSleepAlbum(d: { key: string; ids: string[] }, row: QueueRow): boolean {
+	if (!row) return false;
+	const vid = rowVid(row);
+	if (vid && d.ids.includes(vid)) return true;
+	return d.key !== "" && albumKey(row) === d.key;
 }
 
 /** When a timer of `kind`, started in `state`, stops playback. */
 export function sleepDeadline(kind: SleepKind, state: SleepQueueState): SleepDeadline {
-	const p = Math.max(0, Math.floor(Number(state.position) || 0));
-	if (kind === "track") return { at: "trackEnd", stopAfter: p };
-	if (kind === "album") return { at: "trackEnd", stopAfter: albumEndIndex({ ...state, position: p }) };
+	if (kind === "track") return { at: "trackEnd", mode: "track" };
+	if (kind === "album") {
+		const mix = Array.isArray(state.mix) ? state.mix : [];
+		const cur = mix[clampPos(state.position)];
+		const ctx = state.context;
+		let ids: string[] = [];
+		if (cur && ctx && ctx.kind === "album" && Array.isArray(ctx.ids)) {
+			const all = (ctx.ids as unknown[]).filter((x): x is string => typeof x === "string" && x !== "");
+			if (all.includes(rowVid(cur))) ids = all;
+		}
+		const key = albumKey(cur);
+		// No album information at all: behave like "end of this track".
+		if (!key && ids.length === 0) return { at: "trackEnd", mode: "track" };
+		return { at: "trackEnd", mode: "album", key, ids };
+	}
 	if ("tracks" in kind) {
 		const n = Math.max(1, Math.floor(Number(kind.tracks) || 1));
-		return { at: "trackEnd", stopAfter: p + n - 1 };
+		return { at: "trackEnd", mode: "tracks", left: n, lastEnd: "", lastAt: 0 };
 	}
 	const m = Math.max(0, Number(kind.minutes) || 0);
 	return { at: "time", endsAt: state.now + m * 60_000 };
+}
+
+export interface TrackEndEvent {
+	position: number;
+	mix?: ReadonlyArray<QueueRow>;
+	now: number;
+}
+
+/**
+ * A track just ended at `ev.position`: stop now, or the updated deadline.
+ * - "tracks": one end consumed (the same position + track reported again
+ *   within TRACK_END_DEDUPE_MS is the same end, not a new one);
+ * - "album": stop when the next row is missing or from another album.
+ */
+export function trackEndStep(d: SleepDeadline | null, ev: TrackEndEvent): { stop: boolean; next: SleepDeadline | null } {
+	if (!d || d.at !== "trackEnd") return { stop: false, next: d };
+	if (d.mode === "track") return { stop: true, next: null };
+	const mix = Array.isArray(ev.mix) ? ev.mix : [];
+	const p = clampPos(ev.position);
+	if (d.mode === "tracks") {
+		const endKey = `${p}:${rowVid(mix[p])}`;
+		if (endKey === d.lastEnd && ev.now - d.lastAt < TRACK_END_DEDUPE_MS) return { stop: false, next: d };
+		if (d.left <= 1) return { stop: true, next: null };
+		return { stop: false, next: { ...d, left: d.left - 1, lastEnd: endKey, lastAt: ev.now } };
+	}
+	if (!Array.isArray(ev.mix)) return { stop: true, next: null };
+	const nxt = mix[p + 1];
+	if (!nxt || !inSleepAlbum(d, nxt)) return { stop: true, next: null };
+	return { stop: false, next: d };
+}
+
+/**
+ * The queue changed (replaced, shuffled, "Lire ensuite", jump): "keep" the
+ * deadline or "cancel" it. Counters ("tracks") do not depend on the queue;
+ * an "album" timer is cancelled once the row playing is from another album
+ * (a row without any album information is not taken as "another album").
+ */
+export function sleepQueueAction(
+	d: SleepDeadline | null,
+	state: Pick<SleepQueueState, "position" | "mix">,
+): "keep" | "cancel" {
+	if (!d || d.at !== "trackEnd" || d.mode !== "album") return "keep";
+	const mix = Array.isArray(state.mix) ? state.mix : [];
+	const cur = mix[clampPos(state.position)];
+	if (!cur) return "keep";
+	if (inSleepAlbum(d, cur)) return "keep";
+	if (!albumKey(cur)) return "keep";
+	return "cancel";
 }
 
 /**
@@ -151,12 +213,6 @@ export function extendDeadline(current: SleepDeadline | null, minutes: number, n
 	const add = Math.max(0, Number(minutes) || 0) * 60_000;
 	if (current && current.at === "time") return { at: "time", endsAt: Math.max(current.endsAt, now) + add };
 	return { at: "time", endsAt: now + add };
-}
-
-/** Track-end check: playback stops when the track at `position` ends. */
-export function stopsAt(deadline: SleepDeadline | null, position: number): boolean {
-	if (!deadline || deadline.at !== "trackEnd") return false;
-	return (Number(position) || 0) >= deadline.stopAfter;
 }
 
 /**
@@ -242,12 +298,10 @@ export function startSleepTimer(mode: SleepMode, queue?: Omit<SleepQueueState, "
 	const state: SleepQueueState = { now: Date.now(), position: 0, ...(queue ?? {}) };
 	if (mode === "track" || mode === "album" || mode === "tracks") {
 		const kind: SleepKind = mode === "tracks" ? { tracks: SLEEP_TRACK_COUNT } : mode;
-		deadline = queue ? sleepDeadline(kind, state) : { at: "trackEnd", stopAfter: -1 };
+		deadline = queue || kind !== "album" ? sleepDeadline(kind, state) : { at: "trackEnd", mode: "track" };
 		sleepMode.set(mode);
 		sleepRemaining.set(0);
-		if (mode === "tracks" && deadline.at === "trackEnd") {
-			sleepTracksLeft.set(Math.max(1, deadline.stopAfter - state.position + 1));
-		}
+		if (deadline.at === "trackEnd" && deadline.mode === "tracks") sleepTracksLeft.set(deadline.left);
 		notify(
 			mode === "track"
 				? "Minuterie : pause à la fin du morceau"
@@ -294,16 +348,34 @@ export function cancelSleepTimer(silent = false) {
 
 /**
  * player.ts end-of-track hook: true when the track at `position` must be the
- * last one. "track" mode stops at the end of whatever track is playing.
+ * last one. "track" mode stops at the end of whatever track is playing;
+ * "tracks" consumes one track end; "album" looks at the next row of `queue`.
  */
-export function shouldStopAtTrackEnd(position?: number): boolean {
+export function shouldStopAtTrackEnd(
+	position?: number,
+	queue?: { mix?: ReadonlyArray<QueueRow> } | null,
+): boolean {
 	const mode = get(sleepMode);
 	if (mode === "track") return true;
 	if (mode !== "album" && mode !== "tracks") return false;
 	if (typeof position !== "number" || !deadline || deadline.at !== "trackEnd") return true;
-	if (stopsAt(deadline, position)) return true;
-	if (mode === "tracks") sleepTracksLeft.set(Math.max(1, deadline.stopAfter - position));
+	const step = trackEndStep(deadline, { position, mix: queue?.mix, now: Date.now() });
+	if (step.stop) return true;
+	deadline = step.next;
+	if (deadline && deadline.at === "trackEnd" && deadline.mode === "tracks") sleepTracksLeft.set(deadline.left);
 	return false;
+}
+
+/**
+ * player.ts forwards every queue update here. An "album" timer whose album
+ * no longer plays (queue replaced, other track picked) is cancelled with a
+ * toast; "tracks" keeps counting track ends whatever the queue.
+ */
+export function sleepQueueChanged(state: { position?: unknown; mix?: ReadonlyArray<QueueRow> } | null | undefined) {
+	if (!deadline || deadline.at !== "trackEnd" || deadline.mode !== "album" || !state) return;
+	if (sleepQueueAction(deadline, { position: Number(state.position) || 0, mix: state.mix }) !== "cancel") return;
+	cancelSleepTimer(true);
+	notify("Minuterie « Fin de l'album » annulée : un autre album joue", "success");
 }
 
 /** player.ts calls this once it has paused at the end of the track. */
@@ -380,6 +452,7 @@ export const sleepTimer = {
 	extend: extendSleepTimer,
 	cancel: cancelSleepTimer,
 	shouldStopAtTrackEnd,
+	queueChanged: sleepQueueChanged,
 	trackEnded,
 	mode: sleepMode,
 	remaining: sleepRemaining,

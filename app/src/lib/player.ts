@@ -22,7 +22,7 @@ import {
 import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
-import { shouldStopAtTrackEnd, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
+import { shouldStopAtTrackEnd, sleepQueueChanged, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
 import { syncTabs } from "./tabSync";
 import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
@@ -897,7 +897,7 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 				// normal auto-advance resumes on the next play().
 				if (this._sleepHold) return;
 				// c39c B6-9: "album" / "tracks" modes stop after a queue index.
-				if (shouldStopAtTrackEnd(SessionListService.position)) {
+				if (shouldStopAtTrackEnd(SessionListService.position, SessionListService.value)) {
 					this._sleepHold = true;
 					this.nextSrc.url = undefined;
 					this.pause();
@@ -1352,6 +1352,11 @@ function handleError(err: PlayerRequestError | string | undefined) {
 		body: null,
 		error: true,
 	};
+}
+
+// L12-1: a "Fin de l'album" sleep timer follows queue replacements / jumps.
+if (browser && globalThis.self.name !== "IDB") {
+	SessionListService.subscribe((state) => sleepQueueChanged(state));
 }
 
 if (browser && globalThis.self.name !== "IDB" && settings) {
