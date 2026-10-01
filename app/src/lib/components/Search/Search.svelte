@@ -938,7 +938,7 @@
 
 		.recent-searches-header {
 			padding: 0.5em;
-			font-size: 0.9em;
+			font-size: var(--text-secondary-size);
 			color: var(--text-secondary);
 			font-weight: 500;
 			background: var(--top-bg);
@@ -1027,7 +1027,7 @@
 			}
 
 			.local-artist {
-				font-size: 0.75em;
+				font-size: var(--text-secondary-size);
 				color: var(--text-secondary);
 				overflow: hidden;
 				text-overflow: ellipsis;

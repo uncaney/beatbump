@@ -160,7 +160,7 @@
 	.stats-sub {
 		grid-area: sub;
 		color: #bbb;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 	}
 	.stats-go {
 		grid-area: go;
@@ -188,7 +188,7 @@
 	.note {
 		margin-top: 1.5rem;
 		color: #999;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 	}
 	.state {
 		color: #999;

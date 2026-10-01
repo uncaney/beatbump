@@ -281,6 +281,7 @@
 		margin-bottom: 0.3rem;
 	}
 	p.secondary {
+		font-size: var(--text-secondary-size);
 		letter-spacing: -0.01em;
 		max-width: 40ch;
 	}

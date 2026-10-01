@@ -484,7 +484,7 @@
 	}
 	.space-status {
 		color: $muted;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 	}
 	.space-row {
 		display: flex;
@@ -494,7 +494,7 @@
 	}
 	.size-label {
 		color: $muted;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 		text-transform: none;
 	}
 	.select select {
@@ -510,7 +510,7 @@
 	.space-desc {
 		margin: 0.5rem 0 0;
 		color: #999;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		line-height: 1.35;
 	}
 	.panel {
@@ -537,7 +537,7 @@
 	}
 	.space-result {
 		margin: 0.5rem 0 0;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 		color: rgba(255, 255, 255, 0.85);
 	}
 	.space-error {
@@ -546,7 +546,7 @@
 		align-items: center;
 		gap: 0.5rem;
 		margin: 0.5rem 0 0;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 		color: #ffb3b3;
 	}
 </style>

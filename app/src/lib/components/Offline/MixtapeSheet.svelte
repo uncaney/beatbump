@@ -323,7 +323,7 @@
 			padding: 0;
 			margin-bottom: 0.4rem;
 			color: $muted;
-			font-size: 0.85rem;
+			font-size: var(--text-secondary-size);
 		}
 	}
 	.seg {
@@ -382,7 +382,7 @@
 		}
 		small {
 			color: $muted;
-			font-size: 0.8rem;
+			font-size: var(--text-secondary-size);
 		}
 		input {
 			flex: 0 0 auto;
@@ -395,7 +395,7 @@
 	}
 	.preview {
 		margin: 0.5rem 0 0.75rem;
-		font-size: 0.95rem;
+		font-size: var(--text-secondary-size);
 		color: $muted;
 		&.none {
 			color: #e0a000;

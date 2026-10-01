@@ -471,7 +471,7 @@
 		line-height: 1.4;
 
 		> span {
-			font-size: 0.875em;
+			font-size: var(--text-secondary-size);
 			color: hsla(0, 0%, 100%, 0.7);
 			line-height: 1.2;
 		}

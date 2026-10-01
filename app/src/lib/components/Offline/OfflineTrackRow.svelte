@@ -247,7 +247,7 @@
 		opacity: 0.75;
 	}
 	.sub {
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		color: $muted;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -326,7 +326,7 @@
 		border-radius: 0.5rem;
 		background: rgb(220 53 69 / 12%);
 		border: 1px solid rgb(220 53 69 / 45%);
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		line-height: 1.3;
 	}
 	.confirm-text {
@@ -337,7 +337,7 @@
 		width: auto;
 		min-width: max(2.75rem, 44px);
 		padding: 0 0.6rem;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		font-weight: 600;
 	}
 	.confirm-yes,

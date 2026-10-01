@@ -316,7 +316,7 @@
 	}
 	.sub {
 		color: #999;
-		font-size: 0.95rem;
+		font-size: var(--text-secondary-size);
 	}
 	.controls {
 		display: flex;

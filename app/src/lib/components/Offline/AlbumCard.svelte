@@ -410,7 +410,7 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		font-weight: 400;
 		color: $muted;
 	}
@@ -521,11 +521,11 @@
 		padding: 0 0.6rem 0.5rem;
 	}
 	.ready {
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		color: $muted;
 	}
 	.complete {
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		// L8-7: the scoped rule beats .btn-secondary's floor; 2rem was 24px on
 		// mobile. Keep the small type, give the pill the 44px tap height.
 		min-height: max(2.75rem, 44px);

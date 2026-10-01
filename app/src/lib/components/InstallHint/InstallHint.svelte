@@ -115,7 +115,7 @@
 		background: rgba(20, 20, 24, 0.96);
 		border: 1px solid rgba(255, 255, 255, 0.12);
 		color: #eee;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 	}
 	.text p {

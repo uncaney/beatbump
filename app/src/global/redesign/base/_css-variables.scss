@@ -7,6 +7,11 @@
 
 	--secondary-font-family: "Commissioner Variable", sans-serif;
 	--secondary-font-color: rgb(175, 175, 175);
+	// U11-5 (audit UX v11): one size for secondary / meta text (song and card
+	// subtitles, counters, section hints, settings descriptions). The mobile
+	// root is 12px, so 0.85-0.9rem rendered at 10.2-10.8px; this is 14px on the
+	// 16px desktop root and never under 12px. Primary text is not affected.
+	--text-secondary-size: max(12px, 0.875rem);
 
 	--color-dark: hsl(0deg 0% 98%);
 	--color-light: #111113;

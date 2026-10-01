@@ -270,7 +270,7 @@
 	.sub {
 		margin: 0 2.5rem 0.75rem 0;
 		color: #b3b3b3;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 	}
 	.actions {
 		display: flex;
@@ -280,7 +280,7 @@
 	.note {
 		margin: 0.6rem 0 0;
 		color: #b3b3b3;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 	}
 	.note.error {
 		color: #ff8a80;
@@ -320,6 +320,6 @@
 	.name-hint {
 		margin: 0.5rem 0 0;
 		color: #b3b3b3;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 	}
 </style>

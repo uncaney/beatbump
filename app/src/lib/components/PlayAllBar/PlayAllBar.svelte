@@ -223,6 +223,6 @@
 	}
 	.pab-count {
 		color: #999;
-		font-size: 0.9em;
+		font-size: var(--text-secondary-size);
 	}
 </style>

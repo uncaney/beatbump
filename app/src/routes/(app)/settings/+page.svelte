@@ -258,7 +258,7 @@
 		gap: 0.125em;
 		line-height: 1.4;
 		:last-child {
-			font-size: 0.875em;
+			font-size: var(--text-secondary-size);
 			color: hsla(0, 0%, 100%, 0.7);
 			line-height: 1.1;
 		}
