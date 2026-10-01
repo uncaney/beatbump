@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"beatbump-server/backend/db"
 )
 
 // fakeAlbums is a stable album list: every third album has fewer than
@@ -159,5 +161,108 @@ func TestLocalAlbumOfDayHandler(t *testing.T) {
 	c, rec := ctxFor(http.MethodGet, "/api/v1/local/album-of-day?date=01/10/2026", "", nil)
 	if err := LocalAlbumOfDayHandler(c); err != nil || rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad date: %v %d", err, rec.Code)
+	}
+}
+
+// L12-7: the pick of a date is persisted, so a restart (memo dropped) or a
+// library change (index order moved) keeps the same album for that date.
+func TestAlbumOfDayPersistedAcrossRestarts(t *testing.T) {
+	stub := newMixStub(t)
+	useTestDB(t)
+	if err := db.DB.AutoMigrate(&db.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	resetAlbumDayMemo()
+	t.Cleanup(resetAlbumDayMemo)
+	for i, a := range stub.albums {
+		a["trackCount"] = float64(5 + i%3)
+	}
+	albumDayNow = func() time.Time { return time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { albumDayNow = time.Now })
+	id := func(m map[string]interface{}) interface{} {
+		a, _ := m["album"].(map[string]interface{})
+		return a["browseId"]
+	}
+	first := id(getJSON(t, LocalAlbumOfDayHandler, "/api/v1/local/album-of-day"))
+	if first == nil {
+		t.Fatal("no album")
+	}
+	var row db.Setting
+	if err := db.DB.First(&row, "key = ?", "album-of-day:2026-10-01").Error; err != nil || row.Value == "" {
+		t.Fatalf("pick not persisted: %v", err)
+	}
+	// "Restart" + an acquisition wave that shifts every offset.
+	resetAlbumDayMemo()
+	for i := 0; i < 60; i++ {
+		stub.albums = append([]map[string]interface{}{{"id": fmt.Sprintf("lb-%011x", 0xdd0000+i), "album": fmt.Sprintf("AAA %02d", i), "albumArtist": "Z", "year": "2020", "trackCount": float64(9)}}, stub.albums...)
+	}
+	if again := id(getJSON(t, LocalAlbumOfDayHandler, "/api/v1/local/album-of-day")); again != first {
+		t.Fatalf("album of the day moved after a restart: %v -> %v", first, again)
+	}
+	// The next day skips the persisted album of today.
+	if next := id(getJSON(t, LocalAlbumOfDayHandler, "/api/v1/local/album-of-day?date=2026-10-02")); next == first || next == nil {
+		t.Fatalf("next day repeats today: %v", next)
+	}
+	// ?date= bounds: +/- 366 days.
+	for _, q := range []string{"0001-01-01", "9999-12-31", "2027-10-03", "2025-09-29"} {
+		c, rec := ctxFor(http.MethodGet, "/api/v1/local/album-of-day?date="+q, "", nil)
+		if err := LocalAlbumOfDayHandler(c); err != nil || rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: want 400, got %d", q, rec.Code)
+		}
+	}
+	for _, q := range []string{"2027-10-01", "2025-09-30"} {
+		c, rec := ctxFor(http.MethodGet, "/api/v1/local/album-of-day?date="+q, "", nil)
+		if err := LocalAlbumOfDayHandler(c); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("%s: want 200, got %d", q, rec.Code)
+		}
+	}
+}
+
+func TestAlbumOfDayMemoLRU(t *testing.T) {
+	resetAlbumDayMemo()
+	t.Cleanup(resetAlbumDayMemo)
+	albumDayMemoPut("today", map[string]interface{}{"d": "today"})
+	for i := 0; i < albumDayMemoMax+4; i++ {
+		albumDayMemoPut(fmt.Sprintf("2026-01-%02d", i+1), map[string]interface{}{})
+		// today keeps being read: it is never the least recently used
+		if _, ok := albumDayMemoGet("today"); !ok {
+			t.Fatalf("today evicted after %d other dates", i+1)
+		}
+	}
+	if len(albumDayMemo) != albumDayMemoMax || len(albumDayOrder) != albumDayMemoMax {
+		t.Fatalf("memo size %d / %d, want %d", len(albumDayMemo), len(albumDayOrder), albumDayMemoMax)
+	}
+	if _, ok := albumDayMemoGet("2026-01-01"); ok {
+		t.Fatal("the oldest date should have been evicted")
+	}
+}
+
+func TestAlbumOfDayFailedWindowNotKept(t *testing.T) {
+	all := fakeAlbums(200)
+	calls := 0
+	failing := func(off, lim int) []map[string]interface{} {
+		calls++
+		if calls == 1 {
+			return nil // Meili timed out on the first window
+		}
+		return fetchFrom(all, nil)(off, lim)
+	}
+	if doc, ok := pickAlbumOfDayOK("2026-10-01", len(all), failing, ""); ok || doc == nil {
+		t.Fatalf("a failed window must flag the (slid) pick: ok=%v doc=%v", ok, doc)
+	}
+	if _, ok := pickAlbumOfDayOK("2026-10-01", len(all), fetchFrom(all, nil), ""); !ok {
+		t.Fatal("healthy fetch flagged as failed")
+	}
+	// The stored chain day is used as the previous-day skip.
+	day := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	free := pickAlbumOfDay("2026-10-05", len(all), fetchFrom(all, nil), "")
+	got, _ := albumOfDayResolve(day, len(all), fetchFrom(all, nil), func(d string) string {
+		if d == "2026-10-04" {
+			return mstr(free, "id")
+		}
+		return ""
+	})
+	if mstr(got, "id") == mstr(free, "id") {
+		t.Fatalf("persisted previous day not skipped: %v", got)
 	}
 }
