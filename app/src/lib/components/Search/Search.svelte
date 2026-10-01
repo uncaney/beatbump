@@ -1,3 +1,73 @@
+<script context="module" lang="ts">
+	import { APIClient } from "$lib/api";
+	import type { Item } from "$lib/types";
+
+	// "Tendances" (audit v4 TOP 7 / 3.3): a fresh profile has neither resume
+	// rows nor recent searches, so the empty overlay used to show nothing.
+	// Fallback: TRENDING_MAX items of /api/v1/trending (cached 5 min server
+	// side), the "Trending" songs carousel first, any non-empty one otherwise;
+	// the recently added local songs if trending fails (YouTube down/offline).
+	const TRENDING_MAX = 6;
+	const TRENDING_TTL_MS = 5 * 60 * 1000;
+	let trendingPromise: Promise<Item[]> | null = null;
+	let trendingAt = 0;
+
+	async function fetchTrendingRows(): Promise<Item[]> {
+		let rows: Item[] = [];
+		try {
+			const res = await APIClient.fetch(`/api/v1/trending`);
+			if (res.ok) {
+				const data = await res.json();
+				const carousels: any[] = Array.isArray(data?.carousels)
+					? data.carousels
+					: [];
+				const withItems = carousels.filter(
+					(c) => Array.isArray(c?.items) && c.items.length > 0,
+				);
+				const pick =
+					withItems.find((c) => /trending|tendance/i.test(c?.header?.title ?? "")) ??
+					withItems[0];
+				rows = (pick?.items ?? [])
+					.filter((it: any) => it?.title && (it?.videoId || it?.endpoint?.browseId))
+					.slice(0, TRENDING_MAX);
+			}
+		} catch {
+			rows = [];
+		}
+		if (rows.length === 0) {
+			try {
+				const res = await APIClient.fetch(
+					`/api/v1/local/songs?limit=${TRENDING_MAX}&sort=dateAdded:desc`,
+				);
+				const data = res.ok ? await res.json() : { items: [] };
+				rows = Array.isArray(data?.items) ? data.items.slice(0, TRENDING_MAX) : [];
+			} catch {
+				rows = [];
+			}
+		}
+		return rows;
+	}
+
+	/**
+	 * Audit v6 TOP 4: one trending lookup shared by every overlay opening
+	 * (5 min, like the server cache). Nav calls it when the search button
+	 * opens the overlay, so the rows are usually in before Search mounts.
+	 * An empty answer is not kept: the next opening retries.
+	 */
+	export function prefetchTrending(): Promise<Item[]> {
+		const now = Date.now();
+		if (!trendingPromise || now - trendingAt > TRENDING_TTL_MS) {
+			trendingAt = now;
+			const p = fetchTrendingRows().catch(() => [] as Item[]);
+			trendingPromise = p;
+			void p.then((rows) => {
+				if (rows.length === 0 && trendingPromise === p) trendingPromise = null;
+			});
+		}
+		return trendingPromise;
+	}
+</script>
+
 <script lang="ts">
 	import { goto } from "$app/navigation";
 	import Icon from "$lib/components/Icon/Icon.svelte";
@@ -7,7 +77,6 @@
 	import { createEventDispatcher, onDestroy, onMount } from "svelte";
 	import { fullscreenStore } from "../Player/channel";
 	import { searchFilter } from "./options";
-	import { APIClient } from "$lib/api";
 	import { browser } from "$app/environment";
 	import SessionListService from "$lib/stores/list";
 	import { isLocalTrackId } from "$lib/stores/list/sessionList";
@@ -15,7 +84,6 @@
 	import { getRecent } from "$lib/me";
 	import { getOfflineTracks } from "$lib/offline";
 	import { entityHref } from "$lib/local";
-	import type { Item } from "$lib/types";
 
 	export let type: "inline";
 	export let query = "";
@@ -62,20 +130,19 @@
 	// library hits (songs then artists) once the user types.
 	$: localBlock = showRecentSearches ? resumeRows : localRows;
 
-	// "Tendances" (audit v4 TOP 7 / 3.3): a fresh profile has neither resume
-	// rows nor recent searches, so the empty overlay used to show nothing.
-	// Fallback: TRENDING_MAX items of /api/v1/trending (cached 5 min server
-	// side), the "Trending" songs carousel first, any non-empty one otherwise;
-	// the recently added local songs if trending fails (YouTube down/offline).
-	const TRENDING_MAX = 6;
+	// Tendances (fetch + cache in the module script above). Audit v6 TOP 4:
+	// the block (heading + TRENDING_MAX placeholder rows) renders as soon as
+	// the empty overlay has nothing else to show, without waiting for the
+	// resume lookup nor the YouTube answer.
 	let trendingRows: Item[] = [];
 	let trendingRequested = false;
+	let trendingLoading = false;
 	let destroyed = false;
 	$: showTrending =
 		showRecentSearches &&
 		resumeRows.length === 0 &&
 		recentSearches.length === 0 &&
-		trendingRows.length > 0;
+		(trendingRows.length > 0 || trendingLoading);
 
 	onMount(() => {
 		if (browser) {
@@ -83,6 +150,9 @@
 			// A pre-filled box (H7) must not open on the empty-box rows.
 			showRecentSearches = !query.trim();
 			scheduleResume();
+			// Fresh profile: start the Tendances now (placeholders render at
+			// once), not after the 150 ms resume debounce + getRecent.
+			if (showRecentSearches && recentSearches.length === 0) void loadTrending();
 		}
 	});
 
@@ -142,40 +212,11 @@
 	async function loadTrending() {
 		if (trendingRequested || destroyed) return;
 		trendingRequested = true;
-		let rows: Item[] = [];
-		try {
-			const res = await APIClient.fetch(`/api/v1/trending`);
-			if (res.ok) {
-				const data = await res.json();
-				const carousels: any[] = Array.isArray(data?.carousels)
-					? data.carousels
-					: [];
-				const withItems = carousels.filter(
-					(c) => Array.isArray(c?.items) && c.items.length > 0,
-				);
-				const pick =
-					withItems.find((c) => /trending|tendance/i.test(c?.header?.title ?? "")) ??
-					withItems[0];
-				rows = (pick?.items ?? [])
-					.filter((it: any) => it?.title && (it?.videoId || it?.endpoint?.browseId))
-					.slice(0, TRENDING_MAX);
-			}
-		} catch {
-			rows = [];
-		}
-		if (rows.length === 0) {
-			try {
-				const res = await APIClient.fetch(
-					`/api/v1/local/songs?limit=${TRENDING_MAX}&sort=dateAdded:desc`,
-				);
-				const data = res.ok ? await res.json() : { items: [] };
-				rows = Array.isArray(data?.items) ? data.items.slice(0, TRENDING_MAX) : [];
-			} catch {
-				rows = [];
-			}
-		}
+		trendingLoading = true;
+		const rows = await prefetchTrending();
 		if (destroyed) return;
 		trendingRows = rows;
+		trendingLoading = false;
 	}
 
 	/** A trending song plays (local lid = local mix), an album/playlist opens. */
@@ -664,6 +705,22 @@
 					class="recent-searches-header group-header"
 					data-testid="trending-header">Tendances</li
 				>
+				{#if trendingRows.length === 0}
+					<!-- Placeholders while /api/v1/trending answers (audit v6 TOP 4). -->
+					{#each Array(TRENDING_MAX) as _, i (i)}
+						<li
+							class="local-row trending-placeholder"
+							aria-hidden="true"
+							data-testid="trending-placeholder"
+						>
+							<span class="ph ph-icon"></span>
+							<span class="local-text">
+								<span class="ph ph-title"></span>
+								<span class="ph ph-sub"></span>
+							</span>
+						</li>
+					{/each}
+				{/if}
 				{#each trendingRows as item, i (item.videoId || item?.endpoint?.browseId || i)}
 					<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 					<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
@@ -942,6 +999,47 @@
 				color: var(--text-secondary);
 				border: 1px solid hsl(0deg 0% 66.7% / 35%);
 			}
+		}
+	}
+
+	.suggestions li.trending-placeholder {
+		cursor: default;
+		pointer-events: none;
+		.local-text {
+			flex: 1 1 auto;
+			gap: 0.45em;
+		}
+		.ph {
+			display: block;
+			border-radius: 999px;
+			background: rgb(255 255 255 / 9%);
+			animation: ph-pulse 1.2s ease-in-out infinite alternate;
+		}
+		.ph-icon {
+			flex: 0 0 auto;
+			width: 1rem;
+			height: 1rem;
+		}
+		.ph-title {
+			width: 62%;
+			height: 0.8em;
+		}
+		.ph-sub {
+			width: 36%;
+			height: 0.6em;
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.ph {
+				animation: none;
+			}
+		}
+	}
+	@keyframes ph-pulse {
+		from {
+			opacity: 0.55;
+		}
+		to {
+			opacity: 1;
 		}
 	}
 

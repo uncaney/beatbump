@@ -4,7 +4,7 @@
     import {browser} from "$app/environment";
     import {goto} from "$app/navigation";
     import Icon from "$components/Icon/Icon.svelte";
-    import Search from "$components/Search/Search.svelte";
+    import Search, {prefetchTrending} from "$components/Search/Search.svelte";
     import {clickOutside} from "$lib/actions/clickOutside";
     import {tooltip} from "$lib/actions/tooltip";
     import {preserveSearch} from "$lib/stores";
@@ -196,6 +196,8 @@
 				shown = !shown;
 				hidden = !hidden;
 				fullscreenStore.set("closed");
+				// Audit v6 TOP 4: Tendances requested with the opening tap.
+				if (!hidden) void prefetchTrending();
 			}}
             aria-label="Search"
             title="Search"
