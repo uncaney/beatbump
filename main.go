@@ -5,6 +5,7 @@ import (
 	"beatbump-server/backend/api/downloader"
 	"beatbump-server/backend/db"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -56,22 +57,23 @@ func main() {
 	// /aud/* -> IVVP_URL (iv-vp). Streaming reverse proxies, GET + HEAD.
 	api.RegisterAudioProxyRoutes(e)
 
-	e.GET("/api/v1/search.json", api.SearchEndpointHandler)
+	// Read-mostly, user-independent JSON: short TTL response cache (backend/api/rescache.go).
+	e.GET("/api/v1/search.json", api.CacheResponse(60*time.Second, api.SearchEndpointHandler))
 	e.GET("/api/v1/player.json", api.PlayerEndpointHandler)
 	e.GET("/api/v1/playlist.json", api.PlaylistEndpointHandler)
 	e.GET("/api/v1/next.json", api.NextEndpointHandler)
 	e.GET("/api/v1/related.json", api.RelatedEndpointHandler)
-	e.GET("/api/v1/main.json", api.AlbumEndpointHandler)
+	e.GET("/api/v1/main.json", api.CacheResponse(5*time.Minute, api.AlbumEndpointHandler))
 	e.GET("/api/v1/get_queue.json", api.GetQueueHandler)
 	e.GET("/api/v1/get_search_suggestions.json", api.GetSearchSuggstionsHandler)
 
-	e.GET("/api/v1/home.json", api.HomeEndpointHandler)
-	e.GET("/api/v1/explore/:category", api.ExploreEndpointHandler)
-	e.GET("/api/v1/explore", api.ExploreEndpointHandler)
-	e.GET("/api/v1/trending", api.TrendingEndpointHandler)
-	e.GET("/api/v1/trending/:browseId", api.TrendingEndpointHandler)
+	e.GET("/api/v1/home.json", api.CacheResponse(2*time.Minute, api.HomeEndpointHandler))
+	e.GET("/api/v1/explore/:category", api.CacheResponse(5*time.Minute, api.ExploreEndpointHandler))
+	e.GET("/api/v1/explore", api.CacheResponse(5*time.Minute, api.ExploreEndpointHandler))
+	e.GET("/api/v1/trending", api.CacheResponse(5*time.Minute, api.TrendingEndpointHandler))
+	e.GET("/api/v1/trending/:browseId", api.CacheResponse(5*time.Minute, api.TrendingEndpointHandler))
 
-	e.GET("/api/v1/artist/:artistId", api.ArtistEndpointHandler)
+	e.GET("/api/v1/artist/:artistId", api.CacheResponse(5*time.Minute, api.ArtistEndpointHandler))
 
 	// Lyrics via lrclib.net (universal; local or YouTube tracks)
 	e.GET("/api/v1/lyrics", api.LyricsHandler)
