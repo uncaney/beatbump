@@ -68,7 +68,7 @@
 	});
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active={kind} />
 	<header class="head">
 		<div>

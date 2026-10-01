@@ -109,7 +109,31 @@ overflow:hidden;
 	max-height: 4.25em;
 
 	border-radius: var(--xs-radius);
+	position: relative;
 	@media screen and (min-width: 720px) {
+	}
+}
+
+/* Touch screens have no hover: show a permanent 40px round play badge on the
+   row thumbnail (audit 2.5) so a tap on the row reads as "play". Pure CSS,
+   pointer-events none: the tap still lands on the row's click handler. */
+@media (hover: none) {
+	.thumbnail::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		margin: auto;
+		width: 40px;
+		height: 40px;
+		border-radius: 50%;
+		pointer-events: none;
+		background: rgba(0, 0, 0, 0.55)
+			url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff'><path d='M8 5v14l11-7z'/></svg>")
+			center / 18px 18px no-repeat;
+		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+	}
+	.isPlaying .thumbnail::after {
+		display: none;
 	}
 }
 img {

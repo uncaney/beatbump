@@ -143,7 +143,7 @@
 	}
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active="downloads-offline" />
 	<header class="head">
 		<div class="titles">

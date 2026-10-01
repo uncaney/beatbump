@@ -267,6 +267,11 @@
 		left: 0;
 		right: 0;
 		padding-top: 45vh;
+		// Phones: hero capped at ~32vh in total (20vh image band + name/buttons
+		// block), was 45vh + content (audit 1.5).
+		@media only screen and (max-width: 719px) {
+			padding-top: 20vh;
+		}
 		@media only screen and (min-width: 1024px) {
 			padding-top: 33vh;
 		}

@@ -148,6 +148,13 @@
 
 	main {
 		@include content-spacing($type: "padding");
+		// The global `main` rule pads the top by the nav-bar height (+2vh) so
+		// content clears the fixed top bar. Here the hero is above <main>, so
+		// that padding was ~65px of dead space between Follow and "Songs"
+		// (audit 1.5 / 2.1). Scoped selector + !important beats the global one.
+		@media screen and (max-width: 719px) {
+			padding-block-start: 0.5rem !important;
+		}
 	}
 
 	.artist-body {
