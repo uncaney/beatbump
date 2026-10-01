@@ -45,11 +45,15 @@
 {/if}
 
 <style lang="scss">
+	/* The global %button-base (button:not(.icon-btn)) forces `color: #0f0f0f
+	   !important` and a white background; on the transparent artist hero that
+	   produced a 1.09:1 ghost outline (audit 1.5). Every colour here is therefore
+	   !important too. #fff on #121212 = 17.9:1; border rgba(255,255,255,.5). */
 	.follow-btn {
 		appearance: none;
-		border: 1px solid rgba(255, 255, 255, 0.4);
-		background: transparent;
-		color: inherit;
+		border: 1px solid rgba(255, 255, 255, 0.5) !important;
+		background: transparent !important;
+		color: #fff !important;
 		font-weight: 600;
 		padding: 0.45rem 1.25rem;
 		border-radius: 2rem;
@@ -57,15 +61,29 @@
 		transition: background 0.15s, border-color 0.15s;
 	}
 	.follow-btn:hover {
-		background: rgba(255, 255, 255, 0.12);
+		background: rgba(255, 255, 255, 0.12) !important;
+		border-color: rgba(255, 255, 255, 0.75) !important;
+		color: #fff !important;
 	}
 	.follow-btn.following {
-		background: var(--accent, #1ed760);
-		border-color: transparent;
-		color: #000;
+		background: var(--accent, #1ed760) !important;
+		border-color: transparent !important;
+		color: #000 !important;
 	}
+	.follow-btn.following:hover {
+		background: var(--accent, #1ed760) !important;
+		color: #000 !important;
+	}
+	.follow-btn:focus-visible {
+		outline: 2px solid #fff;
+		outline-offset: 2px;
+	}
+	/* Busy (disabled) state stays readable: #9a9a9a on #2c2c2c = 4.96:1, no opacity. */
 	.follow-btn:disabled {
-		opacity: 0.6;
+		opacity: 1 !important;
+		background: rgb(44, 44, 44) !important;
+		color: #9a9a9a !important;
+		border-color: rgba(255, 255, 255, 0.25) !important;
 		cursor: default;
 	}
 </style>
