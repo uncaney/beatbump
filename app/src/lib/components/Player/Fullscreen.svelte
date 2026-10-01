@@ -763,6 +763,9 @@
 						queueOpen ? 55 : 93
 				  }vw, 0px, 0) !important;`}
 		>
+			<!-- Mobile only (display:none from 720px): the labelled handle plus the
+			     "Vider la file" button on the same row, above the fold when closed. -->
+			<div class="sheet-head">
 			<div
 				use:draggable
 				on:bb-dragstart|capture|stopPropagation={() => onDragStart()}
@@ -805,7 +808,39 @@
 						style="transform: rotate({sheetOpen ? 90 : -90}deg); transition: transform 200ms;"
 					/>
 					<span>File d'attente</span>
+					{#if $queue.length}
+						<span class="handle-count"
+							>· {$queue.length}
+							{$queue.length > 1 ? "morceaux" : "morceau"}</span
+						>
+					{/if}
 				</span>
+			</div>
+			{#if $isMobileMQ}
+				<!-- Mobile: "Vider la file" sits in the handle row so it stays above
+				     the fold while the sheet is closed (the in-list toolbar was cut by
+				     the bottom of the screen). Events are stopped so the sheet's drag /
+				     tap-to-toggle / keydown handlers never see them. -->
+				<button
+					type="button"
+					class="queue-clear queue-clear-head"
+					data-testid="queue-clear"
+					aria-label="Vider la file d'attente (garder le morceau en cours)"
+					title="Vider la file d'attente (garder le morceau en cours)"
+					disabled={$queue.length <= 1}
+					on:pointerdown|stopPropagation={() => {}}
+					on:touchstart|stopPropagation={() => {}}
+					on:keydown|stopPropagation={() => {}}
+					on:click|stopPropagation={clearQueue}
+				>
+					<Icon
+						name="trash"
+						size="1em"
+						color="currentColor"
+					/>
+					<span>Vider la file</span>
+				</button>
+			{/if}
 			</div>
 			<Tabs
 				{tabs}
@@ -822,28 +857,31 @@
 								class="scroller queue-scroller"
 								on:touchstart|stopPropagation={null}
 							>
-								<div class="queue-toolbar">
-									<span class="queue-count" aria-live="polite">
-										{$queue.length}
-										{$queue.length > 1 ? "morceaux" : "morceau"}
-									</span>
-									<button
-										type="button"
-										class="queue-clear"
-										data-testid="queue-clear"
-										aria-label="Vider la file d'attente (garder le morceau en cours)"
-										title="Vider la file d'attente (garder le morceau en cours)"
-										disabled={$queue.length <= 1}
-										on:click|stopPropagation={clearQueue}
-									>
-										<Icon
-											name="trash"
-											size="1em"
-											color="currentColor"
-										/>
-										<span>Vider la file</span>
-									</button>
-								</div>
+								{#if !$isMobileMQ}
+									<!-- desktop toolbar; on mobile the count + button live in the sheet handle row -->
+									<div class="queue-toolbar">
+										<span class="queue-count" aria-live="polite">
+											{$queue.length}
+											{$queue.length > 1 ? "morceaux" : "morceau"}
+										</span>
+										<button
+											type="button"
+											class="queue-clear"
+											data-testid="queue-clear"
+											aria-label="Vider la file d'attente (garder le morceau en cours)"
+											title="Vider la file d'attente (garder le morceau en cours)"
+											disabled={$queue.length <= 1}
+											on:click|stopPropagation={clearQueue}
+										>
+											<Icon
+												name="trash"
+												size="1em"
+												color="currentColor"
+											/>
+											<span>Vider la file</span>
+										</button>
+									</div>
+								{/if}
 								<DraggableList
 									items={$queue}
 									swipeToRemove
@@ -1015,11 +1053,16 @@
 		justify-content: space-between;
 		gap: 0.5em;
 		padding: 0.35em 0.75em;
+		// keeps the button inside the panel (desktop panel edge)
+		padding-inline-end: 1rem;
 	}
 	.queue-count {
 		font-size: 0.8em;
 		color: hsla(0, 0%, 100%, 0.65);
 	}
+	// The `!important`s beat the global `button:not(.icon-btn)` rule
+	// (`color: #0f0f0f !important`, capitalize, light hover/focus/disabled
+	// backgrounds): it rendered "Vider La File" dark-on-grey at 1.05:1.
 	.queue-clear {
 		display: inline-flex;
 		align-items: center;
@@ -1027,20 +1070,56 @@
 		min-height: 2.5em;
 		padding: 0.4em 0.9em;
 		border-radius: 999px;
-		border: 1px solid hsla(0, 0%, 100%, 0.25);
-		background: hsla(0, 0%, 100%, 0.08);
-		color: #fff;
+		border: 1px solid hsla(0, 0%, 100%, 0.25) !important;
+		background: rgba(255, 255, 255, 0.08) !important;
+		color: #fff !important;
+		text-transform: none !important;
+		box-shadow: none !important;
+		white-space: nowrap;
 		font-size: 0.85em;
 		font-weight: 600;
 		cursor: pointer;
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
+			color: #fff !important;
+			background: rgba(255, 255, 255, 0.16) !important;
+			border-color: hsla(0, 0%, 100%, 0.45) !important;
+		}
 		&:disabled {
 			opacity: 0.4;
 			cursor: default;
+			color: #fff !important;
+			background: rgba(255, 255, 255, 0.08) !important;
+			border-color: hsla(0, 0%, 100%, 0.25) !important;
 		}
 		&:focus-visible {
 			outline: 2px solid #fff;
 			outline-offset: 2px;
 		}
+	}
+	// Mobile sheet head: [grip + "File d'attente · N morceaux"] ... [Vider la file]
+	.sheet-head {
+		display: flex;
+		align-items: center;
+		gap: 0.5em;
+		> .handle.horizontal {
+			flex: 1 1 auto;
+			min-width: 0;
+		}
+		@media screen and (min-width: 720px) {
+			display: none !important;
+		}
+	}
+	.queue-clear-head {
+		flex: 0 0 auto;
+		margin-inline-end: 1rem;
+	}
+	.handle-count {
+		font-weight: 500;
+		color: hsla(0, 0%, 100%, 0.65);
+		white-space: nowrap;
 	}
 
 	.immersive-wrapper {
