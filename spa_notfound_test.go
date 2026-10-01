@@ -16,7 +16,7 @@ import (
 func TestIsKnownSPAPath(t *testing.T) {
 	for p, want := range map[string]bool{
 		"/": true, "/home": true, "/search/daft%20punk": true, "/artist/UC123": true,
-		"/library/downloads-offline": true, "/listen": true, "/nope": false,
+		"/library/downloads-offline": true, "/listen": true, "/about": true, "/nope": false,
 		"/this/does/not/exist": false, "/api/v1/x": false, "/favicon.ico": false,
 	} {
 		if got := IsKnownSPAPath(p); got != want {

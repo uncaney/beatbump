@@ -22,6 +22,7 @@ var spaRoots = map[string]bool{
 	"artist": true, "channel": true, "listen": true, "watch": true,
 	"explore": true, "trending": true, "playlist": true, "release": true,
 	"lyrics": true, "session": true, "favorites": true, "downloads": true,
+	"about": true,
 }
 
 // IsKnownSPAPath reports whether p starts with a known SvelteKit route root.

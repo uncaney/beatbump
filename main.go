@@ -12,6 +12,10 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
+// version is the server build reported by /api/v1/stats/library (ST2). Set
+// with `-ldflags "-X main.version=<tag>"`, else YTM_VERSION, else "dev".
+var version = "dev"
+
 func main() {
 	db.InitDB()
 	downloader.StartWorker()
@@ -61,6 +65,7 @@ func cacheControlMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 // listeners, no DB side effects) so tests can exercise the routing table.
 func newServer() *echo.Echo {
 	e := echo.New()
+	api.SetVersion(version)
 
 	e.Use(middleware.CORS())
 	e.Use(middleware.Logger())
@@ -153,6 +158,9 @@ func newServer() *echo.Echo {
 	me.GET("/mix", api.MeMixHandler)
 	me.PUT("/nowplaying", api.MeNowPlayingPutHandler)
 	me.GET("/nowplaying", api.MeNowPlayingGetHandler)
+
+	// ST2 "A propos / Etat": library size + build version (no profile data).
+	e.GET("/api/v1/stats/library", api.LibraryStatsHandler)
 
 	// Download & Settings
 	e.GET("/api/v1/download/playlist", api.DownloadPlaylistHandler)

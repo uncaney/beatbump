@@ -42,6 +42,7 @@ func TestAPIWildcardDoesNotShadowRoutes(t *testing.T) {
 		{http.MethodGet, "/api/v1/artist/UC123", "/api/v1/artist/:artistId"},
 		{http.MethodDelete, "/api/v1/downloads/t1/tracks/v1", "/api/v1/downloads/:taskId/tracks/:videoId"},
 		{http.MethodGet, "/api/v1/me/stats/export.csv", "/api/v1/me/stats/export.csv"},
+		{http.MethodGet, "/api/v1/stats/library", "/api/v1/stats/library"},
 		{http.MethodGet, "/api/v1/nope.json", "/api/*"},
 	} {
 		c := e.NewContext(httptest.NewRequest(tc.method, tc.path, nil), httptest.NewRecorder())
