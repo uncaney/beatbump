@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"beatbump-server/backend/db"
@@ -21,7 +22,34 @@ const (
 	skipMaxFraction = 0.30
 	// skipDedupeWindow: an outbox replay of the same (ref, at) is a duplicate.
 	skipDedupeWindow = 2 * time.Second
+	// skipRetention / skipPurgeEvery (L12-6): skips only matter for 30 days
+	// (skipExcludeWindow); rows older than 90 days are deleted, at most once
+	// an hour, by the write path.
+	skipRetention  = 90 * 24 * time.Hour
+	skipPurgeEvery = time.Hour
 )
+
+// skipLastPurge is the unix-nano time of the last retention purge (0 = none
+// since start-up).
+var skipLastPurge atomic.Int64
+
+// purgeOldSkips deletes skip rows older than skipRetention when the last
+// purge is more than skipPurgeEvery old. One caller wins the slot (CAS); the
+// others return at once. It returns the number of rows deleted.
+func purgeOldSkips(now time.Time) int64 {
+	last := skipLastPurge.Load()
+	if last != 0 && now.Sub(time.Unix(0, last)) < skipPurgeEvery {
+		return 0
+	}
+	if !skipLastPurge.CompareAndSwap(last, now.UnixNano()) {
+		return 0
+	}
+	r := db.DB.Where("skipped_at < ?", now.Add(-skipRetention)).Delete(&db.SkipEvent{})
+	if r.Error != nil {
+		return 0
+	}
+	return r.RowsAffected
+}
 
 var skipSources = map[string]bool{"player": true, "mediasession": true, "fullscreen": true, "keyboard": true}
 
@@ -91,6 +119,7 @@ func MeRecordSkipHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "store"})
 	}
 	invalidateMixCache(pid)
+	purgeOldSkips(now)
 	return c.JSON(http.StatusOK, map[string]interface{}{"ok": true})
 }
 

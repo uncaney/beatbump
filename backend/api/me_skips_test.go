@@ -178,3 +178,36 @@ func TestIsSkipPosition(t *testing.T) {
 		}
 	}
 }
+
+// L12-6: the write path purges rows older than 90 days, at most once an hour.
+func TestSkipRetentionPurge(t *testing.T) {
+	useSkipDB(t)
+	skipLastPurge.Store(0)
+	t.Cleanup(func() { skipLastPurge.Store(0) })
+	now := time.Now()
+	db.DB.Create(&db.SkipEvent{ProfileID: "p-test", Ref: "old-1", SkippedAt: now.Add(-91 * 24 * time.Hour)})
+	db.DB.Create(&db.SkipEvent{ProfileID: "p-other", Ref: "old-2", SkippedAt: now.Add(-200 * 24 * time.Hour)})
+	db.DB.Create(&db.SkipEvent{ProfileID: "p-test", Ref: "recent", SkippedAt: now.Add(-89 * 24 * time.Hour)})
+	if code, _ := postSkip(t, `{"lid":"0123456789a","position":3,"duration":200,"source":"player"}`, nil); code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	if n := countSkips(t); n != 2 {
+		t.Fatalf("after purge: %d rows, want 2 (recent + new)", n)
+	}
+	// within the hour: no second purge
+	db.DB.Create(&db.SkipEvent{ProfileID: "p-test", Ref: "old-3", SkippedAt: now.Add(-100 * 24 * time.Hour)})
+	if code, _ := postSkip(t, `{"lid":"0123456789b","position":3,"duration":200,"source":"player"}`, nil); code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	if n := countSkips(t); n != 4 {
+		t.Fatalf("purged again within the hour: %d rows", n)
+	}
+	// an hour later the next write purges again
+	if got := purgeOldSkips(now.Add(skipPurgeEvery + time.Minute)); got != 1 {
+		t.Fatalf("hourly purge deleted %d, want 1", got)
+	}
+	// the composite index exists
+	if !db.DB.Migrator().HasIndex(&db.SkipEvent{}, "idx_se_profile_ref_at") {
+		t.Fatal("missing idx_se_profile_ref_at")
+	}
+}

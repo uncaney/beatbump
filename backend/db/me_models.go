@@ -67,16 +67,18 @@ type PlayEvent struct {
 
 // SkipEvent (c40b B6-10): the user pressed "next" (button or MediaSession
 // nexttrack) early in a track (< 20 s or < 30 % of it). Not a play: kept
-// apart from play_events so the stats keep counting real listens.
+// apart from play_events so the stats keep counting real listens. Rows older
+// than 90 days are purged at write time (api/me_skips.go, L12-6);
+// idx_se_profile_ref_at serves the per-(profile, ref) window queries.
 type SkipEvent struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	ProfileID string    `gorm:"index:idx_se_profile" json:"-"`
-	Ref       string    `gorm:"index" json:"ref"` // videoId/lid
-	Position  float64   `json:"position"`         // seconds into the track
-	Duration  float64   `json:"duration"`         // seconds (0 = unknown)
-	Source    string    `json:"source"`           // what pressed next: player | mediasession | fullscreen | keyboard
-	Origin    string    `json:"origin"`           // local | youtube
-	SkippedAt time.Time `gorm:"index" json:"skippedAt"`
+	ProfileID string    `gorm:"index:idx_se_profile;index:idx_se_profile_ref_at,priority:1" json:"-"`
+	Ref       string    `gorm:"index;index:idx_se_profile_ref_at,priority:2" json:"ref"` // videoId/lid
+	Position  float64   `json:"position"`                                                // seconds into the track
+	Duration  float64   `json:"duration"`                                                // seconds (0 = unknown)
+	Source    string    `json:"source"`                                                  // what pressed next: player | mediasession | fullscreen | keyboard
+	Origin    string    `json:"origin"`                                                  // local | youtube
+	SkippedAt time.Time `gorm:"index;index:idx_se_profile_ref_at,priority:3" json:"skippedAt"`
 }
 
 type PlaylistItem struct {
