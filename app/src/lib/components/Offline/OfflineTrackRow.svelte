@@ -360,6 +360,13 @@
 		opacity: 0.45;
 		cursor: not-allowed;
 	}
+	// U12-19: the destructive "x" is a quiet ghost (no ring, muted glyph) so
+	// it no longer weighs the same as the pin next to it; the ring comes back
+	// on hover / focus (the shared rule above is more specific).
+	.rm {
+		border-color: transparent !important;
+		color: $muted !important;
+	}
 	.pin.on,
 	.pin.on:hover,
 	.pin.on:focus,
