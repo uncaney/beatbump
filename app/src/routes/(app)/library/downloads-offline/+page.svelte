@@ -41,6 +41,7 @@
 	import { notify } from "$lib/utils";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
+	import SpaceCard from "./_SpaceCard.svelte";
 
 	type View = "albums" | "artists" | "recent";
 
@@ -350,6 +351,10 @@
 			<span class="status off">● Hors-ligne</span>
 		{/if}
 	</header>
+	<!-- F7 + F15: "Libérer" / "Préparer un pack" are actions of this page (they
+	     used to sit in Settings > Offline); one size selector for both. Always
+	     rendered: a pack is the way to fill an empty cache before a trip. -->
+	<SpaceCard on:changed={refresh} />
 	{#if tracks.length === 0}
 		<!-- Empty state with one action (audit 2.4): the explanation lives here
 		     instead of the .note above so it is not said twice on an empty page. -->

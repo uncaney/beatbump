@@ -7,19 +7,12 @@
 <script lang="ts">
 	import { browser } from "$app/environment";
 	import Header from "$components/Layouts/Header.svelte";
-	import { AudioPlayer } from "$lib/player";
 	import { settings, type Theme } from "$stores/settings";
 	import { continueAfterQueue } from "$lib/stores/list/localContinuation";
 	import OfflineSettings from "./OfflineSettings.svelte";
 	import { installPrompt, isInstalled, isIOS, promptInstall } from "$lib/stores/pwa";
 	import { notify } from "$lib/utils";
 	const themes: Theme[] = ["Dark", "Dim", "Midnight", "YTM"];
-
-	function handleStreamSelect() {
-		AudioPlayer.dispatch("update:stream_type", {
-			type: $settings.playback.Stream ?? "HTTP",
-		});
-	}
 
 	// PWA install (Settings > Application). States: installed (standalone or
 	// just installed) -> no button; Chromium fired beforeinstallprompt -> button;
@@ -36,16 +29,9 @@
 		}
 	};
 
-	const updatePrefsCookie = async () => {
-		await fetch("/settings/update.json", {
-			body: JSON.stringify({
-				"Proxy Thumbnails": $settings.network["Proxy Thumbnails"],
-				Restricted: $settings.search.Restricted,
-			}),
-			method: "POST",
-		});
-	};
-
+	// F14: the commented-out Quality / Stream / Network / Search / Restricted
+	// controls (~150 lines of dead HTML and an empty <section> in the DOM) were
+	// removed; their settings keys stay in the store with their defaults.
 	// The legacy "Download Path" / "Ongoing Listening Download" controls
 	// (backend /api/v1/settings keys downloadPath / ongoingListeningEnabled) were
 	// removed from this page: every played track is already cached by the
@@ -143,26 +129,6 @@
 					class="switch"
 				/>
 			</div>
-			<!-- <div class="setting">
-                <label for="quality">Quality</label>
-                <div class="select">
-                    <select
-                        name="quality"
-                        disabled
-                        id="quality"
-                        bind:value={$settings["playback"]["Quality"]}
-                    >
-                        {#each ["Normal", "High"] as option}
-                            <option
-                                value={option}
-                                selected={$settings["playback"]["Quality"] === option}
-                            >{option}</option
-                            >
-                        {/each}
-                    </select>
-                </div>
-            </div>-->
-
 			<div class="setting">
                 <!-- Audit v7 item 10: the help sits under the title like the
                      other rows (was a full-width <p> under the switch). -->
@@ -183,133 +149,8 @@
                     class="switch"
                 />
             </div>
-			<!-- <div class="setting">
-                <label for="stream">Stream </label>
-                <div class="select">
-                    <select
-                        name="stream"
-                        id="stream"
-                        bind:value={$settings["playback"]["Stream"]}
-                        on:change={handleStreamSelect}
-                    >
-                        {#each ["HTTP", "HLS"] as option}
-                            <option
-                                value={option}
-                                selected={$settings["playback"]["Stream"] === option}
-                            >{option}</option
-                            >
-                        {/each}
-                    </select>
-                </div>
-            </div>-->
-
 		</section>
 		<OfflineSettings />
-		<!--<section>
-            <span class="h5">Network</span>
-            <div class="setting">
-                <label for="proxy"
-                >Audio Proxy Server
-                    <span class=""
-                    >In order to use HLS streaming, a proxy server must be used. <br
-                    />Provide the URL to your own, or you can use the default.</span
-                    >
-                </label>
-                <div class="input-container">
-                    <div class="input no-btn mb-1">
-                        <input
-                            type="url"
-                            on:blur={(e) => {
-								let value = e.currentTarget.value;
-
-								if (!value.endsWith("/")) value = value + "/";
-
-								if (value.match(/^https?:\/\//i)) {
-									$settings["network"]["Stream Proxy Server"] = value;
-								} else if (value.match(/^(.[0-9]*\.?){1,4}:[0-9]+/im)) {
-									$settings["network"]["Stream Proxy Server"] = value;
-								}
-							}}
-                            on:input={(e) => {
-								let value = e.currentTarget.value;
-
-								if (value.match(/^https?:\/\//i)) {
-									$settings["network"]["Stream Proxy Server"] = value;
-								} else if (value.match(/^(.[0-9]*\.?){1,4}:[0-9]+/im)) {
-									$settings["network"]["Stream Proxy Server"] = value;
-								}
-							}}
-                            placeholder="https://hls.beatbump.io/"
-                            value={$settings["network"]["Stream Proxy Server"]}
-                        />
-                    </div>
-                    <button
-                        class="link mt-2"
-                        on:click={() => {
-							$settings["network"]["Stream Proxy Server"] =
-								"https://hls.beatbump.io/";
-						}}>Reset to default</button
-                    >
-                </div>
-            </div>
-            <div class="setting">
-                <label
-                >Proxy Audio
-                    <span class="">Proxy audio streams through a server.</span>
-                </label>
-                <input
-                    name="proxy-audio"
-                    id="proxy-audio"
-                    type="checkbox"
-                    bind:checked={$settings["network"]["Proxy Streams"]}
-                />
-                <label
-                    for="proxy-audio"
-                    class="switch"
-                />
-            </div>
-        </section>-->
-		<section>
-			<!-- <span class="h5">Search</span>
-            <div class="setting">
-                <label for="preserve">Preserve </label>
-                <div class="select">
-                    <select
-                        name="preserve"
-                        id="preserve"
-                        bind:value={$settings["search"]["Preserve"]}
-                    >
-                        {#each ["Category", "Query", "Category + Query", "None"] as option}
-                            <option
-                                value={option}
-                                selected={$settings["playback"]["Stream"] === option}
-                            >{option}</option
-                            >
-                        {/each}
-                    </select>
-                </div>
-            </div>-->
-			<!-- <div class="setting">
-                <label for="restricted"
-                >Restricted Mode <span
-                >Can help reduce the amount of explicit or potentially mature
-						content shown. <br />(filter is not 100% accurate)</span
-                ></label
-                >
-
-                <input
-                    name="restricted"
-                    id="restricted"
-                    on:input={updatePrefsCookie}
-                    type="checkbox"
-                    bind:checked={$settings["search"]["Restricted"]}
-                />
-                <label
-                    for="restricted"
-                    class="switch"
-                />
-            </div>-->
-		</section>
 		<section
 			id="settings-app"
 			aria-labelledby="app-heading"
