@@ -12,7 +12,9 @@ export type PlaybackContextKind =
 	| "playlist"
 	| "offline"
 	| "artist"
-	| "queue";
+	| "queue"
+	// c28c D4: library genre radio (/library/genres).
+	| "genre";
 
 export interface PlaybackContextInput {
 	kind: PlaybackContextKind;
@@ -36,6 +38,7 @@ const KIND_LABEL: Record<PlaybackContextKind, string> = {
 	offline: "Hors-ligne",
 	artist: "Artiste",
 	queue: "File",
+	genre: "Genre",
 };
 
 const RETURN_LABEL: Partial<Record<PlaybackContextKind, string>> = {
