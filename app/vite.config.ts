@@ -1,4 +1,5 @@
 import { sveltekit } from "@sveltejs/kit/vite";
+import { svelteRuntimeChunk } from "./scripts/svelteRuntimeChunk";
 import type { ConfigEnv } from "vite";
 import type { UserConfig } from "vitest/config";
 
@@ -9,15 +10,23 @@ const version_fmt = `${version.getUTCFullYear()}.${version
 	.padStart(2, "0")}.${version.getDate().toString().padStart(2, "0")}`;
 
 const config: UserConfig = {
-	plugins: [sveltekit()],
+	// PF4-1: svelteRuntimeChunk emits the stable svelte-runtime chunk (client build only).
+	plugins: [sveltekit(), svelteRuntimeChunk()],
 	build: {
 		minify: "esbuild",
 		cssTarget: ["chrome58", "edge16", "firefox57", "safari11"],
 		rollupOptions: {
 			output: {
+				// PF4-1 (audit perf v4): readable, stable export names for every
+				// shared chunk; minified ones ("kt", "Tt") were reassigned whenever
+				// a chunk's export set changed, renaming all its importers.
+				minifyInternalExports: false,
 				// hls.js (~400 KB raw) is statically imported by $lib/player.ts and
 				// used to make up ~87% of the shared "window" chunk, so every app
 				// change re-downloaded it. Keep it in its own long-lived chunk.
+				// PF4-1: in the client build, svelteRuntimeChunk puts the Svelte
+				// runtime in its own stable chunk ahead of this rule (instead of the
+				// tree-shaken "scheduler" chunk that 81 files import).
 				manualChunks(id) {
 					if (id.includes("/node_modules/hls.js/")) return "hls";
 				},
