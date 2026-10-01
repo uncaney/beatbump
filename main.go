@@ -125,6 +125,8 @@ func newServer() *echo.Echo {
 	// Local collection browse (whole self-hosted library, paginated + sorted)
 	e.GET("/api/v1/local/artists", api.LocalArtistsHandler)
 	e.GET("/api/v1/local/albums", api.LocalAlbumsHandler)
+	// c31b D5: strict local twin of a YouTube album ("Tu l as deja" banner).
+	e.GET("/api/v1/local/albums/match", api.CacheResponse(2*time.Minute, api.LocalAlbumMatchHandler))
 	e.GET("/api/v1/local/songs", api.LocalSongsHandler)
 	// seed=favorites is per profile: served uncached (audit L8-1), the rest shared-cached 5 min.
 	e.GET("/api/v1/local/related", api.LocalRelatedCached(5*time.Minute))

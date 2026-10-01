@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from "$app/stores";
 	import Header from "$lib/components/Layouts/Header.svelte";
+	import AlreadyOwnedBanner from "$lib/components/Layouts/AlreadyOwnedBanner.svelte";
 	import InfoBox from "$lib/components/Layouts/InfoBox.svelte";
 	import KeepOfflineButton from "$lib/components/ListItem/KeepOfflineButton.svelte";
 	import ListItem, {
@@ -134,6 +135,14 @@
 			{/if}
 		</svelte:fragment>
 	</InfoBox>
+	<!-- D5: YouTube album already in the library: link to the local version. -->
+	{#if !isLocalAlbum}
+		<AlreadyOwnedBanner
+			albumId={id}
+			artist={String(releaseInfo?.artist?.[0]?.name ?? "")}
+			title={String(releaseInfo?.title ?? "")}
+		/>
+	{/if}
 	{#if notFound}
 		<p class="release-missing">Cet album n'est plus dans la bibliothèque.</p>
 	{/if}
