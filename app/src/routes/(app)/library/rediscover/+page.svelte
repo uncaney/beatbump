@@ -106,7 +106,7 @@
 				title="Rien à redécouvrir pour l'instant"
 				text={anonymous
 					? "Dis-moi ton prénom dans Compte pour retrouver tes écoutes : cette liste suit ton historique."
-					: "Il faut des morceaux écoutés au moins 3 fois il y a plus de deux mois, et pas depuis un mois."}
+					: "Il faut des morceaux écoutés au moins 3 fois il y a plus de deux mois, et pas depuis un mois. Explore la bibliothèque pour commencer."}
 				href={anonymous ? "/library/account" : "/library/albums"}
 				cta={anonymous ? "Dire mon prénom" : "Explorer la bibliothèque"}
 			/>

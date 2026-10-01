@@ -9,6 +9,9 @@ form {
 	}
 }
 
+// Original Beatbump forms (Settings, Sync, playlist popups) keep their small
+// caps. U12-9: the program screens ("Taille", "Trier", "Dis-moi ton prénom",
+// MixtapeSheet, OfflineSettings) reset `font-variant-caps` on their own labels.
 label {
 	font-weight: 400;
 	font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,

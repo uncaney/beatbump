@@ -103,8 +103,10 @@
 	<CollectionNav active="recent" />
 	<h1>Écoutes</h1>
 
-	<section>
-		<h2>Écoutés récemment</h2>
+	<!-- U12-7: one page title; the sub-heading only appears when a second
+	     section ("Les plus écoutés") needs telling apart. -->
+	<section aria-label="Écoutés récemment">
+		{#if showTop}<h2>Écoutés récemment</h2>{/if}
 		{#if loading}
 			<p class="state">Chargement…</p>
 		{:else if offline}

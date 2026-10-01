@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from "$components/EmptyState/EmptyState.svelte";
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import PlayAllBar from "$components/PlayAllBar/PlayAllBar.svelte";
@@ -61,7 +62,7 @@
 	});
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active="saved" />
 	<h1>Favoris</h1>
 
@@ -86,9 +87,11 @@
 		</section>
 	{/if}
 
-	<section>
+	<!-- U12-7: one page title; "Morceaux et albums" only when followed artists
+	     sit above it. -->
+	<section aria-label="Morceaux et albums">
 		<div class="fav-head">
-			<h2>Morceaux et albums</h2>
+			{#if follows.length > 0}<h2>Morceaux et albums</h2>{/if}
 			{#if !loading && keepableTracks(items).length}
 				<KeepOfflineButton tracks={items} />
 			{/if}
@@ -98,7 +101,14 @@
 		{:else if offline && items.length === 0}
 			<MeOffline text="Tes sauvegardes reviendront avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
 		{:else if items.length === 0}
-			<p class="state">Aucun favori pour l'instant : utilise le ♥ dans le menu d'un morceau.</p>
+			<EmptyState
+				testid="empty-state"
+				icon="heart"
+				title="Aucun favori pour l'instant"
+				text="Ouvre le menu ⋮ d'un morceau ou d'un album et touche le ♥ : il s'affichera ici."
+				href="/library/albums"
+				cta="Explorer la bibliothèque"
+			/>
 		{:else}
 			{#if offline}
 				<p

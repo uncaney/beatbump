@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { APIClient } from "$lib/api";
+	import { genreHref, normalizeGenreList } from "$lib/localGenres";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
 	import { onMount } from "svelte";
@@ -19,7 +20,8 @@
 		try {
 			const res = await APIClient.fetch("/api/v1/local/genres");
 			const data = await res.json();
-			genres = Array.isArray(data.genres) ? data.genres : [];
+			// U12-5: tolerant of a raw answer (split ";" / "/", junk dropped, merged).
+			genres = normalizeGenreList(data);
 		} catch (err) {
 			console.error("genres load failed", err);
 		}
@@ -68,12 +70,17 @@
 	{:else if filtered.length === 0}
 		<p class="state">{q ? `Aucun genre ne correspond à « ${q} ».` : "Aucun genre."}</p>
 	{:else}
-		<div class="chips">
-			{#each filtered as g}
-				<div class="chip-row">
+		<!-- U12-5: one row per genre (name + count on the left, play and shuffle
+		     aligned on the right), a grid instead of the wrapped zigzag. -->
+		<ul
+			class="genre-list"
+			data-testid="genre-list"
+		>
+			{#each filtered as g (g.name)}
+				<li class="chip-row">
 					<a
 						class="chip"
-						href={`/library/all-songs?genre=${encodeURIComponent(g.name)}`}
+						href={genreHref(g.name)}
 					>
 						<span class="name">{g.name}</span>
 						<span class="count">{g.count}</span>
@@ -104,9 +111,9 @@
 							size="1em"
 						/>
 					</button>
-				</div>
+				</li>
 			{/each}
-		</div>
+		</ul>
 	{/if}
 </main>
 
@@ -131,33 +138,42 @@
 		padding: 0.4rem 0.6rem;
 		max-width: 100%;
 	}
-	.chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
+	// U12-5: a list of equal rows; on wide screens several columns of the
+	// same rows (auto-fill), never a ragged flex-wrap.
+	.genre-list {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+		gap: 0.4rem 1.25rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
 	}
 	// UX1: a long genre name must not push its row past the 16 px gutter
-	// (no horizontal scroll at 390 px): the row and its chip shrink, the
-	// name ellipsizes.
+	// (no horizontal scroll at 390 px): the chip column shrinks, the name
+	// ellipsizes; play / shuffle keep their 44 px on the right.
 	.chip-row {
-		display: inline-flex;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto auto;
 		align-items: center;
-		gap: 0.3rem;
-		max-width: 100%;
+		gap: 0.4rem;
+		min-height: 48px;
 		min-width: 0;
 	}
 	.chip {
-		display: inline-flex;
+		display: flex;
 		align-items: center;
+		justify-content: space-between;
 		gap: 0.5rem;
 		min-width: 0;
+		box-sizing: border-box;
+		min-height: max(2.75rem, 44px);
 		.name {
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
-		padding: 0.4rem 0.8rem;
-		border-radius: 1rem;
+		padding: 0.4rem 0.9rem;
+		border-radius: 999px;
 		background: rgba(255, 255, 255, 0.07);
 		color: inherit;
 		text-decoration: none;
@@ -166,8 +182,10 @@
 		background: rgba(255, 255, 255, 0.16);
 	}
 	.chip .count {
-		color: #999;
-		font-size: 0.85rem;
+		color: #b3b3b3;
+		font-size: var(--text-secondary-size);
+		flex-shrink: 0;
+		font-variant-numeric: tabular-nums;
 	}
 	// L8-7: scoped `.genre-btn` (0,2,0) beats the button system's
 	// `min-height: max(2.75rem, 44px)` (0,1,0): `width/height: 2rem` gave

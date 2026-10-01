@@ -238,15 +238,15 @@
 			class="button-group release-actions"
 			data-testid="release-actions"
 		>
+			<!-- U12-4: one order for YouTube and local albums: play, keep (slot),
+			     radio (YouTube "album-radio" or local "radio-seed"), share, ⋮. -->
 			{#each buttons as { type, icon, text, action, label }, i}
 				{@const name = iconName(icon)}
-				{#if type === "icon"}
-					<!-- ⋮ always last, after the slot / share buttons below. -->
-				{:else}
+				{#if i === 0 && type !== "icon"}
 					<button
 						type="button"
-						class="ra-btn {i === 0 ? 'btn-primary' : 'btn-secondary'}"
-						data-testid={i === 0 ? "release-play" : "album-radio"}
+						class="ra-btn btn-primary"
+						data-testid="release-play"
 						aria-label={label ?? text}
 						title={label ?? text}
 						on:click={action}
@@ -262,6 +262,27 @@
 				{/if}
 			{/each}
 			<slot name="actions" />
+			{#each buttons as { type, icon, text, action, label }, i}
+				{@const name = iconName(icon)}
+				{#if i > 0 && type !== "icon"}
+					<button
+						type="button"
+						class="ra-btn btn-secondary"
+						data-testid="album-radio"
+						aria-label={label ?? text}
+						title={label ?? text}
+						on:click={action}
+					>
+						{#if name}
+							<Icon
+								{name}
+								size="1.1em"
+							/>
+						{/if}
+						<span class="ra-lbl">{text}</span>
+					</button>
+				{/if}
+			{/each}
 			{#if localAlbumId}
 				<button
 					type="button"
@@ -342,6 +363,11 @@
 	/* Audit v6 TOP 9: below 513 px the title is centred (listPages.scss) but
 	   the 40ch meta block started at the left edge, so artist + info line sat
 	   41 px left of the title centre. Centre the block itself. */
+	/* U12-11: listPages.scss sets `small` to 0.9em, which put the release line
+	   ("Album · 13 titres · 2013 · 1 h 14 min") at 10.8 px on phones. */
+	p.release-meta small {
+		font-size: var(--text-secondary-size);
+	}
 	@media screen and (max-width: 512.98px) {
 		p.release-meta {
 			margin-inline: auto;

@@ -189,6 +189,19 @@
 </main>
 
 <style lang="scss">
+	/* U12-10: the anchor itself is the 44 px hit box ("See All" was 39x28);
+	   negative block margins keep the header row's 28 px rhythm. */
+	a.link {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		min-height: max(2.75rem, 44px);
+		min-width: max(2.75rem, 44px);
+		margin-block: calc((28px - max(2.75rem, 44px)) / 2);
+		padding-inline: 0.25rem;
+		vertical-align: middle;
+	}
 	a small {
 		$color: rgb(175 175 175);
 
@@ -348,8 +361,8 @@
 		}
 	}
 	.genre-count {
-		color: #999;
-		font-size: 0.85em;
+		color: #b3b3b3;
+		font-size: var(--text-secondary-size);
 	}
 
 	.item-box {

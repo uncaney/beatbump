@@ -300,6 +300,9 @@
 		display: block;
 		margin-bottom: 0.4rem;
 		font-weight: 600;
+		/* U12-9: undo the global small caps of _forms.scss (original Beatbump forms only). */
+		font-variant-caps: normal;
+		letter-spacing: normal;
 	}
 	.name-row {
 		display: flex;

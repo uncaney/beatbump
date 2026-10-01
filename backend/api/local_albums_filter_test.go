@@ -80,6 +80,7 @@ func TestLocalAlbumsFilterAdded30d(t *testing.T) {
 func TestLocalAlbumsFilterNeverPlayed(t *testing.T) {
 	useTestDB(t)
 	stub := newAlbumFilterStub(t)
+	seedNamedProfiles(t, "p-test", "p-other")
 	seed := []db.PlayEvent{
 		{ProfileID: "p-test", Ref: "lidd1000000", Title: "Zeta 1", Artist: "Artist A", Album: "Zeta", Source: "local"},
 		{ProfileID: "p-test", Ref: "lidd1000031", Title: "Old 1", Source: "local"}, // no album label: Meili must catch it
@@ -136,6 +137,7 @@ func TestLocalAlbumsUnknownFilterIs400(t *testing.T) {
 // albums index nor re-confirms pages 1-4.
 func TestLocalAlbumsNeverPlayedPagingCostIsFlat(t *testing.T) {
 	useTestDB(t)
+	seedNamedProfiles(t, "p-test")
 	stub := &neverPlayedStub{}
 	for i := 0; i < 300; i++ {
 		lid := fmt.Sprintf("lidp%07d", i)
@@ -210,9 +212,11 @@ func TestLocalAlbumsNeverPlayedPagingCostIsFlat(t *testing.T) {
 // L10-6: a request without the bbp cookie gets a fresh random profile id, so
 // its never-played scan is never asked again: it must not enter the memo
 // (128 entries of ~1000 decoded docs pinned 60 s by a curl loop). With the
-// cookie the second page still comes from the memo.
+// cookie the second page still comes from the memo. Since U12-12 such a
+// request is anonymous and answered before any scan, which is stricter still.
 func TestNeverPlayedMemoOnlyWithProfileCookie(t *testing.T) {
 	useTestDB(t)
+	seedNamedProfiles(t, "p-test")
 	resetNeverPlayedMemo()
 	t.Cleanup(resetNeverPlayedMemo)
 	stub := &neverPlayedStub{}
@@ -241,8 +245,8 @@ func TestNeverPlayedMemoOnlyWithProfileCookie(t *testing.T) {
 	a0 := stub.albumCalls
 	anon()
 	anon()
-	if got := stub.albumCalls - a0; got != 2 {
-		t.Fatalf("anonymous requests: %d album scans, want 2 (no memo)", got)
+	if got := stub.albumCalls - a0; got != 0 {
+		t.Fatalf("anonymous requests: %d album scans, want 0 (anonymous answer, no memo)", got)
 	}
 	if n := memoLen(); n != 0 {
 		t.Fatalf("anonymous requests left %d memo entries", n)
@@ -265,6 +269,7 @@ func TestNeverPlayedMemoOnlyWithProfileCookie(t *testing.T) {
 // differences between the album doc and its tracks do not matter.
 func TestLocalAlbumsNeverPlayedBatchedConfirmation(t *testing.T) {
 	useTestDB(t)
+	seedNamedProfiles(t, "p-test")
 	resetNeverPlayedMemo()
 	stub := &neverPlayedStub{}
 	for i := 0; i < 260; i++ {

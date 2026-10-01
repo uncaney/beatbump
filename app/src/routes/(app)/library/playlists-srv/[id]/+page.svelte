@@ -49,7 +49,7 @@
 	}
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active="my-playlists" />
 	{#if loading}
 		<p class="state">Chargement…</p>
@@ -66,7 +66,8 @@
 					<KeepOfflineButton {tracks} />
 				{/if}
 				<button
-					class="btn"
+					type="button"
+					class="btn-secondary"
 					on:click={remove}>Supprimer</button
 				>
 			</div>
@@ -109,6 +110,7 @@
 	}
 	.head {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
 		gap: 1rem;
@@ -123,14 +125,6 @@
 	.sub {
 		color: #999;
 		margin-left: 0.5rem;
-	}
-	.btn {
-		background: rgba(255, 255, 255, 0.1);
-		border: 1px solid rgba(255, 255, 255, 0.2);
-		border-radius: 0.4rem;
-		color: inherit;
-		padding: 0.4rem 0.9rem;
-		cursor: pointer;
 	}
 	.state {
 		color: #999;

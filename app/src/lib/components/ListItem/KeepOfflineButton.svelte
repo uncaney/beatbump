@@ -5,8 +5,8 @@
 	// I12: the batch runs in the module store `keepJobs` (keyed by source):
 	// leaving the page does not cancel it, only "Annuler" does, and the
 	// button shows the running batch again when the page is reopened.
-	// UX2 (cycle 35): `compact` renders a 44px corner .icon-btn (download
-	// pictogram, "9/14" while running, green when ready) for dense grids such
+	// UX2 (cycle 35): `compact` renders a 44px corner .icon-btn (pin
+	// pictogram since U12-3, "9/14" while running, green when ready) for dense grids such
 	// as the Mixes cards; same testid / data-state / data-ready / data-total.
 	import { page } from "$app/stores";
 	import Icon from "$components/Icon/Icon.svelte";
@@ -24,9 +24,10 @@
 	/** UX2: icon-only variant (aria-label = state + card title, L10-13). */
 	export let compact = false;
 	/**
-	 * UX7: album action row. A download icon before the label; on phones the
-	 * idle / ready label folds to the icon (aria-label keeps the words), the
-	 * running "9/14 prêts" progress stays written.
+	 * UX7: album action row. A pin icon before the label (U12-3: the download
+	 * arrow is reserved for "Télécharger sur l'appareil"); on phones the idle /
+	 * ready label folds to a short "Garder" / "Gardé" next to the icon
+	 * (aria-label keeps the full words), the running "9/14 prêts" stays written.
 	 */
 	export let responsive = false;
 	/** L10-13: title of the card a compact button belongs to (part of its accessible name). */
@@ -58,6 +59,7 @@
 	}
 	$: label = keepLabel(progress, running);
 	$: state = running ? "running" : progress && progress.total && progress.ready === progress.total ? "ready" : "idle";
+	$: shortLabel = state === "ready" ? "Gardé" : "Garder";
 
 	function start() {
 		if (running || !key) return;
@@ -100,7 +102,7 @@
 				>
 			{:else}
 				<Icon
-					name="download"
+					name="pin"
 					size="1.25em"
 				/>
 			{/if}
@@ -138,9 +140,12 @@
 		disabled={running}
 		on:click|stopPropagation={start}
 		>{#if responsive}<Icon
-				name="download"
+				name="pin"
 				size="1.1em"
-			/><span class="keep-lbl">{label}</span>{:else}{label}{/if}</button
+			/><span class="keep-lbl">{label}</span><span
+				class="keep-short"
+				aria-hidden="true">{shortLabel}</span
+			>{:else}{label}{/if}</button
 	>
 	{#if running}
 		<button
@@ -168,13 +173,19 @@
 			cursor: progress;
 			opacity: 1;
 		}
+		.keep-short {
+			display: none;
+		}
 		@media only screen and (max-width: 719px) {
 			&.responsive:not(.show-label) {
 				min-width: max(2.75rem, 44px);
-				padding-inline: 0.6rem;
-				gap: 0;
+				padding-inline: 0.75rem;
+				gap: 0.3rem;
 				.keep-lbl {
 					display: none;
+				}
+				.keep-short {
+					display: inline;
 				}
 			}
 		}

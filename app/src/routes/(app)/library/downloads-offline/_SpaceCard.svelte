@@ -13,10 +13,11 @@
 	// window.__ytmFreeUpPlan / window.__ytmPackPlan are unchanged.
 	//
 	// UX8 (cycle 35): the card folds to one summary line behind
-	// [data-testid=space-toggle] so "Tout lire" stays above the fold. It is
-	// open by default (no stored preference, harness free_up_and_pack clicks
-	// free-up right after goto) and stays folded only once the user folded it
-	// (localStorage SPACE_OPEN_KEY).
+	// [data-testid=space-toggle] so "Tout lire" stays above the fold.
+	// U12-9 (cycle 37): FOLDED by default (no stored preference); the user's
+	// choice is remembered both ways (localStorage SPACE_OPEN_KEY "1" / "0"),
+	// and a running pack opens it so its progress and "Annuler" stay in view.
+	// Harness free_up_and_pack expands it through space-toggle first.
 	import { createEventDispatcher, onMount, tick } from "svelte";
 	import { get } from "svelte/store";
 	import {
@@ -39,7 +40,7 @@
 	import { currentTrack } from "$lib/stores/list";
 
 	const MB = 1024 * 1024;
-	/** UX8: "0" = the user folded the card; anything else (or nothing) = open. */
+	/** U12-9: "1" = the user opened the card, "0" = folded; nothing = folded. */
 	const SPACE_OPEN_KEY = "ytm-offline-space-open";
 	const SW_UNAVAILABLE = "Cache hors-ligne indisponible : le service worker n'a pas répondu (première visite, fenêtre privée ou rechargement nécessaire).";
 	const dispatch = createEventDispatcher<{ changed: void }>();
@@ -54,8 +55,8 @@
 	/** The one size (Mo) both actions use. */
 	let sizeMb: (typeof PACK_SIZES_MB)[number] = 100;
 
-	/** UX8: card unfolded (default) or folded to its summary line. */
-	let open = true;
+	/** U12-9: card folded to its summary line (default) or unfolded. */
+	let open = false;
 	function toggleOpen() {
 		open = !open;
 		try {
@@ -205,6 +206,9 @@
 		packResult = packProgress ? `${packProgress.ready}/${packProgress.total} prêts hors-ligne` : "Pack terminé";
 	}
 	$: packRunning = packState === "running" || packState === "planning";
+	// U12-9: a pack in progress (started here or found running on mount) unfolds
+	// the card once; only `packRunning` is read, so the user can still fold it.
+	$: if (packRunning) open = true;
 	$: packTarget = packPlan ? packPlan.target : sizeMb * MB;
 	$: packText =
 		packState === "planning"
@@ -307,7 +311,9 @@
 
 	onMount(() => {
 		try {
-			if (localStorage.getItem(SPACE_OPEN_KEY) === "0") open = false;
+			const stored = localStorage.getItem(SPACE_OPEN_KEY);
+			if (stored === "1") open = true;
+			else if (stored === "0" && !packRunning) open = false;
 		} catch {
 			/* ignore */
 		}
@@ -555,7 +561,6 @@
 		min-height: max(2.75rem, 44px);
 		padding: 0.25rem 0;
 		background: none;
-		border: 0;
 		color: inherit;
 		font: inherit;
 		text-align: left;
@@ -594,6 +599,9 @@
 		color: $muted;
 		font-size: var(--text-secondary-size);
 		text-transform: none;
+		/* U12-9: undo the global small caps of _forms.scss (original Beatbump forms only). */
+		font-variant-caps: normal;
+		letter-spacing: normal;
 	}
 	.select select {
 		min-height: max(2.75rem, 44px);

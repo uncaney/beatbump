@@ -364,6 +364,9 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 1rem;
+		/* U12-9: undo the global small caps of _forms.scss (original Beatbump forms only). */
+		font-variant-caps: normal;
+		letter-spacing: normal;
 		min-height: 2.75rem;
 		padding: 0.35rem 0;
 		cursor: pointer;

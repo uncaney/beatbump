@@ -147,7 +147,7 @@
 		{
 			// O8: dropdowns.config "Garder hors-ligne" (download then pin).
 			text: "Garder hors-ligne",
-			icon: "download",
+			icon: "pin",
 			action: () => {
 				if (!browser) return;
 				void keepItemOffline(data);
