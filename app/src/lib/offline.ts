@@ -7,7 +7,7 @@
 // Consumed event (emitted by the session list / prefetcher):
 //   window.dispatchEvent(new CustomEvent("ytm:prefetched", { detail: { item, url } }))
 //   -> cacheTrackOffline(item, url)
-import { APIClient } from "$lib/api";
+import { APIClient, PREFETCH_INIT } from "$lib/api";
 
 const KEY = "ytm-offline-tracks";
 const ACK_TIMEOUT_MS = 120_000; // a full track fetch on a slow link can take a while
@@ -109,8 +109,10 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 
 async function resolveAudioUrl(lid: string): Promise<string> {
 	try {
+		// Resolution only (save for offline / download to device), not a play:
+		// X-Ytm-Prefetch keeps the backend from acquiring album + lookahead (F12).
 		const p = await withTimeout(
-			APIClient.fetch(`/api/v1/player.json?videoId=${lid}`).then((r) => r.json()),
+			APIClient.fetch(`/api/v1/player.json?videoId=${lid}`, PREFETCH_INIT).then((r) => r.json()),
 			15_000,
 			null as any,
 		);

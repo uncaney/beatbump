@@ -1,5 +1,5 @@
 import { redirect } from "@sveltejs/kit";
-import { APIClient } from "$lib/api";
+import { APIClient, PREFETCH_INIT } from "$lib/api";
 
 /** Structured error of /api/v1/player.json ({error, status, reason}). */
 export type ShareError = { kind: string; reason: string };
@@ -16,8 +16,10 @@ export const load = async ({ url }) => {
 	}
 
 	const qs = `videoId=${id}${playlist ? `&playlistId=${playlist}` : ""}`;
+	// Opening a shared link is a preview, not a play: the acquisition happens
+	// when the user presses "Start Listening" (getSrc without the header) (F12).
 	const [playerRes, list] = await Promise.all([
-		APIClient.fetch(`/api/v1/player.json?${qs}`),
+		APIClient.fetch(`/api/v1/player.json?${qs}`, PREFETCH_INIT),
 		APIClient.fetch(`/api/v1/next.json?${qs}`)
 			.then((res) => res.json())
 			.catch(() => null),

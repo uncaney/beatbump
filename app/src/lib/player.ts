@@ -7,7 +7,7 @@ import type { HlsConfig } from "hls.js";
 import { tick } from "svelte";
 import { tweened } from "svelte/motion";
 import { writable } from "svelte/store";
-import { APIClient } from "./api";
+import { APIClient, PREFETCH_INIT } from "./api";
 import { announceNowPlaying, cacheTrackOffline, getCachedUrl, verifyCached } from "./offline";
 import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
@@ -830,6 +830,7 @@ export const getSrc = async (
 	playlistId?: string,
 	params?: string,
 	shouldAutoplay = true,
+	opts?: { prefetch?: boolean },
 ): Promise<
 	| {
 		body: ResponseBody | null;
@@ -837,6 +838,10 @@ export const getSrc = async (
 	}
 	| undefined
 > => {
+	// Not a playback start (getMoreLikeThis warm-up, guest continuation of a
+	// track the host already played): tell the backend so it serves the stream
+	// without acquiring the track (F12). A real play keeps the default path.
+	const prefetch = opts?.prefetch ?? !shouldAutoplay;
 
 	const currentTrack = SessionListService.value.mix.find(t => t.videoId === videoId);
 	if (currentTrack?.localUrl) {
@@ -853,7 +858,7 @@ export const getSrc = async (
 	const cached = await offlineFormats(videoId);
 	if (cached) return setTrack(cached, shouldAutoplay, currentTrack || (videoId ? { videoId } : undefined));
 
-	const res = await fetchPlayerJson(videoId, playlistId, params);
+	const res = await fetchPlayerJson(videoId, playlistId, params, 0, prefetch);
 	if (res instanceof PlayerRequestError) {
 		return handleError(res);
 	}
@@ -925,15 +930,18 @@ export class PlayerRequestError extends Error {
 
 const PLAYER_RETRY_DELAY_MS = 1500;
 
-async function fetchPlayerJson(videoId?: string, playlistId?: string, params?: string, attempt = 0): Promise<any> {
+async function fetchPlayerJson(videoId?: string, playlistId?: string, params?: string, attempt = 0, prefetch = false): Promise<any> {
 	let response: Response;
 	try {
-		response = await APIClient.fetch(`/api/v1/player.json?videoId=${videoId}&playlistId=${playlistId}&playerParams=${params}`);
+		response = await APIClient.fetch(
+			`/api/v1/player.json?videoId=${videoId}&playlistId=${playlistId}&playerParams=${params}`,
+			prefetch ? PREFETCH_INIT : undefined,
+		);
 	} catch (e) {
 		// Network failure (offline, DNS): behaves like an unreachable upstream.
 		if (attempt === 0) {
 			await new Promise((r) => setTimeout(r, PLAYER_RETRY_DELAY_MS));
-			return fetchPlayerJson(videoId, playlistId, params, 1);
+			return fetchPlayerJson(videoId, playlistId, params, 1, prefetch);
 		}
 		return new PlayerRequestError(0, "network", "NETWORK", String((e as Error)?.message || e));
 	}
@@ -964,7 +972,7 @@ async function fetchPlayerJson(videoId?: string, playlistId?: string, params?: s
 	if ((err.kind === "upstream" || err.kind === "timeout") && attempt === 0) {
 		notify("Service lecteur indisponible, nouvelle tentative…", "error");
 		await new Promise((r) => setTimeout(r, PLAYER_RETRY_DELAY_MS));
-		return fetchPlayerJson(videoId, playlistId, params, 1);
+		return fetchPlayerJson(videoId, playlistId, params, 1, prefetch);
 	}
 	return err;
 }
