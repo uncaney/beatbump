@@ -30,7 +30,8 @@ export type KeepResult = KeepProgress & { cancelled: boolean };
 export type KeepOptions = { onProgress?: (p: KeepProgress) => void; signal?: AbortSignal };
 export type KeepDeps = {
 	pin: (t: any) => Promise<PinResult>;
-	download: (t: any) => Promise<OfflineResult>;
+	/** I15: `pinned: true` asks the SW to write the entry pinned (atomic pin). */
+	download: (t: any, opts?: { pinned?: boolean }) => Promise<OfflineResult>;
 	/** SW cache summary for the quota estimate; null = unknown (no SW answer). */
 	cacheInfo: () => Promise<{ quota: number; pinnedBytes: number; avgBytes: number } | null>;
 };
@@ -57,7 +58,7 @@ const defaultDeps: KeepDeps = {
 	pin: (t) => pinOffline(t, true),
 	// A stable /localf or /aud URL goes straight to the SW, otherwise through
 	// the API URL resolution (downloadForOffline).
-	download: (t) => (isStableAudioUrl(t?._offlineUrl) ? cacheTrackOffline(t, t._offlineUrl) : downloadForOffline(t)),
+	download: (t, opts) => (isStableAudioUrl(t?._offlineUrl) ? cacheTrackOffline(t, t._offlineUrl, opts) : downloadForOffline(t, opts)),
 	cacheInfo: async () => {
 		const l = await listCachedAudio().catch(() => null);
 		if (!l || !Array.isArray(l.entries)) return null;
@@ -127,7 +128,9 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 				break;
 			}
 			pinnedBytes += est; // reserve while the download runs
-			const dl = () => deps.download(t).catch(() => ({ ok: false, reason: "error" }) as OfflineResult);
+			// I15: the download is written pinned by the SW (no eviction window
+			// before the pin below, which then only confirms the flag).
+			const dl = () => deps.download(t, { pinned: true }).catch(() => ({ ok: false, reason: "error" }) as OfflineResult);
 			const pinIt = () => deps.pin(t).catch(() => ({ ok: false, reason: "error" }) as PinResult);
 			let r = await dl();
 			// I15: each track is pinned as soon as ITS download lands (never

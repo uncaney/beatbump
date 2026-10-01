@@ -487,7 +487,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
  * "audio-cached" ack (with timeout) and stores `_cached` / `_bytes`.
  * Concurrent calls for the same URL share one in-flight promise. Never throws.
  */
-export function cacheTrackOffline(item: any, url: string): Promise<OfflineResult> {
+export function cacheTrackOffline(item: any, url: string, opts: { pinned?: boolean } = {}): Promise<OfflineResult> {
 	const lid = item && item.videoId;
 	if (!lid) return Promise.resolve({ ok: false, reason: "no id" });
 	if (!cacheableUrl(url)) return Promise.resolve({ ok: false, reason: "not cacheable" });
@@ -529,13 +529,15 @@ export function cacheTrackOffline(item: any, url: string): Promise<OfflineResult
 			write(list);
 
 			const ack = waitAck(url, ACK_TIMEOUT_MS);
-			sw.postMessage({ type: "cache-audio", url, videoId: lid });
+			// I15: `pinned` makes the SW write the entry pinned (atomic pin).
+			sw.postMessage(opts.pinned ? { type: "cache-audio", url, videoId: lid, pinned: true } : { type: "cache-audio", url, videoId: lid });
 			const a = await ack;
 			if (!a) {
 				// No ack in time: the SW may still finish; leave _cached as-is.
 				return { ok: false, reason: "timeout", cached: entry._cached === true };
 			}
 			const fields: Partial<OfflineTrack> = { _cached: !!a.ok, _bytes: a.ok ? a.bytes : entry._bytes };
+			if (a.ok && opts.pinned) fields._pinned = true;
 			// The SW may hold the track under another (earlier) URL: that is the
 			// one the <audio> element must request to hit the cache.
 			if (a.ok && typeof a.cachedUrl === "string" && a.cachedUrl) fields._offlineUrl = a.cachedUrl;
@@ -585,7 +587,7 @@ export async function recacheEvicted(): Promise<{ total: number; ok: number }> {
  * Explicit "save for offline" (alias of cacheTrackOffline with URL resolution).
  * Falls back to an on-device download when no service worker is usable.
  */
-export async function downloadForOffline(item: any): Promise<OfflineResult> {
+export async function downloadForOffline(item: any, opts: { pinned?: boolean } = {}): Promise<OfflineResult> {
 	const lid = item && item.videoId;
 	if (!lid) return { ok: false, reason: "no id" };
 
@@ -595,7 +597,7 @@ export async function downloadForOffline(item: any): Promise<OfflineResult> {
 
 	// Service-worker offline cache (works on macOS/Chrome/Android). iOS Safari/Brave
 	// in private mode or an in-app webview exposes no serviceWorker → degrade.
-	if (await getSW()) return cacheTrackOffline(item, url);
+	if (await getSW()) return cacheTrackOffline(item, url, opts);
 
 	// No usable service worker. If we own the file locally, save it straight to the
 	// device (Fichiers on iOS) — that survives offline without the SW. Otherwise be honest.

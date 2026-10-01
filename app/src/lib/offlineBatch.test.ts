@@ -305,3 +305,21 @@ describe("keepOffline pins per track (I15)", () => {
 		expect(r).toMatchObject({ ready: 0, failed: 0, refused: 1 });
 	});
 });
+
+describe("keepOffline I15 (atomic pin)", () => {
+	it("asks each download to be written pinned, then confirms the pin", async () => {
+		const f = fakeDeps({ cached: ["a"] });
+		const calls: Array<unknown> = [];
+		const inner = f.deps.download;
+		f.deps.download = (t, o) => {
+			calls.push([t.videoId, o]);
+			return inner(t, o);
+		};
+		const r = await keepOffline([tr("a"), tr("b"), tr("c")], {}, f.deps);
+		expect(r).toEqual({ ready: 3, failed: 0, refused: 0, total: 3, cancelled: false });
+		expect(calls.sort()).toEqual([
+			["b", { pinned: true }],
+			["c", { pinned: true }],
+		]);
+	});
+});

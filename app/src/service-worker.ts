@@ -14,7 +14,7 @@
 // for /aud/<id> that misses by URL is served from the videoId's entry.
 //
 // Page <-> SW message contract (all via navigator.serviceWorker / postMessage):
-//   page -> SW  { type: "cache-audio",     url, videoId? }
+//   page -> SW  { type: "cache-audio",     url, videoId?, pinned? }   (pinned: write the entry pinned, I15)
 //   SW  -> page { type: "audio-cached",    url, videoId, ok, bytes, reason?, already?, cachedUrl? }
 //                 reason "quota" = could not fit even after evicting the oldest entries
 //   page -> SW  { type: "uncache-audio",   url, videoId? }
@@ -544,7 +544,7 @@ type CacheResult = { ok: boolean; bytes: number; reason?: string; already?: bool
 // resort a no-cors fetch yields an opaque response with no status, headers or
 // readable body, so there is NO reliable signal that it is audio and not an
 // error page: we deliberately do not cache it (reported as reason "opaque").
-async function cacheAudio(rawUrl: string, videoId: string): Promise<CacheResult> {
+async function cacheAudio(rawUrl: string, videoId: string, pinNow = false): Promise<CacheResult> {
 	const abs = new URL(rawUrl, self.location.href).href;
 	const c = await caches.open(AUDIO_CACHE);
 
@@ -611,7 +611,10 @@ async function cacheAudio(rawUrl: string, videoId: string): Promise<CacheResult>
 	// entries and retry once; still failing → reason "quota".
 	// The pin of the previous entry (header or meta) is carried over (G6): a
 	// rotated /vp URL, recacheEvicted() or a re-download must not unpin a track.
-	let pinned = false;
+	// I15: `pinNow` (cache-audio { pinned: true }) stamps X-YTM-Pinned at write
+	// time, so a "Garder hors-ligne" download is never evicted between its
+	// write and its pin.
+	let pinned = pinNow;
 	if (videoId) {
 		const old = await getMeta(videoId);
 		if (old) {
@@ -649,7 +652,7 @@ async function cacheAudio(rawUrl: string, videoId: string): Promise<CacheResult>
 
 // In-flight dedup: one download per videoId (or per URL when no videoId).
 const inflight = new Map<string, Promise<CacheResult>>();
-function cacheAudioDeduped(rawUrl: string, videoId: string): Promise<CacheResult> {
+function cacheAudioDeduped(rawUrl: string, videoId: string, pinNow = false): Promise<CacheResult> {
 	let key: string;
 	try {
 		key = videoId ? "id:" + videoId : "url:" + new URL(rawUrl, self.location.href).href;
@@ -658,7 +661,7 @@ function cacheAudioDeduped(rawUrl: string, videoId: string): Promise<CacheResult
 	}
 	const running = inflight.get(key);
 	if (running) return running;
-	const p = cacheAudio(rawUrl, videoId).finally(() => {
+	const p = cacheAudio(rawUrl, videoId, pinNow).finally(() => {
 		if (inflight.get(key) === p) inflight.delete(key);
 	});
 	inflight.set(key, p);
@@ -681,8 +684,9 @@ self.addEventListener("message", (event) => {
 
 	if (data.type === "cache-audio" && typeof data.url === "string") {
 		const videoId = typeof data.videoId === "string" ? data.videoId : "";
+		const pinNow = data.pinned === true;
 		ev.waitUntil(
-			cacheAudioDeduped(data.url, videoId)
+			cacheAudioDeduped(data.url, videoId, pinNow)
 				.catch((e) => ({ ok: false, bytes: 0, reason: isQuotaError(e) ? "quota" : String((e && e.message) || e || "error") }))
 				.then((r) => reply(ev, { type: "audio-cached", url: data.url, videoId, ...r })),
 		);
