@@ -175,25 +175,6 @@
                 </div>
             </div>-->
 
-			<div class="setting">
-				<!-- svelte-ignore a11y-label-has-associated-control -->
-				<label
-					>Playback Updates URL
-					<span class=""
-						>Playing a song updates the URL with the song's sharing URL.</span
-					>
-				</label>
-				<input
-					name="update-url"
-					id="update-url"
-					type="checkbox"
-					bind:checked={$settings["playback"]["Playback Updates URL"]}
-				/>
-				<label
-					for="update-url"
-					class="switch"
-				/>
-			</div>
 		</section>
 		<OfflineSettings />
 		<!--<section>

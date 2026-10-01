@@ -21,6 +21,7 @@ interface Playback {
 	"Remember Last Track"?: boolean;
 	Quality?: "Normal" | "Low";
 	Stream?: StreamType;
+	/** No consumer any more; kept so stored settings keep deserialising (audit F20). */
 	"Playback Updates URL"?: boolean;
 }
 interface Network {
