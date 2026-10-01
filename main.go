@@ -77,6 +77,8 @@ func newServer() *echo.Echo {
 		echo.TrustPrivateNet(true),
 	)
 
+	// Audit L10-1: a panic in any handler must cost one 500, never the process.
+	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
 	e.Use(middleware.Logger())
 	// Compression: the shell, hashed bundles and JSON APIs were served uncompressed (444 KB

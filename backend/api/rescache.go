@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/list"
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -283,6 +284,14 @@ func refreshInBackground(rc *responseCache, key string, c echo.Context, ttl, gra
 		defer rc.bg.Done()
 		defer rc.endRefresh(key)
 		defer cancel()
+		// Audit L10-1: the refresh runs outside Echo's request path, so a handler
+		// panic (YouTube answering 200 without tabs, nil deref in a parser) would
+		// kill the whole server instead of one request. Keep serving the stale entry.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[rescache] refresh of %s panicked: %v", key, r)
+			}
+		}()
 		bw := &bufferWriter{header: http.Header{}}
 		c2 := e.NewContext(r2, bw)
 		c2.SetPath(path)

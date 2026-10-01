@@ -50,6 +50,10 @@ func ParseHome(homeResponse _youtube.HomeResponse) interface{} {
 		response["header"] = homeResponse.Header.MusicHeaderRenderer.Title.Runs[0].Text
 	}
 	//var description Description = Description{}
+	// Audit L10-1: YouTube sometimes answers 200 with no tab (consent / bot check page).
+	if len(homeResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs) == 0 {
+		return response
+	}
 	if len(homeResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents) != 0 {
 		for _, section := range homeResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents {
 			musicShelf := Carousel{}
