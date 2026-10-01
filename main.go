@@ -28,6 +28,25 @@ func apiNotFound(c echo.Context) error {
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
 }
 
+// cacheControlMiddleware is the browser cache policy: hashed immutable assets
+// are cached forever, the shell / service worker / manifest are always
+// revalidated, API responses are never stored by the browser.
+func cacheControlMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		p := c.Request().URL.Path
+		h := c.Response().Header()
+		switch {
+		case strings.HasPrefix(p, "/_app/immutable/"):
+			h.Set("Cache-Control", "public, max-age=31536000, immutable")
+		case p == "/" || p == "/index.html" || p == "/service-worker.js" || p == "/manifest.json":
+			h.Set("Cache-Control", "no-cache")
+		case strings.HasPrefix(p, "/api/"):
+			h.Set("Cache-Control", "no-store")
+		}
+		return next(c)
+	}
+}
+
 // newServer builds the Echo router with every middleware and route (no
 // listeners, no DB side effects) so tests can exercise the routing table.
 func newServer() *echo.Echo {
@@ -42,23 +61,7 @@ func newServer() *echo.Echo {
 		Level:   5,
 		Skipper: func(c echo.Context) bool { return api.IsAudioProxyPath(c.Request().URL.Path) },
 	}))
-	// Cache policy: hashed immutable assets are cached forever, the shell / service worker /
-	// manifest are always revalidated, API responses are never stored by the browser.
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			p := c.Request().URL.Path
-			h := c.Response().Header()
-			switch {
-			case strings.HasPrefix(p, "/_app/immutable/"):
-				h.Set("Cache-Control", "public, max-age=31536000, immutable")
-			case p == "/" || p == "/index.html" || p == "/service-worker.js" || p == "/manifest.json":
-				h.Set("Cache-Control", "no-cache")
-			case strings.HasPrefix(p, "/api/"):
-				h.Set("Cache-Control", "no-store")
-			}
-			return next(c)
-		}
-	})
+	e.Use(cacheControlMiddleware)
 	// Unknown SPA routes get the shell with a real 404 status (spa_notfound.go).
 	e.Use(spaNotFound("./build"))
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
@@ -83,8 +86,11 @@ func newServer() *echo.Echo {
 	e.GET("/api/v1/search.json", api.CacheResponse(60*time.Second, api.SearchEndpointHandler))
 	e.GET("/api/v1/player.json", api.PlayerEndpointHandler)
 	e.GET("/api/v1/playlist.json", api.PlaylistEndpointHandler)
-	e.GET("/api/v1/next.json", api.NextEndpointHandler)
-	e.GET("/api/v1/related.json", api.RelatedEndpointHandler)
+	// K6: next.json (p50 1.0 s) and related.json (p50 0.4 s) depend on the
+	// videoId/playlistId/continuation query only; player.json stays uncached
+	// (signed stream URLs).
+	e.GET("/api/v1/next.json", api.CacheResponse(2*time.Minute, api.NextEndpointHandler))
+	e.GET("/api/v1/related.json", api.CacheResponse(5*time.Minute, api.RelatedEndpointHandler))
 	e.GET("/api/v1/main.json", api.CacheResponse(5*time.Minute, api.AlbumEndpointHandler))
 	e.GET("/api/v1/get_queue.json", api.GetQueueHandler)
 	e.GET("/api/v1/get_search_suggestions.json", api.GetSearchSuggstionsHandler)

@@ -48,3 +48,29 @@ func TestAPIWildcardDoesNotShadowRoutes(t *testing.T) {
 		}
 	}
 }
+
+// K6: next.json and related.json go through the
+// TTL response cache (X-Ytm-Cache header); player.json never does (signed
+// stream URLs). YTM_API_CACHE=0 keeps the wrapper in BYPASS so the test does
+// not populate the process-wide cache, and the requests are built so every
+// handler fails fast on validation without touching YouTube.
+func TestCachedRoutesCarryXYtmCache(t *testing.T) {
+	t.Setenv("YTM_API_CACHE", "0")
+	e := newServer()
+	get := func(target string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		return rec
+	}
+	for _, target := range []string{
+		"/api/v1/next.json",
+		"/api/v1/related.json?browseId=",
+	} {
+		if got := get(target).Header().Get("X-Ytm-Cache"); got != "BYPASS" {
+			t.Fatalf("%s: X-Ytm-Cache %q, want BYPASS (route not wrapped by CacheResponse)", target, got)
+		}
+	}
+	if got := get("/api/v1/player.json").Header().Get("X-Ytm-Cache"); got != "" {
+		t.Fatalf("player.json must stay uncached, got X-Ytm-Cache %q", got)
+	}
+}
