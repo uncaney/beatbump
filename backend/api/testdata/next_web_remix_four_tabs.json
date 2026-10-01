@@ -1,0 +1,880 @@
+{
+  "responseContext": {
+    "visitorData": "CgttcEkwem5KSmtzYyiN-vbVBjIoCgJGUhIiEh4SHAsMDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicgNw%3D%3D"
+  },
+  "currentVideoEndpoint": {
+    "clickTrackingParams": "CAAQg2ciEwjUlMrv2peXAxVshDcIHV7FKC7KAQTjEanc",
+    "watchEndpoint": {
+      "videoId": "9bZkp7q19f0",
+      "playlistId": "RDAMVM9bZkp7q19f0",
+      "index": 0,
+      "playerParams": "ygYQNTZCNDRGNkQxMDU1N0NDNg%3D%3D",
+      "playlistSetVideoId": "56B44F6D10557CC6",
+      "loggingContext": {
+        "vssLoggingContext": {
+          "serializedContextData": "GhFSREFNVk05YlprcDdxMTlmMA%3D%3D"
+        }
+      }
+    }
+  },
+  "contents": {
+    "singleColumnMusicWatchNextResultsRenderer": {
+      "tabbedRenderer": {
+        "watchNextTabbedResultsRenderer": {
+          "tabs": [
+            {
+              "tabRenderer": {
+                "title": "Up next",
+                "content": {
+                  "musicQueueRenderer": {
+                    "content": {
+                      "playlistPanelRenderer": {
+                        "contents": [
+                          {
+                            "playlistPanelVideoRenderer": {
+                              "title": {
+                                "runs": [
+                                  {
+                                    "text": "Gangnam Style"
+                                  }
+                                ]
+                              },
+                              "longBylineText": {
+                                "runs": [
+                                  {
+                                    "text": "Psy",
+                                    "navigationEndpoint": {
+                                      "clickTrackingParams": "COMGEMggGAAiEwjUlMrv2peXAxVshDcIHV7FKC7KAQTjEanc",
+                                      "browseEndpoint": {
+                                        "browseId": "UC3gsgELlsob7AFi-mHOqNkg",
+                                        "browseEndpointContextSupportedConfigs": {
+                                          "browseEndpointContextMusicConfig": {
+                                            "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "text": " • "
+                                  },
+                                  {
+                                    "text": "6B views"
+                                  },
+                                  {
+                                    "text": " • "
+                                  },
+                                  {
+                                    "text": "32M likes"
+                                  }
+                                ]
+                              },
+                              "thumbnail": {
+                                "thumbnails": [
+                                  {
+                                    "url": "https://i.ytimg.com/vi/9bZkp7q19f0/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nIsOyi_A9eiF4jT5pgbqF4_4IRkA",
+                                    "width": 400,
+                                    "height": 225
+                                  }
+                                ]
+                              },
+                              "lengthText": {
+                                "runs": [
+                                  {
+                                    "text": "4:13"
+                                  }
+                                ],
+                                "accessibility": {
+                                  "accessibilityData": {
+                                    "label": "4 minutes, 13 seconds"
+                                  }
+                                }
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "COMGEMggGAAiEwjUlMrv2peXAxVshDcIHV7FKC4yA0JGYUj969fV-5SZ2_UBmgEFCAwQ-B3KAQTjEanc",
+                                "watchEndpoint": {
+                                  "videoId": "9bZkp7q19f0",
+                                  "playlistId": "RDAMVM9bZkp7q19f0",
+                                  "index": 0,
+                                  "params": "OAHyAQIIAQ%3D%3D",
+                                  "playerParams": "8AUBygYQNTZCNDRGNkQxMDU1N0NDNtIHCQlNARCCnT_ysLAIAg%3D%3D",
+                                  "playlistSetVideoId": "56B44F6D10557CC6",
+                                  "loggingContext": {
+                                    "vssLoggingContext": {
+                                      "serializedContextData": "GhFSREFNVk05YlprcDdxMTlmMA%3D%3D"
+                                    }
+                                  },
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "hasPersistentPlaylistPanel": true,
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                    }
+                                  }
+                                }
+                              },
+                              "videoId": "9bZkp7q19f0",
+                              "trackingParams": "COMGEMggGAAiEwjUlMrv2peXAxVshDcIHV7FKC4=",
+                              "menu": {
+                                "menuRenderer": {
+                                  "items": [
+                                    {
+                                      "menuNavigationItemRenderer": {
+                                        "text": {
+                                          "runs": [
+                                            {
+                                              "text": "Start mix"
+                                            }
+                                          ]
+                                        },
+                                        "icon": {
+                                          "iconType": "MIX"
+                                        },
+                                        "navigationEndpoint": {
+                                          "clickTrackingParams": "CPMGEJvzBRgAIhMI1JTK79qXlwMVbIQ3CB1exSguygEE4xGp3A==",
+                                          "watchEndpoint": {
+                                            "videoId": "9bZkp7q19f0",
+                                            "playlistId": "RDAMVM9bZkp7q19f0",
+                                            "params": "wAEB",
+                                            "loggingContext": {
+                                              "vssLoggingContext": {
+                                                "serializedContextData": "GhFSREFNVk05YlprcDdxMTlmMA%3D%3D"
+                                              }
+                                            },
+                                            "watchEndpointMusicSupportedConfigs": {
+                                              "watchEndpointMusicConfig": {
+                                                "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "trackingParams": "CPMGEJvzBRgAIhMI1JTK79qXlwMVbIQ3CB1exSgu"
+                                      }
+                                    }
+                                  ],
+                                  "trackingParams": "COMGEMggGAAiEwjUlMrv2peXAxVshDcIHV7FKC4=",
+                                  "accessibility": {
+                                    "accessibilityData": {
+                                      "label": "Action menu"
+                                    }
+                                  }
+                                }
+                              },
+                              "playlistSetVideoId": "56B44F6D10557CC6",
+                              "canReorder": true
+                            }
+                          },
+                          {
+                            "playlistPanelVideoRenderer": {
+                              "title": {
+                                "runs": [
+                                  {
+                                    "text": "Gentleman"
+                                  }
+                                ]
+                              },
+                              "longBylineText": {
+                                "runs": [
+                                  {
+                                    "text": "Psy",
+                                    "navigationEndpoint": {
+                                      "clickTrackingParams": "CNIGEMggGAEiEwjUlMrv2peXAxVshDcIHV7FKC7KAQTjEanc",
+                                      "browseEndpoint": {
+                                        "browseId": "UC3gsgELlsob7AFi-mHOqNkg",
+                                        "browseEndpointContextSupportedConfigs": {
+                                          "browseEndpointContextMusicConfig": {
+                                            "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "text": " • "
+                                  },
+                                  {
+                                    "text": "1.7B views"
+                                  },
+                                  {
+                                    "text": " • "
+                                  },
+                                  {
+                                    "text": "9.1M likes"
+                                  }
+                                ]
+                              },
+                              "thumbnail": {
+                                "thumbnails": [
+                                  {
+                                    "url": "https://i.ytimg.com/vi/ASO_zypdnsQ/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mUlmdMFmUoaWiHGiygvSiza54iFA",
+                                    "width": 400,
+                                    "height": 225
+                                  }
+                                ]
+                              },
+                              "lengthText": {
+                                "runs": [
+                                  {
+                                    "text": "3:54"
+                                  }
+                                ],
+                                "accessibility": {
+                                  "accessibilityData": {
+                                    "label": "3 minutes, 54 seconds"
+                                  }
+                                }
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CNIGEMggGAEiEwjUlMrv2peXAxVshDcIHV7FKC4yA0JGYUjEvfbS8vnvkQGaAQUIDBD4HcoBBOMRqdw=",
+                                "watchEndpoint": {
+                                  "videoId": "ASO_zypdnsQ",
+                                  "playlistId": "RDAMVM9bZkp7q19f0",
+                                  "index": 1,
+                                  "params": "OAHyAQIIAQ%3D%3D",
+                                  "playerParams": "8AUBygYQMjg5RjRBNDZERjBBMzBEMtIHCQlNARCCnT_ysLAIAg%3D%3D",
+                                  "playlistSetVideoId": "289F4A46DF0A30D2",
+                                  "loggingContext": {
+                                    "vssLoggingContext": {
+                                      "serializedContextData": "GhFSREFNVk05YlprcDdxMTlmMA%3D%3D"
+                                    }
+                                  },
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "hasPersistentPlaylistPanel": true,
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                    }
+                                  }
+                                }
+                              },
+                              "videoId": "ASO_zypdnsQ",
+                              "trackingParams": "CNIGEMggGAEiEwjUlMrv2peXAxVshDcIHV7FKC4=",
+                              "menu": {
+                                "menuRenderer": {
+                                  "items": [
+                                    {
+                                      "menuNavigationItemRenderer": {
+                                        "text": {
+                                          "runs": [
+                                            {
+                                              "text": "Start mix"
+                                            }
+                                          ]
+                                        },
+                                        "icon": {
+                                          "iconType": "MIX"
+                                        },
+                                        "navigationEndpoint": {
+                                          "clickTrackingParams": "COIGEJvzBRgAIhMI1JTK79qXlwMVbIQ3CB1exSguygEE4xGp3A==",
+                                          "watchEndpoint": {
+                                            "videoId": "ASO_zypdnsQ",
+                                            "playlistId": "RDAMVMASO_zypdnsQ",
+                                            "params": "wAEB",
+                                            "loggingContext": {
+                                              "vssLoggingContext": {
+                                                "serializedContextData": "GhFSREFNVk1BU09fenlwZG5zUQ%3D%3D"
+                                              }
+                                            },
+                                            "watchEndpointMusicSupportedConfigs": {
+                                              "watchEndpointMusicConfig": {
+                                                "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "trackingParams": "COIGEJvzBRgAIhMI1JTK79qXlwMVbIQ3CB1exSgu"
+                                      }
+                                    }
+                                  ],
+                                  "trackingParams": "CNIGEMggGAEiEwjUlMrv2peXAxVshDcIHV7FKC4=",
+                                  "accessibility": {
+                                    "accessibilityData": {
+                                      "label": "Action menu"
+                                    }
+                                  }
+                                }
+                              },
+                              "playlistSetVideoId": "289F4A46DF0A30D2",
+                              "canReorder": true
+                            }
+                          }
+                        ],
+                        "playlistId": "RDAMVM9bZkp7q19f0",
+                        "title": null,
+                        "continuations": [
+                          {
+                            "nextRadioContinuationData": {
+                              "continuation": "CDISPhILdFd5dWdsR0NLZ0UiEVJEQU1WTTliWmtwN3ExOWYwMgR3QUVCODHQAQH6ARBENjI1QUI0MDI5NEQzODFEGAo%3D",
+                              "clickTrackingParams": "CCkQxyAiEwjUlMrv2peXAxVshDcIHV7FKC7KAQTjEanc"
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "hack": true,
+                    "musicQueueConfig": {},
+                    "subHeaderChipCloud": {
+                      "chipCloudRenderer": {
+                        "chips": [
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "All"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CCUQ_V0YACITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CCUQ_V0YACITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDAMVM9bZkp7q19f0",
+                                      "params": "ggUMRWdBWUFRJTNEJTNE",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhFSREFNVk05YlprcDdxMTlmMA%3D%3D"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CCUQ_V0YACITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "All"
+                                }
+                              },
+                              "isSelected": true,
+                              "uniqueId": "All"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "Popular"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CCQQ_V0YASITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CCQQ_V0YASITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATpYv9bZkp7q19f0",
+                                      "params": "ggU4Q2hKU1JFRlVjRmwyT1dKYWEzQTNjVEU1WmpBWUN5SU5DZ2RRYjNCMWJHRnlHZ0psYmclM0QlM0Q%3D",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhJSREFUcFl2OWJaa3A3cTE5ZjA%3D"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CCQQ_V0YASITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "Popular"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "Popular"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "Discover"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CCMQ_V0YAiITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CCMQ_V0YAiITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATiXv9bZkp7q19f0",
+                                      "params": "ggU2Q2hKU1JFRlVhVmgyT1dKYWEzQTNjVEU1WmpBWUN5SU9DZ2hFYVhOamIzWmxjaG9DWlc0JTNE",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhJSREFUaVh2OWJaa3A3cTE5ZjA%3D"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CCMQ_V0YAiITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "Discover"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "Discover"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "Deep cuts"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CCIQ_V0YAyITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CCIQ_V0YAyITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATpXv9bZkp7q19f0",
+                                      "params": "ggU0Q2hKU1JFRlVjRmgyT1dKYWEzQTNjVEU1WmpBWUN5SVBDZ2xFWldWd0lHTjFkSE1hQW1WdQ%3D%3D",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhJSREFUcFh2OWJaa3A3cTE5ZjA%3D"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CCIQ_V0YAyITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "Deep cuts"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "Deep cuts"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "Party"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CCEQ_V0YBCITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CCEQ_V0YBCITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATmev9bZkp7q19f0",
+                                      "params": "ggUyQ2hKU1JFRlViV1YyT1dKYWEzQTNjVEU1WmpBWUN5SUxDZ1ZRWVhKMGVSb0NaVzQlM0Q%3D",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhJSREFUbWV2OWJaa3A3cTE5ZjA%3D"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CCEQ_V0YBCITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "Party"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "Party"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "2010s"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CCAQ_V0YBSITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CCAQ_V0YBSITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATd0Xv9bZkp7q19f0",
+                                      "params": "ggUwQ2hOU1JFRlVaREJZZGpsaVdtdHdOM0V4T1dZd0dBc2lDd29GTWpBeE1ITWFBbVZ1",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhNSREFUZDBYdjliWmtwN3ExOWYw"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CCAQ_V0YBSITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "2010s"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "2010s"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "Pump-up"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CB8Q_V0YBiITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CB8Q_V0YBiITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATmYv9bZkp7q19f0",
+                                      "params": "ggU4Q2hKU1JFRlViVmwyT1dKYWEzQTNjVEU1WmpBWUN5SU5DZ2RRZFcxd0xYVndHZ0psYmclM0QlM0Q%3D",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhJSREFUbVl2OWJaa3A3cTE5ZjA%3D"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CB8Q_V0YBiITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "Pump-up"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "Pump-up"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "2020s"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CB4Q_V0YByITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CB4Q_V0YByITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATd1Xv9bZkp7q19f0",
+                                      "params": "ggUwQ2hOU1JFRlVaREZZZGpsaVdtdHdOM0V4T1dZd0dBc2lDd29GTWpBeU1ITWFBbVZ1",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhNSREFUZDFYdjliWmtwN3ExOWYw"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CB4Q_V0YByITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "2020s"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "2020s"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "Workout"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CB0Q_V0YCCITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CB0Q_V0YCCITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATmZv9bZkp7q19f0",
+                                      "params": "ggU4Q2hKU1JFRlViVnAyT1dKYWEzQTNjVEU1WmpBWUN5SU5DZ2RYYjNKcmIzVjBHZ0psYmclM0QlM0Q%3D",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhJSREFUbVp2OWJaa3A3cTE5ZjA%3D"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CB0Q_V0YCCITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "Workout"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "Workout"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "Electronic"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CBwQ_V0YCSITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CBwQ_V0YCSITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATgiv9bZkp7q19f0",
+                                      "params": "ggU8Q2hKU1JFRlVaMmwyT1dKYWEzQTNjVEU1WmpBWUN5SVFDZ3BGYkdWamRISnZibWxqR2dKbGJnJTNEJTNE",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhJSREFUZ2l2OWJaa3A3cTE5ZjA%3D"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CBwQ_V0YCSITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "Electronic"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "Electronic"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "Pop"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CBsQ_V0YCiITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CBsQ_V0YCiITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATg9Xv9bZkp7q19f0",
+                                      "params": "ggU0Q2hOU1JFRlVaemxZZGpsaVdtdHdOM0V4T1dZd0dBc2lDUW9EVUc5d0dnSmxiZyUzRCUzRA%3D%3D",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhNSREFUZzlYdjliWmtwN3ExOWYw"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CBsQ_V0YCiITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "Pop"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "Pop"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "Korean dance"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CBoQ_V0YCyITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CBoQ_V0YCyITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATg0Xv9bZkp7q19f0",
+                                      "params": "ggVAQ2hOU1JFRlVaekJZZGpsaVdtdHdOM0V4T1dZd0dBc2lFZ29NUzI5eVpXRnVJR1JoYm1ObEdnSmxiZyUzRCUzRA%3D%3D",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhNSREFUZzBYdjliWmtwN3ExOWYw"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CBoQ_V0YCyITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "Korean dance"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "Korean dance"
+                            }
+                          },
+                          {
+                            "chipCloudChipRenderer": {
+                              "text": {
+                                "runs": [
+                                  {
+                                    "text": "Focus"
+                                  }
+                                ]
+                              },
+                              "navigationEndpoint": {
+                                "clickTrackingParams": "CBkQ_V0YDCITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                "queueUpdateCommand": {
+                                  "queueUpdateSection": "QUEUE_UPDATE_SECTION_QUEUE",
+                                  "fetchContentsCommand": {
+                                    "clickTrackingParams": "CBkQ_V0YDCITCNSUyu_al5cDFWyENwgdXsUoLsoBBOMRqdw=",
+                                    "watchEndpoint": {
+                                      "playlistId": "RDATmav9bZkp7q19f0",
+                                      "params": "ggUyQ2hKU1JFRlViV0YyT1dKYWEzQTNjVEU1WmpBWUN5SUxDZ1ZHYjJOMWN4b0NaVzQlM0Q%3D",
+                                      "loggingContext": {
+                                        "vssLoggingContext": {
+                                          "serializedContextData": "GhJSREFUbWF2OWJaa3A3cTE5ZjA%3D"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "dedupeAgainstLocalQueue": true,
+                                  "syncMode": "QUEUE_UPDATE_SYNC_MODE_DEDUPE_AGAINST_LOCAL"
+                                }
+                              },
+                              "trackingParams": "CBkQ_V0YDCITCNSUyu_al5cDFWyENwgdXsUoLg==",
+                              "accessibilityData": {
+                                "accessibilityData": {
+                                  "label": "Focus"
+                                }
+                              },
+                              "isSelected": false,
+                              "uniqueId": "Focus"
+                            }
+                          }
+                        ],
+                        "trackingParams": "CBgQ_F0iEwjUlMrv2peXAxVshDcIHV7FKC4=",
+                        "selectionBehavior": "CHIP_CLOUD_SELECTION_BEHAVIOR_SINGLE_SELECT_ALWAYS_SELECTED"
+                      }
+                    }
+                  }
+                },
+                "trackingParams": "CBcQn7QFGAQiEwjUlMrv2peXAxVshDcIHV7FKC4="
+              }
+            },
+            {
+              "tabRenderer": {
+                "endpoint": {
+                  "clickTrackingParams": "CBYQk80FGAUiEwjUlMrv2peXAxVshDcIHV7FKC7KAQTjEanc",
+                  "browseEndpoint": {
+                    "browseId": "MPLYt_BdOtXdMbwGj",
+                    "browseEndpointContextSupportedConfigs": {
+                      "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_TRACK_LYRICS"
+                      }
+                    }
+                  }
+                },
+                "title": "Lyrics",
+                "trackingParams": "CBYQk80FGAUiEwjUlMrv2peXAxVshDcIHV7FKC4=",
+                "unselectable": true
+              }
+            },
+            {
+              "tabRenderer": {
+                "title": "Comments",
+                "trackingParams": "CBMQpIARGAYiEwjUlMrv2peXAxVshDcIHV7FKC4="
+              }
+            },
+            {
+              "tabRenderer": {
+                "endpoint": {
+                  "clickTrackingParams": "CBIQlM0FGAciEwjUlMrv2peXAxVshDcIHV7FKC7KAQTjEanc",
+                  "browseEndpoint": {
+                    "browseId": "MPTRt_BdOtXdMbwGj",
+                    "browseEndpointContextSupportedConfigs": {
+                      "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_TRACK_RELATED"
+                      }
+                    }
+                  }
+                },
+                "title": "Related",
+                "trackingParams": "CBIQlM0FGAciEwjUlMrv2peXAxVshDcIHV7FKC4="
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

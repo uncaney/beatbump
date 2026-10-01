@@ -16,6 +16,10 @@
 	export let sizes = { main: "2em", skip: "1.5em" };
 
 	let original: ISessionListService["mix"] = [];
+	// Mix type captured when shuffle was turned ON, restored when turned OFF
+	// (audit F8): without it `setMix(original)` dropped the "local" type and an
+	// offline / local queue fell back to YouTube `fetchNext` with local ids.
+	let originalType: "auto" | "playlist" | "local" | undefined;
 	let isShuffled = false;
 
 	let repeatState: 0 | 1 | 2 = 0;
@@ -34,12 +38,31 @@
 	function handleShuffle() {
 		if (isShuffled === true && original.length !== 0) {
 			isShuffled = false;
-			SessionListService.setMix(original);
+			const restored = original;
+			const type = SessionListService.isLocalPlaylist
+				? "local"
+				: originalType;
+			const currentId = $queue[$SessionListService.position]?.videoId;
 			original = [];
+			originalType = undefined;
+			SessionListService.setMix(restored, type).then(() => {
+				// Keep the playing track as the cursor: its index differs once
+				// the original order is back (updatePosition only moves the
+				// cursor + prefetch, it does not start playback).
+				const idx = currentId
+					? restored.findIndex((t) => t?.videoId === currentId)
+					: -1;
+				if (idx >= 0 && idx !== SessionListService.position) {
+					SessionListService.updatePosition(idx);
+				}
+			});
 			return;
 		}
 		isShuffled = true;
 		original = [...$queue];
+		originalType =
+			$SessionListService.currentMixType ??
+			(SessionListService.isLocalPlaylist ? "local" : undefined);
 		SessionListService.shuffle($SessionListService.position, true);
 	}
 

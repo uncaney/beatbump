@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/labstack/echo/v4"
+	"log"
 	"net/http"
+	"strings"
+	"sync"
 )
 
 type NextEndpointResponse struct {
@@ -101,13 +104,53 @@ func NextEndpointHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, struct{}{})
 }
 
+// The "Related" tab of a `next` response carries the MPTRt_… browseId used by
+// related.json. Its INDEX is not stable: the layout used to be
+// ["Up next", "Lyrics", "Related"] (tabs[2]) and is now
+// ["Up next", "Lyrics", "Comments", "Related"] (tabs[3]) for WEB_REMIX, which
+// left related.browseId empty and the fullscreen Related tab dead (audit F10).
+// The tab is therefore located by page type / browseId prefix, never by index.
+const (
+	relatedTabPageType  = "MUSIC_PAGE_TYPE_TRACK_RELATED"
+	relatedBrowsePrefix = "MPTRt"
+)
+
+var logNextTabsOnce sync.Once
+
+// findRelatedTab returns the Related browse endpoint of a `next` response, or
+// an empty Related when no tab carries one. The received tab layout is logged
+// once (debug) so a future upstream change is visible in the logs.
+func findRelatedTab(nextResponse _youtube.NextResponse) Related {
+	tabs := nextResponse.Contents.SingleColumnMusicWatchNextResultsRenderer.TabbedRenderer.WatchNextTabbedResultsRenderer.Tabs
+	logNextTabsOnce.Do(func() {
+		layout := make([]string, 0, len(tabs))
+		for i, t := range tabs {
+			be := t.TabRenderer.Endpoint.BrowseEndpoint
+			layout = append(layout, fmt.Sprintf("%d:%q browseId=%q pageType=%q", i, t.TabRenderer.Title,
+				be.BrowseId, be.BrowseEndpointContextSupportedConfigs.BrowseEndpointContextMusicConfig.PageType))
+		}
+		log.Printf("DEBUG next: tabs layout [%s]", strings.Join(layout, "; "))
+	})
+	for _, t := range tabs {
+		be := t.TabRenderer.Endpoint.BrowseEndpoint
+		pageType := be.BrowseEndpointContextSupportedConfigs.BrowseEndpointContextMusicConfig.PageType
+		if pageType == relatedTabPageType || strings.HasPrefix(be.BrowseId, relatedBrowsePrefix) {
+			return Related{
+				BrowseID:                              be.BrowseId,
+				BrowseEndpointContextSupportedConfigs: be.BrowseEndpointContextSupportedConfigs,
+			}
+		}
+	}
+	return Related{}
+}
+
 func ParseNextBody(nextResponse _youtube.NextResponse) NextEndpointResponse {
 	tabs := nextResponse.Contents.SingleColumnMusicWatchNextResultsRenderer.TabbedRenderer.WatchNextTabbedResultsRenderer.Tabs
-	if len(tabs) < 3 {
+	if len(tabs) == 0 {
 		return NextEndpointResponse{}
 	}
 
-	related := tabs[2].TabRenderer.Endpoint.BrowseEndpoint
+	related := findRelatedTab(nextResponse)
 	contents := tabs[0].TabRenderer.Content.MusicQueueRenderer.Content.PlaylistPanelRenderer.Contents
 
 	if len(contents) == 0 {
@@ -130,12 +173,9 @@ func ParseNextBody(nextResponse _youtube.NextResponse) NextEndpointResponse {
 	}
 
 	return NextEndpointResponse{
-		Results:     results,
-		VisitorData: visitorData,
-		Related: Related{
-			BrowseEndpointContextSupportedConfigs: related.BrowseEndpointContextSupportedConfigs,
-			BrowseID:                              related.BrowseId,
-		},
+		Results:      results,
+		VisitorData:  visitorData,
+		Related:      related,
 		CurrentMixID: mixId,
 		//	ClickTrackingParams:
 	}
@@ -216,4 +256,3 @@ type Item struct {
 	Length              string      `json:"length"`
 	ClickTrackingParams string      `json:"clickTrackingParams"`
 }
-

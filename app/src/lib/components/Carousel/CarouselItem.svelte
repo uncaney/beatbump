@@ -117,7 +117,7 @@
 		},
 		favorite: (ctx: BuildMenuParams) => {
 			const { item } = ctx;
-			IDBService.sendMessage("create", "favorite", item);
+			saveFavourite(item);
 		},
 		share: async (ctx: BuildMenuParams) => {
 			const { SITE_ORIGIN_URL: $SITE_ORIGIN_URL, item } = ctx;
@@ -175,7 +175,7 @@
 	import { goto } from "$app/navigation";
 	import Loading from "$components/Loading/Loading.svelte";
 	// import { groupSession } from "$lib/stores";
-	import { IDBService } from "$lib/workers/db/service";
+	import { saveFavourite } from "$lib/favourites";
 
 	import { browser } from "$app/environment";
 	import { buildDropdown, type Dropdown } from "$lib/configs/dropdowns.config";

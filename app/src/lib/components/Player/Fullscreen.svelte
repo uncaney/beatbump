@@ -43,6 +43,7 @@
 	import ListItem, { listItemPageContext } from "../ListItem/ListItem.svelte";
 	import Loading from "../Loading/Loading.svelte";
 	import Tabs from "../Tabs";
+	import type { TabItem } from "../Tabs";
 	import Controls from "./Controls.svelte";
 	import { createPlayerPopperMenu } from "./Player.svelte";
 	import ProgressBar from "./ProgressBar";
@@ -115,23 +116,26 @@
 		Popup,
 	}
 
-	const tabs = [
-		{
-			id: "UpNext",
-			text: "Up Next",
-			action: () => {
-				active = tabs[0].id;
-			},
+	const upNextTab: TabItem = {
+		id: "UpNext",
+		text: "Up Next",
+		action: () => {
+			active = "UpNext";
 		},
-		{
-			id: "Related",
-			text: "Related",
-			action: async () => {
-				if (!$SessionListService.related) return;
-				active = tabs[1].id;
-			},
+	};
+	const relatedTab: TabItem = {
+		id: "Related",
+		text: "Related",
+		action: () => {
+			active = "Related";
 		},
-	];
+	};
+	// The Related tab is only shown when the backend returned a browseId
+	// (`MPTRt_…`) for the current track; previously the tab was always there
+	// and its click was silently ignored when the id was empty (audit F10).
+	$: hasRelated = !!$SessionListService.related?.browseId;
+	$: tabs = hasRelated ? [upNextTab, relatedTab] : [upNextTab];
+	$: if (!hasRelated && active === "Related") active = "UpNext";
 
 	const motion = tweened(-33, {
 		duration: 180,

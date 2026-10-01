@@ -15,7 +15,7 @@
 	import PopperButton from "../Popper/PopperButton.svelte";
 	import { goto } from "$app/navigation";
 	import { resolveArtistId } from "$lib/local";
-	import { IDBService } from "$lib/workers/db/service";
+	import { saveFavourite } from "$lib/favourites";
 	import SessionListService, { queuePosition, queue } from "$lib/stores/list";
 	import { AudioPlayer, updateGroupPosition } from "$lib/player";
 	import { CTX_ListItem } from "$lib/contexts";
@@ -74,7 +74,7 @@
 			text: "Favorite",
 			icon: "heart",
 			action: () => {
-				IDBService.sendMessage("create", "favorite", item);
+				saveFavourite(item);
 			},
 		},
 		{
