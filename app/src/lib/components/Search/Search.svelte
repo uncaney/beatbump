@@ -463,7 +463,7 @@
 	on:keydown={handleKeyDown}
 	on:submit|preventDefault={handleSubmit}
 >
-	<div class="nav-item">
+	<div class="nav-item search-field">
 		<div
 			role="textbox"
 			class="input search-input-wrapper"
@@ -637,7 +637,7 @@
 			{/if}
 		</ul>
 	{/if}
-	<div class="nav-item">
+	<div class="nav-item filter-field">
 		<div
 			class="select search-select-wrapper"
 			class:inline={type === "inline" ? true : false}
@@ -702,6 +702,48 @@
 		left: 0;
 		right: 0;
 		width: 100%;
+
+		// Phones (audit v4 TOP 7 bis): the box takes the whole row (>= 300 px
+		// at 390 px) and the filter select shrinks to a compact pill on the
+		// right, instead of a 190 px box next to a 130 px select.
+		@media only screen and (max-width: 640px) {
+			box-sizing: border-box;
+			justify-content: stretch;
+			align-items: center;
+			gap: 0.375rem;
+			padding-inline: 0.375rem;
+
+			.nav-item {
+				margin: 0;
+			}
+
+			.search-field {
+				flex: 1 1 auto;
+				min-width: 0;
+			}
+
+			.filter-field {
+				flex: 0 0 auto;
+			}
+
+			.search-input-wrapper {
+				width: 100%;
+				min-width: 0;
+				max-width: none;
+			}
+
+			.search-select-wrapper.inline {
+				width: 5.75rem;
+				min-width: 0;
+				max-width: 5.75rem;
+
+				select {
+					padding-right: 1.6em;
+					text-overflow: ellipsis;
+					overflow: hidden;
+				}
+			}
+		}
 	}
 
 	ul {
