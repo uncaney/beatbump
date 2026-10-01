@@ -594,8 +594,11 @@
 	}
 	.week-card-dismiss {
 		flex: 0 0 auto;
-		width: 2.75rem;
-		height: 2.75rem;
+		/* L8-7: 2.75rem alone is 33px at the 12px mobile root; px floor. */
+		min-width: max(2.75rem, 44px);
+		min-height: max(2.75rem, 44px);
+		width: max(2.75rem, 44px);
+		height: max(2.75rem, 44px);
 		opacity: 0.7;
 	}
 	.resume-queue {

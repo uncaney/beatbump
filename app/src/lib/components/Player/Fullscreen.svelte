@@ -640,7 +640,7 @@
 								<!-- P4: sleep timer chip; click cancels the timer. -->
 								<button
 									type="button"
-									class="sleep-chip"
+									class="btn-reset sleep-chip"
 									aria-label="Minuterie de sommeil : {$sleepLabel}. Annuler"
 									title="Minuterie de sommeil : {$sleepLabel} (cliquer pour annuler)"
 									data-testid="sleep-timer-chip-fullscreen"
@@ -743,7 +743,7 @@
 						</div>
 						<button
 							type="button"
-							class="np-fav"
+							class="btn-reset np-fav"
 							aria-label={favLabel}
 							title={favLabel}
 							aria-pressed={$currentIsFavourite}

@@ -526,7 +526,9 @@
 	}
 	.complete {
 		font-size: 0.85rem;
-		min-height: 2rem;
+		// L8-7: the scoped rule beats .btn-secondary's floor; 2rem was 24px on
+		// mobile. Keep the small type, give the pill the 44px tap height.
+		min-height: max(2.75rem, 44px);
 		padding: 0.3rem 0.9rem;
 	}
 	@media (max-width: 420px) {

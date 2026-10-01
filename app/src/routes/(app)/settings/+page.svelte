@@ -244,7 +244,7 @@
                         />
                     </div>
                     <button
-                        class="link mt-2"
+                        class="btn-reset link mt-2"
                         on:click={() => {
 							$settings["network"]["Stream Proxy Server"] =
 								"https://hls.beatbump.io/";
@@ -343,7 +343,7 @@
 					<button
 						type="button"
 						id="pwa-install"
-						class="btn"
+						class="btn-reset btn"
 						aria-describedby="pwa-install-desc"
 						disabled={installing}
 						on:click={install}

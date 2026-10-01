@@ -70,7 +70,7 @@
 				</h2>
 				<button
 					type="button"
-					class="close-btn"
+					class="btn-reset close-btn"
 					aria-label="Fermer"
 					title="Fermer (Échap)"
 					on:click={close}>×</button

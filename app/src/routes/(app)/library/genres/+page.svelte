@@ -156,12 +156,18 @@
 		color: #999;
 		font-size: 0.85rem;
 	}
+	// L8-7: scoped `.genre-btn` (0,2,0) beats the button system's
+	// `min-height: max(2.75rem, 44px)` (0,1,0): `width/height: 2rem` gave
+	// 24px targets at the 12px mobile root. Keep the round icon look with
+	// min-* at the 44px floor instead of a fixed box.
 	.genre-btn {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 2rem;
-		height: 2rem;
+		min-width: max(2.75rem, 44px);
+		min-height: max(2.75rem, 44px);
+		width: max(2.75rem, 44px);
+		height: max(2.75rem, 44px);
 		border-radius: 50%;
 		padding: 0;
 	}
