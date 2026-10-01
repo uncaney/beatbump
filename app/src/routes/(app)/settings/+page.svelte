@@ -276,11 +276,6 @@
 {/if}
 
 <style lang="scss">
-	.input-container {
-		min-width: 15ch !important;
-		max-width: 32ch !important;
-		width: 100%;
-	}
 	button {
 		background: unset;
 		all: unset;

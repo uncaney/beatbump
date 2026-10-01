@@ -27,7 +27,16 @@
 		{ label: "Artistes", value: "artists" },
 		{ label: "Playlists", value: "all_playlists" },
 	];
-	$: query = decodeURIComponent($page.params.slug ?? "");
+	// SvelteKit params are already decoded; a stray "%" in the query would make
+	// decodeURIComponent throw, so decode defensively.
+	function safeDecode(s: string) {
+		try {
+			return decodeURIComponent(s);
+		} catch {
+			return s;
+		}
+	}
+	$: query = safeDecode($page.params.slug ?? "");
 	$: activeFilter = (filter || "all").toLowerCase();
 	$: restricted = $page.url.searchParams.get("restricted") || "";
 	function chipHref(value: string) {
