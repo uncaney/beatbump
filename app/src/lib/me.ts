@@ -4,6 +4,7 @@ import { APIClient } from "$lib/api";
 import { clearHomeCache } from "$lib/homeCache";
 import { parseMigrated, rememberMigration, type MigratedCounts } from "$lib/identity";
 import { enqueuePlay, flushOutbox, installHistoryOutbox, readOutbox, statusResult, type SendResult } from "$lib/historyOutbox";
+import { isSkipItem, skipBody, skipItem, type SkipSource } from "$lib/skips";
 
 function itemRef(item: any): string {
 	return item?.videoId || item?.endpoint?.browseId || item?.browseId || "";
@@ -219,8 +220,14 @@ export async function unfollow(artistId: string) {
 // and at startup. Offline the POST is not even tried.
 // I11: a direct (online) POST carries NO playedAt, the server dates it; only
 // an outbox replay sends the stored playedAt (+ clientSentAt, historyOutbox).
+// c40b B6-10: the outbox also carries skips (skips.ts SKIP_MARK), sent to
+// POST me/skips with their press time `at`.
 async function postPlay(item: any, playedAt?: number): Promise<SendResult> {
 	try {
+		if (isSkipItem(item)) {
+			const r = await APIClient.post(`/api/v1/me/skips`, skipBody(item as any, playedAt));
+			return statusResult(Number(r?.status) || 0);
+		}
 		const body = typeof playedAt === "number" && Number.isFinite(playedAt) ? { ...item, playedAt } : { ...item };
 		const r = await APIClient.post(`/api/v1/me/history`, body);
 		return statusResult(Number(r?.status) || 0);
@@ -240,6 +247,24 @@ export function recordHistory(item: any) {
 		if (r === "retry") enqueuePlay(item, playedAt);
 		else if (r === "ok" && readOutbox().length) void flushOutbox(postPlay);
 	});
+}
+/**
+ * c40b B6-10: a user "next" press on `track` at `position` / `duration`
+ * (seconds). Early presses (skips.ts isSkip) are queued like plays: POST
+ * me/skips now, the outbox when offline or failing. Late presses: nothing.
+ */
+export function recordSkip(track: any, position: number, duration: number, source: SkipSource): boolean {
+	const item = skipItem(track, position, duration, source);
+	if (!item) return false;
+	const at = Date.now();
+	if (typeof navigator !== "undefined" && navigator.onLine === false) {
+		enqueuePlay(item, at);
+		return true;
+	}
+	void postPlay(item, at).then((r) => {
+		if (r === "retry") enqueuePlay(item, at);
+	});
+	return true;
 }
 if (typeof window !== "undefined") installHistoryOutbox(postPlay);
 // PF3-6 (audit perf v3): a cold /home asked me/stats/recent twice

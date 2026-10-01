@@ -30,6 +30,8 @@ import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from ".
 import { reportClientError } from "./clientLog";
 import { setWorkerInterval } from "./utils/workerTimeout";
 import { resumeKeptFor } from "./stores/resumeState";
+import { recordSkip } from "./me";
+import type { SkipSource } from "./skips";
 import {
 	mediaArtwork,
 	mediaMetadataFields,
@@ -126,8 +128,9 @@ function metaDataHandler({
 		navigator.mediaSession.setActionHandler("previoustrack", () =>
 			AudioPlayer.previousOrRestart(),
 		);
+		// c40b B6-10: an early lock-screen "next" is recorded as a skip.
 		navigator.mediaSession.setActionHandler("nexttrack", () =>
-			SessionListService.next(),
+			AudioPlayer.skipNext("mediasession"),
 		);
 		// C3: headset / lock screen ±10 s.
 		setMediaAction("seekbackward", onSeek("seekbackward"));
@@ -570,6 +573,24 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 			return;
 		}
 		await SessionListService.previous();
+	}
+
+	/**
+	 * c40b B6-10: a USER "next" (player / fullscreen buttons, keyboard,
+	 * lock screen). Records a skip when the press comes early (skips.ts),
+	 * then advances exactly like SessionListService.next(nextSrc, update).
+	 * The track-end auto-advance and a tap on a queue row do not come here.
+	 */
+	public skipNext(source: SkipSource, update = false): Promise<void> {
+		try {
+			const track = SessionListService.mix?.[SessionListService.position];
+			const t = this.player && isFinite(this.player.currentTime) ? this.player.currentTime : this.currentTime;
+			const d = this.duration > 0 ? this.duration : this.player && isFinite(this.player.duration) ? this.player.duration : 0;
+			recordSkip(track, t, d, source);
+		} catch {
+			/* never block "next" on the skip log */
+		}
+		return SessionListService.next(undefined, update);
 	}
 
 	/** Media element playback rate (1 before the element exists). */
