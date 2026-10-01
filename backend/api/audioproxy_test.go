@@ -307,3 +307,40 @@ func TestIsAudioProxyPath(t *testing.T) {
 		}
 	}
 }
+
+// K2: /cover 200s carry a one-week immutable Cache-Control (a lid is stable);
+// every other status / route keeps the upstream headers untouched.
+func TestAudioProxy_CoverCacheControl(t *testing.T) {
+	up := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		w.Header().Set("Content-Type", "image/jpeg")
+		if r.URL.Query().Get("lid") == "missing" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("jpg"))
+	})
+	for _, base := range []string{"", "/bridge"} {
+		mux := http.NewServeMux()
+		mux.Handle(base+"/", up)
+		srv := httptest.NewServer(mux)
+		t.Setenv("COMPANION_URL", srv.URL+base)
+		e := newAudioTestApp(t)
+		get := func(target string) *httptest.ResponseRecorder {
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+			return rec
+		}
+		if rec := get("/cover?lid=0123456789a"); rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != coverCacheControl {
+			t.Fatalf("base %q: cover 200: status %d cc %q, want 200 %q", base, rec.Code, rec.Header().Get("Cache-Control"), coverCacheControl)
+		}
+		if rec := get("/cover?lid=missing"); rec.Code != http.StatusNotFound || rec.Header().Get("Cache-Control") != "private, max-age=3600" {
+			t.Fatalf("base %q: cover 404: status %d cc %q, want upstream header untouched", base, rec.Code, rec.Header().Get("Cache-Control"))
+		}
+		if rec := get("/localf?p=%2Fa.mp3"); rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "private, max-age=3600" {
+			t.Fatalf("base %q: localf: status %d cc %q, want upstream header untouched", base, rec.Code, rec.Header().Get("Cache-Control"))
+		}
+		srv.Close()
+	}
+}

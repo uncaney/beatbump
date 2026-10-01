@@ -286,6 +286,59 @@ async function matchAudio(c: Cache, req: Request, url: URL): Promise<Response | 
 	return undefined;
 }
 
+// ---------------------------------------------------------------------------
+// BEGIN ytm-covers (lane c25b, K2): /cover?lid=… cache-first, bounded LRU.
+// A cover is addressed by a stable lid and the backend now stamps a one-week
+// immutable Cache-Control on its 200s; the home page requests ~22 of them
+// (p50 ~500 ms each) and the audio cache never stored them. Cache-first in a
+// dedicated cache, capped at COVER_MAX entries: Cache API keys() returns the
+// entries in insertion order, so deleting the first ones is a simple LRU
+// (a hit is re-put to move it to the end).
+// ---------------------------------------------------------------------------
+const COVER_CACHE = "ytm-covers";
+const COVER_MAX = 200;
+const isCover = (u: URL) => u.origin === location.origin && u.pathname === "/cover" && u.searchParams.has("lid");
+
+async function trimCoverCache(c: Cache): Promise<void> {
+	try {
+		const keys = await c.keys();
+		const excess = keys.length - COVER_MAX;
+		for (let i = 0; i < excess; i++) await c.delete(keys[i]);
+	} catch {
+		/* best effort */
+	}
+}
+
+async function coverFetch(req: Request): Promise<Response> {
+	let c: Cache | null = null;
+	try {
+		c = await caches.open(COVER_CACHE);
+		const hit = await c.match(req.url);
+		if (hit) {
+			// touch: re-insert at the end of keys() so the LRU keeps it (clone
+			// before the body of `hit` is handed to the page and locked)
+			const copy = hit.clone();
+			c.delete(req.url)
+				.then(() => c!.put(req.url, copy))
+				.catch(() => {});
+			return hit;
+		}
+	} catch {
+		c = null;
+	}
+	const res = await fetch(req);
+	if (c && res.ok && res.status === 200 && req.method === "GET") {
+		const copy = res.clone();
+		c.put(req.url, copy)
+			.then(() => trimCoverCache(c!))
+			.catch(() => {});
+	}
+	return res;
+}
+// ---------------------------------------------------------------------------
+// END ytm-covers
+// ---------------------------------------------------------------------------
+
 self.addEventListener("fetch", (event) => {
 	const req = event.request;
 	let url: URL;
@@ -294,6 +347,13 @@ self.addEventListener("fetch", (event) => {
 	} catch {
 		return;
 	}
+
+	// BEGIN ytm-covers branch (c25b, K2): before isAudio, whose regex also matches /cover
+	if (req.method === "GET" && isCover(url)) {
+		event.respondWith(coverFetch(req));
+		return;
+	}
+	// END ytm-covers branch
 
 	// offline-cached audio + covers → cache-first (served when offline), Range-aware
 	if (isAudio(url) && (req.method === "GET" || req.method === "HEAD")) {

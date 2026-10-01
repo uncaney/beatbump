@@ -146,6 +146,13 @@ var (
 	audioProxies   = map[string]*httputil.ReverseProxy{}
 )
 
+// coverProxyPath is the cover route; coverCacheControl is stamped on its 200s
+// (K2): one week, immutable, shared caches allowed (a cover carries no profile).
+const (
+	coverProxyPath    = "/cover"
+	coverCacheControl = "public, max-age=604800, immutable"
+)
+
 // audioProxyFor returns a (cached) streaming reverse proxy for an upstream
 // base URL such as "http://ytm-cache:8789" or "http://iv-vp:5007". The
 // incoming request path is appended to the base path; query and Range are
@@ -191,6 +198,15 @@ func audioProxyFor(base string) (*httputil.ReverseProxy, error) {
 			out.Header.Del("Cookie")
 			out.Header.Del("Authorization")
 			pr.SetXForwarded()
+		},
+		// K2: a cover is addressed by a stable lid, so a 200 can live a week in
+		// the browser / SW cache (22 x ~500 ms per home load before). Audio
+		// streams keep the upstream headers untouched (signed URLs, Range).
+		ModifyResponse: func(resp *http.Response) error {
+			if resp.StatusCode == http.StatusOK && resp.Request != nil && resp.Request.URL.Path == basePath+coverProxyPath {
+				resp.Header.Set("Cache-Control", coverCacheControl)
+			}
+			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, context.Canceled) {
