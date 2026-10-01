@@ -53,12 +53,15 @@ export async function unfollow(artistId: string) {
 }
 
 // ---- play history + stats ----
-// O9: one POST with the client playedAt (ms); a failure (network, 5xx) queues
-// the play in the outbox ($lib/historyOutbox), replayed on `online` and at
-// startup. Offline the POST is not even tried.
-async function postPlay(item: any, playedAt: number): Promise<SendResult> {
+// O9: one POST; a failure (network, 5xx) queues the play in the outbox
+// ($lib/historyOutbox) with the client playedAt (ms), replayed on `online`
+// and at startup. Offline the POST is not even tried.
+// I11: a direct (online) POST carries NO playedAt, the server dates it; only
+// an outbox replay sends the stored playedAt (+ clientSentAt, historyOutbox).
+async function postPlay(item: any, playedAt?: number): Promise<SendResult> {
 	try {
-		const r = await APIClient.post(`/api/v1/me/history`, { ...item, playedAt });
+		const body = typeof playedAt === "number" && Number.isFinite(playedAt) ? { ...item, playedAt } : { ...item };
+		const r = await APIClient.post(`/api/v1/me/history`, body);
 		return statusResult(Number(r?.status) || 0);
 	} catch {
 		return "retry";
@@ -71,7 +74,7 @@ export function recordHistory(item: any) {
 		enqueuePlay(item, playedAt);
 		return Promise.resolve();
 	}
-	return postPlay(item, playedAt).then((r) => {
+	return postPlay(item).then((r) => {
 		if (r === "retry") enqueuePlay(item, playedAt);
 		else if (r === "ok" && readOutbox().length) void flushOutbox(postPlay);
 	});
