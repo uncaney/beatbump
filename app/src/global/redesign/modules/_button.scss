@@ -225,10 +225,12 @@ button.danger {
 // colours.
 // Green (`$accent`, #1ed760) is a STATE colour: the playing row, the "Prêt
 // hors-ligne" badge, the active pin border. Never a button fill, a green
-// button reads as "already active". Still green at HEAD (files outside this
-// lane): "Tout lire" (library/downloads-offline/+page.svelte `.cta.primary`)
-// and the EmptyState "Explorer" CTA; move them to .btn-primary /
-// .btn-secondary and drop their `$accent !important`.
+// button reads as "already active". Fixed at HEAD by lane c28a: "Tout lire"
+// (library/downloads-offline/+page.svelte, now `.btn-primary`) and the
+// EmptyState "Explorer" CTA (now `.btn-secondary`) no longer set
+// `$accent !important`. Audit UX v10 2/3.2: the already-built prod artefact
+// captured before c28a was promoted still showed the old green fill; that was
+// a build-timing gap, not a code regression, and closes once 28a ships.
 // Usage: <button type="button" class="btn-secondary">Aléatoire</button>
 // ============================================================================
 %btn-system {
