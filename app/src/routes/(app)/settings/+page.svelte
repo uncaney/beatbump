@@ -86,7 +86,7 @@
 					name="dedupe"
 					id="dedupe"
 					type="checkbox"
-					bind:value={$settings["playback"]["Dedupe Automix"]}
+					bind:checked={$settings["playback"]["Dedupe Automix"]}
 				/>
 				<label
 					for="dedupe"
