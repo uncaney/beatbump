@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from "$app/stores";
 	import ArtistPageHeader from "$lib/components/ArtistPageHeader/ArtistPageHeader.svelte";
-	import FollowButton from "$lib/components/FollowButton/FollowButton.svelte";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
 
 	import Header from "$lib/components/Layouts/Header.svelte";
@@ -40,18 +39,13 @@
 <svelte:window bind:innerWidth />
 {#key id}
 <div class="fix-width">
+	<!-- Follow is rendered by the header, in the Play Radio / Shuffle row (audit v3 1.6). -->
 	<ArtistPageHeader
 		description={header?.description}
 		{header}
 		thumbnail={header?.thumbnails}
+		artistId={id}
 	/>
-	<div class="artist-actions resp-content-width">
-		<FollowButton
-			artistId={id}
-			name={header?.name}
-			thumbnail={header?.thumbnails && header?.thumbnails[0]?.url}
-		/>
-	</div>
 	<main>
 		<div class="artist-body">
 			{#if songs?.items?.length > 0}

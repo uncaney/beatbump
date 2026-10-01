@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Button from "$components/Button/Button.svelte";
+	import FollowButton from "$components/FollowButton/FollowButton.svelte";
 	import { scrollObserver } from "$lib/actions/scrollObserver";
 	import type { ArtistPage } from "$lib/parsers";
 	import list from "$lib/stores/list";
@@ -14,6 +15,8 @@
 	export let header: ArtistPage["header"];
 	export let thumbnail: Thumbnail[] = [];
 	export let description = "";
+	/** Artist browse id: when set, the Follow button sits in the same row as Play Radio / Shuffle (audit v3 1.6). */
+	export let artistId = "";
 	let y = 1;
 	let isExpanded = false;
 	let timestamp = 0;
@@ -200,6 +203,13 @@
 								})}><span class="button-text"> Shuffle</span></Button
 						>
 					{/if}
+					{#if artistId}
+						<FollowButton
+							{artistId}
+							name={header?.name ?? ""}
+							thumbnail={thumbnail?.[0]?.url ?? ""}
+						/>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -341,6 +351,27 @@
 			.content-thumbnail {
 				max-width: 6rem;
 				max-height: 6rem;
+			}
+
+			// One flex-wrap row for Play Radio / Shuffle / Follow, all 40px high
+			// (36px on phones) and starting at the same gutter (audit v3 1.6:
+			// Follow used to sit on its own line, 28px left of the grid, 30px high).
+			.btn-wrpr {
+				display: flex;
+				flex-flow: row wrap;
+				align-items: center;
+				gap: 0.5rem 0.75rem;
+				width: 100%;
+
+				:global(.button),
+				:global(.follow-btn) {
+					box-sizing: border-box;
+					min-height: 40px;
+					margin: 0;
+					@media only screen and (max-width: 719px) {
+						min-height: 36px;
+					}
+				}
 			}
 
 			.name {
