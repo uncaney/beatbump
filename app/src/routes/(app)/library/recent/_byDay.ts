@@ -1,7 +1,9 @@
 // S3 "Historique par jour": pure helpers for /library/recent. The history
 // (me/stats/recent, one row per ref, most recent first) is split into local
 // calendar days; each day's group lists its rows most recent first and replays
-// them in listening order (oldest first).
+// them in listening order (oldest first). I18: the page asks one row per play
+// (`events=1`, last 200 plays), so a title played on two days is on both, and
+// a day replays every play of that day.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export interface DayGroup {
@@ -61,6 +63,18 @@ export function dayLabel(ms: number, now: number = Date.now()): string {
 	return d.toLocaleDateString("fr-FR", opts);
 }
 
+const seen = new WeakMap<DayGroup, Set<string>>();
+function seenIn(g: DayGroup, id: string): boolean {
+	let s = seen.get(g);
+	if (!s) seen.set(g, (s = new Set()));
+	if (s.has(id)) return true;
+	s.add(id);
+	return false;
+}
+
+/** I18: the history page asked by /library/recent: the last 200 plays, one row per play. */
+export const RECENT_EVENTS_URL = "/api/v1/me/stats/recent?limit=200&events=1";
+
 /**
  * Group the history by local day, most recent day first. Returns null when no
  * row carries a usable play time (the page then keeps the flat list). Rows
@@ -85,8 +99,12 @@ export function groupByDay(items: unknown, playedAt?: unknown, now: number = Dat
 			byKey.set(key, g);
 			groups.push(g);
 		}
-		g.items.push(r.item);
+		// I18: with one row per play (`events=1`) a title played twice the
+		// same day is shown once (its latest play) but replayed in order.
+		g.replay.push(r.item);
+		const id = r.item?.videoId || r.item?.title;
+		if (!id || !seenIn(g, id)) g.items.push(r.item);
 	}
-	for (const g of groups) g.replay = g.items.slice().reverse();
+	for (const g of groups) g.replay.reverse();
 	return groups;
 }

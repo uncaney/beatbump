@@ -2,11 +2,12 @@
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
-	import { getRecent, getTop } from "$lib/me";
+	import { APIClient } from "$lib/api";
+	import { getTop } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
-	import { groupByDay, type DayGroup } from "./_byDay";
+	import { groupByDay, RECENT_EVENTS_URL, type DayGroup } from "./_byDay";
 
 	let recent: any[] = [];
 	// S3: the history split by local day. null = no play time in the answer
@@ -23,7 +24,9 @@
 		let t: any = null;
 		let err: unknown = undefined;
 		try {
-			[r, t] = await Promise.all([getRecent(60), getTop(60)]);
+			// I18: the last 200 plays, one row per play (not one per title at
+			// its last play): each day lists and replays all of its plays.
+			[r, t] = await Promise.all([APIClient.fetch(RECENT_EVENTS_URL).then((x) => x.json()), getTop(60)]);
 		} catch (e) {
 			err = e;
 			console.error("recent load failed", e);
@@ -34,9 +37,11 @@
 			top = [];
 			days = null;
 		} else if (!err) {
-			recent = Array.isArray(r?.items) ? r.items : [];
+			const plays = Array.isArray(r?.items) ? r.items : [];
 			top = Array.isArray(t?.items) ? t.items : [];
-			days = groupByDay(recent, r?.playedAt);
+			days = groupByDay(plays, r?.playedAt);
+			// Flat fallback (no play times): one row per title.
+			recent = playableUnique(plays);
 		}
 		loading = false;
 	}
@@ -50,12 +55,23 @@
 		return () => window.removeEventListener("online", on);
 	});
 
+	function playableUnique(list: any[]): any[] {
+		const seen = new Set<string>();
+		return list.filter((it) => {
+			const id = it?.videoId || it?.title;
+			if (!id) return true;
+			if (seen.has(id)) return false;
+			seen.add(id);
+			return true;
+		});
+	}
+
 	let replaying = "";
 	async function replayDay(g: DayGroup) {
 		if (replaying) return;
 		replaying = g.key;
 		try {
-			await playTracks(g.replay);
+			await playTracks(g.replay, { context: { kind: "queue", title: g.label, href: "/library/recent" } });
 		} finally {
 			replaying = "";
 		}

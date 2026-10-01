@@ -449,10 +449,16 @@ func rehydrate(rows []struct {
 	return items
 }
 
-// recently played, one row per ref, most-recent first
+// recently played, one row per ref, most-recent first. I18: `events=1`
+// returns one row per play instead (the last `limit` plays, most recent
+// first, a ref played on two days appears on both), for /library/recent's
+// by-day view and "Rejouer cette journée".
 func MeRecentHandler(c echo.Context) error {
 	pid := profileID(c)
 	n := clampLimit(c, 50, 200)
+	if c.QueryParam("events") == "1" {
+		return meRecentEvents(c, pid, n)
+	}
 	var rows []struct {
 		Ref  string
 		Data string
@@ -485,6 +491,25 @@ func MeRecentHandler(c echo.Context) error {
 		playedAt[i] = last[ref]
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "playedAt": playedAt})
+}
+
+// meRecentEvents: the last n plays (one row per event), items aligned with
+// playedAt (epoch ms), one bounded query.
+func meRecentEvents(c echo.Context, pid string, n int) error {
+	var evs []db.PlayEvent
+	db.DB.Select("ref, data, played_at").
+		Where("profile_id = ? AND data <> ''", pid).
+		Order("played_at desc").Limit(n).Find(&evs)
+	items := make([]json.RawMessage, 0, len(evs))
+	playedAt := make([]int64, 0, len(evs))
+	for _, e := range evs {
+		if e.Data == "" {
+			continue
+		}
+		items = append(items, json.RawMessage(e.Data))
+		playedAt = append(playedAt, e.PlayedAt.UnixMilli())
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "playedAt": playedAt, "events": true})
 }
 
 // MeMixHandler — "Made for you": a personalized library mix seeded by the
