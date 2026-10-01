@@ -77,6 +77,10 @@ func newServer() *echo.Echo {
 		Skipper: func(c echo.Context) bool { return api.IsAudioProxyPath(c.Request().URL.Path) },
 	}))
 	e.Use(cacheControlMiddleware)
+	// AP3: link-preview robots (WhatsApp, Telegram, ...) fetching /listen?id=,
+	// /release?id= or /playlist/<id> get an Open Graph card; humans fall through
+	// to the unchanged SPA shell (backend/api/og_preview.go).
+	e.Use(api.OGPreview())
 	// Unknown SPA routes get the shell with a real 404 status (spa_notfound.go).
 	e.Use(spaNotFound("./build"))
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
