@@ -18,6 +18,9 @@
 	export let isBrowseEndpoint: boolean;
 	export let visitorData = "";
 	export let nofollow = false;
+	// Optional explicit "see all" link (used by the personal rows on /home).
+	export let seeAllHref = "";
+	export let seeAllLabel = "See All";
 
 	let moreOnLeft: boolean, moreOnRight: boolean;
 
@@ -137,7 +140,11 @@
 		{header.title}
 	</span>
 
-	{#if !header.title.includes("Videos") && header.browseId}
+	{#if seeAllHref}
+		<a href={seeAllHref}>
+			<small>{seeAllLabel}</small>
+		</a>
+	{:else if !header.title.includes("Videos") && header.browseId}
 		<a href={href}>
 			<small>See All</small>
 		</a>
