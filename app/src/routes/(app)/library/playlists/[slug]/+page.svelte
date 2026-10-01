@@ -46,8 +46,13 @@
 	});
 	const drop = async (event, target) => {
 		if (hasQuery) return;
+		// Since cycle 19 DraggableList drives the reorder with pointer events and has already
+		// moved the row inside `items` when "dragend" fires: there is no dataTransfer any more,
+		// the page only persists. The legacy branch below stays for a native drag event.
+		if (!event || !event.dataTransfer) return;
 		event.dataTransfer.dropEffect = "move";
 		const start = parseInt(event.dataTransfer.getData("text/plain"));
+		if (!Number.isFinite(start) || start === target) return;
 		const newTracklist = items;
 
 		if (start < target) {
@@ -60,8 +65,7 @@
 		items = newTracklist;
 	};
 	const dragstart = (event, i) => {
-		// console.log(event, i)
-
+		if (!event || !event.dataTransfer) return; // pointer-driven drag (cycle 19): nothing to set
 		event.dataTransfer.effectAllowed = "move";
 		event.dataTransfer.dropEffect = "move";
 		const start = i;
@@ -172,6 +176,7 @@
 				if (hasQuery) return;
 				drop(event, index);
 				await tick();
+				items = items; // the component moved the row in place: refresh the view
 				await IDBService.sendMessage("update", "playlist", {
 					items: [...items],
 					id: playlistName,
