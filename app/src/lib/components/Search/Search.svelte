@@ -10,6 +10,10 @@
 	import { APIClient } from "$lib/api";
 	import { browser } from "$app/environment";
 	import SessionListService from "$lib/stores/list";
+	import { isLocalTrackId } from "$lib/stores/list/sessionList";
+	import { buildResumeRow, readLastTrack } from "$lib/homeRows";
+	import { getRecent } from "$lib/me";
+	import { getOfflineTracks } from "$lib/offline";
 	import type { Item } from "$lib/types";
 
 	export let type: "inline";
@@ -39,6 +43,19 @@
 	];
 	$: hasLocal = localRows.length > 0;
 
+	// "Reprendre" (audit v3 3.3): with an empty box the overlay also lists the
+	// last RESUME_MAX played local tracks (lastTrack + me/stats/recent, the
+	// offline cache as fallback), as playable rows under the recent searches.
+	// Loaded 150 ms after mount; typing before that cancels the load.
+	const RESUME_MAX = 5;
+	const RESUME_DEBOUNCE_MS = 150;
+	let resumeRows: Item[] = [];
+	let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// The local block shows the resume rows while the box is empty, the
+	// library hits (songs then artists) once the user types.
+	$: localBlock = showRecentSearches ? resumeRows : localRows;
+
 	onMount(() => {
 		if (browser) {
 			const stored = localStorage.getItem("recentSearches");
@@ -46,12 +63,58 @@
 				recentSearches = JSON.parse(stored);
 			}
 			showRecentSearches = true;
+			scheduleResume();
 		}
 	});
 
 	onDestroy(() => {
 		cancelLocal();
+		cancelResume();
 	});
+
+	function cancelResume() {
+		if (resumeTimer) {
+			clearTimeout(resumeTimer);
+			resumeTimer = null;
+		}
+	}
+
+	function scheduleResume() {
+		cancelResume();
+		resumeTimer = setTimeout(() => {
+			resumeTimer = null;
+			void loadResume();
+		}, RESUME_DEBOUNCE_MS);
+	}
+
+	async function loadResume() {
+		let last: Item | null = null;
+		try {
+			last = readLastTrack(localStorage) as Item | null;
+		} catch {
+			last = null;
+		}
+		let recent: any[] = [];
+		try {
+			const r = await getRecent(RESUME_MAX * 4);
+			recent = Array.isArray(r?.items) ? r.items : [];
+		} catch {
+			recent = [];
+		}
+		if (recent.length === 0) {
+			// Offline / fresh profile: the cached tracks, most recent first.
+			try {
+				recent = getOfflineTracks()
+					.slice()
+					.sort((a: any, b: any) => (b?._at ?? 0) - (a?._at ?? 0));
+			} catch {
+				recent = [];
+			}
+		}
+		resumeRows = buildResumeRow(last, recent, [], RESUME_MAX * 4)
+			.filter((it) => isLocalTrackId(it?.videoId))
+			.slice(0, RESUME_MAX) as Item[];
+	}
 
 	function addToRecentSearches(searchQuery: string) {
 		if (!browser) return;
@@ -100,6 +163,7 @@
 			return;
 		}
 		showRecentSearches = false;
+		cancelResume();
 		localTimer = setTimeout(() => {
 			localTimer = null;
 			fetchLocal(q);
@@ -316,14 +380,14 @@
 			/>
 		</div>
 	</div>
-	{#if ((results.length > 0 || hasLocal) && !showRecentSearches) || (showRecentSearches && recentSearches.length > 0)}
+	{#if ((results.length > 0 || hasLocal) && !showRecentSearches) || (showRecentSearches && (recentSearches.length > 0 || resumeRows.length > 0))}
 		<ul
 			role="listbox"
 			id="suggestions"
 			bind:this={listbox}
 			class="suggestions"
 		>
-			{#if showRecentSearches}
+			{#if showRecentSearches && recentSearches.length > 0}
 				<li class="recent-searches-header group-header">Recent Searches</li>
 				{#each recentSearches as recentQuery}
 					<li
@@ -347,46 +411,51 @@
 						{recentQuery}
 					</li>
 				{/each}
-			{:else}
-				{#if hasLocal}
+			{/if}
+			{#if localBlock.length > 0}
+				<!-- One markup for both local blocks: "Reprendre" (empty box, last
+				     played local tracks) and "Dans ta bibliothèque" (typed query). -->
+				<li
+					class="recent-searches-header group-header"
+					data-testid={showRecentSearches ? "resume-header" : "local-suggestions-header"}
+					>{showRecentSearches ? "Reprendre" : "Dans ta bibliothèque"}</li
+				>
+				{#each localBlock as item, i (item.videoId ?? localArtistBrowseId(item) ?? i)}
+					{@const kind = showRecentSearches || i < Math.min(localSongs.length, LOCAL_SONGS_MAX) ? "song" : "artist"}
+					<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+					<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
 					<li
-						class="recent-searches-header group-header"
-						data-testid="local-suggestions-header">Dans ta bibliothèque</li
+						tabindex="0"
+						class="local-row"
+						data-testid="local-suggestion"
+						data-kind={kind}
+						data-origin={showRecentSearches ? "resume" : "library"}
+						data-lid={kind === "song" ? item.videoId : localArtistBrowseId(item)}
+						on:click={() => activateLocal(item, kind)}
+						on:keydown={(e) => {
+							if (e.key === "Enter" || e.key === " ") {
+								e.preventDefault();
+								e.stopPropagation();
+								activateLocal(item, kind);
+							}
+						}}
 					>
-					{#each localRows as item, i (item.videoId ?? localArtistBrowseId(item) ?? i)}
-						{@const kind = i < Math.min(localSongs.length, LOCAL_SONGS_MAX) ? "song" : "artist"}
-						<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-						<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
-						<li
-							tabindex="0"
-							class="local-row"
-							data-testid="local-suggestion"
-							data-kind={kind}
-							data-lid={kind === "song" ? item.videoId : localArtistBrowseId(item)}
-							on:click={() => activateLocal(item, kind)}
-							on:keydown={(e) => {
-								if (e.key === "Enter" || e.key === " ") {
-									e.preventDefault();
-									e.stopPropagation();
-									activateLocal(item, kind);
-								}
-							}}
-						>
-							<Icon
-								name={kind === "song" ? "play" : "artist"}
-								size="1rem"
-								style="color: var(--text-secondary);"
-							/>
-							<span class="local-text">
-								<span class="local-title">{item.title}</span>
-								{#if kind === "song" && localArtistName(item)}
-									<span class="local-artist">{localArtistName(item)}</span>
-								{/if}
-							</span>
-							<span class="local-badge">bibliothèque</span>
-						</li>
-					{/each}
-				{/if}
+						<Icon
+							name={kind === "song" ? "play" : "artist"}
+							size="1rem"
+							style="color: var(--text-secondary);"
+						/>
+						<span class="local-text">
+							<span class="local-title">{item.title}</span>
+							{#if kind === "song" && localArtistName(item)}
+								<span class="local-artist">{localArtistName(item)}</span>
+							{/if}
+						</span>
+						<span class="local-badge">{showRecentSearches ? "reprendre" : "bibliothèque"}</span>
+					</li>
+				{/each}
+			{/if}
+			{#if !showRecentSearches}
 				<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 				{#each results as result (result.id)}
 					<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
