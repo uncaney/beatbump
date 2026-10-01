@@ -12,6 +12,10 @@
 	export let iconOnly = false;
 	/** Icon colour (the fullscreen player sits on a dark cover). */
 	export let color: string | undefined = undefined;
+	/** UX7: "secondary" = the pill of the album action row; default ghost. */
+	export let variant: "ghost" | "secondary" = "ghost";
+	/** UX7: icon + label on desktop, icon-only on phones (aria-label stays). */
+	export let responsive = false;
 
 	let busy = false;
 	async function onShare() {
@@ -29,8 +33,9 @@
 
 <button
 	type="button"
-	class="btn-ghost share-link"
+	class="share-link {variant === 'secondary' ? 'btn-secondary' : 'btn-ghost'}"
 	class:icon-only={iconOnly}
+	class:responsive
 	data-testid="share-link"
 	aria-label="Partager"
 	title="Partager le lien"
@@ -43,7 +48,7 @@
 		{color}
 		--stroke={color ?? "currentColor"}
 	/>
-	{#if !iconOnly}<span>Partager</span>{/if}
+	{#if !iconOnly}<span class="share-lbl">Partager</span>{/if}
 </button>
 
 <style>
@@ -51,5 +56,15 @@
 		min-width: max(2.75rem, 44px);
 		padding: 0.4em;
 		filter: drop-shadow(0 1px 2px rgb(0 0 0 / 60%));
+	}
+	@media only screen and (max-width: 719px) {
+		.share-link.responsive {
+			min-width: max(2.75rem, 44px);
+			padding-inline: 0.6rem;
+			gap: 0;
+		}
+		.share-link.responsive .share-lbl {
+			display: none;
+		}
 	}
 </style>

@@ -466,14 +466,14 @@
 				text-shadow: rgb(0 0 0 / 17.1%) 0.2rem -0.12rem 0.5rem;
 				letter-spacing: -0.02em;
 				padding-bottom: 1rem;
-				// Audit v7 item 10: long names clamp to two lines with an
-				// ellipsis instead of pushing the buttons off-screen.
-				display: -webkit-box;
-				-webkit-box-orient: vertical;
-				-webkit-line-clamp: 2;
-				overflow: hidden;
+				// UX7 (cycle 35): a long name wraps (two lines on a phone), never
+				// an ellipsis; words broken only when one word
+				// alone is wider than the screen.
+				display: block;
 				max-width: 100%;
-				overflow-wrap: anywhere;
+				overflow-wrap: break-word;
+				hyphens: auto;
+				line-height: 1.1;
 
 				@media screen and (min-width: 642px) and (max-width: 839px) {
 					font-size: 2rem;

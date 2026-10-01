@@ -13,6 +13,7 @@
 	import { getOfflineTracks } from "$lib/offline";
 	import { cancelKeepJob, findKeepJob, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepProgress } from "$lib/offlineBatch";
 	import { notify } from "$lib/utils";
+	import Icon from "$components/Icon/Icon.svelte";
 
 	/** Tracks of the source, or a loader (album pages resolve their queue lazily). */
 	export let tracks: any[] = [];
@@ -23,6 +24,12 @@
 	export let testid = "keep-offline";
 	/** UX2: icon-only variant (aria-label "Garder hors-ligne", status in the title). */
 	export let compact = false;
+	/**
+	 * UX7: album action row. A download icon before the label; on phones the
+	 * idle / ready label folds to the icon (aria-label keeps the words), the
+	 * running "9/14 prêts" progress stays written.
+	 */
+	export let responsive = false;
 
 	// $page (not `location`): a same-route navigation (release?id=A → B) reuses this component.
 	$: key = sourceKey || ($page?.url ? $page.url.pathname + $page.url.search : "");
@@ -118,6 +125,9 @@
 	<button
 		type="button"
 		class="keep-btn btn-reset btn-secondary"
+		class:responsive
+		class:show-label={running}
+		aria-label={responsive ? label : undefined}
 		data-testid={testid}
 		data-state={state}
 		data-ready={progress ? progress.ready : 0}
@@ -125,7 +135,11 @@
 		title={progress && progress.total ? `${progress.ready}/${progress.total} prêts` : "Télécharger et épingler pour l'écoute sans connexion"}
 		aria-live="polite"
 		disabled={running}
-		on:click|stopPropagation={start}>{label}</button
+		on:click|stopPropagation={start}
+		>{#if responsive}<Icon
+				name="download"
+				size="1.1em"
+			/><span class="keep-lbl">{label}</span>{:else}{label}{/if}</button
 	>
 	{#if running}
 		<button
@@ -152,6 +166,16 @@
 			// "9/14 prêts" is a progress label, not a disabled control.
 			cursor: progress;
 			opacity: 1;
+		}
+		@media only screen and (max-width: 719px) {
+			&.responsive:not(.show-label) {
+				min-width: max(2.75rem, 44px);
+				padding-inline: 0.6rem;
+				gap: 0;
+				.keep-lbl {
+					display: none;
+				}
+			}
 		}
 		&[data-state="ready"] {
 			// Green is the state colour: "Prêt hors-ligne", border only.

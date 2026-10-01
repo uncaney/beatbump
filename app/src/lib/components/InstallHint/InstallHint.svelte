@@ -8,10 +8,13 @@
 	// not shown yet this session. Never pops up right as a track starts
 	// playing (a 2 s window after `AudioPlayer.paused` goes false).
 	// Audit UX v11 U11-3: one full-width compact bar docked on the mini-bar
-	// (or under the top nav while nothing plays) instead of a floating card
+	// instead of a floating card
 	// with two dismiss affordances; a single "Installer" + a single close
 	// ("Plus tard" = the 14-day snooze); never over the fullscreen player or
 	// the lyrics page, which it used to mask.
+	// UX5 (cycle 35): without a mini-player it docks on the bottom edge
+	// (safe-area inset) instead of under the top nav, where it covered the
+	// library nav and the page title; see ./dock.ts.
 	import { onDestroy, onMount } from "svelte";
 	import { page } from "$app/stores";
 	import Icon from "$components/Icon/Icon.svelte";
@@ -27,6 +30,7 @@
 	import { AudioPlayer } from "$lib/player";
 	import { queue } from "$lib/stores/list";
 	import { fullscreenStore } from "$components/Player/channel";
+	import { installHintDock, installHintGeometry } from "./dock";
 
 	// Shown at most once per session: once true, stays true for the rest of
 	// this component's (= the app's) lifetime, whatever triggers next.
@@ -55,6 +59,8 @@
 	$: onPlaybackSurface =
 		$fullscreenStore === "open" || ($page?.url?.pathname ?? "").startsWith("/lyrics");
 	$: hasPlayer = $queue.length > 0;
+	$: dock = installHintDock(hasPlayer);
+	$: geometry = installHintGeometry(dock);
 	$: show =
 		!dismissed &&
 		!snoozed &&
@@ -80,7 +86,9 @@
 {#if show}
 	<div
 		class="install-hint"
-		class:docked-top={!hasPlayer}
+		data-dock={dock}
+		style:--install-hint-bottom={geometry.bottom}
+		style:--install-hint-safe-area={geometry.safeArea}
 		role="status"
 		data-testid="install-hint"
 	>
@@ -121,15 +129,17 @@
 		left: 0;
 		right: 0;
 		// Docked right on top of the mini-bar (the footer is `--player-bar-height`
-		// tall and fixed at the bottom); the safe-area inset is already inside
-		// the bar. No transform / no centering: a full-width strip.
-		bottom: var(--player-bar-height, 0px);
+		// tall and fixed at the bottom; the safe-area inset is already inside
+		// the bar), or on the bottom edge without a player, padded by the
+		// safe-area inset (dock.ts). Never docked at the top, so no nav or page title
+		// under it. No transform / no centering: a full-width strip.
+		bottom: var(--install-hint-bottom, var(--player-bar-height, 0px));
 		z-index: 55;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
 		min-height: max(2.75rem, 44px);
-		padding: 0.35rem 0.5rem 0.35rem 1rem;
+		padding: 0.35rem 0.5rem calc(0.35rem + var(--install-hint-safe-area, 0px)) 1rem;
 		background: rgba(20, 20, 24, 0.97);
 		border-top: 1px solid rgba(255, 255, 255, 0.12);
 		color: #eee;
@@ -137,13 +147,6 @@
 		font-size: var(--text-secondary-size);
 		line-height: 1.3;
 		box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
-		&.docked-top {
-			bottom: auto;
-			top: var(--top-bar-height, 0px);
-			border-top: none;
-			border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-			box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-		}
 	}
 	.text {
 		flex: 1 1 auto;
