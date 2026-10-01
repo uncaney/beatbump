@@ -14,6 +14,16 @@
 		}
 		return false;
 	};
+
+	// Thumbnail shape is keyed on the ITEM type, not the page: only artists and
+	// channels get the round thumbnail; albums, singles and playlists stay square
+	// (audit 1.3: the circle codes "artist" everywhere else in the app).
+	const hasRoundThumbnail = (item: Item) => {
+		const pt = item?.endpoint?.pageType ?? "";
+		if (/ALBUM|SINGLE|PLAYLIST|EP/.test(pt)) return false;
+		if (/ARTIST|USER_CHANNEL/.test(pt)) return true;
+		return item?.type === "artist" || item?.type === "artists";
+	};
 </script>
 
 <script lang="ts">
@@ -49,6 +59,7 @@
 	let videoId = "";
 	let playlistId = "";
 	let isArtist = isChannelOrArtist(data);
+	let roundThumbnail = hasRoundThumbnail(data);
 
 	let srcImg =
 		Array.isArray(data?.thumbnails) && data?.thumbnails[0]
@@ -342,7 +353,7 @@
 		>
 			<div
 				class="img-container"
-				class:artist-img={isArtist}
+				class:artist-img={roundThumbnail}
 			>
 				{#if loading}
 					<Loading size="3em" />
@@ -642,6 +653,8 @@
 		}
 	}
 
+	// Round thumbnail: artists and channels only (see hasRoundThumbnail). Albums,
+	// singles and playlists keep the square $xs-radius of .img-container.
 	.artist-img {
 		border-radius: 99999em;
 	}
