@@ -127,9 +127,11 @@ func decodeBody(c echo.Context, v interface{}) error {
 // ---- history item slimming (K13) ----
 // A play event used to store the whole item the front sent (1-2 KB of
 // YouTube tracking blobs each) and events=1&limit=200 replayed all of it.
-// Same DROP_KEYS as app/src/lib/historyOutbox.ts, applied server side at
-// write (new events) and at read (events stored before this change).
-var historyDropKeys = []string{"loggingContext", "clickTrackingParams", "playerParams", "playlistSetVideoId", "itct", "params", "musicVideoType", "autoMixList"}
+// Same DROP_KEYS as app/src/lib/historyOutbox.ts minus musicVideoType
+// (L21: ListItem.svelte passes item.musicVideoType as config.type to
+// initAutoMixSession when a history row is replayed, 3 bytes), applied
+// server side at write (new events) and at read (events stored before).
+var historyDropKeys = []string{"loggingContext", "clickTrackingParams", "playerParams", "playlistSetVideoId", "itct", "params", "autoMixList"}
 
 // historyMaxThumbnails: the smallest (list rows and homeRows read [0]) and
 // the largest (Fullscreen.svelte reads thumbnails.at(-1): cover, blurred

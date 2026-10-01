@@ -40,6 +40,10 @@ func assertSlim(t *testing.T, raw json.RawMessage, where string) {
 	if m["title"] != "Song A" || m["videoId"] != "0123456789a" || m["length"] != "4:00" {
 		t.Fatalf("%s: display fields lost: %v", where, m)
 	}
+	// L21: ListItem passes it as config.type when replaying a history row.
+	if m["musicVideoType"] != "MUSIC_VIDEO_TYPE_ATV" {
+		t.Fatalf("%s: musicVideoType lost: %v", where, m["musicVideoType"])
+	}
 	if ai, ok := m["artistInfo"].(map[string]interface{}); !ok || ai["artist"] == nil {
 		t.Fatalf("%s: artistInfo lost", where)
 	}
