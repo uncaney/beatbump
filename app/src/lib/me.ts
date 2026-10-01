@@ -1,6 +1,7 @@
 // Client helpers for the server-side profile state (favorites / follows / playlists).
 // The bbp profile cookie is set + carried automatically (credentials:'same-origin').
 import { APIClient } from "$lib/api";
+import { clearHomeCache } from "$lib/homeCache";
 import { enqueuePlay, flushOutbox, installHistoryOutbox, readOutbox, statusResult, type SendResult } from "$lib/historyOutbox";
 
 function itemRef(item: any): string {
@@ -118,6 +119,9 @@ export async function isAnonymousProfile(): Promise<boolean> {
 }
 export async function login(name: string): Promise<{ id: string; name: string }> {
 	forgetWhoami();
+	// L8-5: the instant-home cache belongs to the previous profile; drop it so the
+	// next /home never paints another profile's rows (listener lives on /home only).
+	clearHomeCache(typeof localStorage === "undefined" ? undefined : localStorage);
 	const r = await (await APIClient.post(`/api/v1/me/login`, { name })).json();
 	if (r && typeof r === "object" && typeof r.id === "string") writeWhoamiMemo({ id: r.id, name: typeof r.name === "string" ? r.name : "" });
 	announceProfileChange();
@@ -125,6 +129,7 @@ export async function login(name: string): Promise<{ id: string; name: string }>
 }
 export async function logout() {
 	forgetWhoami();
+	clearHomeCache(typeof localStorage === "undefined" ? undefined : localStorage);
 	announceProfileChange();
 	return APIClient.post(`/api/v1/me/logout`, {});
 }

@@ -149,6 +149,38 @@ func CacheResponse(ttl time.Duration, next echo.HandlerFunc) echo.HandlerFunc {
 	return cacheResponseWith(apiResponseCache, ttl, next)
 }
 
+// CacheResponseUnless is CacheResponse with an escape hatch: when skip(c) is
+// true the request goes straight to next (X-Ytm-Cache: BYPASS) and is never
+// stored. Used for endpoints that are shared-cacheable except for a per-profile
+// variant (audit L8-1: local/related?seed=favorites leaked one profile's radio
+// to every other profile for 5 minutes).
+func CacheResponseUnless(ttl time.Duration, skip func(echo.Context) bool, next echo.HandlerFunc) echo.HandlerFunc {
+	return cacheResponseUnlessWith(apiResponseCache, ttl, skip, next)
+}
+
+func cacheResponseUnlessWith(rc *responseCache, ttl time.Duration, skip func(echo.Context) bool, next echo.HandlerFunc) echo.HandlerFunc {
+	cached := cacheResponseWith(rc, ttl, next)
+	return func(c echo.Context) error {
+		if skip(c) {
+			c.Response().Header().Set("X-Ytm-Cache", "BYPASS")
+			return next(c)
+		}
+		return cached(c)
+	}
+}
+
+// perProfileRelated reports whether a local/related request depends on the
+// caller's profile (favorites seed) and so must never be served from the
+// shared cache.
+func perProfileRelated(c echo.Context) bool {
+	return c.QueryParam("seed") == "favorites"
+}
+
+// LocalRelatedCached is the registered handler for GET /api/v1/local/related.
+func LocalRelatedCached(ttl time.Duration) echo.HandlerFunc {
+	return CacheResponseUnless(ttl, perProfileRelated, LocalRelatedHandler)
+}
+
 func cacheResponseWith(rc *responseCache, ttl time.Duration, next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		req := c.Request()

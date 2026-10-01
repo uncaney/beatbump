@@ -126,7 +126,8 @@ func newServer() *echo.Echo {
 	e.GET("/api/v1/local/artists", api.LocalArtistsHandler)
 	e.GET("/api/v1/local/albums", api.LocalAlbumsHandler)
 	e.GET("/api/v1/local/songs", api.LocalSongsHandler)
-	e.GET("/api/v1/local/related", api.CacheResponse(5*time.Minute, api.LocalRelatedHandler))
+	// seed=favorites is per profile: served uncached (audit L8-1), the rest shared-cached 5 min.
+	e.GET("/api/v1/local/related", api.LocalRelatedCached(5*time.Minute))
 	e.GET("/api/v1/local/genres", api.LocalGenresHandler)
 	// c29b D1: decade / genre mixes (user-independent, cached like local/related).
 	e.GET("/api/v1/local/mix", api.LocalMixHandler)

@@ -105,3 +105,40 @@ func TestResponseCacheCapEvictsLRU(t *testing.T) {
 		t.Fatalf("oversized body must not be cached")
 	}
 }
+
+// L8-1: a per-profile variant must bypass the shared cache in both directions
+// (never stored, never served) while the shared variant still caches.
+func TestCacheResponseUnlessSkipsPerProfile(t *testing.T) {
+	t.Setenv("YTM_API_CACHE", "")
+	e := echo.New()
+	calls := 0
+	h := cacheResponseUnlessWith(newResponseCache(10), time.Minute, perProfileRelated, func(c echo.Context) error {
+		calls++
+		return c.String(http.StatusOK, "profile="+c.Request().Header.Get("X-Test-Profile")+" seed="+c.QueryParam("seed"))
+	})
+	do := func(url, profile string) (string, string) {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("X-Test-Profile", profile)
+		rec := httptest.NewRecorder()
+		if err := h(e.NewContext(req, rec)); err != nil {
+			t.Fatal(err)
+		}
+		return rec.Body.String(), rec.Header().Get("X-Ytm-Cache")
+	}
+	b1, c1 := do("/api/v1/local/related?seed=favorites", "A")
+	b2, c2 := do("/api/v1/local/related?seed=favorites", "B")
+	if c1 != "BYPASS" || c2 != "BYPASS" {
+		t.Fatalf("favorites seed must bypass: %s %s", c1, c2)
+	}
+	if b1 == b2 {
+		t.Fatalf("profile B got profile A's favorites radio: %q", b2)
+	}
+	_, c3 := do("/api/v1/local/related?seed=album:x", "A")
+	_, c4 := do("/api/v1/local/related?seed=album:x", "B")
+	if c3 != "MISS" || c4 != "HIT" {
+		t.Fatalf("album seed should still be shared-cached: %s %s", c3, c4)
+	}
+	if calls != 3 {
+		t.Fatalf("handler calls = %d, want 3", calls)
+	}
+}
