@@ -54,6 +54,7 @@
 	import { cancelSleepTimer, sleepLabel } from "$stores/sleepTimer";
 	import { currentIsFavourite, toggleCurrentFavourite } from "./favouriteState";
 	import { describeContext } from "$lib/stores/list/playbackContext";
+	import ShareLinkButton from "$components/ShareLinkButton/ShareLinkButton.svelte";
 	export let state: "open" | "closed";
 
 	// F2: heart label (state is refreshed by Player.svelte on track change)
@@ -517,6 +518,15 @@
 						/>
 					</button>
 					<div style="display:flex;align-items:center;gap:0.4em;">
+						<!-- c31b: "Partager" the current track (/listen?id=). -->
+						<ShareLinkButton
+							kind="track"
+							id={data?.videoId}
+							title={data?.title ?? ""}
+							artist={data?.artistInfo?.artist?.at(0)?.text ?? ""}
+							iconOnly
+							color="#fff"
+						/>
 						<button
 							type="button"
 							aria-label={favLabel}
@@ -758,6 +768,14 @@
 								strokeWidth={1.5}
 							/>
 						</button>
+						<ShareLinkButton
+							kind="track"
+							id={data?.videoId}
+							title={data?.title ?? ""}
+							artist={data?.artistInfo?.artist?.at(0)?.text ?? ""}
+							iconOnly
+							color="#fff"
+						/>
 					</div>
 				{/if}
 			</div>

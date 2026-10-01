@@ -26,6 +26,7 @@
 	import { page } from "$app/stores";
 	import { APIClient } from "$lib/api";
 	import { playTracks } from "../PlayAllBar/PlayAllBar.svelte";
+	import ShareLinkButton from "../ShareLinkButton/ShareLinkButton.svelte";
 
 	type Button<
 		Type extends string = string,
@@ -260,6 +261,13 @@
 					/>
 					<span>Radio</span>
 				</button>
+				<!-- c31b: "Partager" the local album (/release?id=lb-...). -->
+				<ShareLinkButton
+					kind="album"
+					id={localAlbumId}
+					{title}
+					artist={releaseArtists[0]?.name ?? ""}
+				/>
 			{/if}
 		</div>
 	{/if}
