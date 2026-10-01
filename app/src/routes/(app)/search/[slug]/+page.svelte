@@ -60,7 +60,7 @@
 	function isLocalShelf(s: MusicShelf | undefined): boolean {
 		return !!s && (s.local === true || s.header?.title === "Your Library");
 	}
-	$: ytShelf = filter !== "all" ? (results ?? []).find((s) => !isLocalShelf(s)) : undefined;
+	$: ytShelf = filter !== "all" ? (results ?? []).find((s: MusicShelf) => !isLocalShelf(s)) : undefined;
 	$: localShelves = filter !== "all" ? (results ?? []).filter(isLocalShelf) : [];
 	const search = writable<Item[]>([]);
 	$: filter !== "all" && search.set((ytShelf?.contents ?? []) as unknown as Item[]);
