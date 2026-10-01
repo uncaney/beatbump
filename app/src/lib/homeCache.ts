@@ -6,12 +6,15 @@
 // reads/writes through these pure helpers.
 
 import type { RowItem } from "./homeRows";
+import { albumOfDayFrom, utcDay, type AlbumOfDay } from "./albumOfDay";
 
 /** localStorage key (versioned envelope: version + savedAt + profile scope + rows). */
 export const HOME_CACHE_KEY = "ytm-home-cache";
 // v2 (c30a AP4): six rows instead of three. A v1 envelope is ignored (not
 // migrated): the live loads repaint everything within the second anyway.
-export const HOME_CACHE_VERSION = 2;
+// v3 (c39b B6-1): plus the "Album du jour" card (album, year, UTC date; not
+// its tracks, fetched again on "Écouter"), painted only on its own UTC day.
+export const HOME_CACHE_VERSION = 3;
 // Ignored after 7 days: a week-old "Récemment acquis" is worse than nothing.
 const HOME_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 // Bounded to ~120 slim cards total (6 rows x 20): enough to paint every row
@@ -27,6 +30,7 @@ interface HomeCacheEnvelope {
 	savedAt: number;
 	profileId: string;
 	rows: HomeCacheRows;
+	albumOfDay?: AlbumOfDay | null;
 }
 
 type StorageLike = {
@@ -71,6 +75,14 @@ export interface HomeCacheSnapshot {
 	profileId: string;
 	savedAt: number;
 	rows: HomeCacheRows;
+	/** c39b: today's (UTC) album of the day, null when absent or from another day. */
+	albumOfDay: AlbumOfDay | null;
+}
+
+/** The cached album-of-day card, kept only while its UTC date is `today`. */
+function cachedAlbumOfDay(raw: unknown, today: string): AlbumOfDay | null {
+	const a = albumOfDayFrom(raw);
+	return a && a.date === today ? { ...a, tracks: [] } : null;
 }
 
 /**
@@ -80,7 +92,7 @@ export interface HomeCacheSnapshot {
  * the caller compares `profileId` itself once it has one and drops the
  * paint on a mismatch. Any corruption/expiry answers null, never throws.
  */
-export function peekHomeCache(storage: StorageLike | undefined): HomeCacheSnapshot | null {
+export function peekHomeCache(storage: StorageLike | undefined, now: number = Date.now()): HomeCacheSnapshot | null {
 	try {
 		const raw = storage?.getItem(HOME_CACHE_KEY);
 		if (!raw) return null;
@@ -89,7 +101,7 @@ export function peekHomeCache(storage: StorageLike | undefined): HomeCacheSnapsh
 		if (parsed.v !== HOME_CACHE_VERSION) return null;
 		if (typeof parsed.profileId !== "string" || !parsed.profileId) return null;
 		if (typeof parsed.savedAt !== "number" || !Number.isFinite(parsed.savedAt)) return null;
-		if (Date.now() - parsed.savedAt > HOME_CACHE_MAX_AGE_MS) return null;
+		if (now - parsed.savedAt > HOME_CACHE_MAX_AGE_MS) return null;
 		const rows = parsed.rows as Partial<Record<HomeCacheRowKey, unknown>> | undefined;
 		if (!rows || typeof rows !== "object") return null;
 		const out = emptyRows();
@@ -97,7 +109,12 @@ export function peekHomeCache(storage: StorageLike | undefined): HomeCacheSnapsh
 			const v = rows[k];
 			if (Array.isArray(v)) out[k] = v;
 		}
-		return { profileId: parsed.profileId, savedAt: parsed.savedAt, rows: out };
+		return {
+			profileId: parsed.profileId,
+			savedAt: parsed.savedAt,
+			rows: out,
+			albumOfDay: cachedAlbumOfDay(parsed.albumOfDay, utcDay(new Date(now))),
+		};
 	} catch {
 		return null;
 	}
@@ -119,7 +136,12 @@ export function readHomeCache(storage: StorageLike | undefined, profileId: strin
  * a private-mode / quota failure never throws (the cache is an optimisation,
  * not a source of truth).
  */
-export function writeHomeCache(storage: StorageLike | undefined, profileId: string, rows: Partial<HomeCacheRows>): void {
+export function writeHomeCache(
+	storage: StorageLike | undefined,
+	profileId: string,
+	rows: Partial<HomeCacheRows>,
+	albumOfDay?: AlbumOfDay | null,
+): void {
 	try {
 		if (!storage?.setItem || !profileId) return;
 		const bounded = emptyRows();
@@ -129,6 +151,8 @@ export function writeHomeCache(storage: StorageLike | undefined, profileId: stri
 			savedAt: Date.now(),
 			profileId,
 			rows: bounded,
+			// The card only: its tracks (up to 300 rows) are not worth the bytes.
+			albumOfDay: albumOfDay ? { album: slimCard(albumOfDay.album), year: albumOfDay.year, date: albumOfDay.date, tracks: [] } : null,
 		};
 		storage.setItem(HOME_CACHE_KEY, JSON.stringify(envelope));
 	} catch {

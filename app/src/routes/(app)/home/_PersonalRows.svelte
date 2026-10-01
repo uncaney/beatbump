@@ -70,12 +70,19 @@
 
 	// c39b B6-1: the album of the day (GET local/album-of-day), null = no card.
 	let albumDay: AlbumOfDay | null = null;
+	// c39b item 4: painted from the home cache (v3) on its own UTC day, then
+	// replaced in place by the live answer (same AP1 opacity cue).
+	let albumDaySource: "empty" | "cache" | "live" = "empty";
 	async function loadAlbumOfDay() {
 		try {
 			const res = await APIClient.fetch(ALBUM_OF_DAY_URL);
 			if (!res.ok) return;
 			const next = albumOfDayFrom(await res.json());
-			if (next) albumDay = next;
+			if (next) {
+				albumDay = next;
+				albumDaySource = "live";
+				homeCachePersist.schedule();
+			}
 		} catch {
 			/* keep what is shown (cache paint or nothing) */
 		}
@@ -170,7 +177,7 @@
 				redecouvrir: rediscover,
 				nouveautes: newInLibrary,
 				jamaisEcoute: neverPlayed,
-			});
+			}, albumDay);
 		} catch {
 			/* best-effort: offline whoami, private mode, quota, ... */
 		}
@@ -213,6 +220,12 @@
 		if (snap.rows.jamaisEcoute.length) {
 			neverPlayed = snap.rows.jamaisEcoute;
 			neverPlayedSource = "cache";
+		}
+		// The album of the day is the same for every profile: a profile
+		// mismatch (validateCacheProfile) does not drop it.
+		if (snap.albumOfDay && !albumDay) {
+			albumDay = snap.albumOfDay;
+			albumDaySource = "cache";
 		}
 		void validateCacheProfile(snap.profileId);
 	}
@@ -758,6 +771,7 @@
 	>
 		<div
 			class="row-fade"
+			class:is-cache={albumDaySource === "cache"}
 			data-testid="album-of-day"
 			data-album={albumDay.album.browseId}
 			data-date={albumDay.date}
