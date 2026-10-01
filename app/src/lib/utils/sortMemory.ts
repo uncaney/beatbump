@@ -131,3 +131,35 @@ export function seekShouldContinue(rows: ReadonlyArray<{ title?: unknown }>, let
 	const want = letterRank(letter);
 	return desc ? last > want : last < want;
 }
+
+/**
+ * L8-8: an A-Z seek loads at most this many extra pages (of `seekLimit`
+ * rows, 200) before giving up with "Lettre trop loin, utilise le filtre".
+ * 5 x 200 = 1 000 rows on top of what is loaded: a phone can hold that in
+ * the DOM; the 6 800-album index at "Z" cannot be reached by scrolling.
+ */
+export const SEEK_MAX_PAGES = 5;
+
+export type SeekStep = "found" | "load" | "too_far" | "absent";
+
+/**
+ * Next step of an A-Z seek for `letter` given the rows loaded so far,
+ * `pagesLoaded` pages fetched by this seek and whether the list is `done`:
+ * "found" when a row of the letter is loaded, "absent" when the list is
+ * exhausted or already went past the letter (nothing to scroll to),
+ * "too_far" when the page budget is spent, else "load" (fetch one more
+ * page). Pure, so the bound is unit tested.
+ */
+export function seekStep(
+	rows: ReadonlyArray<{ title?: unknown }>,
+	letter: string,
+	desc: boolean,
+	pagesLoaded: number,
+	done: boolean,
+	maxPages = SEEK_MAX_PAGES,
+): SeekStep {
+	if (findLetterIndex(rows, letter) >= 0) return "found";
+	if (done || !seekShouldContinue(rows, letter, desc)) return "absent";
+	if (pagesLoaded >= maxPages) return "too_far";
+	return "load";
+}

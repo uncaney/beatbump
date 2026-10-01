@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	AZ_LETTERS,
+	SEEK_MAX_PAGES,
 	findLetterIndex,
 	initialOf,
 	isTitleSort,
@@ -8,9 +9,57 @@ import {
 	loadSortPrefs,
 	saveSortPrefs,
 	seekShouldContinue,
+	seekStep,
 	sortKey,
 	type PrefStorage,
 } from "./sortMemory";
+
+/** `n` rows whose titles start with `letter` (A-sorted fixture helper). */
+const rowsOf = (letter: string, n: number) => Array.from({ length: n }, (_, i) => ({ title: `${letter}${i}` }));
+
+describe("L8-8 bounded A-Z seek: seekStep", () => {
+	it("found as soon as a row of the letter is loaded", () => {
+		expect(seekStep([...rowsOf("A", 3), ...rowsOf("M", 1)], "M", false, 0, false)).toBe("found");
+		expect(seekStep(rowsOf("M", 1), "M", true, SEEK_MAX_PAGES + 3, true)).toBe("found");
+	});
+	it("loads while the list has not reached the letter and the budget is not spent", () => {
+		expect(seekStep([], "M", false, 0, false)).toBe("load");
+		expect(seekStep(rowsOf("A", 200), "M", false, 0, false)).toBe("load");
+		expect(seekStep(rowsOf("A", 200), "M", false, SEEK_MAX_PAGES - 1, false)).toBe("load");
+		// descending: the list runs Z..A, "M" is still ahead while the last row is later
+		expect(seekStep(rowsOf("Z", 200), "M", true, 2, false)).toBe("load");
+	});
+	it("too_far once SEEK_MAX_PAGES pages were loaded without reaching the letter", () => {
+		expect(SEEK_MAX_PAGES).toBe(5);
+		expect(seekStep(rowsOf("A", 1000), "Z", false, SEEK_MAX_PAGES, false)).toBe("too_far");
+		expect(seekStep(rowsOf("A", 1000), "Z", false, SEEK_MAX_PAGES + 1, false)).toBe("too_far");
+		expect(seekStep(rowsOf("Z", 1000), "#", true, SEEK_MAX_PAGES, false)).toBe("too_far");
+		// a custom budget
+		expect(seekStep(rowsOf("A", 10), "Z", false, 2, false, 2)).toBe("too_far");
+	});
+	it("absent when the list is exhausted or already went past the letter (no page, no message)", () => {
+		expect(seekStep(rowsOf("A", 10), "Z", false, 0, true)).toBe("absent");
+		expect(seekStep([...rowsOf("A", 2), ...rowsOf("N", 2)], "M", false, 0, false)).toBe("absent");
+		expect(seekStep(rowsOf("L", 2), "M", true, 0, false)).toBe("absent");
+		// the budget is spent AND the list is exhausted: exhausted wins (nothing more to load)
+		expect(seekStep(rowsOf("A", 10), "Z", false, SEEK_MAX_PAGES, true)).toBe("absent");
+	});
+	it("a seek loop stops after exactly SEEK_MAX_PAGES loads (simulated 6 831-album index, tap Z)", () => {
+		let rows: { title: string }[] = rowsOf("A", 60); // first page of 60
+		let loads = 0;
+		let step = seekStep(rows, "Z", false, 0, false);
+		let pages = 0;
+		while (step === "load") {
+			rows = [...rows, ...rowsOf(String.fromCharCode(66 + loads), 200)]; // B.., C.. never Z
+			loads++;
+			pages++;
+			step = seekStep(rows, "Z", false, pages, false);
+		}
+		expect(step).toBe("too_far");
+		expect(loads).toBe(SEEK_MAX_PAGES);
+		expect(rows.length).toBe(60 + SEEK_MAX_PAGES * 200);
+	});
+});
 
 const mem = (): PrefStorage & { map: Map<string, string> } => {
 	const map = new Map<string, string>();

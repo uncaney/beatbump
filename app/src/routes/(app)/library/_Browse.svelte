@@ -9,7 +9,7 @@
 		isTitleSort,
 		loadSortPrefs,
 		saveSortPrefs,
-		seekShouldContinue,
+		seekStep,
 	} from "$lib/utils/sortMemory";
 	import { onMount, tick } from "svelte";
 	import CollectionNav from "./_CollectionNav.svelte";
@@ -39,6 +39,8 @@
 	$: sortDesc = sort.endsWith(":desc");
 	let seeking = "";
 	let activeLetter = "";
+	// L8-8: the last seek gave up (page budget spent before the letter).
+	let tooFar = false;
 
 	async function load(reset = false, pageSize = limit) {
 		if (loading) return;
@@ -69,15 +71,21 @@
 	}
 
 	let debounce: ReturnType<typeof setTimeout>;
+	// L8-10: the localStorage write rides the same 250 ms debounce as the
+	// reload, not one write per keystroke.
 	function onQuery() {
 		clearTimeout(debounce);
-		saveSortPrefs(pathname, { sort, q });
-		debounce = setTimeout(() => load(true), 250);
+		tooFar = false;
+		debounce = setTimeout(() => {
+			saveSortPrefs(pathname, { sort, q });
+			load(true);
+		}, 250);
 	}
 	function onSort(e: Event) {
 		sort = (e.target as HTMLSelectElement).value;
 		saveSortPrefs(pathname, { sort, q });
 		activeLetter = "";
+		tooFar = false;
 		load(true);
 	}
 
@@ -98,16 +106,31 @@
 	 * paginated server side (60 per page, infinite scroll), so when the letter
 	 * is not loaded yet the next pages are fetched (200 at a time) until it
 	 * shows up or the list went past it, then the row is scrolled into view.
+	 * L8-8: at most SEEK_MAX_PAGES pages per tap (seekStep); beyond, the seek
+	 * stops and "Lettre trop loin, utilise le filtre" is shown. The letter
+	 * buttons stay enabled (a second tap during a seek is ignored) so the
+	 * pressed letter keeps the keyboard focus.
 	 */
 	async function jumpTo(letter: string) {
 		if (seeking) return;
+		tooFar = false;
 		if (await scrollToLetter(letter)) return;
 		seeking = letter;
+		let pages = 0;
 		try {
-			while (!done && seekShouldContinue(items, letter, sortDesc)) {
-				if (loading) await new Promise((r) => setTimeout(r, 50));
-				else await load(false, seekLimit);
-				if (findLetterIndex(items, letter) >= 0) break;
+			for (;;) {
+				const step = seekStep(items, letter, sortDesc, pages, done);
+				if (step === "found" || step === "absent") break;
+				if (step === "too_far") {
+					tooFar = true;
+					break;
+				}
+				if (loading) {
+					await new Promise((r) => setTimeout(r, 50));
+					continue;
+				}
+				await load(false, seekLimit);
+				pages++;
 			}
 			if (!(await scrollToLetter(letter))) activeLetter = "";
 		} finally {
@@ -178,11 +201,20 @@
 					class:seeking={letter === seeking}
 					aria-label="Aller à {letter === '#' ? 'autres' : letter}"
 					aria-current={letter === activeLetter ? "true" : undefined}
-					disabled={!!seeking}
+					aria-disabled={seeking && letter !== seeking ? "true" : undefined}
 					on:click={() => jumpTo(letter)}>{letter}</button
 				>
 			{/each}
 		</nav>
+		{#if tooFar}
+			<p
+				class="state too-far"
+				role="status"
+				data-testid="az-too-far"
+			>
+				Lettre trop loin, utilise le filtre
+			</p>
+		{/if}
 	{/if}
 
 	<section
@@ -276,6 +308,9 @@
 		color: #999;
 		margin: 1.5rem 0;
 	}
+	.too-far {
+		margin: 0.25rem 0 0.75rem;
+	}
 	.sentinel {
 		height: 1px;
 	}
@@ -320,7 +355,7 @@
 			&.seeking {
 				opacity: 0.6;
 			}
-			&:disabled:not(.seeking) {
+			&[aria-disabled="true"] {
 				opacity: 0.35;
 			}
 			&:focus-visible {
