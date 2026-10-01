@@ -489,6 +489,13 @@
 
 	.menu {
 		padding-right: 0em;
+		// Desktop: the kebab sat a few px above the row centre (audit v3 3.2).
+		// Centre it on the grid row and keep the 44px hit box around the icon.
+		align-self: center;
+		display: grid;
+		place-items: center;
+		min-width: 44px;
+		min-height: 44px;
 	}
 
 	.hidden {
