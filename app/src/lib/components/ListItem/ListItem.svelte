@@ -202,6 +202,19 @@
 					left: 0,
 				});
 			})
+			// Queue actions (P1). On a queue row "Lire ensuite" MOVES the row right
+			// after the current track; "Ajouter à la file" is meaningless there.
+			.add(
+				"Lire ensuite",
+				page === "queue"
+					? () => {
+							list.moveTrackNext(idx);
+					  }
+					: () => playNext(item),
+			)
+			.add(page === "queue" ? undefined : "Ajouter à la file", () =>
+				addToQueueEnd(item),
+			)
 			.add("Play Song Radio", async () => {
 				list.initAutoMixSession({
 					videoId: item.videoId,
@@ -307,6 +320,7 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId, entityHref } from "$lib/local";
 	import { downloadToDevice } from "$lib/offline";
+	import { addToQueueEnd, playNext } from "$lib/queueActions";
 	import { buildDropdown } from "$lib/configs/dropdowns.config";
 	import { APIParams, FINITE_LIST_PARAMS } from "$lib/constants";
 	import { CTX_ListItem } from "$lib/contexts";

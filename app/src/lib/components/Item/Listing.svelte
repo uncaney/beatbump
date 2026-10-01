@@ -39,7 +39,8 @@
 	import { mobileLongPress } from "$lib/actions/longtouch";
 	import type { Dropdown } from "$lib/configs/dropdowns.config";
 	import { groupSession } from "$lib/stores";
-	import list, { queue, queuePosition } from "$lib/stores/list";
+	import list from "$lib/stores/list";
+	import { addToQueueEnd, playNext } from "$lib/queueActions";
 	import type { Item } from "$lib/types";
 	import { IsoBase64, Logger, filter, notify } from "$lib/utils";
 	import {
@@ -93,20 +94,14 @@
 			},
 		},
 		{
-			text: "Play Next",
-			icon: "queue",
-			action: () =>
-				groupSession.hasActiveSession
-					? groupSession.addToQueue(data, $queuePosition)
-					: list.setTrackWillPlayNext(data, $queuePosition),
+			text: "Lire ensuite",
+			icon: "play-circle",
+			action: () => playNext(data),
 		},
 		{
-			text: "Add to Queue",
+			text: "Ajouter à la file",
 			icon: "queue",
-			action: () =>
-				groupSession.hasActiveSession
-					? groupSession.addToQueue(data, $queue.length)
-					: list.setTrackWillPlayNext(data, $queue.length),
+			action: () => addToQueueEnd(data),
 		},
 
 		{

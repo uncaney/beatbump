@@ -56,6 +56,15 @@ function togglePlayerLoad() {
 
 type MixListAppendOp = [op: "append" | "set", data: Item[]];
 
+/**
+ * Owned-library (local) track id: 11 lowercase hex chars, the same rule as the
+ * backend's `isLid()`. Such an id is not a YouTube videoId and must never be
+ * sent to `get_queue.json`.
+ */
+export function isLocalTrackId(id: string | undefined | null): boolean {
+    return typeof id === "string" && /^[0-9a-f]{11}$/.test(id);
+}
+
 const VALID_KEYS = [
     "clickTrackingParams",
     "continuation",
@@ -924,6 +933,34 @@ export class ListService {
         syncTabs.updateSessionList(this._$.value);
     }
 
+    /**
+     * Queue row "Lire ensuite": move the track at `index` right after the
+     * current one. The cursor keeps pointing at the playing track (it shifts
+     * left by one when a row before it is moved). No-op for the current track,
+     * the one already next, or an out-of-range index.
+     */
+    public async moveTrackNext(index: number): Promise<boolean> {
+        const mix = this._$.value.mix.slice();
+        const position = this._$.value.position;
+        if (index < 0 || index >= mix.length) return false;
+        if (index === position || index === position + 1) return false;
+        const [track] = mix.splice(index, 1);
+        const newPosition = index < position ? position - 1 : position;
+        mix.splice(newPosition + 1, 0, track);
+        const state = await this.#sanitizeAndUpdate("APPLY", {
+            mix: ["set", mix] satisfies MixListAppendOp,
+            position: newPosition,
+        });
+        this.clearNextTrack();
+        this.schedulePrefetch(state.position);
+        syncTabs.updateSessionList(state);
+        if (groupSession?.initialized && groupSession?.hasActiveSession) {
+            groupSession.send("PUT", "state.update.mix", this.toJSON(), groupSession.client);
+        }
+        notify(`« ${track?.title ?? "Le morceau"} » sera lu ensuite`, "success");
+        return true;
+    }
+
     public async setMix(mix: Item[], type?: "auto" | "playlist" | "local") {
         this.invalidatePrefetch();
         const guard = await mutex.do(async () => {
@@ -949,14 +986,56 @@ export class ListService {
         syncTabs.updateSessionList(guard);
     }
 
-    public async setTrackWillPlayNext(item: Item, key: number) {
+    /**
+     * Tracks to insert for a row: local / offline items are inserted as-is (a
+     * lid is not a YouTube id; the row already carries title, thumbnails and
+     * videoId, and getSrc() plays a lid or a `localUrl` directly). YouTube
+     * items go through `get_queue.json` (a playlist/album row expands to its
+     * tracks); when that returns nothing the row itself is inserted so a
+     * flaky endpoint never silently drops the action.
+     */
+    private async resolveQueueItems(item: Item): Promise<Item[]> {
+        if (item.localUrl || isLocalTrackId(item.videoId)) return [item];
+        const fetched = await addToQueue(item);
+        if (Array.isArray(fetched) && fetched.length) return fetched as Item[];
+        if (item.videoId) return [item];
+        return [];
+    }
+
+    /**
+     * "Lire ensuite": insert `item` right after the current track. Empty
+     * queue: becomes the first (and playing) track.
+     */
+    public playNext(item: Item): Promise<boolean> {
+        const key = this._$.value.mix.length ? this._$.value.position : -1;
+        return this.setTrackWillPlayNext(item, key);
+    }
+
+    /**
+     * "Ajouter à la file": append `item` at the end of the queue. Empty queue:
+     * becomes the first (and playing) track.
+     */
+    public addToQueueEnd(item: Item): Promise<boolean> {
+        return this.setTrackWillPlayNext(item, this._$.value.mix.length - 1);
+    }
+
+    /**
+     * Insert `item` (or the tracks it expands to) at `key + 1`. Resolves to
+     * true when something was inserted; errors are notified (in French) and
+     * resolve to false so callers can skip their success toast.
+     */
+    public async setTrackWillPlayNext(item: Item, key: number): Promise<boolean> {
         await tick();
         if (!item) {
-            notify("No track to remove was provided!", "error");
-            return;
+            notify("Aucun morceau à ajouter à la file", "error");
+            return false;
         }
         try {
-            const itemToAdd = await addToQueue(item);
+            const itemToAdd = await this.resolveQueueItems(item);
+            if (!itemToAdd.length) {
+                notify("Impossible d'ajouter ce morceau à la file", "error");
+                return false;
+            }
             const oldLength = this._$.value.mix.length;
 
             splice(this._$.value.mix, key + 1, 0, ...itemToAdd);
@@ -976,9 +1055,12 @@ export class ListService {
             // "Play next" inserts right after the current track: re-warm.
             this.clearNextTrack();
             this.schedulePrefetch(state.position);
+            syncTabs.updateSessionList(state);
+            return true;
         } catch (err) {
             console.error(err);
-            notify(`Error: ${err}`, "error");
+            notify(`Impossible d'ajouter à la file : ${err}`, "error");
+            return false;
         }
     }
 
