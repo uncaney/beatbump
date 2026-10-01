@@ -1,7 +1,9 @@
 <script lang="ts">
 	// One album (or an artist's "Singles" bucket): cover, name, artist, count,
-	// play / shuffle buttons and a collapsible track list (click a track to play
-	// the album from there). Events: play {tracks, index, shuffle}, remove track.
+	// two visible actions (play album + pin, audit v5 TOP 6), a kebab menu for
+	// the secondary ones (shuffle, show/hide tracks) and a collapsible track list
+	// (the cover and the name toggle it; click a track to play the album from
+	// there). Events: play {tracks, index, shuffle}, remove track, pin, recache.
 	//
 	// The global stylesheet forces `color: #0f0f0f !important`, `display:
 	// inline-flex` and `text-transform: capitalize` on every `button:not(.icon-btn)`;
@@ -10,7 +12,7 @@
 	import Icon from "$components/Icon/Icon.svelte";
 	import type { AlbumGroup } from "$lib/offlineQueue";
 	import { formatBytes } from "$lib/offlineQueue";
-	import { createEventDispatcher } from "svelte";
+	import { createEventDispatcher, tick } from "svelte";
 	import OfflineTrackRow from "./OfflineTrackRow.svelte";
 
 	export let album: AlbumGroup;
@@ -33,11 +35,61 @@
 	$: size = formatBytes(album.bytes);
 	$: isActive = !!activeId && album.tracks.some((t) => t.videoId === activeId);
 	$: toggleLabel = open ? "Replier l'album" : "Déplier l'album";
+
+	// Kebab menu (secondary actions). Closes on Escape, outside click and after
+	// a choice; focus goes to the first item on open and back to the kebab.
+	let menuOpen = false;
+	let menuBtn: HTMLButtonElement | null = null;
+	let menuEl: HTMLDivElement | null = null;
+	const menuId = "album-menu-" + Math.random().toString(36).slice(2, 9);
+	async function toggleMenu() {
+		menuOpen = !menuOpen;
+		if (menuOpen) {
+			await tick();
+			menuEl?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+		}
+	}
+	function closeMenu(refocus = true) {
+		if (!menuOpen) return;
+		menuOpen = false;
+		if (refocus) menuBtn?.focus();
+	}
+	function onWindowClick(e: MouseEvent) {
+		if (!menuOpen) return;
+		const t = e.target as Node | null;
+		if (t && (menuEl?.contains(t) || menuBtn?.contains(t))) return;
+		closeMenu(false);
+	}
+	function onMenuKeydown(e: KeyboardEvent) {
+		const items = Array.from(menuEl?.querySelectorAll<HTMLButtonElement>("[role=menuitem]") || []);
+		const i = items.indexOf(document.activeElement as HTMLButtonElement);
+		if (e.key === "Escape") {
+			e.preventDefault();
+			closeMenu();
+		} else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+			e.preventDefault();
+			const n = items.length;
+			if (n) items[(i + (e.key === "ArrowDown" ? 1 : n - 1) + n) % n].focus();
+		} else if (e.key === "Tab") {
+			closeMenu(false);
+		}
+	}
+	function shuffleAlbum() {
+		closeMenu();
+		dispatch("play", { tracks: album.tracks, index: 0, shuffle: true });
+	}
+	function toggleTracks() {
+		closeMenu();
+		open = !open;
+	}
 </script>
+
+<svelte:window on:click={onWindowClick} />
 
 <section
 	class="album"
 	class:active={isActive}
+	class:menu-open={menuOpen}
 >
 	<div class="head">
 		<button
@@ -75,11 +127,6 @@
 					{count} {count > 1 ? "pistes" : "piste"}{#if size}<span class="dot">·</span>{size}{/if}
 				</span>
 			</span>
-			<span
-				class="chev"
-				class:open
-				aria-hidden="true">›</span
-			>
 		</button>
 		<div class="actions">
 			<button
@@ -96,18 +143,6 @@
 				/>
 			</button>
 			<button
-				class="btn"
-				type="button"
-				title="Album en aléatoire"
-				aria-label="Album en aléatoire"
-				on:click={() => dispatch("play", { tracks: album.tracks, index: 0, shuffle: true })}
-			>
-				<Icon
-					name="shuffle"
-					size="1.1em"
-				/>
-			</button>
-			<button
 				type="button"
 				class="btn pin"
 				class:on={allPinned}
@@ -116,6 +151,62 @@
 				on:click={() => dispatch("pin", { tracks: album.tracks, pinned: !allPinned })}>
 				<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill={allPinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="2"><path d="M16 3l5 5-4 1-5 5 1 5-3 3-4-6-4 4-1-1 4-4-6-4 3-3 5 1 5-5z"/></svg>
 			</button>
+			<div class="menu-wrap">
+				<button
+					class="kebab"
+					type="button"
+					title="Plus d'options"
+					aria-label="Plus d'options pour l'album"
+					aria-haspopup="menu"
+					aria-expanded={menuOpen}
+					aria-controls={menuOpen ? menuId : undefined}
+					bind:this={menuBtn}
+					on:click={toggleMenu}
+				>
+					<Icon
+						name="dots"
+						size="1.1em"
+					/>
+				</button>
+				{#if menuOpen}
+					<div
+						class="menu"
+						id={menuId}
+						role="menu"
+						tabindex="-1"
+						aria-label="Options de l'album"
+						bind:this={menuEl}
+						on:keydown={onMenuKeydown}
+					>
+						<button
+							class="item"
+							type="button"
+							role="menuitem"
+							tabindex="-1"
+							on:click={shuffleAlbum}
+						>
+							<Icon
+								name="shuffle"
+								size="1.1em"
+							/>
+							<span>Lecture aléatoire</span>
+						</button>
+						<button
+							class="item"
+							type="button"
+							role="menuitem"
+							tabindex="-1"
+							on:click={toggleTracks}
+						>
+							<Icon
+								name="list-music"
+								size="1.1em"
+							/>
+							<span>{open ? "Masquer les pistes" : "Afficher les pistes"}</span>
+						</button>
+					</div>
+				{/if}
+			</div>
 		</div>
 	</div>
 	{#if open}
@@ -151,6 +242,10 @@
 		&.active {
 			border-color: rgba(30, 215, 96, 0.35);
 		}
+		// The kebab menu is absolute inside the card: let it overflow.
+		&.menu-open {
+			overflow: visible;
+		}
 		&.active .name {
 			color: $accent;
 		}
@@ -166,7 +261,9 @@
 	// (dark text / border / hover backgrounds, all !important there).
 	.cover,
 	.info,
-	.btn {
+	.btn,
+	.kebab,
+	.item {
 		color: $text !important;
 		box-shadow: none !important;
 		font: inherit;
@@ -215,9 +312,8 @@
 			display: block;
 		}
 	}
-	// Name + meta stacked in a column; the chevron sits at the right end of the
-	// same button (it already toggles), so the card keeps only two round buttons
-	// and leaves room for the title on a 390px screen.
+	// Name + meta stacked in a column (the button toggles the track list, as
+	// the cover does): no chevron, the card shows two round actions only.
 	.info {
 		flex: 1 1 auto;
 		min-width: 0;
@@ -269,19 +365,6 @@
 	.dot {
 		margin: 0 0.3em;
 	}
-	.chev {
-		flex: 0 0 auto;
-		width: 1rem;
-		display: inline-grid;
-		place-items: center;
-		font-size: 1.4rem;
-		line-height: 1;
-		color: $muted;
-		transition: transform 150ms ease;
-		&.open {
-			transform: rotate(90deg);
-		}
-	}
 	.actions {
 		flex: 0 0 auto;
 		display: flex;
@@ -307,6 +390,68 @@
 		&:active {
 			background: rgba(255, 255, 255, 0.16) !important;
 			border-color: rgba(255, 255, 255, 0.3) !important;
+		}
+	}
+	// Kebab: no disc, so the two round actions stay the card's only visible
+	// buttons; 44px tall tap zone, narrow width.
+	.menu-wrap {
+		position: relative;
+		display: flex;
+	}
+	.kebab {
+		min-width: max(2rem, 32px);
+		min-height: max(2.75rem, 44px);
+		padding: 0;
+		display: grid;
+		place-items: center;
+		border: 0 !important;
+		border-radius: 0.5rem;
+		background: none !important;
+		color: $muted !important;
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
+			background: rgba(255, 255, 255, 0.08) !important;
+			border-color: transparent !important;
+			color: $text !important;
+		}
+	}
+	.menu {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 0.25rem);
+		z-index: 20;
+		min-width: 13rem;
+		padding: 0.3rem;
+		border-radius: 0.6rem;
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		background: #1e1e1e;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+		display: flex;
+		flex-direction: column;
+	}
+	.item {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		width: 100%;
+		min-height: max(2.75rem, 44px);
+		padding: 0 0.75rem;
+		border: 0 !important;
+		border-radius: 0.4rem;
+		background: none !important;
+		font-size: 0.95rem;
+		white-space: nowrap;
+		&:hover,
+		&:focus,
+		&:focus-within,
+		&:active {
+			background: rgba(255, 255, 255, 0.1) !important;
+			border-color: transparent !important;
+		}
+		&:focus-visible {
+			outline-offset: -2px;
 		}
 	}
 	.tracks {
