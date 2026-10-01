@@ -8,7 +8,17 @@ import { tick } from "svelte";
 import { tweened } from "svelte/motion";
 import { writable } from "svelte/store";
 import { APIClient, PREFETCH_INIT } from "./api";
-import { announceNowPlaying, cacheTrackOffline, getCachedUrl, swRequest, verifyCached } from "./offline";
+import {
+	announceNowPlaying,
+	cacheTrackOffline,
+	getCachedUrl,
+	getOfflineTracks,
+	isLocalUrl,
+	isStableAudioUrl,
+	listCachedAudio,
+	swRequest,
+	verifyCached,
+} from "./offline";
 import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
@@ -16,7 +26,7 @@ import { shouldStopAtTrackEnd, trackEnded as sleepTimerTrackEnded } from "./stor
 import { syncTabs } from "./tabSync";
 import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
-import { claimMediaRetry } from "./utils/mediaRetry";
+import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from "./utils/mediaRetry";
 import { setWorkerInterval } from "./utils/workerTimeout";
 
 let userSettings: UserSettings | undefined = undefined;
@@ -781,19 +791,29 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 					case 4: {
 						// MEDIA_ERR_SRC_NOT_SUPPORTED: container/MIME rejected or 4xx/5xx on the source.
 						// The first play of a fresh browser context fails ~1 run in 8 with
-						// PIPELINE_ERROR_READ and succeeds on retry: re-resolve the source once
-						// per track (per 10 min window, G21) before giving up (toast + guarded
-						// auto-skip). The retry bypasses the service-worker cache (G2).
+						// PIPELINE_ERROR_READ and succeeds on retry: up to two automatic
+						// attempts per track per 10 min window (G21, H1) before giving up
+						// (toast + guarded auto-skip). Attempt 1 reloads the same source,
+						// attempt 2 re-resolves it (see retryMediaSource for the purge rules).
+						err = new PlayerRequestError(0, "unplayable", "MEDIA_ERR_SRC_NOT_SUPPORTED", "Source audio illisible");
 						const cur = SessionListService.$.value.mix?.[SessionListService.$.value.position];
 						const vid = cur?.videoId ? String(cur.videoId) : "";
-						if (vid && claimMediaRetry(mediaRetriedAt, vid)) {
-							console.warn("[player] source read error, retrying once", vid, message);
+						const attempt = vid ? claimMediaRetryAttempt(mediaRetryAttempts, vid) : 0;
+						if (attempt > 0) {
+							const raw = String(this.player?.currentSrc || this.player?.src || "");
+							// MSE (HLS) sources are blob: URLs: not reloadable as such.
+							const failedSrc = raw.startsWith("blob:") ? "" : raw;
+							const giveUpErr = err;
+							console.warn("[player] source read error, retry attempt", attempt, vid, message);
 							setTimeout(() => {
-								void retryMediaSource(vid, cur?.playlistId).catch(() => {});
+								void retryMediaSource(vid, cur?.playlistId, attempt, failedSrc)
+									.then((retried) => {
+										if (!retried) handleError(giveUpErr);
+									})
+									.catch(() => {});
 							}, 400);
 							return;
 						}
-						err = new PlayerRequestError(0, "unplayable", "MEDIA_ERR_SRC_NOT_SUPPORTED", "Source audio illisible");
 						break;
 					}
 					default:
@@ -1028,21 +1048,52 @@ async function fetchPlayerJson(videoId?: string, playlistId?: string, params?: s
 	return err;
 }
 
-// One automatic source reload per track per 10 min window on a media read
-// error (see the error handler): videoId -> time of the last retry (G21).
-const mediaRetriedAt = new Map<string, number>();
+// Automatic media-error attempts per track per 10 min window (G21, H1):
+// videoId -> {first attempt time, attempts used}.
+const mediaRetryAttempts = new Map<string, MediaRetryRecord>();
+
+/** Pinned state of `videoId`: offline list `_pinned`, else the SW meta; null = unknown. */
+async function offlinePinned(videoId: string): Promise<boolean | null> {
+	const local = getOfflineTracks().find((t) => t.videoId === videoId);
+	if (local?._pinned === true) return true;
+	const list = await listCachedAudio().catch(() => null);
+	if (!list || !Array.isArray(list.entries)) return null;
+	return list.entries.some((e) => e.videoId === videoId && e.pinned === true);
+}
 
 /**
- * Media-error retry (G2): when the service worker holds this track, the
- * source that just failed IS that cached entry (truncated download, invalid
- * body behind an audio Content-Type), so drop it first (`uncache-audio`; the
- * SW re-downloads on the next play) and let `verifyCached` mark the offline
- * entry `_cached:false`. Then re-resolve from player.json, bypassing the
- * cache check. Best-effort: a missing SW only skips the purge.
+ * Media-error retry (G2, H1); decision rules in `planMediaRetry`:
+ * - attempt 1: reload the very source that failed (cache-busted unless it is
+ *   a stable /localf or /aud URL); never touches the offline copy, since the
+ *   error is mostly transient (PIPELINE_ERROR_READ on a fresh context).
+ * - attempt 2 (second failure within the window): offline, give up and keep
+ *   the copy; online, re-resolve from player.json bypassing the SW copy, and
+ *   drop that SW entry first (`uncache-audio`) only when it is known not
+ *   pinned and is not a /localf library file.
+ * Resolves false when the caller must surface the error (no attempt made).
  */
-async function retryMediaSource(videoId: string, playlistId?: string) {
+async function retryMediaSource(videoId: string, playlistId: string | undefined, attempt: number, failedSrc: string): Promise<boolean> {
+	// The user moved on during the 400 ms delay: never hijack the new track.
+	const cur = SessionListService.$.value.mix?.[SessionListService.$.value.position];
+	if (String(cur?.videoId || "") !== videoId) return true;
 	const cachedUrl = getCachedUrl(videoId);
-	if (cachedUrl) {
+	const online = typeof navigator === "undefined" || navigator.onLine !== false;
+	const pinned = attempt >= 2 && cachedUrl && online ? await offlinePinned(videoId) : null;
+	const step = planMediaRetry({
+		attempt,
+		failedSrc,
+		failedSrcStable: isStableAudioUrl(failedSrc),
+		cachedUrl,
+		localCopy: isLocalUrl(cachedUrl) || isLocalUrl(failedSrc),
+		pinned,
+		online,
+	});
+	if (step.kind === "give_up") return false;
+	if (step.kind === "reload") {
+		updatePlayerSrc({ url: step.url, original_url: step.url });
+		return true;
+	}
+	if (step.purge) {
 		try {
 			await swRequest({ type: "uncache-audio", url: cachedUrl, videoId }, "audio-uncached", 3_000);
 			await verifyCached(videoId, 1_000);
@@ -1050,7 +1101,8 @@ async function retryMediaSource(videoId: string, playlistId?: string) {
 			/* purge is best-effort */
 		}
 	}
-	return getSrc(videoId, playlistId, undefined, true, { bypassCache: true });
+	await getSrc(videoId, playlistId, undefined, true, { bypassCache: step.bypassCache });
+	return true;
 }
 
 // Auto-skip guard: skip to the next track on a failure, but never chain skips
