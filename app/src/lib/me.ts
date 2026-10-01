@@ -2,6 +2,7 @@
 // The bbp profile cookie is set + carried automatically (credentials:'same-origin').
 import { APIClient } from "$lib/api";
 import { clearHomeCache } from "$lib/homeCache";
+import { parseMigrated, rememberMigration, type MigratedCounts } from "$lib/identity";
 import { enqueuePlay, flushOutbox, installHistoryOutbox, readOutbox, statusResult, type SendResult } from "$lib/historyOutbox";
 
 function itemRef(item: any): string {
@@ -143,15 +144,25 @@ export async function isAnonymousProfile(): Promise<boolean> {
 		return false;
 	}
 }
-export async function login(name: string): Promise<{ id: string; name: string }> {
+/**
+ * 39A: the server moves this device's anonymous history onto the named
+ * profile; `migrated` says what moved (null when nothing was eligible: no
+ * anonymous profile, or switching between two named profiles). The last
+ * non-empty migration is kept for the Compte page.
+ */
+export async function login(name: string): Promise<{ id: string; name: string; migrated: MigratedCounts | null }> {
 	forgetWhoami();
 	// L8-5: the instant-home cache belongs to the previous profile; drop it so the
 	// next /home never paints another profile's rows (listener lives on /home only).
 	clearHomeCache(typeof localStorage === "undefined" ? undefined : localStorage);
-	const r = await (await APIClient.post(`/api/v1/me/login`, { name })).json();
+	const res = await APIClient.post(`/api/v1/me/login`, { name });
+	if (res && typeof res.ok === "boolean" && !res.ok) throw new Error(`login ${res.status}`);
+	const r = await res.json();
 	if (r && typeof r === "object" && typeof r.id === "string") writeWhoamiMemo({ id: r.id, name: typeof r.name === "string" ? r.name : "" });
+	const migrated = parseMigrated(r?.migrated);
+	if (r && typeof r.name === "string") rememberMigration(r.name, migrated);
 	announceProfileChange();
-	return r;
+	return { ...r, migrated };
 }
 /**
  * L10-8: the server call first, then the local purge and the announcement to

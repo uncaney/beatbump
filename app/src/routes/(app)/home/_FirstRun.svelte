@@ -19,6 +19,7 @@
 	import { goto } from "$app/navigation";
 	import { onMount } from "svelte";
 	import { APIClient } from "$lib/api";
+	import IdentityPrompt from "$components/IdentityPrompt/IdentityPrompt.svelte";
 	import { getRecent, isAnonymousProfile, login } from "$lib/me";
 	import { mixCardsFrom } from "$lib/mixes";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
@@ -245,6 +246,9 @@
 		{/if}
 	</section>
 {/if}
+<!-- 39A: an anonymous profile WITH a history (>= 10 plays) gets the compact
+     name invitation instead (its plays move onto the name). -->
+<IdentityPrompt />
 
 <style lang="scss">
 	.first-run {

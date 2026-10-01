@@ -1,6 +1,7 @@
 <script lang="ts">
 	// S1 "Ton mois": personal listening stats over 7 / 30 / 365 days, from the
 	// profile's play history (plays counted after 30 s, harness excluded).
+	import IdentityPrompt from "$components/IdentityPrompt/IdentityPrompt.svelte";
 	import Listing from "$components/Item/Listing.svelte";
 	import { getStatsSummary, getTopBy, type StatsSummary, type TopRow } from "$lib/me";
 	import { NNBSP, formatCountFr, formatIntFr } from "$lib/utils/formatFr";
@@ -116,6 +117,8 @@
 			title="Tout l'historique d'écoute (10 000 dernières écoutes), format CSV">Exporter en CSV</a
 		>
 	</header>
+	<!-- 39A: anonymous with >= 10 plays: these stats live on this device only. -->
+	<IdentityPrompt />
 
 	{#if error}
 		<p class="state">{error}</p>

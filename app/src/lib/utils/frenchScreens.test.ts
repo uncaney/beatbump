@@ -60,6 +60,9 @@ export const FILES = [
 	"lib/offlineFailed.ts",
 	"lib/utils/shareLink.ts",
 	"lib/utils/retryOnce.ts",
+	// 39A: identity prompt and device-only banner.
+	"lib/components/IdentityPrompt/IdentityPrompt.svelte",
+	"lib/identity.ts",
 ] as const;
 
 /**
