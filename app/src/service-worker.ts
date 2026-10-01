@@ -67,12 +67,13 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // Cache one shell asset unless it is already there; a failing asset must not
 // abort the precache (which would leave the PWA unable to boot offline).
-async function addIfMissing(c: Cache, path: string): Promise<void> {
+async function addIfMissing(c: Cache, path: string): Promise<boolean> {
 	try {
-		if (await c.match(path)) return;
+		if (await c.match(path)) return true;
 		await c.add(path);
+		return true;
 	} catch {
-		/* ignore */
+		return false; // L4: the caller decides whether a partial precache still "finished"
 	}
 }
 
@@ -126,11 +127,21 @@ function precacheRest(): Promise<void> {
 			const c = await caches.open(SHELL);
 			const have = new Set((await c.keys()).map((k) => new URL(k.url).pathname));
 			const todo = build.filter((p) => !have.has(p));
+			let allOk = true;
 			for (let i = 0; i < todo.length; i += PRECACHE_BATCH) {
 				if (i) await sleep(PRECACHE_BATCH_DELAY_MS);
-				await Promise.all(todo.slice(i, i + PRECACHE_BATCH).map((p) => addIfMissing(c, p)));
+				const results = await Promise.all(todo.slice(i, i + PRECACHE_BATCH).map((p) => addIfMissing(c, p)));
+				if (results.some((ok) => !ok)) allOk = false;
 			}
-			restDone = true;
+			// L4 (audit v7, P3): `addIfMissing` used to never fail (it swallowed
+			// every error), so `restDone` was set unconditionally even after a
+			// network drop mid-install left most of `build` un-cached - for the
+			// rest of this SW's lifetime (hours on desktop). Only a fully
+			// successful pass may mark it done; a partial one retries (the
+			// batches already cached are skipped via `have`/`c.match`) on the
+			// next trigger (the next API fetch that keeps this SW alive).
+			if (allOk) restDone = true;
+			else restPrecache = null;
 		})().catch(() => {
 			restPrecache = null;
 		});
@@ -196,6 +207,14 @@ async function purgeProfileScopedApiCache(): Promise<void> {
 // raw, went in). Answers above API_MAX_BYTES are not stored; the cache is
 // capped at API_MAX_ENTRIES, the oldest entries (Cache API keys are in
 // insertion order) pruned at activate and every API_PRUNE_EVERY puts.
+//
+// L3 (audit v7, P3): `apiPuts` only lived in memory, so on Android - where the
+// browser stops the SW after ~30s idle - a session rarely reaches
+// API_PRUNE_EVERY puts before being restarted with the counter back at 0;
+// between two SW *versions* (the only other prune point, at activate) the
+// cache could then grow unbounded in time even though no single put ever
+// crossed the limit. Pruning once more at the FIRST put of each SW lifetime
+// closes that gap cheaply (one keys() call, ≤ ~250 entries).
 const API_MAX_BYTES = 300 * 1024;
 const API_MAX_ENTRIES = 200;
 const API_PRUNE_EVERY = 50;
@@ -221,7 +240,8 @@ async function putApiResponse(c: Cache, req: Request, res: Response): Promise<vo
 		headers.delete("Content-Encoding");
 		headers.delete("Content-Length");
 		await c.put(req, new Response(body, { status: res.status, statusText: res.statusText, headers }));
-		if (++apiPuts % API_PRUNE_EVERY === 0) await pruneApiCache(c);
+		apiPuts++;
+		if (apiPuts === 1 || apiPuts % API_PRUNE_EVERY === 0) await pruneApiCache(c);
 	} catch {
 		/* best effort */
 	}
@@ -489,11 +509,30 @@ const COVER_CACHE = "ytm-covers";
 const COVER_MAX = 200;
 const isCover = (u: URL) => u.origin === location.origin && u.pathname === "/cover" && u.searchParams.has("lid");
 
+// L1 (audit v7, P2): a HIT used to be a delete+put of the full image (up to
+// 1 MB, uncropped `/cover`) on EVERY access - 22 disk rewrites per home load
+// - and let two concurrent <img> requests for the same cover (same album in
+// "Recents" and "Pour toi") interleave delete(A)/match(B) into a transient
+// miss. True recency is now tracked in memory; the cache's physical,
+// insertion-ordered entry is only refreshed (re-put) at most once per
+// COVER_TOUCH_THROTTLE_MS for a given url, so a repeat view of the same
+// home page does no disk writes at all. Pruning prefers this in-memory
+// recency (an entry hit often but throttled out of reinsertion must not
+// look "oldest"); keys() insertion order is only the fallback for an entry
+// this SW lifetime never saw a hit for.
+const COVER_TOUCH_THROTTLE_MS = 10 * 60 * 1000;
+const coverLastHit = new Map<string, number>();
+
 async function trimCoverCache(c: Cache): Promise<void> {
 	try {
 		const keys = await c.keys();
 		const excess = keys.length - COVER_MAX;
-		for (let i = 0; i < excess; i++) await c.delete(keys[i]);
+		if (excess <= 0) return;
+		const byRecency = [...keys].sort((a, b) => (coverLastHit.get(a.url) ?? 0) - (coverLastHit.get(b.url) ?? 0));
+		for (let i = 0; i < excess; i++) {
+			await c.delete(byRecency[i]);
+			coverLastHit.delete(byRecency[i].url);
+		}
 	} catch {
 		/* best effort */
 	}
@@ -505,12 +544,17 @@ async function coverFetch(req: Request): Promise<Response> {
 		c = await caches.open(COVER_CACHE);
 		const hit = await c.match(req.url);
 		if (hit) {
-			// touch: re-insert at the end of keys() so the LRU keeps it (clone
-			// before the body of `hit` is handed to the page and locked)
-			const copy = hit.clone();
-			c.delete(req.url)
-				.then(() => c!.put(req.url, copy))
-				.catch(() => {});
+			const now = Date.now();
+			const last = coverLastHit.get(req.url) || 0;
+			coverLastHit.set(req.url, now); // true recency, updated on every hit
+			if (now - last > COVER_TOUCH_THROTTLE_MS) {
+				// Re-insert at the end of keys() so the physical LRU keeps it
+				// (clone before the body of `hit` is handed to the page and locked).
+				const copy = hit.clone();
+				c.delete(req.url)
+					.then(() => c!.put(req.url, copy))
+					.catch(() => {});
+			}
 			return hit;
 		}
 	} catch {
@@ -518,6 +562,7 @@ async function coverFetch(req: Request): Promise<Response> {
 	}
 	const res = await fetch(req);
 	if (c && res.ok && res.status === 200 && req.method === "GET") {
+		coverLastHit.set(req.url, Date.now());
 		const copy = res.clone();
 		c.put(req.url, copy)
 			.then(() => trimCoverCache(c!))
@@ -721,6 +766,21 @@ async function listEntries(c: Cache): Promise<Entry[]> {
 		// Complete the index record so this entry is answered from the index next time.
 		if (sameEntry && entry.bytes > 0) {
 			await setMeta(videoId, { ...meta!, bytes: entry.bytes, at: entry.at, lastAccess: entry.lastAccess, pinned: entry.pinned, contentType: entry.contentType });
+		} else if (videoId && !meta && entry.bytes > 0) {
+			// L2 (audit v7, P3): the audio entry survived a cache put but the
+			// index write (or the whole SW) was killed before setMeta /
+			// persistIndex ran (e.g. the browser stopping a SW mid cache-audio
+			// batch). Backfill from the entry's own headers so `is-cached` /
+			// "déjà en cache" answer true again instead of re-downloading a
+			// track that is already on disk.
+			await setMeta(videoId, {
+				url: entry.url,
+				bytes: entry.bytes,
+				at: entry.at || Date.now(),
+				lastAccess: entry.lastAccess || entry.at || Date.now(),
+				pinned: entry.pinned,
+				contentType: entry.contentType,
+			});
 		}
 	}
 	for (const [videoId, meta] of metas) if (!present.has(meta.url)) await deleteMeta(videoId);
