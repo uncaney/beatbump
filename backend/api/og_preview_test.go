@@ -1,9 +1,12 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,10 +37,12 @@ func TestIsPreviewRobot(t *testing.T) {
 func ogTestServer(t *testing.T) *echo.Echo {
 	t.Helper()
 	apiResponseCache = newResponseCache(resCacheMaxEntries)
+	ogCardCache = newOGCache(ogCacheMaxEntries)
 	ot, oa, op, oto := ogResolveTrackFn, ogResolveAlbumFn, ogResolvePlaylistFn, ogResolveTimeout
 	t.Cleanup(func() {
 		ogResolveTrackFn, ogResolveAlbumFn, ogResolvePlaylistFn, ogResolveTimeout = ot, oa, op, oto
 		apiResponseCache = newResponseCache(resCacheMaxEntries)
+		ogCardCache = newOGCache(ogCacheMaxEntries)
 	})
 	ogResolveTrackFn = func(id string) *ogMeta {
 		switch id {
@@ -160,5 +165,121 @@ func TestOGPreviewFallbacks(t *testing.T) {
 func TestOGBigThumb(t *testing.T) {
 	if got := ogBigThumb("https://lh3.googleusercontent.com/abc=w60-h60-l90-rj"); got != "https://lh3.googleusercontent.com/abc=w544-h544-l90-rj" {
 		t.Errorf("ogBigThumb = %s", got)
+	}
+}
+
+// L9-1: the fallback card (unknown id, upstream error, timeout) is served
+// but never stored, and the cards never touch the API response cache.
+func TestOGPreviewFallbackNotCached(t *testing.T) {
+	e := ogTestServer(t)
+	for i := 0; i < 2; i++ {
+		rec := ogGet(e, "/listen?id=zzzzzzzzzzz", "WhatsApp/2.23")
+		if rec.Header().Get("X-Ytm-Cache") != "MISS" || !strings.Contains(rec.Body.String(), `content="music.ekaii.fr"`) {
+			t.Fatalf("fallback fetch %d: %q %s", i, rec.Header().Get("X-Ytm-Cache"), rec.Body.String())
+		}
+		if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+			t.Fatalf("fallback Cache-Control %q", cc)
+		}
+	}
+	if ogCardCache.len() != 0 {
+		t.Fatalf("fallback stored: %d entries", ogCardCache.len())
+	}
+	ogGet(e, "/listen?id=0123456789a", "WhatsApp/2.23")
+	if ogCardCache.len() != 1 || apiResponseCache.len() != 0 {
+		t.Fatalf("og cache %d, api cache %d", ogCardCache.len(), apiResponseCache.len())
+	}
+}
+
+// L9-1: a robot HEAD is answered from the card cache, without the resolver.
+func TestOGPreviewHeadUsesCache(t *testing.T) {
+	e := ogTestServer(t)
+	var calls atomic.Int32
+	inner := ogResolveTrackFn
+	ogResolveTrackFn = func(id string) *ogMeta { calls.Add(1); return inner(id) }
+	ogGet(e, "/listen?id=0123456789a", "Twitterbot/1.0")
+	req := httptest.NewRequest(http.MethodHead, "/listen?id=0123456789a", nil)
+	req.Host = "music.example"
+	req.Header.Set("User-Agent", "Twitterbot/1.0")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != 200 || rec.Header().Get("X-Ytm-Cache") != "HIT" || calls.Load() != 1 {
+		t.Fatalf("HEAD: code %d cache %q resolver calls %d", rec.Code, rec.Header().Get("X-Ytm-Cache"), calls.Load())
+	}
+}
+
+// L9-1: 50 concurrent robot requests for distinct ids run at most
+// ogMaxLookups metadata lookups at once; the others get the fallback card
+// right away (not cached).
+func TestOGPreviewConcurrentLookupsBounded(t *testing.T) {
+	e := ogTestServer(t)
+	waitOGIdle(t)
+	var active, peak, calls atomic.Int32
+	ogResolveTrackFn = func(id string) *ogMeta {
+		calls.Add(1)
+		n := active.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+		active.Add(-1)
+		return &ogMeta{Title: "T " + id}
+	}
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			rec := ogGet(e, fmt.Sprintf("/listen?id=id%09d", i), "WhatsApp/2.23")
+			if rec.Code != 200 {
+				t.Errorf("request %d: code %d", i, rec.Code)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	if peak.Load() > ogMaxLookups {
+		t.Fatalf("peak concurrent lookups %d > %d", peak.Load(), ogMaxLookups)
+	}
+	if calls.Load() < 1 || int(calls.Load()) != ogCardCache.len() {
+		t.Fatalf("lookups %d, cached cards %d (only real cards are stored)", calls.Load(), ogCardCache.len())
+	}
+	if len(ogSem) != 0 {
+		t.Fatalf("semaphore still holds %d slots", len(ogSem))
+	}
+}
+
+// L9-1: a lookup past the budget gives its slot back at once.
+func TestOGPreviewAbandonedLookupFreesSlot(t *testing.T) {
+	e := ogTestServer(t)
+	waitOGIdle(t)
+	ogResolveTimeout = 30 * time.Millisecond
+	ogResolveTrackFn = func(id string) *ogMeta { time.Sleep(300 * time.Millisecond); return &ogMeta{Title: "late"} }
+	for i := 0; i < ogMaxLookups; i++ {
+		ogGet(e, fmt.Sprintf("/listen?id=slow%07d", i), "WhatsApp/2.23")
+	}
+	if len(ogSem) != 0 || ogAbandoned.Load() != ogMaxLookups {
+		t.Fatalf("after timeouts: sem %d abandoned %d", len(ogSem), ogAbandoned.Load())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for ogAbandoned.Load() != 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if ogAbandoned.Load() != 0 {
+		t.Fatalf("abandoned lookups never accounted back: %d", ogAbandoned.Load())
+	}
+}
+
+// waitOGIdle waits for lookups abandoned by earlier tests to finish.
+func waitOGIdle(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for (ogAbandoned.Load() != 0 || len(ogSem) != 0) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
 	}
 }
