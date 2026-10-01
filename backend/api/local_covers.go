@@ -32,6 +32,7 @@ const (
 	albumCoverTTL         = 15 * time.Minute // a resolved coverLid
 	albumCoverNegativeTTL = 2 * time.Minute  // "no album doc / no coverLid" (Meili hiccups heal fast)
 	albumCoverBatchLimit  = 1000             // Meili maxTotalHits default
+	albumCoverMaxPages    = 10               // 10 000 albums per batch at most
 )
 
 type albumCoverEntry struct {
@@ -87,10 +88,14 @@ func trackAlbumKey(h map[string]interface{}) (id, albumArtist, album string) {
 }
 
 // albumCovers batch-resolves album id -> coverLid for the distinct albums of a
-// hit list with ONE albums-index query (memo hits cost nothing). Ids queried
-// but absent from the index (or without coverLid) are memoised as "" so the
-// per-item fallback in trackCoverLid does not fire for them. On a Meili error
-// nothing negative is memoised.
+// hit list with one albums-index query per page of albumCoverBatchLimit hits
+// (memo hits cost nothing). Pages are fetched while ids are still wanted and
+// the previous page was full, up to albumCoverMaxPages: an albumArtist shared
+// by more than 1000 albums ("Various Artists") used to leave every album past
+// the first page unresolved AND memoised as absent (audit v3 G9). Ids absent
+// from the whole result are memoised as "" so the per-item fallback in
+// trackCoverLid does not fire for them; when the page cap is hit, or on a
+// Meili error, nothing negative is memoised (the fallback GET still works).
 func albumCovers(hits []map[string]interface{}) map[string]string {
 	out := map[string]string{}
 	want := map[string]bool{}
@@ -118,32 +123,43 @@ func albumCovers(hits []map[string]interface{}) map[string]string {
 		names = append(names, "\""+escapeMeili(aa)+"\"")
 	}
 	sort.Strings(names)
-	res, err := meiliReq("POST", "/indexes/albums/search", map[string]interface{}{
-		"q": "", "filter": "albumArtist IN [" + strings.Join(names, ",") + "]",
-		"limit":                albumCoverBatchLimit,
-		"attributesToRetrieve": []string{"id", "coverLid"},
-	})
-	if err != nil || res == nil {
-		return out
-	}
-	raw, _ := res["hits"].([]interface{})
-	for _, r := range raw {
-		a, ok := r.(map[string]interface{})
-		if !ok {
-			continue
+	filter := "albumArtist IN [" + strings.Join(names, ",") + "]"
+	exhausted := false
+	for page := 0; page < albumCoverMaxPages && len(want) > 0; page++ {
+		res, err := meiliReq("POST", "/indexes/albums/search", map[string]interface{}{
+			"q": "", "filter": filter,
+			"offset":               page * albumCoverBatchLimit,
+			"limit":                albumCoverBatchLimit,
+			"attributesToRetrieve": []string{"id", "coverLid"},
+		})
+		if err != nil || res == nil {
+			return out
 		}
-		id := mstr(a, "id")
-		if !want[id] {
-			continue
+		raw, _ := res["hits"].([]interface{})
+		for _, r := range raw {
+			a, ok := r.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			id := mstr(a, "id")
+			if !want[id] {
+				continue
+			}
+			cover := mstr(a, "coverLid")
+			out[id] = cover
+			albumCoverStore(id, cover)
+			delete(want, id)
 		}
-		cover := mstr(a, "coverLid")
-		out[id] = cover
-		albumCoverStore(id, cover)
-		delete(want, id)
+		if len(raw) < albumCoverBatchLimit {
+			exhausted = true
+			break
+		}
 	}
 	for id := range want {
 		out[id] = ""
-		albumCoverStore(id, "")
+		if exhausted {
+			albumCoverStore(id, "")
+		}
 	}
 	return out
 }
