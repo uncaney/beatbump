@@ -3,6 +3,7 @@
 	import { getPlaylists, createPlaylist, addToPlaylist } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
 	import { queue } from "$lib/stores/list";
+	import { formatCountFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 
@@ -40,7 +41,7 @@
 		if (busy) return;
 		busy = true;
 		try {
-			await createPlaylist("New Playlist");
+			await createPlaylist("Nouvelle playlist");
 			await load();
 		} finally {
 			busy = false;
@@ -53,7 +54,7 @@
 		if (!items.length) return;
 		busy = true;
 		try {
-			const pl = await createPlaylist("Saved queue");
+			const pl = await createPlaylist("File enregistrée");
 			for (const it of items) {
 				// eslint-disable-next-line no-await-in-loop
 				await addToPlaylist(pl.id, it);
@@ -68,7 +69,7 @@
 <main>
 	<CollectionNav active="my-playlists" />
 	<header class="head">
-		<h1>My Playlists</h1>
+		<h1>Mes playlists</h1>
 		<a
 			class="back-link"
 			href="/library"
@@ -79,24 +80,24 @@
 				class="btn"
 				on:click={newPlaylist}
 				disabled={busy || offline}
-				title={offline ? "Hors connexion" : undefined}>New playlist</button
+				title={offline ? "Hors connexion" : undefined}>Nouvelle playlist</button
 			>
 			<button
 				class="btn"
 				on:click={saveQueue}
 				disabled={busy || offline || !($queue && $queue.length)}
-				title={offline ? "Hors connexion" : "Save the current play queue as a playlist"}
-				>Save current queue{$queue && $queue.length ? ` (${$queue.length})` : ""}</button
+				title={offline ? "Hors connexion" : "Enregistrer la file de lecture actuelle comme playlist"}
+				>Enregistrer la file{$queue && $queue.length ? ` (${$queue.length})` : ""}</button
 			>
 		</div>
 	</header>
 
 	{#if loading}
-		<p class="state">Loading…</p>
+		<p class="state">Chargement…</p>
 	{:else if offline}
 		<MeOffline text="Tes playlists reviendront avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
 	{:else if playlists.length === 0}
-		<p class="state">No server playlists yet.</p>
+		<p class="state">Pas encore de playlist sur le serveur.</p>
 	{:else}
 		<div class="list">
 			{#each playlists as p (p.id)}
@@ -105,7 +106,7 @@
 					href={`/library/playlists-srv/${p.id}`}
 				>
 					<span class="name">{p.name}</span>
-					<span class="count">{p.count} {p.count === 1 ? "track" : "tracks"}</span>
+					<span class="count">{formatCountFr(p.count, "titre")}</span>
 				</a>
 			{/each}
 		</div>

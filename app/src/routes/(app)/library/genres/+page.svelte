@@ -57,15 +57,16 @@
 		<input
 			class="filter"
 			type="search"
-			placeholder="Filter genres…"
+			placeholder="Filtrer les genres…"
+			aria-label="Filtrer les genres"
 			bind:value={q}
 		/>
 	</header>
 
 	{#if loading}
-		<p class="state">Loading…</p>
+		<p class="state">Chargement…</p>
 	{:else if filtered.length === 0}
-		<p class="state">No genres.</p>
+		<p class="state">{q ? `Aucun genre ne correspond à « ${q} ».` : "Aucun genre."}</p>
 	{:else}
 		<div class="chips">
 			{#each filtered as g}

@@ -4,12 +4,12 @@
 
 <Browse
 	kind="artists"
-	title="Artists"
+	title="Artistes"
 	sortOptions={[
 		{ label: "A–Z", value: "name:asc" },
 		{ label: "Z–A", value: "name:desc" },
-		{ label: "Most albums", value: "albumCount:desc" },
-		{ label: "Most tracks", value: "trackCount:desc" },
-		{ label: "Recently added", value: "dateAdded:desc" },
+		{ label: "Plus d'albums", value: "albumCount:desc" },
+		{ label: "Plus de titres", value: "trackCount:desc" },
+		{ label: "Ajoutés récemment", value: "dateAdded:desc" },
 	]}
 />

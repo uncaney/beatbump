@@ -55,6 +55,7 @@
 	import { currentIsFavourite, toggleCurrentFavourite } from "./favouriteState";
 	import { describeContext } from "$lib/stores/list/playbackContext";
 	import ShareLinkButton from "$components/ShareLinkButton/ShareLinkButton.svelte";
+	import { formatCountFr } from "$lib/utils/formatFr";
 	export let state: "open" | "closed";
 
 	// F2: heart label (state is refreshed by Player.svelte on track change)
@@ -952,8 +953,7 @@
 					<span>File d'attente</span>
 					{#if $queue.length}
 						<span class="handle-count"
-							>· {$queue.length}
-							{$queue.length > 1 ? "morceaux" : "morceau"}</span
+							>· {formatCountFr($queue.length, "morceau", "morceaux")}</span
 						>
 					{/if}
 				</span>
@@ -985,8 +985,7 @@
 								>
 									{#if !$isMobileMQ}
 										<span class="queue-count" aria-live="polite">
-											{$queue.length}
-											{$queue.length > 1 ? "morceaux" : "morceau"}
+											{formatCountFr($queue.length, "morceau", "morceaux")}
 										</span>
 									{/if}
 										<button

@@ -7,6 +7,7 @@
 	// c30a F1 + F2: arrangeHomeRows ($lib/homeRows) shows a card in one row
 	// only and paints at most 4 rows above the first YouTube row; the others
 	// fold behind "Plus pour toi" ([data-testid=home-more-rows]).
+	import { NNBSP, formatCountFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
@@ -529,8 +530,8 @@
 				<div class="week-card-body">
 					<p class="week-card-title">Ta semaine</p>
 					<p class="week-card-stats">
-						{weekCard.minutes} min écoutées{#if weekCard.topArtist} · artiste n°1 : {weekCard.topArtist}{/if}{#if weekCard.newAlbums > 0}
-							· {weekCard.newAlbums} nouveaux albums{/if}
+						{weekCard.minutes}{NNBSP}min écoutées{#if weekCard.topArtist} · artiste n°1 : {weekCard.topArtist}{/if}{#if weekCard.newAlbums > 0}
+							· {formatCountFr(weekCard.newAlbums, "nouvel album", "nouveaux albums")}{/if}
 					</p>
 				</div>
 				<a

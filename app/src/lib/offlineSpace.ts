@@ -3,18 +3,10 @@
 // "Libérer" (HL2) and "Préparer un pack" (HL3), its button labels and the
 // status line. No Svelte import so the wording is unit-testable.
 
-const MB = 1024 * 1024;
-const GB = 1024 * MB;
+import { formatBytesFr, formatMoFr } from "$lib/utils/formatFr";
 
-/** French units, decimal comma: "0 Mo", "56 Mo", "1,5 Go", "11 Go". */
-export function fmtBytesFr(bytes: number): string {
-	if (!(bytes > 0)) return "0 Mo";
-	if (bytes >= GB) {
-		const go = (bytes / GB).toFixed(bytes >= 10 * GB ? 0 : 1).replace(".", ",");
-		return `${go} Go`;
-	}
-	return `${Math.max(1, Math.round(bytes / MB))} Mo`;
-}
+/** French units, decimal comma (c31a: one shared helper, $lib/utils/formatFr). */
+export const fmtBytesFr = formatBytesFr;
 
 /** The quota as text; 0 (or less) is "illimité". */
 export function fmtQuotaFr(quota: number): string {
@@ -23,7 +15,7 @@ export function fmtQuotaFr(quota: number): string {
 
 /** Labels of the two action buttons for the selected size (Mo). */
 export function spaceButtonLabels(sizeMb: number): { freeUp: string; pack: string } {
-	return { freeUp: `Libérer ${sizeMb} Mo`, pack: `Préparer un pack de ${sizeMb} Mo` };
+	return { freeUp: `Libérer ${formatMoFr(sizeMb)}`, pack: `Préparer un pack de ${formatMoFr(sizeMb)}` };
 }
 
 export type SpaceStatusInput = {

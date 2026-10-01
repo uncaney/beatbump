@@ -6,6 +6,7 @@
 	import Icon from "$components/Icon/Icon.svelte";
 	import { getPlaylist, deletePlaylist, removeFromPlaylist } from "$lib/me";
 	import { goto } from "$app/navigation";
+	import { formatCountFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 	import CollectionNav from "../../_CollectionNav.svelte";
 
@@ -51,14 +52,14 @@
 <main>
 	<CollectionNav active="my-playlists" />
 	{#if loading}
-		<p class="state">Loading…</p>
+		<p class="state">Chargement…</p>
 	{:else if !pl}
-		<p class="state">Playlist not found.</p>
+		<p class="state">Playlist introuvable.</p>
 	{:else}
 		<header class="head">
 			<div>
 				<h1>{pl.name}</h1>
-				<span class="sub">{tracks.length} tracks</span>
+				<span class="sub">{formatCountFr(tracks.length, "titre")}</span>
 			</div>
 			<div class="actions">
 				{#if tracks.length}
@@ -66,12 +67,12 @@
 				{/if}
 				<button
 					class="btn"
-					on:click={remove}>Delete</button
+					on:click={remove}>Supprimer</button
 				>
 			</div>
 		</header>
 		{#if tracks.length === 0}
-			<p class="state">No tracks in this playlist.</p>
+			<p class="state">Aucun titre dans cette playlist.</p>
 		{:else}
 			<!-- J16: the context comes from the page data, not from the DOM heading. -->
 			<PlayAllBar

@@ -29,6 +29,7 @@
 	import { cancelKeepJob, defaultKeepDeps, keepDepsWithAbort, keepJobs, keepSummary, startKeepJob, type KeepProgress, type KeepResult } from "$lib/offlineBatch";
 	import { getFavorites, getMix, getRecent } from "$lib/me";
 	import { notify } from "$lib/utils";
+	import { formatMoFr } from "$lib/utils/formatFr";
 	import { currentTrack } from "$lib/stores/list";
 
 	const MB = 1024 * 1024;
@@ -319,7 +320,7 @@
 				bind:value={sizeMb}
 			>
 				{#each PACK_SIZES_MB as mb}
-					<option value={mb}>{mb} Mo</option>
+					<option value={mb}>{formatMoFr(mb)}</option>
 				{/each}
 			</select>
 		</div>
@@ -367,8 +368,8 @@
 		class="space-desc"
 		id="offline-space-desc"
 	>
-		Libérer retire les morceaux les moins écoutés jusqu'à {sizeMb} Mo (les épinglés ne sont jamais touchés) ; un pack télécharge
-		et épingle tes favoris, puis tes écoutes récentes, puis ta sélection, jusqu'à {sizeMb} Mo.
+		Libérer retire les morceaux les moins écoutés jusqu'à {formatMoFr(sizeMb)} (les épinglés ne sont jamais touchés) ; un pack télécharge
+		et épingle tes favoris, puis tes écoutes récentes, puis ta sélection, jusqu'à {formatMoFr(sizeMb)}.
 	</p>
 	{#if freePlan}
 		<div
@@ -382,7 +383,7 @@
 				data-count={freePlan.count}
 				data-bytes={freePlan.bytes}
 				>{#if freePlan.count}{freeUpSummary(freePlan)} seront libérés{#if !freePlan.reached}
-						(moins que {sizeMb} Mo : le reste est épinglé ou en lecture){/if}.{:else}Rien à libérer : tout est épinglé ou
+						(moins que {formatMoFr(sizeMb)} : le reste est épinglé ou en lecture){/if}.{:else}Rien à libérer : tout est épinglé ou
 					en lecture.{/if}</span
 			>
 			<div class="panel-actions">

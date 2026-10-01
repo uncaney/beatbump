@@ -70,14 +70,14 @@
 
 	let DropdownItems: Dropdown = [
 		{
-			text: "Add to Queue",
+			text: "Ajouter à la file",
 			icon: "queue",
 			action: () => {
 				dispatch("addqueue");
 			},
 		},
 		{
-			text: "Add to Playlist",
+			text: "Ajouter à une playlist",
 			icon: "list-plus",
 			action: () => {
 				dispatch("playlistAdd");
@@ -86,7 +86,7 @@
 		// @ts-expect-error it's fine
 		releasePageContext.has("release")
 			? {
-					text: "Shuffle",
+					text: "Lecture aléatoire",
 					action: () => {
 						dispatch("shuffle");
 					},

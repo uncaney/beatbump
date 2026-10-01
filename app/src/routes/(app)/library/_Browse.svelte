@@ -14,12 +14,14 @@
 	} from "$lib/utils/sortMemory";
 	import { onMount, tick } from "svelte";
 	import CollectionNav from "./_CollectionNav.svelte";
+	import { formatCountFr, formatIntFr } from "$lib/utils/formatFr";
 
 	export let kind: "artists" | "albums" | "songs"; // backend endpoint
 	export let title: string;
 	export let sortOptions: { label: string; value: string }[];
 	export let extraParams: string = ""; // e.g. "&genre=Rock"
 	export let subtitle: string = "";
+	const COUNT_WORD = { artists: "artiste", albums: "album", songs: "titre" } as const;
 
 	let sort = sortOptions[0].value;
 	let q = "";
@@ -193,18 +195,19 @@
 		<div>
 			<h1>{title}</h1>
 			{#if subtitle}<span class="sub">{subtitle}</span>{/if}
-			{#if total}<span class="sub">· {total.toLocaleString()} items</span>{/if}
+			{#if total}<span class="sub">· {formatCountFr(total, COUNT_WORD[kind])}</span>{/if}
 		</div>
 		<div class="controls">
 			<input
 				class="filter"
 				type="search"
-				placeholder="Filter…"
+				placeholder="Filtrer…"
+				aria-label="Filtrer la liste"
 				bind:value={q}
 				on:input={onQuery}
 			/>
 			<label class="sort">
-				<span>Sort</span>
+				<span>Trier</span>
 				<select
 					bind:value={sort}
 					on:change={onSort}
@@ -282,11 +285,11 @@
 	{#if seeking}
 		<p class="state">Recherche de « {seeking} »…</p>
 	{:else if loading}
-		<p class="state">Loading…</p>
+		<p class="state">Chargement…</p>
 	{:else if items.length === 0}
-		<p class="state">Nothing here yet.</p>
+		<p class="state">{q || filter ? "Aucun résultat" : "Rien ici pour l’instant"}</p>
 	{:else if done}
-		<p class="state">End of list ({items.length})</p>
+		<p class="state">Fin de la liste ({formatIntFr(items.length)})</p>
 	{/if}
 	<div
 		bind:this={sentinel}

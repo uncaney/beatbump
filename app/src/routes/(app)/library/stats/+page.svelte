@@ -3,6 +3,7 @@
 	// profile's play history (plays counted after 30 s, harness excluded).
 	import Listing from "$components/Item/Listing.svelte";
 	import { getStatsSummary, getTopBy, type StatsSummary, type TopRow } from "$lib/me";
+	import { NNBSP, formatCountFr, formatIntFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 
@@ -65,12 +66,13 @@
 		load(days);
 	});
 
-	const fmtInt = (n: number) => new Intl.NumberFormat("fr-FR").format(Math.round(n || 0));
+	// c31a: shared French number format; narrow no-break space before units.
+	const fmtInt = formatIntFr;
 	function fmtMinutes(m: number): string {
 		const min = Math.round(m || 0);
-		if (min < 60) return `${min} min`;
+		if (min < 60) return `${min}${NNBSP}min`;
 		const h = Math.floor(min / 60);
-		return `${fmtInt(h)} h ${String(min % 60).padStart(2, "0")}`;
+		return `${fmtInt(h)}${NNBSP}h${NNBSP}${String(min % 60).padStart(2, "0")}`;
 	}
 	const pct = (count: number, max: number) => (max > 0 ? Math.max(4, Math.round((count / max) * 100)) : 0);
 	const plural = (n: number, one: string, many: string) => (n > 1 ? many : one);
@@ -172,7 +174,7 @@
 				{#each summary.hours as n, h}
 					<div
 						class="hcol"
-						title="{String(h).padStart(2, '0')} h : {n} {plural(n, 'écoute', 'écoutes')}"
+						title="{String(h).padStart(2, '0')} h : {formatCountFr(n, 'écoute')}"
 					>
 						<div
 							class="hbar"
@@ -207,7 +209,7 @@
 								</div>
 								<span
 									class="count"
-									title="{r.count} {plural(r.count, 'écoute', 'écoutes')}"
+									title={formatCountFr(r.count, "écoute")}
 								>
 									<span
 										class="bar"
@@ -243,7 +245,7 @@
 								{/if}
 								<span
 									class="count"
-									title="{r.count} {plural(r.count, 'écoute', 'écoutes')}"
+									title={formatCountFr(r.count, "écoute")}
 								>
 									<span
 										class="bar"
@@ -275,7 +277,7 @@
 								</span>
 								<span
 									class="count"
-									title="{r.count} {plural(r.count, 'écoute', 'écoutes')}"
+									title={formatCountFr(r.count, "écoute")}
 								>
 									<span
 										class="bar"

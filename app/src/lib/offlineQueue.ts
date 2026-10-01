@@ -8,6 +8,7 @@
 // through the existing session list with `localUrl` set on every item, so the
 // player (getSrc in $lib/player) never touches the network. Everything here
 // works with `navigator.onLine === false`.
+import { formatBytesFr } from "$lib/utils/formatFr";
 
 export type OfflineTrack = any;
 
@@ -146,15 +147,7 @@ export function totalBytes(tracks: OfflineTrack[]): number | undefined {
 
 export function formatBytes(n: number | undefined): string {
 	if (n === undefined || !Number.isFinite(n)) return "";
-	const units = ["o", "Ko", "Mo", "Go", "To"];
-	let v = n;
-	let i = 0;
-	while (v >= 1024 && i < units.length - 1) {
-		v /= 1024;
-		i++;
-	}
-	const digits = i === 0 ? 0 : v < 10 ? 1 : 0;
-	return `${v.toFixed(digits).replace(".", ",")} ${units[i]}`;
+	return formatBytesFr(n);
 }
 
 /**

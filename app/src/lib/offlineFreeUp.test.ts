@@ -57,7 +57,7 @@ describe("planFreeUp", () => {
 describe("freeUpSummary", () => {
 	it("reads count + Mo in French", () => {
 		expect(freeUpSummary({ count: 0, bytes: 0 })).toBe("Rien à libérer");
-		expect(freeUpSummary({ count: 1, bytes: 3.6 * MB })).toBe("1 morceau · 4 Mo");
-		expect(freeUpSummary({ count: 12, bytes: 480 * MB })).toBe("12 morceaux · 480 Mo");
+		expect(freeUpSummary({ count: 1, bytes: 3.6 * MB })).toBe("1\u00a0morceau · 3,6\u202fMo");
+		expect(freeUpSummary({ count: 12, bytes: 480 * MB })).toBe("12\u00a0morceaux · 480\u202fMo");
 	});
 });

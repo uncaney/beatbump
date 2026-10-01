@@ -219,7 +219,7 @@
 						data-testid="local-artist-note"
 					>
 						Artiste de ta bibliothèque : pas de radio ni de suivi, lecture
-						avec « Lire tout » ci-dessous.
+						avec « Tout lire » ci-dessous.
 					</p>
 				{:else}
 				<div class="btn-wrpr">

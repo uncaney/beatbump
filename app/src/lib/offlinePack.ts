@@ -5,6 +5,7 @@
 // network): the settings page fetches the three sources, plans, then hands
 // the items to keepOffline (downloaded + pinned, 2 at a time, cancellable).
 import { keepableTracks } from "$lib/offlineBatch";
+import { formatMoFr } from "$lib/utils/formatFr";
 
 /** Size guess for a track never downloaded (a ~3-4 min Opus / AAC stream). */
 export const PACK_EST_BYTES = 4 * 1024 * 1024;
@@ -83,7 +84,7 @@ export function planPack(candidates: PackCandidates | null | undefined, targetBy
 
 /** "12 morceaux · 48 Mo" for a plan, "3/12 · 12 Mo sur 100 Mo" while running. */
 export function packLabel(done: number, total: number, doneBytes: number, target: number): string {
-	const mb = (n: number) => `${Math.max(0, Math.round(n / (1024 * 1024)))} Mo`;
+	const mb = (n: number) => formatMoFr(Math.max(0, Math.round(n / (1024 * 1024))));
 	if (total <= 0) return "Aucun morceau à préparer";
 	return `${done}/${total} · ${mb(doneBytes)} sur ${mb(target)}`;
 }
