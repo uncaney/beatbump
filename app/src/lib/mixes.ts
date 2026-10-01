@@ -8,7 +8,7 @@ export interface MixCard {
 	kind: "decade" | "genre";
 	/** "Années 1990" | "Rock" */
 	title: string;
-	/** "52 albums" | "1 234 titres" */
+	/** "52 albums" | "1 234 titres · 20 albums" (genre albums since L8-6) */
 	subtitle: string;
 	/** Query string of GET /api/v1/local/mix (without the "?"). */
 	query: string;
@@ -60,12 +60,15 @@ export function mixCardsFrom(resp: unknown): MixCard[] {
 		for (const g of r.genres) {
 			const name = (g as { name?: unknown })?.name;
 			const count = Number((g as { count?: unknown })?.count);
+			const albums = Number((g as { albums?: unknown })?.albums);
 			if (typeof name !== "string" || name.trim() === "" || !(count > 0)) continue;
 			out.push({
 				key: `genre:${name}`,
 				kind: "genre",
 				title: name,
-				subtitle: tracksLabel(count),
+				// L8-6: the backend only lists genres whose mix can play and says
+				// over how many albums; older answers (no `albums`) keep the count.
+				subtitle: albums > 0 ? `${tracksLabel(count)} · ${albumsLabel(albums)}` : tracksLabel(count),
 				query: `genre=${encodeURIComponent(name)}`,
 			});
 		}

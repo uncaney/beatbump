@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // mixStub is a Meilisearch double for the D1 mixes: it EVALUATES the two
@@ -14,9 +16,11 @@ import (
 // offset/limit, reports estimatedTotalHits and answers the genre facet, so
 // the sampling and the thresholds are exercised for real.
 type mixStub struct {
+	mu      sync.Mutex // mixSample / genreAlbumCounts query concurrently
 	tracks  []map[string]interface{}
 	albums  []map[string]interface{}
 	filters []string
+	surveys []string // filters of the survey requests (limit == mixSurveyLimit)
 }
 
 func (s *mixStub) match(h map[string]interface{}, filter string) bool {
@@ -49,7 +53,12 @@ func (s *mixStub) handler() http.Handler {
 		var body map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&body)
 		filter := mstr(body, "filter")
+		s.mu.Lock()
 		s.filters = append(s.filters, filter)
+		if stubInt(body["limit"]) == mixSurveyLimit {
+			s.surveys = append(s.surveys, filter)
+		}
+		s.mu.Unlock()
 		src := s.tracks
 		if index == "albums" {
 			src = s.albums
@@ -95,6 +104,7 @@ func (s *mixStub) handler() http.Handler {
 func newMixStub(t *testing.T) *mixStub {
 	t.Helper()
 	resetAlbumCoverMemo()
+	resetMixSurveyMemo()
 	s := &mixStub{}
 	n := 0
 	add := func(album, artist, year, genre string, tracks int) {
@@ -220,11 +230,121 @@ func TestLocalMixesCards(t *testing.T) {
 	if len(genres) != 0 {
 		t.Fatalf("no genre reaches 200 tracks in the fixture, got %v", genres)
 	}
-	dc, gc := mixCards(map[int]int{1970: 14, 1990: 15, 2000: 40}, map[string]int{"Rock": 3000, "Pop": 199, "Jazz": 200, "Blues": 200})
+	albums := map[string]int{"Rock": 48, "Pop": 30, "Jazz": 15, "Blues": 15, "OST": 3}
+	dc, gc := mixCards(map[int]int{1970: 14, 1990: 15, 2000: 40}, map[string]int{"Rock": 3000, "Pop": 199, "Jazz": 200, "Blues": 200, "OST": 900}, albums)
 	if len(dc) != 2 || dc[0].Decade != 2000 || dc[1].Decade != 1990 {
 		t.Fatalf("decade cards = %v", dc)
 	}
-	if len(gc) != 3 || gc[0].Name != "Rock" || gc[1].Name != "Blues" || gc[2].Name != "Jazz" {
+	// OST: 900 tracks but 3 albums -> no card (L8-6); Pop: 199 tracks -> none.
+	if len(gc) != 3 || gc[0].Name != "Rock" || gc[1].Name != "Blues" || gc[2].Name != "Jazz" || gc[0].Albums != 48 {
 		t.Fatalf("genre cards = %v", gc)
+	}
+}
+
+// surveyCalls counts the survey requests (limit == mixSurveyLimit) the stub
+// saw for a filter.
+func (s *mixStub) surveyCalls(filter string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, f := range s.surveys {
+		if f == filter {
+			n++
+		}
+	}
+	return n
+}
+
+// newMixStubGenres seeds two big genres: "Rock" = 20 albums x 10 tracks
+// (200 tracks, 20 albums: a mix) and "Soundtrack" = 3 albums x 70 tracks
+// (210 tracks, 3 albums: never a mix), plus the 1990s decade from them.
+func newMixStubGenres(t *testing.T) *mixStub {
+	t.Helper()
+	resetAlbumCoverMemo()
+	resetMixSurveyMemo()
+	s := &mixStub{}
+	n := 0
+	add := func(album, artist, year, genre string, tracks int) {
+		for i := 0; i < tracks; i++ {
+			n++
+			s.tracks = append(s.tracks, map[string]interface{}{
+				"lid": fmt.Sprintf("%011x", n), "title": fmt.Sprintf("%s %d", album, i+1), "artist": artist, "albumArtist": artist,
+				"album": album, "track": float64(i + 1), "durationSec": 200.0, "year": year, "genre": genre,
+			})
+		}
+		s.albums = append(s.albums, map[string]interface{}{"id": albumID(artist, album), "album": album, "albumArtist": artist, "year": year, "coverLid": fmt.Sprintf("%011x", n)})
+	}
+	for a := 0; a < 20; a++ {
+		add(fmt.Sprintf("Rock %d", a), fmt.Sprintf("Band %d", a), fmt.Sprintf("%d", 1990+a%10), "Rock", 10)
+	}
+	for a := 0; a < 3; a++ {
+		add(fmt.Sprintf("Score %d", a), "Composer", fmt.Sprintf("%d", 2001+a), "Soundtrack", 70)
+	}
+	srv := httptest.NewServer(s.handler())
+	t.Cleanup(srv.Close)
+	t.Setenv("MEILI_URL", srv.URL)
+	return s
+}
+
+// L8-6: every genre card /local/mixes lists answers a non-empty /local/mix.
+func TestLocalMixesCardsAlwaysPlayable(t *testing.T) {
+	newMixStubGenres(t)
+	resp := getJSON(t, LocalMixesHandler, "/api/v1/local/mixes")
+	genres, _ := resp["genres"].([]interface{})
+	if len(genres) != 1 {
+		t.Fatalf("expected only Rock (Soundtrack has 210 tracks on 3 albums), got %v", genres)
+	}
+	g := genres[0].(map[string]interface{})
+	if g["name"] != "Rock" || g["count"] != 200.0 || g["albums"] != 20.0 {
+		t.Fatalf("genre card = %v", g)
+	}
+	for _, it := range genres {
+		name := it.(map[string]interface{})["name"].(string)
+		mix := getJSON(t, LocalMixHandler, "/api/v1/local/mix?genre="+name)
+		items, _ := mix["items"].([]interface{})
+		if len(items) == 0 {
+			t.Fatalf("listed card %q does not play: %v", name, mix["reason"])
+		}
+	}
+	dead := getJSON(t, LocalMixHandler, "/api/v1/local/mix?genre=Soundtrack")
+	if dead["reason"] != "too_small" || dead["albums"] != 3.0 {
+		t.Fatalf("Soundtrack should stay too_small: %v", dead)
+	}
+}
+
+// L8-9: the survey of a filter is memoised for mixSurveyTTL (the sample is
+// still fresh per tap), an empty survey is never memoised, and the memo
+// expires.
+func TestLocalMixSurveyMemo(t *testing.T) {
+	stub := newMixStubGenres(t)
+	rock := genreFilter("Rock")
+	a := getJSON(t, LocalMixHandler, "/api/v1/local/mix?genre=Rock")
+	b := getJSON(t, LocalMixHandler, "/api/v1/local/mix?genre=Rock")
+	if stub.surveyCalls(rock) != 1 {
+		t.Fatalf("survey ran %d times for two taps, want 1", stub.surveyCalls(rock))
+	}
+	ai, _ := a["items"].([]interface{})
+	bi, _ := b["items"].([]interface{})
+	if len(ai) != 40 || len(bi) != 40 {
+		t.Fatalf("both taps should give 40 tracks: %d / %d", len(ai), len(bi))
+	}
+	// Unknown genre: 0 / 0 is not kept, the next tap surveys again.
+	getJSON(t, LocalMixHandler, "/api/v1/local/mix?genre=Nope")
+	getJSON(t, LocalMixHandler, "/api/v1/local/mix?genre=Nope")
+	if stub.surveyCalls(genreFilter("Nope")) != 2 {
+		t.Fatalf("empty survey memoised: %d calls", stub.surveyCalls(genreFilter("Nope")))
+	}
+	// /local/mixes primes the memo for its listed genres.
+	getJSON(t, LocalMixesHandler, "/api/v1/local/mixes")
+	if stub.surveyCalls(rock) != 1 {
+		t.Fatalf("cards listing re-surveyed Rock: %d calls", stub.surveyCalls(rock))
+	}
+	// Past the TTL the survey runs again.
+	base := time.Now()
+	mixSurveyNow = func() time.Time { return base.Add(mixSurveyTTL + time.Second) }
+	t.Cleanup(func() { mixSurveyNow = time.Now })
+	getJSON(t, LocalMixHandler, "/api/v1/local/mix?genre=Rock")
+	if stub.surveyCalls(rock) != 2 {
+		t.Fatalf("memo did not expire: %d calls", stub.surveyCalls(rock))
 	}
 }

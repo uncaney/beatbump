@@ -5,11 +5,25 @@ package api
 //
 //	GET /api/v1/local/mix?decade=1990        -> {"items":[...40 songs], "decade":1990, "albums":N}
 //	GET /api/v1/local/mix?genre=Rock         -> {"items":[...40 songs], "genre":"Rock", "albums":N}
-//	GET /api/v1/local/mixes                  -> {"decades":[{"decade":1990,"albums":52}], "genres":[{"name":"Rock","count":1234}]}
+//	GET /api/v1/local/mixes                  -> {"decades":[{"decade":1990,"albums":52}], "genres":[{"name":"Rock","count":1234,"albums":48}]}
 //
 // Exactly one of decade / genre is required (400 otherwise). A slice holding
 // fewer than mixMinAlbums distinct albums answers {"items":[],"reason":"too_small"}:
 // a mix over 3 albums is an album, not a mix.
+//
+// Audit L8-6: a genre card is listed only when its mix can play, i.e. the
+// genre has >= mixGenreMin tracks AND its survey finds >= mixMinAlbums
+// distinct albums (same threshold as the mix itself: a 200-track soundtrack
+// genre spread over 3 albums used to get a card that always answered
+// too_small). The album count is part of the card. The threshold is kept at
+// 15 for genres on purpose: relaxing it to 5 would list mixes that are 40
+// tracks of 5 albums, which is what the "not a mix" rule rejects.
+//
+// Audit L8-9: /local/mix is NOT response-cached (the 40-track sample must be
+// fresh on every tap); what is memoised in-process for mixSurveyTTL is the
+// deterministic part, mixSurvey(filter) -> (total, albums), in a bounded map
+// (mixSurveyMemoMax filters). /local/mixes stays behind main.go's 5 min
+// response cache and primes that memo for every listed genre.
 //
 // Meili facts this relies on (ytm-meili settings, 2026-10): the tracks index
 // filters on `genre` and `year`; `year` is stored as a STRING ("1994"), so a
@@ -17,8 +31,8 @@ package api
 // explicit `year IN [1990,...,1999]` list (Meili matches a numeric literal
 // against the string value). The albums index is NOT filterable on year, so
 // the decade cards come from one bounded scan of the albums index (id + year
-// only, pages of mixAlbumPage). Both listings are cheap enough for the 5 min
-// response cache main.go wraps them in.
+// only, pages of mixAlbumPage). The cards listing is cheap enough for the
+// 5 min response cache main.go wraps it in.
 
 import (
 	"math/rand"
@@ -27,20 +41,24 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
 const (
-	mixSize        = 40  // tracks per mix
-	mixMinAlbums   = 15  // distinct albums a slice needs before it is a mix
-	mixGenreMin    = 200 // tracks a genre needs before it gets a card
-	mixAlbumPage   = 1000
-	mixAlbumPages  = 12 // albums index maxTotalHits is 12000
-	mixSurveyLimit = 1000
-	mixPerWindow   = 4
-	mixDecadeMinY  = 1900
-	mixDecadeMaxY  = 2090
+	mixSize           = 40  // tracks per mix
+	mixMinAlbums      = 15  // distinct albums a slice needs before it is a mix
+	mixGenreMin       = 200 // tracks a genre needs before it gets a card
+	mixAlbumPage      = 1000
+	mixAlbumPages     = 12 // albums index maxTotalHits is 12000
+	mixSurveyLimit    = 1000
+	mixPerWindow      = 4
+	mixDecadeMinY     = 1900
+	mixDecadeMaxY     = 2090
+	mixSurveyTTL      = 5 * time.Minute // L8-9: in-process memo of mixSurvey
+	mixSurveyMemoMax  = 256             // filters kept (decades + genres << this)
+	mixGenreSurveyPar = 4               // concurrent genre surveys in /local/mixes
 )
 
 var mixTrackAttrs = []string{"lid", "title", "artist", "albumArtist", "track", "durationSec", "album"}
@@ -116,6 +134,59 @@ func mixSurvey(filter string) (total, albums int) {
 		total = len(raw)
 	}
 	return total, len(seen)
+}
+
+// mixSurveyEntry is one memoised survey (L8-9).
+type mixSurveyEntry struct {
+	total, albums int
+	at            time.Time
+}
+
+var (
+	mixSurveyMu   sync.Mutex
+	mixSurveyMemo = map[string]mixSurveyEntry{}
+	// mixSurveyNow is swapped by tests to age the memo.
+	mixSurveyNow = time.Now
+)
+
+// mixSurveyCached is mixSurvey behind a mixSurveyTTL memo keyed by filter.
+// An empty answer (Meili down or unknown slice: 0 tracks, 0 albums) is not
+// kept, so a transient failure never pins "too_small" for 5 minutes. The map
+// is bounded: past mixSurveyMemoMax entries the expired ones go first, then
+// the whole map is dropped (a few dozen filters exist in practice).
+func mixSurveyCached(filter string) (total, albums int) {
+	now := mixSurveyNow()
+	mixSurveyMu.Lock()
+	if e, ok := mixSurveyMemo[filter]; ok && now.Sub(e.at) < mixSurveyTTL {
+		mixSurveyMu.Unlock()
+		return e.total, e.albums
+	}
+	mixSurveyMu.Unlock()
+	total, albums = mixSurvey(filter)
+	if total == 0 && albums == 0 {
+		return
+	}
+	mixSurveyMu.Lock()
+	defer mixSurveyMu.Unlock()
+	if len(mixSurveyMemo) >= mixSurveyMemoMax {
+		for k, e := range mixSurveyMemo {
+			if now.Sub(e.at) >= mixSurveyTTL {
+				delete(mixSurveyMemo, k)
+			}
+		}
+		if len(mixSurveyMemo) >= mixSurveyMemoMax {
+			mixSurveyMemo = map[string]mixSurveyEntry{}
+		}
+	}
+	mixSurveyMemo[filter] = mixSurveyEntry{total: total, albums: albums, at: now}
+	return
+}
+
+// resetMixSurveyMemo drops every memoised survey (tests).
+func resetMixSurveyMemo() {
+	mixSurveyMu.Lock()
+	defer mixSurveyMu.Unlock()
+	mixSurveyMemo = map[string]mixSurveyEntry{}
 }
 
 // mixSample is randomLibrarySample over a filtered slice: n/mixPerWindow
@@ -210,7 +281,7 @@ func LocalMixHandler(c echo.Context) error {
 		filter = genreFilter(genre)
 		resp["genre"] = genre
 	}
-	total, albums := mixSurvey(filter)
+	total, albums := mixSurveyCached(filter)
 	resp["albums"] = albums
 	if albums < mixMinAlbums {
 		resp["items"] = []IListItemRenderer{}
@@ -228,8 +299,9 @@ type decadeCard struct {
 }
 
 type genreCard struct {
-	Name  string `json:"name"`
-	Count int    `json:"count"`
+	Name   string `json:"name"`
+	Count  int    `json:"count"`
+	Albums int    `json:"albums"`
 }
 
 // decadeAlbumCounts scans the albums index (id + year, pages of mixAlbumPage,
@@ -280,10 +352,46 @@ func genreTrackCounts() map[string]int {
 	return counts
 }
 
+// genreCandidates lists the genres with at least mixGenreMin tracks.
+func genreCandidates(genres map[string]int) []string {
+	out := make([]string, 0, len(genres))
+	for name, n := range genres {
+		if n >= mixGenreMin {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// genreAlbumCounts surveys each candidate genre (mixSurveyCached, at most
+// mixGenreSurveyPar at a time) and returns name -> distinct albums (L8-6).
+func genreAlbumCounts(names []string) map[string]int {
+	out := make(map[string]int, len(names))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, mixGenreSurveyPar)
+	for _, name := range names {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(name string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			_, albums := mixSurveyCached(genreFilter(name))
+			mu.Lock()
+			out[name] = albums
+			mu.Unlock()
+		}(name)
+	}
+	wg.Wait()
+	return out
+}
+
 // mixCards folds the raw counts into the card lists: decades with at least
 // mixMinAlbums albums (newest first), genres with at least mixGenreMin tracks
-// (most tracks first, name as tie-break).
-func mixCards(decades map[int]int, genres map[string]int) ([]decadeCard, []genreCard) {
+// AND at least mixMinAlbums distinct albums (genreAlbums, L8-6: every listed
+// card can play), most tracks first, name as tie-break.
+func mixCards(decades map[int]int, genres map[string]int, genreAlbums map[string]int) ([]decadeCard, []genreCard) {
 	dc := make([]decadeCard, 0, len(decades))
 	for d, n := range decades {
 		if n >= mixMinAlbums {
@@ -293,8 +401,8 @@ func mixCards(decades map[int]int, genres map[string]int) ([]decadeCard, []genre
 	sort.Slice(dc, func(i, j int) bool { return dc[i].Decade > dc[j].Decade })
 	gc := make([]genreCard, 0, len(genres))
 	for name, n := range genres {
-		if n >= mixGenreMin {
-			gc = append(gc, genreCard{Name: name, Count: n})
+		if n >= mixGenreMin && genreAlbums[name] >= mixMinAlbums {
+			gc = append(gc, genreCard{Name: name, Count: n, Albums: genreAlbums[name]})
 		}
 	}
 	sort.Slice(gc, func(i, j int) bool {
@@ -315,6 +423,6 @@ func LocalMixesHandler(c echo.Context) error {
 	go func() { defer wg.Done(); decades = decadeAlbumCounts() }()
 	go func() { defer wg.Done(); genres = genreTrackCounts() }()
 	wg.Wait()
-	dc, gc := mixCards(decades, genres)
+	dc, gc := mixCards(decades, genres, genreAlbumCounts(genreCandidates(genres)))
 	return c.JSON(http.StatusOK, map[string]interface{}{"decades": dc, "genres": gc})
 }

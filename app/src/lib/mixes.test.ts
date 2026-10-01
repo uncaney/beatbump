@@ -19,7 +19,7 @@ describe("mixes cards (c29b D1)", () => {
 				{ decade: "x", albums: 3 },
 			],
 			genres: [
-				{ name: "Rock", count: 3000 },
+				{ name: "Rock", count: 3000, albums: 48 },
 				{ name: " ", count: 300 },
 				{ name: "Pop", count: 0 },
 				{ name: "Hip Hop", count: 250 },
@@ -27,7 +27,8 @@ describe("mixes cards (c29b D1)", () => {
 		});
 		expect(cards.map((c) => c.key)).toEqual(["decade:2000", "decade:1990", "genre:Rock", "genre:Hip Hop"]);
 		expect(cards[0]).toMatchObject({ kind: "decade", title: "Années 2000", subtitle: "40 albums", query: "decade=2000" });
-		expect(cards[3]).toMatchObject({ kind: "genre", title: "Hip Hop", query: "genre=Hip%20Hop" });
+		expect(cards[2].subtitle.replace(/[\u00a0\u202f\u2009]/g, " ")).toBe("3 000 titres · 48 albums");
+		expect(cards[3]).toMatchObject({ kind: "genre", title: "Hip Hop", subtitle: "250 titres", query: "genre=Hip%20Hop" });
 	});
 
 	it("gives no card for an empty or malformed answer", () => {
