@@ -15,6 +15,10 @@ export const RESUME_KEY = "resumeState";
 export const RESUME_VERSION = 1;
 export const RESUME_MAX_ITEMS = 500;
 export const RESUME_SAVE_INTERVAL_MS = 5000;
+/** I7: a saved queue older than this is ignored at restore. */
+export const RESUME_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+/** I7: periodic saves only when the position moved more than this (s). */
+export const RESUME_MIN_TIME_DELTA = 2;
 /** Rows kept before the cursor when a long queue is cut to RESUME_MAX_ITEMS. */
 const RESUME_KEEP_BEFORE = 100;
 
@@ -37,6 +41,7 @@ export interface ResumeState {
 interface StorageLike {
 	getItem(key: string): string | null;
 	setItem(key: string, value: string): void;
+	removeItem?(key: string): void;
 }
 
 // Enough to show the row and play it again (getSrc: videoId / playlistId /
@@ -141,8 +146,11 @@ export function buildResumeState(
 	};
 }
 
-/** Validate a persisted state; null when absent / corrupt / empty. */
-export function parseResumeState(raw: string | null | undefined): ResumeState | null {
+/**
+ * Validate a persisted state; null when absent / corrupt / empty, or (I7,
+ * when `now` is given) saved more than RESUME_MAX_AGE_MS before `now`.
+ */
+export function parseResumeState(raw: string | null | undefined, now?: number): ResumeState | null {
 	if (!raw) return null;
 	let j: any;
 	try {
@@ -155,9 +163,11 @@ export function parseResumeState(raw: string | null | undefined): ResumeState | 
 		.slice(0, RESUME_MAX_ITEMS)
 		.filter((t: any) => t && typeof t === "object" && typeof t.videoId === "string" && t.videoId);
 	if (!mix.length) return null;
+	const savedAt = finite(j.savedAt);
+	if (typeof now === "number" && savedAt > 0 && now - savedAt > RESUME_MAX_AGE_MS) return null;
 	return {
 		v: RESUME_VERSION,
-		savedAt: finite(j.savedAt),
+		savedAt,
 		type: asType(j.type),
 		position: Math.min(Math.max(0, finite(j.position) | 0), mix.length - 1),
 		currentTime: Math.max(0, finite(j.currentTime)),
@@ -177,9 +187,12 @@ export function resumeSeekTime(state: Pick<ResumeState, "currentTime" | "duratio
 	return t;
 }
 
-export function readResumeState(storage: Pick<StorageLike, "getItem"> | undefined): ResumeState | null {
+export function readResumeState(
+	storage: Pick<StorageLike, "getItem"> | undefined,
+	now = Date.now(),
+): ResumeState | null {
 	try {
-		return parseResumeState(storage?.getItem(RESUME_KEY));
+		return parseResumeState(storage?.getItem(RESUME_KEY), now);
 	} catch {
 		return null;
 	}
@@ -193,6 +206,52 @@ export function writeResumeState(storage: StorageLike | undefined, state: Resume
 	} catch {
 		return false; // quota / private mode: resume is best-effort
 	}
+}
+
+/** I7: drop the saved queue (and the legacy `lastTrack`) from this device. */
+export function clearResumeState(storage: StorageLike | undefined): void {
+	try {
+		storage?.removeItem?.(RESUME_KEY);
+		storage?.removeItem?.("lastTrack");
+	} catch {
+		/* best-effort */
+	}
+}
+
+/**
+ * I7: what identifies the saved queue apart from the playback time: cursor,
+ * type, mix id, context and the ordered ids of every row. Two snapshots with
+ * the same signature differ only by time.
+ */
+export function resumeSignature(list: {
+	mix: unknown[];
+	position: number;
+	currentMixType?: unknown;
+	context?: PlaybackContext | null;
+	currentMixId?: string | null;
+}): string {
+	const mix = Array.isArray(list?.mix) ? list.mix : [];
+	const ids = mix.map((r: any) => (r && typeof r.videoId === "string" ? r.videoId : "")).join(",");
+	const ctx = list?.context ? `${list.context.kind}:${list.context.title}:${list.context.ids?.length ?? 0}` : "";
+	return [finite(list?.position) | 0, String(list?.currentMixType ?? ""), list?.currentMixId ?? "", ctx, ids].join("|");
+}
+
+/**
+ * I7: whether to write a snapshot. Always when nothing was written yet or the
+ * queue / cursor / context changed. Otherwise only when the time moved more
+ * than `minDelta` seconds: RESUME_MIN_TIME_DELTA for the periodic save (so a
+ * paused or idle tab stops rewriting the same state), ~0 for the pause /
+ * hide events (exact position, but a second pause write of the same state is
+ * skipped).
+ */
+export function shouldSaveResume(
+	last: { sig: string; t: number } | null,
+	sig: string,
+	t: number,
+	minDelta = RESUME_MIN_TIME_DELTA,
+): boolean {
+	if (!last || last.sig !== sig) return true;
+	return Math.abs(finite(t) - last.t) > minDelta;
 }
 
 /**
@@ -356,8 +415,10 @@ export function resumeShortcutClaimed(): boolean {
 
 /**
  * Save every RESUME_SAVE_INTERVAL_MS, on pause, when the page is hidden and
- * on pagehide, while `enabled()` (the "Remember Last Track" setting). An
- * empty queue never overwrites a saved one. Returns the cleanup.
+ * on pagehide, while `enabled()` (the "Remember Last Track" setting), and
+ * only when something changed (I7, shouldSaveResume). An empty queue never
+ * overwrites a saved one. When `enabled()` is false the saved queue is
+ * purged (I7). Returns the cleanup.
  */
 export function startResumePersistence(enabled: () => boolean): () => void {
 	if (typeof window === "undefined") return () => {};
@@ -365,20 +426,29 @@ export function startResumePersistence(enabled: () => boolean): () => void {
 	const cleanups: Array<() => void> = [];
 	void loadRuntime().then(({ SessionListService, AudioPlayer }) => {
 		if (stopped) return;
-		const save = () => {
+		let last: { sig: string; t: number } | null = null;
+		let purged = false;
+		const save = (minDelta = 0.25) => {
 			try {
-				if (!enabled()) return;
-				const state = buildResumeState(
-					SessionListService.value,
-					AudioPlayer.currentTime,
-					AudioPlayer.duration,
-				);
-				if (state) writeResumeState(browserStorage(), state);
+				if (!enabled()) {
+					// I7: turning the setting off removes the saved queue.
+					if (!purged) clearResumeState(browserStorage());
+					purged = true;
+					last = null;
+					return;
+				}
+				purged = false;
+				const list = SessionListService.value;
+				const t = AudioPlayer.currentTime;
+				const sig = resumeSignature(list);
+				if (!shouldSaveResume(last, sig, t, minDelta)) return;
+				const state = buildResumeState(list, t, AudioPlayer.duration);
+				if (state && writeResumeState(browserStorage(), state)) last = { sig, t: state.currentTime };
 			} catch {
 				/* best-effort */
 			}
 		};
-		const timer = setInterval(save, RESUME_SAVE_INTERVAL_MS);
+		const timer = setInterval(() => save(RESUME_MIN_TIME_DELTA), RESUME_SAVE_INTERVAL_MS);
 		cleanups.push(() => clearInterval(timer));
 		let first = true;
 		cleanups.push(
@@ -393,11 +463,12 @@ export function startResumePersistence(enabled: () => boolean): () => void {
 		const onVisibility = () => {
 			if (document.visibilityState === "hidden") save();
 		};
+		const onPageHide = () => save();
 		document.addEventListener("visibilitychange", onVisibility);
-		window.addEventListener("pagehide", save);
+		window.addEventListener("pagehide", onPageHide);
 		cleanups.push(() => {
 			document.removeEventListener("visibilitychange", onVisibility);
-			window.removeEventListener("pagehide", save);
+			window.removeEventListener("pagehide", onPageHide);
 		});
 	});
 	return () => {
