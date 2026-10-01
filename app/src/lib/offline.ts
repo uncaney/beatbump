@@ -85,6 +85,11 @@ export function getCachedUrl(videoId: string): string {
 export function isLocalUrl(url: string | undefined): boolean {
 	return !!url && /\/localf\b/.test(url);
 }
+// Stable (unsigned, re-fetchable) audio URLs: library files and iv-vp (/aud/<id>).
+// Signed /vp URLs rotate and must not be kept once they fell out of the cache.
+export function isStableAudioUrl(url: string | undefined): boolean {
+	return !!url && /\/(localf|aud)\b/.test(url);
+}
 
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 	return new Promise((resolve) => {
@@ -295,7 +300,7 @@ export async function reconcileOfflineList(): Promise<OfflineTrack[] | null> {
 		} else {
 			t._cached = false;
 			const recent = typeof t._at === "number" && now - t._at < RECONCILE_GRACE_MS;
-			if (!isLocalUrl(t._offlineUrl) && !recent) continue;
+			if (!isStableAudioUrl(t._offlineUrl) && !recent) continue;
 		}
 		out.push(t);
 	}
