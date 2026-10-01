@@ -12,7 +12,8 @@
 	import ListItem from "$components/ListItem/ListItem.svelte";
 	import { SessionListService } from "$stores/list/sessionList";
 	import { planDragCommit } from "$stores/list/queueOps";
-	import { createEventDispatcher } from "svelte";
+	import { createEventDispatcher, onMount, tick } from "svelte";
+	import { SWIPE_ENGAGE, holdDelay, idleMove, keyTarget, moveIndex, swallowClick } from "./dragGesture";
 
 	// eslint-disable-next-line no-undef
 	export let items: T[] = [];
@@ -24,35 +25,31 @@
 
 	const dispatch = createEventDispatcher<{
 		click: void;
-		dragstart: { event: DragEvent | PointerEvent; index: number };
-		dragend: { event: DragEvent | PointerEvent; index: number };
-		drag: { event: DragEvent; index: number };
-		dragover: { event: DragEvent | PointerEvent; index: number };
+		dragstart: { event: PointerEvent | KeyboardEvent; index: number };
+		dragend: { event: PointerEvent | KeyboardEvent; index: number };
+		dragover: { event: PointerEvent; index: number };
 		remove: { index: number; item: T };
 	}>();
 
-	let dragTimer: ReturnType<typeof setTimeout> | undefined;
 	let isDragging = false;
 	let currentDragId: number | null = null;
-	let dragOverId: number | null = null;
 	let dragY = 0;
-	// Ghost offset: the mouse path keeps its historical 10rem; the touch path
-	// centres the ghost on the finger (half a row).
-	let ghostOffset = "10rem";
+	// Ghost offset: centred on the pointer (half a row).
+	let ghostOffset = "0px";
 	// The playing track when a drag starts (lists other than the queue): after
-	// the in-place swaps the cursor (position) must follow it, else the
+	// the in-place moves the cursor (position) must follow it, else the
 	// highlight and next() point at the wrong row once a row crosses the
 	// current one.
 	let dragCurrentTrack: T | null = null;
 	// True while the queue itself is being dragged (`items` is the session
-	// mix). The swaps then happen on a private copy and the queue is replaced
+	// mix). The moves then happen on a private copy and the queue is replaced
 	// once, on drop, through SessionListService.reorder(): the store setter
 	// runs (subscribers, tab sync) and the warm next-track URL is refreshed, so
 	// "suivant" plays the new neighbour (G1). Before, the shared array was
 	// swapped in place and no subscriber ever heard of it.
 	let queueDrag = false;
 	// Queue drag (H4): the parent re-pushes `items` (= the store mix) on every
-	// store emission (track change, continuation), so the swaps live in
+	// store emission (track change, continuation), so the moves live in
 	// `dragItems`, rendered instead of `items` while the drag lasts; `dragBase`
 	// is the queue at drag start and `dragRow` the dragged row. On drop the
 	// fresh queue is compared with `dragBase` (planDragCommit): unchanged, the
@@ -73,12 +70,15 @@
 		}
 		dragCurrentTrack = (s.mix[s.position] as T) ?? null;
 	};
-	const swapRows = (a: number, b: number) => {
+	/** Move one row (a single move, never a swap across several rows). */
+	const moveRow = (from: number, to: number) => {
 		if (queueDrag) {
-			[dragItems[a], dragItems[b]] = [dragItems[b], dragItems[a]];
-			dragItems = dragItems;
+			dragItems = moveIndex(dragItems, from, to);
 		} else {
-			[items[a], items[b]] = [items[b], items[a]];
+			// Other lists (favorites, playlists) are reordered in place, as
+			// they always were: the parent owns the array.
+			const next = moveIndex(items, from, to);
+			items.splice(0, items.length, ...next);
 			items = items;
 		}
 	};
@@ -109,92 +109,54 @@
 		}
 	};
 
+	// A parent handler written for the old native drag (it reads
+	// `event.dataTransfer`) must not break the gesture: it is isolated.
+	const emitDragStart = (event: PointerEvent | KeyboardEvent, index: number) => {
+		try {
+			dispatch("dragstart", { event, index });
+		} catch (err) {
+			console.warn("[list] dragstart handler failed", err);
+		}
+	};
+
 	const finishDrag = () => {
 		currentDragId = null;
-		dragOverId = null;
 		isDragging = false;
-		ghostOffset = "10rem";
 	};
 
-	/** Swap the rows the way the mouse path always did, then hand the result over. */
-	const commitSwap = () => {
-		if (dragOverId !== null && currentDragId !== null) {
-			swapRows(currentDragId, dragOverId);
-			currentDragId = dragOverId;
-		}
-		syncCursor();
-	};
-
-	// ---------------- Mouse: HTML5 drag and drop (unchanged) ----------------
-	function handleDragStart(event: DragEvent, startId: number) {
-		const target = event.target;
-		event.dataTransfer?.setDragImage(new Image(), 0, 0);
-		dragTimer = setTimeout(() => {
-			currentDragId = startId;
-			dragY = event.clientY;
-			captureCurrent(startId);
-			dispatch("dragstart", { event, index: currentDragId });
-			isDragging = true;
-		}, 250);
-
-		if (
-			!target ||
-			!("parentElement" in target) ||
-			!(target.parentElement instanceof HTMLElement)
-		)
-			return;
-	}
-
-	function handleDragEnd(event: DragEvent) {
-		if (dragTimer) {
-			dispatch("click");
-			clearTimeout(dragTimer);
-			dragTimer = undefined;
-		}
-		commitSwap();
-		dispatch("dragend", { event, index: currentDragId as number });
-		finishDrag();
-	}
-
-	function handleDragOver(event: DragEvent, overId: number) {
-		dragOverId = overId;
-		if (overId === dragOverId) return;
-		if ((dragOverId || overId) === null) return;
-		dispatch("dragover", { event, index: currentDragId as number });
-	}
-
-	$: {
-		if (dragOverId !== null && currentDragId !== null) {
-			swapRows(currentDragId, dragOverId);
-			currentDragId = dragOverId;
-		}
-	}
-
-	// ---------------- Touch: Pointer Events ----------------
-	// Long press (250 ms, no movement) = drag; horizontal travel >= 24 px with
-	// |dx| > |dy| = swipe left to remove; anything else is left to the browser
-	// (vertical scroll, `touch-action: pan-y`, which then fires pointercancel).
-	const LONG_PRESS_MS = 250;
-	const MOVE_SLOP = 8;
-	const SWIPE_ENGAGE = 24;
+	// ---------------- Pointer Events: mouse, pen and touch ----------------
+	// One mechanism for every pointer (c19a). Native HTML5 drag and drop is
+	// cancelled on `dragstart`: it used to compete with this path (the grip
+	// was `draggable`, the mouse path waited 250 ms after `dragstart` before
+	// arming, so a quick drag ended as a "click" and nothing moved).
+	//  - grip (.drag-handle): the drag starts on pointerdown;
+	//  - row, mouse / pen: after a 250 ms hold or 6 px of travel;
+	//  - row, touch: long press (250 ms, no travel); a leftward horizontal
+	//    travel of 24 px is a swipe to remove; anything else is left to the
+	//    browser (vertical scroll, `touch-action: pan-y`, then pointercancel).
 	const SWIPE_OPEN = 96;
+	// The click that follows a drag release is swallowed during this window.
+	const CLICK_SWALLOW_MS = 400;
 
-	type TouchMode = "idle" | "drag" | "swipe" | "cancel";
+	type PressMode = "idle" | "drag" | "swipe" | "cancel";
 	let listEl: HTMLDivElement;
 	let touch: {
 		index: number;
 		x: number;
 		y: number;
 		pointerId: number;
+		pointerType: string;
+		fromHandle: boolean;
+		moved: boolean;
 		el: HTMLElement;
-		mode: TouchMode;
+		mode: PressMode;
 		timer?: ReturnType<typeof setTimeout>;
 	} | null = null;
 	let lastPointerType = "";
 	let swipeIndex: number | null = null;
 	let swipeX = 0;
 	let openIndex: number | null = null;
-	let suppressClick = false;
+	let suppressClickUntil = 0;
 
 	$: touchBusy = touch?.mode === "drag" || touch?.mode === "swipe";
 
@@ -211,13 +173,56 @@
 		return Number.isInteger(idx) ? idx : null;
 	};
 
+	// A drag release must not play the row under the pointer: with pointer
+	// capture (or a release over another row) the click can land on any
+	// ancestor, so it is swallowed at the window, capture phase.
+	onMount(() => {
+		const swallow = (event: MouseEvent) => {
+			if (!suppressClickUntil) return;
+			const live = performance.now() < suppressClickUntil;
+			suppressClickUntil = 0;
+			if (!live) return;
+			event.stopPropagation();
+			event.preventDefault();
+		};
+		window.addEventListener("click", swallow, true);
+		return () => window.removeEventListener("click", swallow, true);
+	});
+
+	function startDrag(event: PointerEvent) {
+		if (!touch) return;
+		if (touch.timer) clearTimeout(touch.timer);
+		const { el, index, pointerId } = touch;
+		touch.mode = "drag";
+		touch = touch;
+		try {
+			el.setPointerCapture(pointerId);
+		} catch {
+			/* already captured or gone */
+		}
+		currentDragId = index;
+		ghostOffset = `${Math.round(el.offsetHeight / 2)}px`;
+		updateGhostY(event.clientY);
+		captureCurrent(index);
+		isDragging = true;
+		if (touch.pointerType === "touch") {
+			try {
+				navigator.vibrate?.(10);
+			} catch {
+				/* no haptics */
+			}
+		}
+		emitDragStart(event, index);
+	}
+
 	function onPointerDown(event: PointerEvent, index: number) {
 		lastPointerType = event.pointerType;
-		if (event.pointerType !== "touch") return;
+		// mouse: main button only (a right click opens the context menu)
+		if (event.pointerType !== "touch" && event.button !== 0) return;
 		if (openIndex !== null && openIndex !== index) openIndex = null;
 		const el = event.currentTarget as HTMLElement;
 		// The visible grip (.drag-handle, touch-action none) starts the drag at
-		// once; anywhere else on the row keeps the long press.
+		// once; anywhere else on the row needs the hold (or, mouse, travel).
 		const fromHandle = !!(event.target as Element | null)?.closest?.(".drag-handle");
 		if (touch?.timer) clearTimeout(touch.timer);
 		touch = {
@@ -225,31 +230,26 @@
 			x: event.clientX,
 			y: event.clientY,
 			pointerId: event.pointerId,
+			pointerType: event.pointerType,
+			fromHandle,
+			moved: false,
 			el,
 			mode: "idle",
 		};
+		const delay = holdDelay(fromHandle);
+		if (delay === 0) {
+			startDrag(event);
+			return;
+		}
 		touch.timer = setTimeout(() => {
 			if (!touch || touch.mode !== "idle") return;
-			touch.mode = "drag";
-			touch = touch;
-			try {
-				el.setPointerCapture(event.pointerId);
-			} catch {
-				/* already captured or gone */
-			}
-			currentDragId = index;
-			dragOverId = null;
-			ghostOffset = `${Math.round(el.offsetHeight / 2)}px`;
-			updateGhostY(event.clientY);
-			captureCurrent(index);
-			isDragging = true;
-			try {
-				navigator.vibrate?.(10);
-			} catch {
-				/* no haptics */
-			}
-			dispatch("dragstart", { event, index });
-		}, fromHandle ? 0 : LONG_PRESS_MS);
+			startDrag(event);
+		}, delay);
+	}
+
+	function onMouseDown(event: MouseEvent) {
+		// A grip press is ours: no text selection, no native drag, no focus jump.
+		if (touch?.fromHandle && touch.mode === "drag") event.preventDefault();
 	}
 
 	// Keyboard (audit v4 3.7 / TOP 9): ListItem only renders its kebab while
@@ -271,17 +271,37 @@
 		if (art && !art.matches(":hover")) art.dispatchEvent(new PointerEvent("pointerleave"));
 	}
 
+	// Keyboard reorder: Alt+ArrowUp / Alt+ArrowDown moves the focused row.
+	async function onRowKeyDown(event: KeyboardEvent, index: number) {
+		if (!event.altKey || event.ctrlKey || event.metaKey || touch) return;
+		const to = keyTarget(event.key, index, rows.length);
+		if (to === null) return;
+		event.preventDefault();
+		event.stopPropagation();
+		captureCurrent(index);
+		emitDragStart(event, index);
+		moveRow(index, to);
+		syncCursor();
+		dispatch("dragend", { event, index: to });
+		await tick();
+		listEl?.querySelector<HTMLElement>(`[data-index="${to}"] .m-item`)?.focus();
+	}
+
 	function onPointerMove(event: PointerEvent) {
 		if (!touch || event.pointerId !== touch.pointerId) return;
 		const dx = event.clientX - touch.x;
 		const dy = event.clientY - touch.y;
 		if (touch.mode === "idle") {
-			if (
-				swipeToRemove &&
-				touch.index !== lockedIndex &&
-				dx <= -SWIPE_ENGAGE &&
-				Math.abs(dx) > Math.abs(dy)
-			) {
+			const canSwipe = swipeToRemove && touch.index !== lockedIndex;
+			const outcome = idleMove(touch.pointerType, dx, dy, canSwipe);
+			if (outcome === "none") return;
+			if (outcome === "cancel") {
+				if (touch.timer) clearTimeout(touch.timer);
+				touch.mode = "cancel";
+				touch = touch;
+				return;
+			}
+			if (outcome === "swipe") {
 				if (touch.timer) clearTimeout(touch.timer);
 				touch.mode = "swipe";
 				touch = touch;
@@ -291,13 +311,8 @@
 				} catch {
 					/* ignore */
 				}
-			} else if (Math.abs(dx) > MOVE_SLOP || Math.abs(dy) > MOVE_SLOP) {
-				if (touch.timer) clearTimeout(touch.timer);
-				touch.mode = "cancel";
-				touch = touch;
-				return;
 			} else {
-				return;
+				startDrag(event);
 			}
 		}
 		if (touch.mode === "swipe") {
@@ -307,9 +322,11 @@
 		if (touch.mode === "drag") {
 			updateGhostY(event.clientY);
 			const over = rowIndexAt(event.clientX, event.clientY);
-			if (over !== null && over !== dragOverId) {
-				dragOverId = over;
-				dispatch("dragover", { event, index: currentDragId as number });
+			if (over !== null && currentDragId !== null && over !== currentDragId) {
+				moveRow(currentDragId, over);
+				currentDragId = over;
+				touch.moved = true;
+				dispatch("dragover", { event, index: over });
 			}
 		}
 	}
@@ -317,15 +334,18 @@
 	function onPointerUp(event: PointerEvent) {
 		if (!touch || event.pointerId !== touch.pointerId) return;
 		if (touch.timer) clearTimeout(touch.timer);
-		const { mode, index, el } = touch;
+		const { mode, index, el, pointerType, fromHandle, moved } = touch;
 		touch = null;
 		if (mode === "drag") {
-			suppressClick = true;
-			commitSwap();
-			dispatch("dragend", { event, index: currentDragId as number });
+			if (swallowClick(pointerType, fromHandle, moved)) {
+				suppressClickUntil = performance.now() + CLICK_SWALLOW_MS;
+			}
+			const at = currentDragId as number;
+			syncCursor();
+			dispatch("dragend", { event, index: at });
 			finishDrag();
 		} else if (mode === "swipe") {
-			suppressClick = true;
+			suppressClickUntil = performance.now() + CLICK_SWALLOW_MS;
 			const travel = -swipeX;
 			const commitAt = Math.max(SWIPE_OPEN * 1.5, el.offsetWidth * 0.4);
 			swipeIndex = null;
@@ -350,9 +370,10 @@
 		touch = null;
 		if (mode === "drag") {
 			// The browser took the gesture (scroll): keep whatever rows were
-			// already swapped consistent, same as a drop would.
-			commitSwap();
-			dispatch("dragend", { event, index: currentDragId as number });
+			// already moved consistent, same as a drop would.
+			const at = currentDragId as number;
+			syncCursor();
+			dispatch("dragend", { event, index: at });
 			finishDrag();
 		} else if (mode === "swipe") {
 			swipeIndex = null;
@@ -378,6 +399,15 @@
 		si === index ? Math.max(0, -sx) : oi === index ? SWIPE_OPEN : 0;
 </script>
 
+<!-- Moves and releases are followed at the window: the rows are re-ordered
+     (DOM nodes moved) during the drag, which can drop the pointer capture
+     of the pressed row; every pointer event still bubbles up here. -->
+<svelte:window
+	on:pointermove={onPointerMove}
+	on:pointerup={onPointerUp}
+	on:pointercancel={onPointerCancel}
+/>
+
 <div
 	class="list"
 	bind:this={listEl}
@@ -398,7 +428,6 @@
 	{/if}
 	{#each rows as item, index (item)}
 		<!-- svelte-ignore a11y-no-static-element-interactions -->
-		<!-- svelte-ignore a11y-click-events-have-key-events -->
 		<div
 			class="list-item"
 			data-testid="queue-row"
@@ -409,9 +438,8 @@
 			class:open={openIndex === index}
 			class:locked={lockedIndex === index}
 			on:pointerdown={(event) => onPointerDown(event, index)}
-			on:pointermove={onPointerMove}
-			on:pointerup={onPointerUp}
-			on:pointercancel={onPointerCancel}
+			on:mousedown={onMouseDown}
+			on:keydown={(event) => onRowKeyDown(event, index)}
 			on:focusin={onRowFocusIn}
 			on:focusout={onRowFocusOut}
 			on:touchmove|nonpassive={(event) => {
@@ -422,38 +450,11 @@
 			on:contextmenu={(event) => {
 				if (lastPointerType === "touch") event.preventDefault();
 			}}
-			on:click|capture={(event) => {
-				if (!suppressClick) return;
-				suppressClick = false;
-				event.stopPropagation();
-				event.preventDefault();
-			}}
-			on:drag={(event) => {
-				const target = event.target;
-				if (
-					!target ||
-					!("getBoundingClientRect" in target) ||
-					typeof target.getBoundingClientRect !== "function"
-				)
-					return;
-				if (
-					target &&
-					"parentElement" in target &&
-					target.parentElement instanceof HTMLElement
-				) {
-					dragY = target.parentElement.scrollTop + event.clientY;
-				}
-			}}
-			on:dragend={handleDragEnd}
-			on:dragover|preventDefault={(event) => handleDragOver(event, index)}
 			on:dragstart={(event) => {
-				// Touch is handled with pointer events: never let a mobile
-				// browser start a native drag on the long press.
-				if (lastPointerType === "touch") {
-					event.preventDefault();
-					return;
-				}
-				handleDragStart(event, index);
+				// Reordering is pointer events only: a `draggable` row (ListItem)
+				// must never start a native drag, which would fire pointercancel
+				// and end the pointer drag.
+				event.preventDefault();
 			}}
 		>
 			<!-- Rendered only while a swipe reveals it: at rest the 0-width strip
@@ -491,12 +492,11 @@
 				style:transition={swipeIndex === index ? "none" : "transform 180ms ease-out"}
 			>
 				<!-- Reorder grip, visible at rest (audit v4 TOP 9). Decorative for
-				     assistive tech: reordering stays a pointer gesture. -->
+				     assistive tech: keyboard users reorder with Alt+ArrowUp/Down. -->
 				<span
 					class="drag-handle"
 					aria-hidden="true"
-					draggable="true"
-					title="Glisser pour déplacer"
+					title="Glisser pour déplacer (Alt+↑/↓ au clavier)"
 				/>
 				<slot
 					name="item"
