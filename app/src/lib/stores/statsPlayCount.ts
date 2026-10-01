@@ -29,3 +29,20 @@ export function isLoopRestart(prevTime: number, time: number, duration: number):
 	if (!isFinite(prevTime) || !isFinite(time)) return false;
 	return prevTime >= duration - LOOP_EDGE_SECONDS && time <= LOOP_EDGE_SECONDS && time < prevTime;
 }
+
+/** Largest gap between two time updates still counted as continuous listening. */
+export const LISTEN_MAX_STEP_SECONDS = 2;
+
+/**
+ * I6: seconds actually listened between two time updates. Only forward,
+ * small steps while playing count; a seek (any jump back, or forward by more
+ * than LISTEN_MAX_STEP_SECONDS), a restore that sets the time, or a paused
+ * player adds nothing. A play counts once the sum reaches historyThreshold(),
+ * so a track restored at 40 s and listened to the end counts once, and a
+ * restore alone counts nothing.
+ */
+export function listenedSeconds(prevTime: number, time: number, playing: boolean): number {
+	if (!playing || !isFinite(prevTime) || !isFinite(time)) return 0;
+	const d = time - prevTime;
+	return d > 0 && d <= LISTEN_MAX_STEP_SECONDS ? d : 0;
+}

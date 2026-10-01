@@ -97,7 +97,7 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId } from "$lib/local";
 	import { recordHistory } from "$lib/me";
-	import { historyThreshold, isLoopRestart } from "$stores/statsPlayCount";
+	import { historyThreshold, isLoopRestart, listenedSeconds } from "$stores/statsPlayCount";
 	import { downloadToDevice } from "$lib/offline";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { clickOutside } from "$lib/actions/clickOutside";
@@ -156,30 +156,33 @@
 	// G10 (audit v4): in "repeat one" the <audio> loops without a track change;
 	// each loop (time wrapping from the end to the start, see isLoopRestart in
 	// $stores/statsPlayCount) starts a new play, counted after 30 s again.
-	const { currentTimeStore: historyTime, durationStore: historyDuration } = AudioPlayer;
+	const { currentTimeStore: historyTime, durationStore: historyDuration, paused: historyPaused } = AudioPlayer;
 	let _historyId = "";
 	let _historySent = false;
-	// C1 (cycle 18): a session restored at 40 s must not count a play again; the play
-	// is "armed" only once the time has been seen below the threshold for this playback.
-	let _historyArmed = false;
+	// I6: a play counts on the seconds actually listened (forward steps while
+	// playing, listenedSeconds), not on the position: a session restored at
+	// 40 s and listened to the end counts once, a restore alone counts nothing.
+	let _historyListened = 0;
 	$: if (browser && ($currentTrack?.videoId ?? "") !== _historyId) {
 		_historyId = $currentTrack?.videoId ?? "";
 		_historySent = false;
-		_historyArmed = false;
+		_historyListened = 0;
 	}
 	let _historyPrevTime = 0;
 	$: if (browser) {
 		const t = $historyTime;
-		if (_historySent && isLoopRestart(_historyPrevTime, t, $historyDuration)) _historySent = false;
-		if (t < historyThreshold($historyDuration)) _historyArmed = true;
+		if (isLoopRestart(_historyPrevTime, t, $historyDuration)) {
+			_historySent = false;
+			_historyListened = 0;
+		}
+		_historyListened += listenedSeconds(_historyPrevTime, t, !$historyPaused);
 		_historyPrevTime = t;
 	}
 	$: if (
 		browser &&
 		_historyId &&
 		!_historySent &&
-		_historyArmed &&
-		$historyTime >= historyThreshold($historyDuration) &&
+		_historyListened >= historyThreshold($historyDuration) &&
 		$currentTrack?.videoId === _historyId
 	) {
 		_historySent = true;
