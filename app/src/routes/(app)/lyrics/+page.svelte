@@ -470,10 +470,17 @@
 		&.past {
 			color: #a8a8a8 !important;
 		}
+		/* The global `button.active` rule (_button.scss) paints a light grey
+		   background with !important; `.line.active.svelte-x` outranks it, so the
+		   current line keeps accent text on a dark band. */
 		&.active,
+		&.active:hover,
 		&.active:focus,
+		&.active:focus-within,
 		&.active:active {
-			color: #fff !important;
+			background: rgba(0, 0, 0, 0.35) !important;
+			border-color: transparent !important;
+			color: $accent !important;
 			font-weight: 700;
 			transform: scale(1.04);
 		}
