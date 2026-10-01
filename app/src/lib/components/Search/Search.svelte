@@ -1132,6 +1132,8 @@
 
 		select {
 			height: 100%;
+			// U12-10: the "All" filter measured 67x43 in the phone overlay.
+			min-height: max(2.75rem, 44px);
 			font-size: inherit;
 		}
 
