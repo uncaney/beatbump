@@ -366,7 +366,7 @@
 			aria-label="Lecture hors-ligne"
 		>
 			<button
-				class="cta primary"
+				class="btn-primary"
 				class:is-disabled={!canPlay}
 				type="button"
 				title={playTitle}
@@ -736,19 +736,6 @@
 		&:focus-visible {
 			outline: 2px solid $accent;
 			outline-offset: 2px;
-		}
-		&.primary {
-			background: $accent !important;
-			border-color: $accent !important;
-			color: #000 !important;
-			&:hover,
-			&:focus,
-			&:focus-within,
-			&:active {
-				background: #22e668 !important;
-				border-color: #22e668 !important;
-				color: #000 !important;
-			}
 		}
 		&:disabled,
 		&.is-disabled {
