@@ -7,7 +7,7 @@
 	import { get } from "svelte/store";
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
-	import { buildResumeRow, capItems, diversify, readLastTrack } from "$lib/homeRows";
+	import { buildForYouRow, buildResumeRow, capItems, readLastTrack, sanitizeCard } from "$lib/homeRows";
 	import { getMix, getRecent } from "$lib/me";
 	import { queue } from "$lib/stores/list";
 
@@ -31,13 +31,15 @@
 		} catch {
 			lastTrack = null;
 		}
-		resume = buildResumeRow(lastTrack, recent, get(queue), 10);
+		resume = buildResumeRow(lastTrack, recent, get(queue), 10).map(sanitizeCard);
 	}
 
 	async function loadForYou() {
 		try {
 			const r = await getMix();
-			forYou = diversify(capItems(r?.items, MAX * 4), MAX);
+			// me/mix may return items without thumbnails / artistInfo (audit v3
+			// 1.1): those rendered a "?" cover and an "undefined" artist line.
+			forYou = buildForYouRow(r?.items, MAX);
 		} catch {
 			forYou = [];
 		}
@@ -48,7 +50,7 @@
 			const res = await APIClient.fetch(`/api/v1/local/albums?sort=dateAdded:desc&limit=${MAX}`);
 			if (!res.ok) return;
 			const r = await res.json();
-			acquired = capItems(r?.items, MAX);
+			acquired = capItems(r?.items, MAX).map(sanitizeCard);
 		} catch {
 			acquired = [];
 		}

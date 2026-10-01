@@ -57,6 +57,64 @@ export function buildResumeRow(last: RowItem | null, recent: unknown, queue: unk
 	return [...head, ...rest.filter((it) => rowItemRef(it) !== lastRef).slice(0, max)];
 }
 
+/** Label shown when a card has no usable artist name (never the string "undefined"). */
+export const UNKNOWN_ARTIST = "Artiste inconnu";
+
+/** First thumbnail URL of a card, "" when it has none. */
+export function thumbnailUrl(item: any): string {
+	const u = item?.thumbnails?.[0]?.url;
+	return typeof u === "string" ? u.trim() : "";
+}
+
+const textOf = (v: any): string => {
+	if (typeof v === "string") return v.trim();
+	if (v && typeof v === "object") {
+		const t = v.text ?? v.name;
+		return typeof t === "string" ? t.trim() : "";
+	}
+	return "";
+};
+
+/** Artist name of a card: `artistInfo.artist[0].text`, then `artist`, then the first artist subtitle; "" when unknown. */
+export function artistName(item: any): string {
+	if (!item || typeof item !== "object") return "";
+	const fromInfo = textOf(item.artistInfo?.artist?.[0]);
+	if (fromInfo) return fromInfo;
+	const fromArtist = textOf(item.artist);
+	if (fromArtist) return fromArtist;
+	if (Array.isArray(item.subtitle)) {
+		const sub = item.subtitle.find((s: any) => /ARTIST/.test(s?.pageType || "") && textOf(s));
+		if (sub) return textOf(sub);
+	}
+	return "";
+}
+
+/** A card the "Pour toi" row may show: renderable, with a cover and an artist (audit v3 1.1: "?" + "undefined" cards). */
+export function hasCoverAndArtist(item: any): boolean {
+	return isRenderable(item) && thumbnailUrl(item) !== "" && artistName(item) !== "";
+}
+
+/**
+ * Copy of a card whose subtitle never renders "undefined": entries without a
+ * string text are dropped; when a non-empty subtitle loses every entry, the
+ * artist name (or UNKNOWN_ARTIST) is shown as a plain entry instead. Cards
+ * without a subtitle are returned unchanged. Items are not mutated.
+ */
+export function sanitizeCard(item: RowItem): RowItem {
+	if (!Array.isArray(item?.subtitle) || item.subtitle.length === 0) return item;
+	const subtitle = item.subtitle
+		.filter((s: any) => s && typeof s === "object" && typeof s.text === "string" && s.text.trim() !== "")
+		.map((s: any) => ({ ...s }));
+	if (subtitle.length === 0) subtitle.push({ text: artistName(item) || UNKNOWN_ARTIST });
+	return { ...item, subtitle };
+}
+
+/** "Pour toi": cards with a cover and an artist, varied, capped to `max`, subtitles sanitized. */
+export function buildForYouRow(items: unknown, max: number): RowItem[] {
+	if (!Array.isArray(items)) return [];
+	return diversify(capItems(items.filter(hasCoverAndArtist), max * 4), max).map(sanitizeCard);
+}
+
 /** Keep a row varied: at most `perAlbum` items of the same album and `perArtist` of the same artist. */
 export function diversify(items: RowItem[], max: number, perAlbum = 2, perArtist = 3): RowItem[] {
 	const albums = new Map<string, number>();
