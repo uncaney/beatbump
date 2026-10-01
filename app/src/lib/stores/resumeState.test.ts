@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
 	RESUME_KEY,
+	RESUME_POS_KEY,
 	RESUME_MAX_ITEMS,
 	REMEMBER_MIGRATED_KEY,
 	RESUME_MAX_AGE_MS,
+	buildResumePos,
 	buildResumeState,
 	clearResumeState,
+	mergeResumePos,
+	parseResumePos,
+	resumeSavePlan,
 	resumeSignature,
 	shouldSaveResume,
+	writeResumePos,
 	migrateRememberLastTrack,
 	resumeAction,
 	resumeKeptFor,
@@ -218,9 +224,10 @@ describe("I7: conditional save, max age, purge", () => {
 		writeResumeState(s, buildResumeState({ mix, position: 0 }, 5, 10, now - 3600_000));
 		expect(readResumeState(s, now)?.mix).toHaveLength(3);
 	});
-	it("clearResumeState removes the saved queue and lastTrack", () => {
+	it("clearResumeState removes the saved queue, its position and lastTrack", () => {
 		const m = new Map<string, string>([
 			[RESUME_KEY, "x"],
+			[RESUME_POS_KEY, "p"],
 			["lastTrack", "y"],
 			["other", "z"],
 		]);
@@ -230,5 +237,53 @@ describe("I7: conditional save, max age, purge", () => {
 			removeItem: (k) => void m.delete(k),
 		});
 		expect([...m.keys()]).toEqual(["other"]);
+	});
+});
+
+describe("K8: the position is written apart from the queue", () => {
+	const mix = [track(0), track(1), track(2)];
+	it("resumeSavePlan: queue on first save / signature change, pos when the time moved, none otherwise", () => {
+		const sig = resumeSignature({ mix, position: 0 });
+		expect(resumeSavePlan(null, sig, 0)).toBe("queue");
+		expect(resumeSavePlan({ sig, t: 40 }, resumeSignature({ mix, position: 1 }), 40)).toBe("queue");
+		expect(resumeSavePlan({ sig, t: 40 }, sig, 45)).toBe("pos");
+		expect(resumeSavePlan({ sig, t: 40 }, sig, 41.5)).toBe("none");
+		expect(resumeSavePlan({ sig, t: 40 }, sig, 41, 0.25)).toBe("pos"); // pause write
+	});
+	it("read merges a position that belongs to the saved queue (small key)", () => {
+		const s = memory();
+		const st = buildResumeState({ mix, position: 1 }, 5, 200, 1000)!;
+		writeResumeState(s, st);
+		expect(writeResumePos(s, buildResumePos(st, 42, 200, 1500))).toBe(true);
+		const r = readResumeState(s, 2000)!;
+		expect(r.currentTime).toBe(42);
+		expect(r.savedAt).toBe(1500);
+		expect(r.position).toBe(1);
+		expect(r.mix).toHaveLength(3);
+		expect(s.m.get(RESUME_POS_KEY)!.length).toBeLessThan(160);
+		expect(s.m.get(RESUME_KEY)!.length).toBeGreaterThan(s.m.get(RESUME_POS_KEY)!.length * 3);
+	});
+	it("ignores a position taken on another queue (base or cursor row mismatch)", () => {
+		const s = memory();
+		const older = buildResumeState({ mix, position: 1 }, 5, 200, 1000)!;
+		writeResumePos(s, buildResumePos(older, 42, 200, 1500));
+		// a newer full write (e.g. a remote restore) has another savedAt
+		writeResumeState(s, buildResumeState({ mix, position: 1 }, 7, 200, 3000));
+		expect(readResumeState(s, 4000)?.currentTime).toBe(7);
+		// same base, other row under the cursor
+		const st = buildResumeState({ mix, position: 1 }, 5, 200, 1000)!;
+		const pos = { ...buildResumePos(st, 42, 200, 1500)!, videoId: mix[2].videoId };
+		expect(mergeResumePos(st, pos)?.currentTime).toBe(5);
+		// a position older than its base is ignored too
+		expect(mergeResumePos(st, { ...buildResumePos(st, 42, 200, 900)! })?.currentTime).toBe(5);
+		expect(mergeResumePos(st, null)).toBe(st);
+	});
+	it("parseResumePos rejects corrupt / foreign payloads", () => {
+		expect(parseResumePos(null)).toBeNull();
+		expect(parseResumePos("{")).toBeNull();
+		expect(parseResumePos(JSON.stringify({ v: 2, base: 1, videoId: "x" }))).toBeNull();
+		expect(parseResumePos(JSON.stringify({ v: 1, base: 0, videoId: "x" }))).toBeNull();
+		expect(parseResumePos(JSON.stringify({ v: 1, base: 1, videoId: "" }))).toBeNull();
+		expect(parseResumePos(JSON.stringify({ v: 1, base: 1, videoId: "x", currentTime: -3 }))?.currentTime).toBe(0);
 	});
 });
