@@ -18,6 +18,9 @@
 //   page -> SW  { type: "cache-audio",     url, videoId?, pinned? }   (pinned: write the entry pinned, I15)
 //   SW  -> page { type: "audio-cached",    url, videoId, ok, bytes, reason?, already?, cachedUrl? }
 //                 reason "quota" = could not fit even after evicting the oldest entries
+//                 reason "cancelled" = aborted by abort-audio (HL3 pack "Annuler")
+//   page -> SW  { type: "abort-audio",     videoId?, url? }   (aborts the in-flight cache-audio fetch)
+//   SW  -> page { type: "audio-aborted",   videoId, url, ok }
 //   page -> SW  { type: "uncache-audio",   url, videoId? }
 //   SW  -> page { type: "audio-uncached",  url, ok }
 //   page -> SW  { type: "is-cached",       videoId }
@@ -980,7 +983,7 @@ type CacheResult = { ok: boolean; bytes: number; reason?: string; already?: bool
 // resort a no-cors fetch yields an opaque response with no status, headers or
 // readable body, so there is NO reliable signal that it is audio and not an
 // error page: we deliberately do not cache it (reported as reason "opaque").
-async function cacheAudio(rawUrl: string, videoId: string, pinNow = false): Promise<CacheResult> {
+async function cacheAudio(rawUrl: string, videoId: string, pinNow = false, signal?: AbortSignal): Promise<CacheResult> {
 	const abs = new URL(rawUrl, self.location.href).href;
 	const c = await caches.open(AUDIO_CACHE);
 
@@ -1014,30 +1017,47 @@ async function cacheAudio(rawUrl: string, videoId: string, pinNow = false): Prom
 		}
 	}
 
+	// HL3: an `abort-audio` message aborts this fetch (pack "Annuler"): the
+	// download stops within the second and the page gets reason "cancelled".
+	const cancelled = (): CacheResult => ({ ok: false, bytes: 0, reason: "cancelled" });
+	if (signal?.aborted) return cancelled();
 	let res: Response | null = null;
 	if (sameOrigin(abs)) {
-		res = await fetch(abs, { credentials: "same-origin", cache: "no-store" });
+		try {
+			res = await fetch(abs, { credentials: "same-origin", cache: "no-store", signal });
+		} catch (e) {
+			if (signal?.aborted) return cancelled();
+			throw e;
+		}
 	} else {
 		try {
-			res = await fetch(abs, { mode: "cors", cache: "no-store" });
+			res = await fetch(abs, { mode: "cors", cache: "no-store", signal });
 		} catch {
 			res = null;
 		}
+		if (signal?.aborted) return cancelled();
 		if (!res) {
 			// Last resort: opaque. Not cacheable without a reliable signal (see above).
 			try {
-				const op = await fetch(abs, { mode: "no-cors", cache: "no-store" });
+				const op = await fetch(abs, { mode: "no-cors", cache: "no-store", signal });
 				if (op.type === "opaque") return { ok: false, bytes: 0, reason: "opaque" };
 			} catch {
 				/* ignore */
 			}
-			return { ok: false, bytes: 0, reason: "network" };
+			return signal?.aborted ? cancelled() : { ok: false, bytes: 0, reason: "network" };
 		}
 	}
 	if (!res.ok) return { ok: false, bytes: 0, reason: "status " + res.status };
 	const ct = res.headers.get("Content-Type");
 	if (!isAudioContentType(ct)) return { ok: false, bytes: 0, reason: "content-type " + (ct || "none") };
-	const buf = await res.arrayBuffer();
+	let buf: ArrayBuffer;
+	try {
+		buf = await res.arrayBuffer();
+	} catch (e) {
+		if (signal?.aborted) return cancelled();
+		throw e;
+	}
+	if (signal?.aborted) return cancelled();
 	if (!buf.byteLength) return { ok: false, bytes: 0, reason: "empty" };
 
 	const now = Date.now();
@@ -1110,20 +1130,34 @@ async function cacheAudio(rawUrl: string, videoId: string, pinNow = false): Prom
 
 // In-flight dedup: one download per videoId (or per URL when no videoId).
 const inflight = new Map<string, Promise<CacheResult>>();
-function cacheAudioDeduped(rawUrl: string, videoId: string, pinNow = false): Promise<CacheResult> {
-	let key: string;
+// HL3: the AbortController of each in-flight download, for `abort-audio`.
+const inflightAbort = new Map<string, AbortController>();
+function inflightKey(rawUrl: string, videoId: string): string {
 	try {
-		key = videoId ? "id:" + videoId : "url:" + new URL(rawUrl, self.location.href).href;
+		return videoId ? "id:" + videoId : "url:" + new URL(rawUrl, self.location.href).href;
 	} catch {
-		key = "url:" + rawUrl;
+		return "url:" + rawUrl;
 	}
+}
+function cacheAudioDeduped(rawUrl: string, videoId: string, pinNow = false): Promise<CacheResult> {
+	const key = inflightKey(rawUrl, videoId);
 	const running = inflight.get(key);
 	if (running) return running;
-	const p = cacheAudio(rawUrl, videoId, pinNow).finally(() => {
+	const ctrl = new AbortController();
+	inflightAbort.set(key, ctrl);
+	const p = cacheAudio(rawUrl, videoId, pinNow, ctrl.signal).finally(() => {
 		if (inflight.get(key) === p) inflight.delete(key);
+		if (inflightAbort.get(key) === ctrl) inflightAbort.delete(key);
 	});
 	inflight.set(key, p);
 	return p;
+}
+/** HL3: abort the in-flight download of `videoId` / `url`; false when none runs. */
+function abortCacheAudio(rawUrl: string, videoId: string): boolean {
+	const ctrl = inflightAbort.get(inflightKey(rawUrl, videoId));
+	if (!ctrl) return false;
+	ctrl.abort();
+	return true;
 }
 
 function reply(event: ExtendableMessageEvent, msg: Record<string, unknown>): Promise<void> {
@@ -1149,6 +1183,14 @@ self.addEventListener("message", (event) => {
 				.then((r) => reply(ev, { type: "audio-cached", url: data.url, videoId, ...r }))
 				.then(() => quotaSettled()), // K9: stay alive for the debounced LRU pass
 		);
+		return;
+	}
+	// HL3: page -> SW { type: "abort-audio", videoId?, url? } -> { type: "audio-aborted", videoId, url, ok }
+	// The aborted cache-audio answers its own "audio-cached" with reason "cancelled".
+	if (data.type === "abort-audio" && (typeof data.url === "string" || typeof data.videoId === "string")) {
+		const videoId = typeof data.videoId === "string" ? data.videoId : "";
+		const rawUrl = typeof data.url === "string" ? data.url : "";
+		ev.waitUntil(reply(ev, { type: "audio-aborted", videoId, url: rawUrl, ok: abortCacheAudio(rawUrl, videoId) }));
 		return;
 	}
 	if (data.type === "uncache-audio" && (typeof data.url === "string" || typeof data.videoId === "string")) {

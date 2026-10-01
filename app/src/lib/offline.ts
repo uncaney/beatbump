@@ -443,6 +443,21 @@ export async function verifyCached(videoId: string, ms = 1_500): Promise<{ cache
 	return { cached: !!r.cached, url: (r.cached && r.url) || "" };
 }
 
+/**
+ * HL3: abort the SW download of `videoId` (pack "Annuler"): the in-flight
+ * cache-audio then acks ok:false reason "cancelled" and cacheTrackOffline
+ * resolves at once. No reply awaited (an older SW ignores the message; the
+ * caller races its own abort anyway). Never throws.
+ */
+export function abortCacheAudio(videoId: string | undefined, url?: string) {
+	try {
+		const ctrl = typeof navigator !== "undefined" && navigator.serviceWorker && navigator.serviceWorker.controller;
+		if (ctrl && (videoId || url)) ctrl.postMessage({ type: "abort-audio", videoId: videoId || "", url: url || "" });
+	} catch {
+		/* ignore */
+	}
+}
+
 /** Tell the SW which URL/track is playing so its LRU never evicts it. */
 export function announceNowPlaying(url: string | undefined, videoId: string | undefined) {
 	try {

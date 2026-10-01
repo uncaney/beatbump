@@ -7,6 +7,7 @@
 // refused anyway. Pure core (`keepOffline` with injectable deps) + the toast
 // text (`keepSummary`), both covered by offlineBatch.test.ts.
 import {
+	abortCacheAudio,
 	cacheTrackOffline,
 	deviceOffline,
 	downloadForOffline,
@@ -67,6 +68,46 @@ const defaultDeps: KeepDeps = {
 		return { quota: Number(l.quota) || 0, pinnedBytes: Number(l.pinnedBytes) || 0, avgBytes };
 	},
 };
+/** The real deps (SW helpers of $lib/offline), for callers that wrap them. */
+export const defaultKeepDeps: KeepDeps = defaultDeps;
+
+/** `reason` of a download stopped by an abort (HL3 pack "Annuler"). */
+export const CANCELLED_REASON = "cancelled";
+
+/**
+ * HL3: deps whose downloads stop on `signal` abort: the SW is told to abort
+ * its fetch (abort-audio) and the download resolves at once with reason
+ * "cancelled", so a batch cut by "Annuler" ends within the second whatever
+ * the SW does. What landed before the abort stays cached and pinned.
+ */
+export function keepDepsWithAbort(signal: AbortSignal, base: KeepDeps = defaultDeps, abort: (t: any) => void = (t) => abortCacheAudio(t?.videoId, t?._offlineUrl)): KeepDeps {
+	const cancelled = (): OfflineResult => ({ ok: false, reason: CANCELLED_REASON });
+	return {
+		...base,
+		download: (t, opts) => {
+			if (signal.aborted) return Promise.resolve(cancelled());
+			return new Promise<OfflineResult>((resolve) => {
+				let settled = false;
+				const finish = (r: OfflineResult) => {
+					if (settled) return;
+					settled = true;
+					signal.removeEventListener("abort", onAbort);
+					resolve(r);
+				};
+				const onAbort = () => {
+					try {
+						abort(t);
+					} catch {
+						/* best effort */
+					}
+					finish(cancelled());
+				};
+				signal.addEventListener("abort", onAbort, { once: true });
+				base.download(t, opts).then(finish, () => finish({ ok: false, reason: "error" }));
+			});
+		},
+	};
+}
 
 /**
  * Keep `tracks` offline: pin the cached ones, download the others
@@ -118,6 +159,7 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 	const estimate = (t: any) => Number(t?._bytes) || (info && info.avgBytes) || EST_TRACK_BYTES;
 	let next = 0;
 	let quotaStop = false;
+	let cancelledInFlight = 0;
 	const worker = async () => {
 		while (!quotaStop && !aborted() && next < toDownload.length) {
 			const t = toDownload[next++];
@@ -149,6 +191,10 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 				if (/quota/.test(r.reason || "")) {
 					quotaStop = true;
 					p.refused++;
+				} else if (r.reason === CANCELLED_REASON && aborted()) {
+					// HL3: stopped by "Annuler" (keepDepsWithAbort): neither failed
+					// nor refused, the batch reports cancelled below.
+					cancelledInFlight++;
 				} else p.failed++;
 				emit();
 				continue;
@@ -175,7 +221,7 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 		next = toDownload.length;
 		emit();
 	}
-	return { ...p, cancelled: aborted() && next < toDownload.length };
+	return { ...p, cancelled: aborted() && (next < toDownload.length || cancelledInFlight > 0) };
 }
 
 /** Button label for a running / finished batch: "9/14 prêts", "Prêt hors-ligne". */
@@ -374,11 +420,17 @@ function patchJob(key: string, fn: (j: KeepJob) => KeepJob | null): void {
 export function startKeepJob(
 	key: string,
 	getTracks: () => Promise<any[]> | any[],
-	opts: { onDone?: (r: KeepResult) => void; deps?: KeepDeps; aliases?: string[] } = {},
+	opts: {
+		onDone?: (r: KeepResult) => void;
+		/** HL3: a factory gets the job's abort signal (keepDepsWithAbort). */
+		deps?: KeepDeps | ((signal: AbortSignal) => KeepDeps);
+		aliases?: string[];
+	} = {},
 ): Promise<KeepResult | null> {
 	const running = get(_keepJobs).get(key);
 	if (running) return running.done;
 	const ctrl = new AbortController();
+	const deps: KeepDeps = typeof opts.deps === "function" ? opts.deps(ctrl.signal) : (opts.deps ?? defaultDeps);
 	let resolveDone: (r: KeepResult | null) => void = () => {};
 	const done = new Promise<KeepResult | null>((r) => (resolveDone = r));
 	_keepJobs.update((m) => new Map(m).set(key, { key, progress: null, ctrl, done, aliases: opts.aliases ?? [] }));
@@ -390,7 +442,7 @@ export function startKeepJob(
 			result = await keepOffline(
 				list,
 				{ signal: ctrl.signal, onProgress: (p) => patchJob(key, (j) => ({ ...j, progress: p })) },
-				opts.deps ?? defaultDeps,
+				deps,
 			);
 			try {
 				opts.onDone?.(result);
