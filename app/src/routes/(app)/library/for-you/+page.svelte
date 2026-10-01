@@ -46,27 +46,31 @@
 	<CollectionNav active="for-you" />
 	<header class="head">
 		<div>
-			<h1>Made for you</h1>
+			<!-- F4: one word per concept. "Pour toi" = a personal selection built
+			     from your favourites and plays (a Mix is a slice of the library,
+			     a Radio is endless from a seed, a Mixtape is offline). -->
+			<h1>Pour toi</h1>
 			<span class="sub"
 				>{seeds > 0
-					? `From your ${seeds} favourite seed${seeds === 1 ? "" : "s"}`
-					: "Fresh from your library"}</span
+					? `Une sélection tirée de tes ${seeds} favori${seeds === 1 ? "" : "s"} et de tes écoutes`
+					: "Une sélection tirée de ta bibliothèque"}</span
 			>
 		</div>
 		<button
-			class="btn"
+			class="btn btn-reset btn-secondary"
+			data-testid="for-you-refresh"
 			on:click={load}
 			disabled={loading || offline}
-			title={offline ? "Hors connexion" : undefined}>Refresh</button
+			title={offline ? "Hors connexion" : "Nouvelle sélection"}>Rafraîchir</button
 		>
 	</header>
 
 	{#if loading}
-		<p class="state">Building your mix…</p>
+		<p class="state">Préparation de ta sélection…</p>
 	{:else if offline}
-		<MeOffline text="Ton mix se construit sur le serveur : il revient avec le réseau. Tes morceaux en cache restent dans Hors-ligne." />
+		<MeOffline text="Ta sélection se construit sur le serveur : elle revient avec le réseau. Tes morceaux en cache restent dans Hors-ligne." />
 	{:else if items.length === 0}
-		<p class="state">Play a few tracks and your mix will appear here.</p>
+		<p class="state">Écoute quelques morceaux et ta sélection apparaîtra ici.</p>
 	{:else}
 		<div class="grid">
 			{#each items as item (item.videoId || item.title)}
@@ -93,15 +97,7 @@
 		margin-left: 0.5rem;
 	}
 	.btn {
-		background: rgba(255, 255, 255, 0.1);
-		border: 1px solid rgba(255, 255, 255, 0.2);
-		border-radius: 0.4rem;
-		color: inherit;
-		padding: 0.4rem 0.9rem;
-		cursor: pointer;
-	}
-	.btn:disabled {
-		opacity: 0.5;
+		white-space: nowrap;
 	}
 	.grid {
 		display: grid;

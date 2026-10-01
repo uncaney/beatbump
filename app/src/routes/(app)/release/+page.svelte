@@ -6,6 +6,7 @@
 	import ListItem, {
 		listItemPageContext,
 	} from "$lib/components/ListItem/ListItem.svelte";
+	import { playTracks } from "$lib/components/PlayAllBar/PlayAllBar.svelte";
 	import { CTX_ListItem, releasePageContext } from "$lib/contexts";
 	import list from "$lib/stores/list";
 	import { isPagePlaying } from "$stores/stores";
@@ -29,14 +30,34 @@
 
 	const setId = () => isPagePlaying.add(id);
 
+	// F3: a local album (id "lb-…", local_pages.go) has no YouTube playlistId
+	// nor autoMixId: "Play Album" / "Album Radio" called the YouTube `next`
+	// endpoint with an empty id (a dead button next to the EQ1 "Radio"). Its
+	// rows are played as they are; the only radio is InfoBox's [radio-seed].
+	$: isLocalAlbum = !!id && id.startsWith("lb-");
+	$: hasAutoMix = typeof releaseInfo?.autoMixId === "string" && releaseInfo.autoMixId.length > 0;
+	const localContext = () => ({
+		kind: "album" as const,
+		title: String(releaseInfo?.title ?? ""),
+		href: `/release?id=${encodeURIComponent(id ?? "")}`,
+	});
+
 	const playAlbum = () => {
 		setId();
+		if (isLocalAlbum) {
+			void playTracks(items, { context: localContext() });
+			return;
+		}
 		list.initPlaylistSession({ playlistId: releaseInfo.playlistId, index: 0 });
 		list.updatePosition(0);
 	};
 
 	const playShuffle = () => {
 		setId();
+		if (isLocalAlbum) {
+			void playTracks(items, { shuffle: true, context: localContext() });
+			return;
+		}
 
 		list.initPlaylistSession({
 			playlistId: `${releaseInfo?.playlistId}`,
@@ -44,6 +65,17 @@
 			params: "wAEB8gECGAE%3D",
 		});
 	};
+
+	// One word per concept (F4): "Lire" on a local album (French screen),
+	// YouTube albums keep "Play Album" / "Album Radio"; the radio button only
+	// exists when YouTube gave an autoMixId.
+	$: headerButtons = [
+		{ text: isLocalAlbum ? "Lire" : "Play Album", action: () => playAlbum(), icon: "play" },
+		...(hasAutoMix
+			? [{ text: "Album Radio", type: "outlined", action: () => playRadio(), icon: "play" }]
+			: []),
+		{ icon: "dots", type: "icon" },
+	] as any[];
 
 	const playRadio = () => {
 		setId();
@@ -85,16 +117,7 @@
 <main data-testid="release">
 	<InfoBox
 		{thumbnail}
-		buttons={[
-			{ text: "Play Album", action: () => playAlbum(), icon: "play" },
-			{
-				text: "Album Radio",
-				type: "outlined",
-				action: () => playRadio(),
-				icon: "play",
-			},
-			{ icon: "dots", type: "icon" },
-		]}
+		buttons={headerButtons}
 		title={releaseInfo.title}
 		artist={releaseInfo.artist}
 		subtitles={releaseInfo.subtitles}
@@ -103,7 +126,7 @@
 	>
 		<!-- O8: download the missing tracks then pin the whole album.
 		     Audit v7 TOP 3: its own row inside the header grid, under
-		     Play Album / Album Radio (was a bare div after the InfoBox:
+		     the play buttons (was a bare div after the InfoBox:
 		     x=0 on phones, under the cover on desktop). -->
 		<svelte:fragment slot="actions">
 			{#if !notFound && items.length}

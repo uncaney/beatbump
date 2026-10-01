@@ -5,8 +5,10 @@
 
 
 	import Icon from "$components/Icon/Icon.svelte";
+	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
 	import { APIClient } from "$lib/api";
 	import { localGenreLinks, type LocalGenreLink } from "$lib/localGenres";
+	import { notify } from "$lib/utils";
 	import { onMount } from "svelte";
 
 	export let data;
@@ -48,6 +50,40 @@
 			localGenres = [];
 		}
 	});
+
+	// F6: the chips keep linking to the genre LIST; one play button next to
+	// the section title starts a Mix of the first (biggest) genre: 40 sampled
+	// tracks from local/mix, or, when that genre spans too few albums for a
+	// mix (L8-6), its first 200 tracks like "Lire" on /library/genres.
+	let genreBusy = false;
+	async function playFirstGenre() {
+		const g = localGenres[0];
+		if (!g || genreBusy) return;
+		genreBusy = true;
+		try {
+			const name = encodeURIComponent(g.name);
+			let items: any[] = [];
+			const mix = await APIClient.fetch(`/api/v1/local/mix?genre=${name}`);
+			if (mix.ok) {
+				const d = await mix.json();
+				items = Array.isArray(d?.items) ? d.items : [];
+			}
+			if (!items.length) {
+				const songs = await APIClient.fetch(`/api/v1/local/songs?genre=${name}&limit=200`);
+				if (songs.ok) {
+					const d = await songs.json();
+					items = Array.isArray(d?.items) ? d.items : [];
+				}
+			}
+			const n = await playTracks(items, { context: { kind: "genre", title: g.name, href: "/library/mixes" } });
+			if (!n) notify(`Aucun morceau lisible pour « ${g.name} »`, "error");
+		} catch (err) {
+			console.error("explore-genre-play: failed", err);
+			notify("Lecture impossible pour l'instant", "error");
+		} finally {
+			genreBusy = false;
+		}
+	}
 
 	function scrollMoods(e: MouseEvent) {
 		const box = (e.currentTarget as HTMLElement).parentElement?.querySelector<HTMLElement>(".box");
@@ -114,6 +150,21 @@
 		>
 			<div class="header resp-content-width">
 				<span class="h2">Dans ta bibliothèque</span>
+				<button
+					type="button"
+					class="btn-reset btn-secondary genre-play"
+					data-testid="explore-genre-play"
+					disabled={genreBusy}
+					title={`Lancer un mix ${localGenres[0]?.name ?? ""}`}
+					aria-label={`Lancer un mix ${localGenres[0]?.name ?? ""}`}
+					on:click={playFirstGenre}
+				>
+					<Icon
+						name="play"
+						size="1em"
+					/>
+					<span>Mix {localGenres[0]?.name ?? ""}</span>
+				</button>
 				<a
 					class="link"
 					href="/library/genres"><small>Tous les genres</small></a
@@ -250,6 +301,18 @@
 	@media screen and (min-width: 720px) {
 		:global(.breakout.moods-scrollable:not(.moods-at-end)) > .scroll-btn {
 			display: inline-flex;
+		}
+	}
+
+	// F6: "Mix <genre>" play button between the title and "Tous les genres".
+	.genre-play {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-inline: auto 0.75rem;
+		white-space: nowrap;
+		&:disabled {
+			cursor: progress;
 		}
 	}
 

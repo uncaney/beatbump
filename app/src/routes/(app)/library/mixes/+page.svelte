@@ -60,7 +60,15 @@
 	<CollectionNav active="mixes" />
 	<header class="head">
 		<h1>Mixes</h1>
-		<span class="sub">40 titres tirés de ta bibliothèque, par décennie ou par genre</span>
+		<!-- F4: one word per concept. A Mix is a fixed list of 40 titles sampled
+		     from a slice of the library (a Radio is endless from a seed, Pour
+		     toi is personal, a Mixtape is offline). -->
+		<span class="sub">Un mix = 40 titres tirés de ta bibliothèque, par décennie ou par genre</span>
+		<a
+			class="genres-link"
+			href="/library/genres"
+			data-testid="mixes-genres-link">Tous les genres ›</a
+		>
 	</header>
 
 	{#if loading}
@@ -70,7 +78,7 @@
 			class="state"
 			data-testid="mixes-empty"
 		>
-			Pas encore assez d'albums pour un mix : il en faut 15 d'une même décennie, ou 200 titres d'un même genre.
+			Pas encore assez d'albums pour un mix : il en faut 15 d'une même décennie, ou 200 titres d'un même genre sur 15 albums.
 		</p>
 	{:else}
 		{#if decades.length > 0}
@@ -138,6 +146,19 @@
 	}
 	.sub {
 		color: #999;
+	}
+	.genres-link {
+		margin-left: auto;
+		color: #bbb;
+		text-decoration: none;
+		font-size: 0.9rem;
+		min-height: max(2.75rem, 44px);
+		display: inline-flex;
+		align-items: center;
+		&:hover {
+			color: inherit;
+			text-decoration: underline;
+		}
 	}
 	.group {
 		margin-bottom: 1.75rem;
