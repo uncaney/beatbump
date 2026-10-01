@@ -1,5 +1,6 @@
 <script lang="ts">
 	import EmptyState from "$components/EmptyState/EmptyState.svelte";
+	import DeviceOnlyBanner from "$components/IdentityPrompt/DeviceOnlyBanner.svelte";
 	import ErrorState from "$components/EmptyState/ErrorState.svelte";
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
@@ -102,6 +103,8 @@
 <main>
 	<CollectionNav active="recent" />
 	<h1>Écoutes</h1>
+	<!-- 39A: anonymous: this history lives on this device only. -->
+	<DeviceOnlyBanner />
 
 	<!-- U12-7: one page title; the sub-heading only appears when a second
 	     section ("Les plus écoutés") needs telling apart. -->
