@@ -186,6 +186,9 @@
 		if (event.pointerType !== "touch") return;
 		if (openIndex !== null && openIndex !== index) openIndex = null;
 		const el = event.currentTarget as HTMLElement;
+		// The visible grip (.drag-handle, touch-action none) starts the drag at
+		// once; anywhere else on the row keeps the long press.
+		const fromHandle = !!(event.target as Element | null)?.closest?.(".drag-handle");
 		if (touch?.timer) clearTimeout(touch.timer);
 		touch = {
 			index,
@@ -216,7 +219,26 @@
 				/* no haptics */
 			}
 			dispatch("dragstart", { event, index });
-		}, LONG_PRESS_MS);
+		}, fromHandle ? 0 : LONG_PRESS_MS);
+	}
+
+	// Keyboard (audit v4 3.7 / TOP 9): ListItem only renders its kebab while
+	// "hovered" (pointerenter). A row that receives focus gets the same
+	// signal, so Tab reaches "Plus d'options" without a mouse; the row that
+	// loses focus to another row of the list is released.
+	const rowArticle = (row: EventTarget | null) =>
+		row instanceof HTMLElement ? row.querySelector<HTMLElement>(".m-item") : null;
+	function onRowFocusIn(event: FocusEvent) {
+		const art = rowArticle(event.currentTarget);
+		if (art && !art.matches(":hover")) art.dispatchEvent(new PointerEvent("pointerenter"));
+	}
+	function onRowFocusOut(event: FocusEvent) {
+		const row = event.currentTarget as HTMLElement;
+		const next = event.relatedTarget as Node | null;
+		if (!next || row.contains(next)) return;
+		if (!(next instanceof Element) || !next.closest(".list-item") || !listEl?.contains(next)) return;
+		const art = rowArticle(row);
+		if (art && !art.matches(":hover")) art.dispatchEvent(new PointerEvent("pointerleave"));
 	}
 
 	function onPointerMove(event: PointerEvent) {
@@ -360,6 +382,8 @@
 			on:pointermove={onPointerMove}
 			on:pointerup={onPointerUp}
 			on:pointercancel={onPointerCancel}
+			on:focusin={onRowFocusIn}
+			on:focusout={onRowFocusOut}
 			on:touchmove|nonpassive={(event) => {
 				// Once a touch drag / swipe owns the gesture, the browser must
 				// not start scrolling (touch-action is decided too early).
@@ -436,6 +460,14 @@
 				style:transform={rowTransform(index, swipeX, swipeIndex, openIndex)}
 				style:transition={swipeIndex === index ? "none" : "transform 180ms ease-out"}
 			>
+				<!-- Reorder grip, visible at rest (audit v4 TOP 9). Decorative for
+				     assistive tech: reordering stays a pointer gesture. -->
+				<span
+					class="drag-handle"
+					aria-hidden="true"
+					draggable="true"
+					title="Glisser pour déplacer"
+				/>
 				<slot
 					name="item"
 					{item}
@@ -471,6 +503,82 @@
 	}
 	.drag-target {
 		opacity: 0;
+	}
+	// Reorder grip in the row's left padding (desktop rows pad 2.25em). Muted
+	// at rest, full on hover / keyboard focus, stronger on touch screens that
+	// have no hover at all. Phones (< 720px) keep long press + the kebab
+	// ListItem already shows there, and their 1em padding has no room.
+	.drag-handle {
+		position: absolute;
+		z-index: 2;
+		left: 0.45em;
+		top: 50%;
+		width: 0.9em;
+		height: 1.6em;
+		transform: translateY(-50%);
+		cursor: grab;
+		touch-action: none;
+		opacity: 0.35;
+		transition: opacity 150ms linear;
+		background: radial-gradient(circle, hsla(0, 0%, 100%, 0.9) 1.5px, transparent 2px) 0 0 /
+			50% 33.333% repeat;
+		@media (hover: none) {
+			opacity: 0.7;
+		}
+		@media screen and (max-width: 719px) {
+			display: none;
+		}
+	}
+	.list-item:hover .drag-handle,
+	.list-item:focus-within .drag-handle {
+		opacity: 1;
+	}
+	// "En cours" (11px, muted) under the playing marker of the current row:
+	// below the play triangle of the index column (desktop, or phone rows
+	// without artwork), across the bottom of the artwork otherwise. Higher
+	// specificity than ListItem's touch play badge (`.isPlaying
+	// .thumbnail::after { display:none }`), which this replaces on that row.
+	.list .list-item :global(.m-item.isPlaying .index) {
+		position: relative;
+	}
+	.list .list-item :global(.m-item.isPlaying .index::after) {
+		content: "En cours";
+		position: absolute;
+		left: 50%;
+		top: calc(50% + 0.85em);
+		transform: translateX(-50%);
+		font-size: 11px;
+		line-height: 1.2;
+		font-weight: 500;
+		white-space: nowrap;
+		color: hsla(0, 0%, 100%, 0.62);
+	}
+	.list .list-item :global(.m-item.isPlaying .thumbnail::after) {
+		content: "En cours";
+		display: block;
+		position: absolute;
+		inset: auto 0 0 0;
+		margin: 0;
+		width: auto;
+		height: auto;
+		padding: 1px 0 2px;
+		border-radius: 0 0 var(--xs-radius) var(--xs-radius);
+		box-shadow: none;
+		background: rgba(0, 0, 0, 0.62);
+		font-size: 11px;
+		line-height: 1.2;
+		font-weight: 500;
+		text-align: center;
+		white-space: nowrap;
+		color: hsla(0, 0%, 100%, 0.8);
+		pointer-events: none;
+	}
+	@media screen and (min-width: 720px) {
+		// desktop: the label sits under the triangle, not on the artwork
+		.list .list-item :global(.m-item.isPlaying .index ~ .metadata .thumbnail::after) {
+			content: none;
+			display: none;
+		}
 	}
 	.list-item.dragging,
 	:global(.list-item.dragging > *) {
