@@ -7,7 +7,7 @@
 	import { get } from "svelte/store";
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
-	import { buildResumeRow, capItems, readLastTrack } from "$lib/homeRows";
+	import { buildResumeRow, capItems, diversify, readLastTrack } from "$lib/homeRows";
 	import { getMix, getRecent } from "$lib/me";
 	import { queue } from "$lib/stores/list";
 
@@ -37,7 +37,7 @@
 	async function loadForYou() {
 		try {
 			const r = await getMix();
-			forYou = capItems(r?.items, MAX);
+			forYou = diversify(capItems(r?.items, MAX * 4), MAX);
 		} catch {
 			forYou = [];
 		}

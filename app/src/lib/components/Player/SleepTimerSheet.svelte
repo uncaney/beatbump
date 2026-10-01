@@ -175,8 +175,9 @@
 		min-height: 44px;
 		border-radius: 0.75em;
 		border: 1px solid rgba(255, 255, 255, 0.25);
-		background: rgba(255, 255, 255, 0.06);
-		color: #fff;
+		background: rgba(255, 255, 255, 0.06) !important;
+		// the global button rule sets a dark text colour with !important
+		color: #fff !important;
 		font-weight: 600;
 		&:hover,
 		&[aria-pressed="true"] {

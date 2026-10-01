@@ -56,3 +56,22 @@ export function buildResumeRow(last: RowItem | null, recent: unknown, queue: unk
 	const lastRef = head.length ? rowItemRef(head[0]) : "";
 	return [...head, ...rest.filter((it) => rowItemRef(it) !== lastRef).slice(0, max)];
 }
+
+/** Keep a row varied: at most `perAlbum` items of the same album and `perArtist` of the same artist. */
+export function diversify(items: RowItem[], max: number, perAlbum = 2, perArtist = 3): RowItem[] {
+	const albums = new Map<string, number>();
+	const artists = new Map<string, number>();
+	const out: RowItem[] = [];
+	const key = (v: any) => (typeof v === "string" ? v : v?.browseId || v?.text || v?.name || "").toString().toLowerCase();
+	for (const it of items) {
+		const al = key(it.album) || key(it.albumName);
+		const ar = key(it.artistInfo?.artist?.[0]) || key(it.artist) || key(it.subtitle?.find?.((s: any) => /ARTIST/.test(s?.pageType || ""))?.text);
+		if (al && (albums.get(al) || 0) >= perAlbum) continue;
+		if (ar && (artists.get(ar) || 0) >= perArtist) continue;
+		if (al) albums.set(al, (albums.get(al) || 0) + 1);
+		if (ar) artists.set(ar, (artists.get(ar) || 0) + 1);
+		out.push(it);
+		if (out.length >= max) break;
+	}
+	return out;
+}
