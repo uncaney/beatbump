@@ -6,7 +6,9 @@ package api
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
+	"strconv"
 )
 
 func buildLocalArtist(artistId string) map[string]interface{} {
@@ -35,10 +37,13 @@ func buildLocalArtist(artistId string) map[string]interface{} {
 		}
 	}
 
-	songs := meiliSearchIndex("tracks", map[string]interface{}{
-		"q": "", "filter": "albumArtist = \"" + escapeMeili(name) + "\"", "limit": 12,
+	songs, songsTotal := meiliBrowse("tracks", map[string]interface{}{
+		"q": "", "filter": "albumArtist = \"" + escapeMeili(name) + "\"", "limit": localArtistSongsPreview,
 		"attributesToRetrieve": []string{"lid", "title", "artist", "albumArtist", "album", "track", "durationSec"},
 	})
+	if songsTotal < len(songs) {
+		songsTotal = len(songs)
+	}
 	// The artist's album docs are already in hand: memoise their covers so the
 	// song rows need no extra albums query.
 	for _, a := range albs {
@@ -62,8 +67,19 @@ func buildLocalArtist(artistId string) map[string]interface{} {
 		carousels = append(carousels, cz)
 	}
 	resp["carousels"] = carousels
+	// X1 / A2: the page lists localArtistSongsPreview titles inline; the total
+	// and a seeAll link (same albumArtist filter, LocalSongsHandler cap) let it
+	// load and play every title of the artist ("Voir les N titres"). Both ride
+	// on the songs shelf (the artist page loader only forwards `songs`) and at
+	// the top level.
+	var seeAll map[string]interface{}
+	if name != "" && songsTotal > 0 {
+		seeAll = localArtistSeeAll(name, songsTotal)
+		resp["songsTotal"] = songsTotal
+		resp["seeAll"] = seeAll
+	}
 	if len(songItems) > 0 {
-		sz := Carousel{}
+		sz := localSongsShelf{Total: songsTotal, SeeAll: seeAll}
 		sz.Header.Title = "Songs"
 		sz.Contents = songItems
 		resp["songs"] = sz
@@ -72,6 +88,36 @@ func buildLocalArtist(artistId string) map[string]interface{} {
 		resp["headerThumbnail"] = []Thumbnail{{URL: coverURL(cover)}}
 	}
 	return resp
+}
+
+// localSongsShelf is the local artist "Songs" shelf: the Carousel JSON the page
+// already renders, plus the artist's title count and the seeAll link.
+type localSongsShelf struct {
+	Carousel
+	Total  int                    `json:"total"`
+	SeeAll map[string]interface{} `json:"seeAll,omitempty"`
+}
+
+// localArtistSongsPreview is the number of titles the artist page lists inline.
+const localArtistSongsPreview = 12
+
+// localArtistSeeAllLimit matches the LocalSongsHandler page cap (pag: 200).
+const localArtistSeeAllLimit = 200
+
+// localArtistSeeAll is the "Voir les N titres" link of a local artist page: the
+// full track list through /api/v1/local/songs (album order), capped at
+// localArtistSeeAllLimit.
+func localArtistSeeAll(name string, total int) map[string]interface{} {
+	q := url.Values{}
+	q.Set("artist", name)
+	q.Set("limit", strconv.Itoa(localArtistSeeAllLimit))
+	q.Set("sort", "album:asc")
+	return map[string]interface{}{
+		"title": fmt.Sprintf("Voir les %d titres", total),
+		"url":   "/api/v1/local/songs?" + q.Encode(),
+		"total": total,
+		"limit": localArtistSeeAllLimit,
+	}
 }
 
 var localTrackAttrs = []string{"lid", "title", "artist", "albumArtist", "album", "track", "durationSec", "year"}

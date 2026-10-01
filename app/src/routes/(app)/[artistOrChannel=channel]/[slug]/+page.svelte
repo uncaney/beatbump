@@ -11,6 +11,8 @@
 	import { CTX_ListItem } from "$lib/contexts";
 	import type { ArtistPageBody } from "$lib/parsers/artist";
 	import { isMobileMQ } from "$stores/window";
+	import PlayAllBar from "$components/PlayAllBar/PlayAllBar.svelte";
+	import { APIClient } from "$lib/api";
 	import type { PageData } from "./$types";
 
 	export let data: PageData;
@@ -22,6 +24,50 @@
 	$: songs = (body?.["songs"] ?? []) as ArtistPageBody["songs"];
 
 	$: id = $page.params.slug;
+
+	// X1 / A2: a local artist (la-…) lists a preview of its titles; the API
+	// adds the total and a seeAll link (/api/v1/local/songs?artist=…&limit=200).
+	// "Voir les N titres" loads them in place; "Lire tout" / "Aléatoire" always
+	// play every title, not the preview.
+	$: localSongs = songs as typeof songs & {
+		total?: number;
+		seeAll?: { url?: string; title?: string; total?: number };
+	};
+	$: seeAllUrl = localSongs?.seeAll?.url ?? "";
+	$: songsTotal = Math.max(Number(localSongs?.total) || 0, songs?.items?.length ?? 0);
+	let allSongs: any[] | null = null;
+	let allSongsFor = "";
+	let loadingAll = false;
+	// Navigating artist -> artist drops the previous full list.
+	$: if (allSongsFor !== seeAllUrl) {
+		allSongs = null;
+		allSongsFor = seeAllUrl;
+	}
+	$: shownSongs = allSongs ?? songs?.items ?? [];
+
+	async function fetchAllSongs(): Promise<any[]> {
+		if (allSongs) return allSongs;
+		const url = seeAllUrl;
+		if (!url) return songs?.items ?? [];
+		const res = await APIClient.fetch(url);
+		if (!res.ok) throw new Error(`local songs ${res.status}`);
+		const r = await res.json();
+		const items = Array.isArray(r?.items) ? r.items : [];
+		if (url === seeAllUrl && items.length) allSongs = items;
+		return items.length ? items : songs?.items ?? [];
+	}
+
+	async function showAllSongs() {
+		if (loadingAll) return;
+		loadingAll = true;
+		try {
+			await fetchAllSongs();
+		} catch (err) {
+			console.error("artist: full title list failed", err);
+		} finally {
+			loadingAll = false;
+		}
+	}
 
 	let innerWidth = 640;
 
@@ -60,8 +106,15 @@
                         {/if}
 
 					</div>
+					{#if seeAllUrl}
+						<PlayAllBar
+							tracks={shownSongs}
+							total={songsTotal}
+							loadAll={fetchAllSongs}
+						/>
+					{/if}
 					<section class="songs">
-						{#each songs?.items as item, idx}
+						{#each shownSongs as item, idx}
 							<ListItem
 								{item}
 								{idx}
@@ -71,6 +124,16 @@
 							/>
 						{/each}
 					</section>
+					{#if seeAllUrl && !allSongs && songsTotal > (songs?.items?.length ?? 0)}
+						<button
+							type="button"
+							class="see-all-titles"
+							data-testid="see-all-titles"
+							disabled={loadingAll}
+							on:click={showAllSongs}
+							>{loadingAll ? "Chargement…" : `Voir les ${songsTotal} titres`}</button
+						>
+					{/if}
 				</section>
 			{/if}
 			{#each carousels as { items, header }, i}
@@ -138,6 +201,21 @@
 
 	.songs {
 		margin-bottom: 1rem;
+	}
+
+	.see-all-titles {
+		min-height: 2.5rem;
+		padding: 0.45rem 1rem;
+		border-radius: 2rem;
+		border: 1px solid rgba(255, 255, 255, 0.25);
+		background: rgba(255, 255, 255, 0.08);
+		color: inherit;
+		font-weight: 600;
+		cursor: pointer;
+		&:disabled {
+			opacity: 0.6;
+			cursor: progress;
+		}
 	}
 
 	main {

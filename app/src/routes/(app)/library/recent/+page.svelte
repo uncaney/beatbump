@@ -1,12 +1,17 @@
 <script lang="ts">
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
+	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
 	import { getRecent, getTop } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
+	import { groupByDay, type DayGroup } from "./_byDay";
 
 	let recent: any[] = [];
+	// S3: the history split by local day. null = no play time in the answer
+	// (older API): the flat list stays.
+	let days: DayGroup[] | null = null;
 	let top: any[] = [];
 	let loading = true;
 	// H2: the play history lives in the profile, unreachable offline.
@@ -27,9 +32,11 @@
 		if (offline) {
 			recent = [];
 			top = [];
+			days = null;
 		} else if (!err) {
 			recent = Array.isArray(r?.items) ? r.items : [];
 			top = Array.isArray(t?.items) ? t.items : [];
+			days = groupByDay(recent, r?.playedAt);
 		}
 		loading = false;
 	}
@@ -42,6 +49,17 @@
 		window.addEventListener("online", on);
 		return () => window.removeEventListener("online", on);
 	});
+
+	let replaying = "";
+	async function replayDay(g: DayGroup) {
+		if (replaying) return;
+		replaying = g.key;
+		try {
+			await playTracks(g.replay);
+		} finally {
+			replaying = "";
+		}
+	}
 </script>
 
 <main>
@@ -56,6 +74,31 @@
 			<MeOffline text="Ton historique reviendra avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
 		{:else if recent.length === 0}
 			<p class="state">Nothing played yet.</p>
+		{:else if days && days.length > 0}
+			{#each days as g (g.key)}
+				<section
+					class="day"
+					data-testid="recent-day"
+					data-day={g.key}
+				>
+					<div class="day-head">
+						<h3>{g.label}</h3>
+						<span class="day-count">{g.items.length} titre{g.items.length > 1 ? "s" : ""}</span>
+						<button
+							type="button"
+							class="replay"
+							data-testid="replay-day"
+							disabled={replaying !== ""}
+							on:click={() => replayDay(g)}>Rejouer cette journée</button
+						>
+					</div>
+					<div class="grid">
+						{#each g.items as item (item.videoId || item.title)}
+							<div class="cell"><Listing data={item} /></div>
+						{/each}
+					</div>
+				</section>
+			{/each}
 		{:else}
 			<div class="grid">
 				{#each recent as item (item.videoId || item.title)}
@@ -92,6 +135,42 @@
 	}
 	.cell {
 		min-width: 0;
+	}
+	.day {
+		margin-bottom: 1.25rem;
+	}
+	.day-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.6rem;
+		margin: 0.75rem 0 0.4rem;
+	}
+	.day-head h3 {
+		margin: 0;
+		font-size: 1.05rem;
+	}
+	.day-head h3::first-letter {
+		text-transform: uppercase;
+	}
+	.day-count {
+		color: #999;
+		font-size: 0.9em;
+	}
+	.replay {
+		margin-left: auto;
+		min-height: 2.25rem;
+		padding: 0.35rem 0.9rem;
+		border-radius: 2rem;
+		border: 1px solid rgba(255, 255, 255, 0.25);
+		background: rgba(255, 255, 255, 0.08);
+		color: inherit;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.replay:disabled {
+		opacity: 0.6;
+		cursor: progress;
 	}
 	.state {
 		color: #999;
