@@ -871,7 +871,7 @@
 						/>
 					</div>
 					<Controls
-						sizes={{ main: "2.75em", skip: "1.75em" }}
+						sizes={{ main: "2.75em", skip: "1.75em", toggle: "max(24px, 1.5em)" }}
 						bind:isPaused={isPlaying}
 						bind:loading={$playerLoading}
 						on:play={() => AudioPlayer.play()}

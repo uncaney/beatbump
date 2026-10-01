@@ -13,7 +13,13 @@
 	export let isPaused: boolean;
 	export let isQueue = false;
 	export let loading: boolean;
-	export let sizes = { main: "2em", skip: "1.5em" };
+	// `toggle` = shuffle / repeat glyph (desktop bar keeps 1em; the fullscreen
+	// player passes a 24 px floor, audit UX v12 U12-15).
+	export let sizes: { main: string; skip: string; toggle?: string } = {
+		main: "2em",
+		skip: "1.5em",
+	};
+	$: toggleSize = sizes.toggle ?? "1em";
 
 	let original: ISessionListService["mix"] = [];
 	// Mix type captured when shuffle was turned ON, restored when turned OFF
@@ -42,7 +48,9 @@
 	// hors-ligne" token: a state, never a button fill) plus a dot under the
 	// glyph (.is-on::after), so the state does not rely on colour alone.
 	const ON_STROKE = "#1ed760";
-	const OFF_STROKE = "hsla(0, 0%, 100%, 0.72)";
+	// U12-15: off at 82% white (72% still read as pale next to the white
+	// transport glyphs); on also gets a green-tinted pastille behind the glyph.
+	const OFF_STROKE = "hsla(0, 0%, 100%, 0.82)";
 
 	function handleShuffle() {
 		if (isShuffled === true && original.length !== 0) {
@@ -126,7 +134,7 @@
 				style="stroke-width:2; stroke: {isShuffled ? ON_STROKE : OFF_STROKE};"
 				name="shuffle"
 				fill={"none"}
-				size={"1em"}
+				size={toggleSize}
 			/>
 		</button>
 		<div class="controls-middle">
@@ -217,7 +225,7 @@
 				style="stroke-width:2; stroke: {repeatOn ? ON_STROKE : OFF_STROKE};"
 				name={repeatIcon}
 				fill={"none"}
-				size={"1em"}
+				size={toggleSize}
 			/>
 		</button>
 	</div>
@@ -298,6 +306,9 @@
 			outline-offset: 2px;
 		}
 		// U11-9: "on" dot under the shuffle / repeat glyph (state colour).
+		&.is-on {
+			background: rgba(30, 215, 96, 0.16);
+		}
 		&.is-on::after {
 			content: "";
 			position: absolute;
