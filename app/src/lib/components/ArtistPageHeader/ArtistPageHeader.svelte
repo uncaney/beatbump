@@ -6,6 +6,7 @@
 	import list from "$lib/stores/list";
 	import type { Thumbnail } from "$lib/types";
 	import { debounce } from "$lib/utils";
+	import { hueFor, initials } from "$lib/utils/initials";
 	import { isDesktopMQ, isMobileMQ, windowHeight } from "$stores/window";
 	import { onMount } from "svelte";
 	import { quadOut } from "svelte/easing";
@@ -28,6 +29,24 @@
 
 	let opacity = 1;
 	let img: HTMLImageElement;
+
+	// Audit v7 TOP 7: a local artist without cover art came with
+	// `/cover?lid=` (empty lid) in both thumbnail sizes, so the hero <img>
+	// painted its alt text over the nav and left a 280 px empty band. No
+	// usable url, an empty-lid url, or a load error -> no <picture> at all:
+	// an initials badge on the name's hue (utils/initials, same as the
+	// album tiles) and a compact header instead.
+	let imgBroken = false;
+	$: heroUrl = String(thumbnail?.[1]?.url ?? thumbnail?.[0]?.url ?? "");
+	$: heroUsable = heroUrl !== "" && !/[?&]lid=$/.test(heroUrl);
+	$: if (heroUrl) imgBroken = false;
+	$: hasHero = heroUsable && !imgBroken;
+	$: nameInitials = initials(header?.name);
+	$: nameHue = hueFor(header?.name);
+	// Local artists (la-…) have no YouTube radio / shuffle endpoint and
+	// nothing to follow: those buttons are hidden with a one-line reason;
+	// playback goes through the Play all bar below (data-testid=play-all-bar).
+	$: isLocalArtist = /^la-/.test(artistId);
 
 	let calc: number;
 	const scale = tweened(1, { duration: 300, easing: quadOut });
@@ -74,6 +93,7 @@
 			}
 		}}
 		class="artist-thumbnail"
+		class:compact={!hasHero}
 		style="{isExpanded
 			? 'background-color: rgba(0, 0, 0, 0.4) !important'
 			: ''};"
@@ -93,6 +113,7 @@
 			id="gradient"
 			class="gradient"
 		/>
+		{#if hasHero}
 		<picture class="header-thumbnail">
 			{#each thumbnail as img, i (img)}
 				{#if i === 0}
@@ -120,21 +141,33 @@
 					/>
 				{/if}
 			{/each}
+			<!-- Decorative: the name is in .name below (alt="" so a slow or
+			     failed load paints nothing over the nav). -->
 			<img
 				bind:this={img}
 				class="header-thumbnail"
 				style="opacity:{opacity};"
 				loading="eager"
-				src={thumbnail[1]?.url ?? thumbnail[0]?.url}
+				src={heroUrl}
 				id="artist_img"
-				alt="Artist Thumbnail"
+				alt=""
+				on:error={() => (imgBroken = true)}
 			/>
 		</picture>
+		{/if}
 		<div class="artist-content">
 			<div
 				class="content-wrapper"
 				class:row={header?.foregroundThumbnails}
 			>
+				{#if !hasHero && !header?.foregroundThumbnails}
+					<span
+						class="initials-avatar"
+						data-testid="artist-initials"
+						aria-hidden="true"
+						style="--cover-hue: {nameHue};">{nameInitials}</span
+					>
+				{/if}
 				{#if header?.foregroundThumbnails}
 					<picture>
 						{#each header?.foregroundThumbnails as img, i (img)}
@@ -180,6 +213,15 @@
 						}}
 					/>
 				{/if}
+				{#if isLocalArtist}
+					<p
+						class="local-note"
+						data-testid="local-artist-note"
+					>
+						Artiste de ta bibliothèque : pas de radio ni de suivi, lecture
+						avec « Lire tout » ci-dessous.
+					</p>
+				{:else}
 				<div class="btn-wrpr">
 					{#if header?.buttons?.radio !== null}
 						<Button
@@ -211,6 +253,7 @@
 						/>
 					{/if}
 				</div>
+				{/if}
 			</div>
 		</div>
 	</div>
@@ -298,6 +341,41 @@
 			content: "";
 			inset: 0;
 		}
+		// Audit v7 TOP 7: no hero image -> no image band; the initials badge
+		// and the name make the header (name at y < 200 on phones).
+		&.compact {
+			padding-top: 0.5rem;
+		}
+	}
+
+	.initials-avatar {
+		display: grid;
+		place-items: center;
+		width: 6rem;
+		height: 6rem;
+		margin-bottom: 0.75rem;
+		border-radius: 50%;
+		background: hsl(var(--cover-hue, 220) 32% 30%);
+		color: hsl(var(--cover-hue, 220) 55% 88%);
+		font-family: "Commissioner Variable", sans-serif;
+		font-weight: 700;
+		font-size: 2.25rem;
+		line-height: 1;
+		letter-spacing: 0.04em;
+		user-select: none;
+		@media only screen and (max-width: 719px) {
+			width: 5rem;
+			height: 5rem;
+			font-size: 1.85rem;
+		}
+	}
+
+	.local-note {
+		margin: 0;
+		font-size: max(0.8125rem, 12px);
+		line-height: 1.35;
+		color: hsla(0, 0%, 100%, 0.7);
+		max-width: 48ch;
 	}
 
 	.gradient {
@@ -393,11 +471,18 @@
 			.name {
 				font-weight: 700;
 				font-size: 2.5rem;
-				display: inline-block;
 				font-family: "Commissioner Variable", sans-serif;
 				text-shadow: rgb(0 0 0 / 17.1%) 0.2rem -0.12rem 0.5rem;
 				letter-spacing: -0.02em;
 				padding-bottom: 1rem;
+				// Audit v7 item 10: long names clamp to two lines with an
+				// ellipsis instead of pushing the buttons off-screen.
+				display: -webkit-box;
+				-webkit-box-orient: vertical;
+				-webkit-line-clamp: 2;
+				overflow: hidden;
+				max-width: 100%;
+				overflow-wrap: anywhere;
 
 				@media screen and (min-width: 642px) and (max-width: 839px) {
 					font-size: 2rem;
