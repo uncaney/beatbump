@@ -7,7 +7,10 @@
 	import type { PageData } from "./$types";
 
 	export let data: PageData;
-	const { videoId, playlist, thumbnails = [], title, related } = data;
+	const { videoId, playlist, thumbnails = [], title, related, error } = data;
+	// Largest thumbnail, if any: an unplayable track has none (F13).
+	const cover = thumbnails.length ? thumbnails[thumbnails.length - 1] : undefined;
+	const pageTitle = error ? "Morceau indisponible" : title;
 
 	// $: console.log({ videoId, playlist, thumbnails, title, related, data });
 </script>
@@ -15,7 +18,7 @@
 <svelte:head>
 	<meta
 		property="og:title"
-		content={title}
+		content={pageTitle}
 	/>
 	<meta
 		property="og:type"
@@ -29,10 +32,12 @@
 		property="og:site_name"
 		content="Beatbump"
 	/>
-	<meta
-		property="og:image"
-		content={thumbnails[thumbnails.length - 1].url}
-	/>
+	{#if cover?.url}
+		<meta
+			property="og:image"
+			content={cover.url}
+		/>
+	{/if}
 
 	<meta
 		property="og:url"
@@ -40,15 +45,27 @@
 			playlist ? `&list=${playlist}` : ""
 		}`}
 	/>
-	<title>{title} | Beatbump</title>
+	<title>{pageTitle} | Beatbump</title>
 </svelte:head>
 <main>
+	{#if error}
+		<header class="unavailable">
+			<div class="body">
+				<span class="title h4">Morceau indisponible{error.reason ? ` : ${error.reason}` : ""}</span>
+				<p class="hint">Ce lien pointe vers un morceau qui ne peut pas être lu ici.</p>
+				<a
+					class="back"
+					href="/home">Retour à l'accueil</a
+				>
+			</div>
+		</header>
+	{:else}
 	<header>
 		<div class="image-container">
 			<img
-				src={thumbnails[thumbnails.length - 1]?.url}
-				width={thumbnails[thumbnails.length - 1]?.width}
-				height={thumbnails[thumbnails.length - 1]?.height}
+				src={cover?.url}
+				width={cover?.width}
+				height={cover?.height}
 				alt={`Thumbnail for ${title}`}
 			/>
 		</div>
@@ -72,11 +89,12 @@
 	<section class="related">
 		<span class="h2">Related Tracks</span>
 		<div class="results">
-			{#each related?.results as result}
+			{#each related?.results ?? [] as result}
 				<Listing data={result} />
 			{/each}
 		</div>
 	</section>
+	{/if}
 	<div class="modal">
 		<div class="modal-header" />
 		<div class="container" />
@@ -84,6 +102,17 @@
 </main>
 
 <style lang="scss">
+	header.unavailable {
+		grid-template: "body" auto / 1fr;
+	}
+	.hint {
+		margin: 0;
+		opacity: 0.8;
+	}
+	a.back {
+		text-decoration: underline;
+	}
+
 	.related {
 		display: flex;
 		flex-direction: column;
