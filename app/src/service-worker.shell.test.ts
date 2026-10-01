@@ -76,3 +76,19 @@ describe("L5 (audit v7, P3): shellBuildAssets regex fed the real entry/app.*.js 
 		expect(found).not.toContain("/_app/immutable/chunks/viewport.7af7a1d2.js"); // only the manifest knew about this one
 	});
 });
+
+describe("shellCachesToDelete (DS1: keep the previous shell cache)", () => {
+	it("keeps the current and the most recent previous shell, deletes older ones and ignores other caches", async () => {
+		const { shellCachesToDelete } = await import("./service-worker");
+		const keys = ["ytm-api", "ytm-shell-100", "ytm-shell-300", "ytm-offline-audio", "ytm-shell-200", "ytm-shell-400"];
+		expect(shellCachesToDelete(keys, "ytm-shell-400").sort()).toEqual(["ytm-shell-100", "ytm-shell-200"]);
+	});
+	it("deletes nothing when only the current shell exists", async () => {
+		const { shellCachesToDelete } = await import("./service-worker");
+		expect(shellCachesToDelete(["ytm-shell-400", "ytm-api"], "ytm-shell-400")).toEqual([]);
+	});
+	it("on a rollback the newer cache is the one kept", async () => {
+		const { shellCachesToDelete } = await import("./service-worker");
+		expect(shellCachesToDelete(["ytm-shell-400", "ytm-shell-300", "ytm-shell-200"], "ytm-shell-300")).toEqual(["ytm-shell-200"]);
+	});
+});

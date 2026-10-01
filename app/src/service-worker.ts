@@ -100,6 +100,18 @@ export function staticPrecacheList(all: readonly string[]): string[] {
 // assets whose path is unchanged are byte-identical, so they are copied from
 // the previous ytm-shell-* cache instead of being downloaded again. Pure:
 // which paths of an old cache to carry into the new one.
+/**
+ * DS1: shell caches to delete at activate: every `ytm-shell-*` except the current one
+ * and the most recent previous one (highest numeric version suffix), so pages of the
+ * other build keep resolving their chunks during an upgrade or a rollback.
+ */
+export function shellCachesToDelete(keys: readonly string[], current: string): string[] {
+	const others = keys.filter((k) => k.startsWith("ytm-shell-") && k !== current);
+	const ver = (k: string) => Number(k.slice("ytm-shell-".length)) || 0;
+	others.sort((a, b) => ver(b) - ver(a));
+	return others.slice(1);
+}
+
 export function carryOverPaths(oldPaths: Iterable<string>, buildSet: ReadonlySet<string>, have: ReadonlySet<string>): string[] {
 	const out = new Set<string>();
 	for (const p of oldPaths) {
@@ -277,8 +289,12 @@ self.addEventListener("activate", (event) => {
 		(async () => {
 			// PF3-5: entries the old SW cached after this one installed.
 			await carryOverShell();
+			// DS1 (deploy survives): keep the most recent PREVIOUS shell cache. A page of the
+			// other build can still be open (upgrade: old page alive while this SW activates;
+			// rollback: new page alive while the old SW comes back) and its lazy chunks are
+			// not on the server any more: they must keep resolving from that cache.
 			const keys = await caches.keys();
-			await Promise.all(keys.filter((k) => k.startsWith("ytm-shell-") && k !== SHELL).map((k) => caches.delete(k)));
+			await Promise.all(shellCachesToDelete(keys, SHELL).map((k) => caches.delete(k)));
 			await purgeProfileScopedApiCache(); // G16: entries stored by an older SW
 			await self.clients.claim();
 			// K3: the rest of the build, in batches, without delaying activation
@@ -780,15 +796,17 @@ self.addEventListener("fetch", (event) => {
 
 	// app-shell assets → cache-first; a miss (not yet precached, K3) is fetched
 	// and stored on the way so the next offline boot has it.
-	if (url.origin === location.origin && (BUILD_SET.has(url.pathname) || FILES_SET.has(url.pathname))) {
+	// Any hashed /_app/immutable/ asset is looked up across every cache (caches.match),
+	// so a chunk of the previous build still answers from the kept previous shell cache.
+	if (url.origin === location.origin && (BUILD_SET.has(url.pathname) || FILES_SET.has(url.pathname) || url.pathname.startsWith(IMMUTABLE))) {
 		event.respondWith(
 			(async () => {
 				const hit = await caches.match(req);
 				if (hit) return hit;
 				const res = await fetch(req);
 				// PF3-7: static files are no longer all precached; keep the ones
-				// fetched so the next offline boot has them.
-				if (res.ok && res.status === 200) {
+				// fetched so the next offline boot has them (own build / static files only).
+				if (res.ok && res.status === 200 && (BUILD_SET.has(url.pathname) || FILES_SET.has(url.pathname))) {
 					const copy = res.clone();
 					event.waitUntil(caches.open(SHELL).then((c) => c.put(req, copy)).catch(() => {}));
 				}
