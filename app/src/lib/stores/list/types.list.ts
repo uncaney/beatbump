@@ -77,6 +77,8 @@ export interface ISessionListService {
 	} | null>;
 	lockedSet(_mix: ISessionListProvider): Promise<ISessionListProvider>;
 	removeTrack(index: number): void;
+	/** "Vider la file": keep only the current track */
+	clearQueue(): Promise<boolean>;
 	setMix(mix: Item[], type?: "auto" | "playlist" | "local"): void;
 	/** Inserts the item (or the tracks it expands to) at key + 1; true when inserted */
 	setTrackWillPlayNext(item: Item, key: number): Promise<boolean>;

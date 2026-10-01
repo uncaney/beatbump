@@ -921,16 +921,52 @@ export class ListService {
         syncTabs.updatePosition(position);
     }
 
+    /**
+     * Remove the row at `index`. The cursor keeps pointing at the playing
+     * track (it shifts left by one when a row before it is removed); removing
+     * the current row leaves the cursor on the row that took its place.
+     */
     public removeTrack(index: number) {
-        this._$.value.mix.splice(index, 1);
-        this._$.update((u) => ({
-            ...u,
-            mix: [...u.mix.slice(0, index), ...u.mix.slice(index + 1)],
-        }));
+        const { mix, position } = this._$.value;
+        if (index < 0 || index >= mix.length) return;
+        const next = [...mix.slice(0, index), ...mix.slice(index + 1)];
+        const newPosition =
+            index < position
+                ? position - 1
+                : Math.min(position, Math.max(next.length - 1, 0));
+        this._$.update((u) => ({ ...u, mix: next, position: newPosition }));
         // The track after the current one may have changed.
         this.clearNextTrack();
         this.schedulePrefetch();
         syncTabs.updateSessionList(this._$.value);
+    }
+
+    /**
+     * "Vider la file": keep only the current track (it becomes row 0 and keeps
+     * playing). No-op when the queue has at most one row. The playlist
+     * continuation is dropped so the old list does not refill the queue.
+     */
+    public async clearQueue(): Promise<boolean> {
+        const { mix, position } = this._$.value;
+        if (mix.length <= 1) return false;
+        const current = mix[Math.min(Math.max(position, 0), mix.length - 1)];
+        this.invalidatePrefetch();
+        const state = await this.#sanitizeAndUpdate("APPLY", {
+            mix: ["set", [current]] satisfies MixListAppendOp,
+            position: 0,
+            continuation: "",
+        });
+        this.clearNextTrack();
+        syncTabs.updateSessionList(state);
+        if (groupSession?.initialized && groupSession?.hasActiveSession) {
+            groupSession.send(
+                "PUT",
+                "state.set.mix",
+                JSON.stringify(state),
+                groupSession.client,
+            );
+        }
+        return true;
     }
 
     /**
@@ -995,7 +1031,7 @@ export class ListService {
      * flaky endpoint never silently drops the action.
      */
     private async resolveQueueItems(item: Item): Promise<Item[]> {
-        if (item.localUrl || isLocalTrackId(item.videoId)) return [item];
+        if (item.localUrl || isLocalTrackId(item.videoId)) return [{ ...item }];
         const fetched = await addToQueue(item);
         if (Array.isArray(fetched) && fetched.length) return fetched as Item[];
         if (item.videoId) return [item];
