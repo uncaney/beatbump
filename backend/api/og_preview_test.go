@@ -283,3 +283,41 @@ func waitOGIdle(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// L9-6: the cached card keeps the MISS headers.
+func TestOGPreviewHitKeepsCacheHeaders(t *testing.T) {
+	e := ogTestServer(t)
+	for i, want := range []string{"MISS", "HIT"} {
+		rec := ogGet(e, "/listen?id=0123456789a", "Twitterbot/1.0")
+		if got := rec.Header().Get("X-Ytm-Cache"); got != want {
+			t.Fatalf("fetch %d: X-Ytm-Cache %q", i, got)
+		}
+		if cc, v := rec.Header().Get("Cache-Control"), rec.Header().Get("Vary"); cc != "public, max-age=600" || v != "User-Agent" {
+			t.Fatalf("fetch %d (%s): Cache-Control %q Vary %q", i, want, cc, v)
+		}
+	}
+}
+
+// L9-5: a malformed lb- id is rejected before any Meili request.
+func TestOGResolveAlbumRejectsBadLocalIDs(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MEILI_URL", srv.URL)
+	for _, id := range []string{"lb-x/../../keys", "lb-x?fields=a", "lb-0123456789ab/x", "lb-0123456789AB", "lb-0123456789a", "lb-0123456789ab.a/b", "lb-0123456789ab#x", "lb-"} {
+		if m := ogResolveAlbum(id); m != nil {
+			t.Errorf("%q: got %+v", id, m)
+		}
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("%d Meili requests for malformed ids", hits.Load())
+	}
+	for _, id := range []string{"lb-0123456789ab", "lb-0123456789ab.QXJ0aXN0AEFsYnVt"} {
+		if !localAlbumIDRe.MatchString(id) {
+			t.Errorf("valid id %q rejected", id)
+		}
+	}
+}

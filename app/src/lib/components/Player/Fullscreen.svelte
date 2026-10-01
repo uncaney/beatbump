@@ -56,7 +56,7 @@
 	import { describeContext } from "$lib/stores/list/playbackContext";
 	import ShareLinkButton from "$components/ShareLinkButton/ShareLinkButton.svelte";
 	import { formatCountFr } from "$lib/utils/formatFr";
-	import { queueDrawerInert } from "./queueDrawer";
+	import { queueDrawerHiddenFallback, queueDrawerInert, supportsInert } from "./queueDrawer";
 	export let state: "open" | "closed";
 
 	// F2: heart label (state is refreshed by Player.svelte on track change)
@@ -443,6 +443,10 @@
 		sliding,
 		panelOpen: queueOpen,
 	});
+	// L9-9: engines without `inert` (aria-hidden does not stop Tab) also get
+	// visibility: hidden on the CLOSED drawer body; never on an open one.
+	const hasInert = supportsInert();
+	$: drawerHidden = queueDrawerHiddenFallback(drawerInert, hasInert);
 
 	// P2: "Album : Discovery · 4/14" (link to the source), "Revenir à l'album".
 	$: playbackContext = describeContext(
@@ -989,7 +993,8 @@
 				data-inert={drawerInert ? "1" : "0"}
 				inert={drawerInert || undefined}
 				aria-hidden={drawerInert ? "true" : undefined}
-				style="display: contents;"
+				data-no-inert-hidden={drawerHidden ? "1" : undefined}
+				style="display: contents;{drawerHidden ? ' visibility: hidden;' : ''}"
 			>
 			<Tabs
 				{tabs}

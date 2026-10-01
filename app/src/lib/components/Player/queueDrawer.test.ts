@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { queueDrawerInert, type QueueDrawerState } from "./queueDrawer";
+import { queueDrawerHiddenFallback, queueDrawerInert, supportsInert, type QueueDrawerState } from "./queueDrawer";
 
 const base: QueueDrawerState = {
 	playerState: "open",
@@ -31,5 +31,22 @@ describe("queue drawer inert (audit UX v11 section 4)", () => {
 		expect(queueDrawerInert({ ...phone, sheetOpen: true, sliding: false })).toBe(false);
 		expect(queueDrawerInert({ ...phone, sheetOpen: false, sliding: true })).toBe(false);
 		expect(queueDrawerInert({ ...phone, panelOpen: false, sheetOpen: true })).toBe(false);
+	});
+});
+
+describe("queue drawer without inert support (L9-9)", () => {
+	it("detects inert on the element prototype", () => {
+		expect(supportsInert({ inert: false })).toBe(true);
+		expect(supportsInert({})).toBe(false);
+		expect(supportsInert(undefined)).toBe(true); // SSR: no change
+	});
+	it("hides only the closed drawer, only when inert is missing", () => {
+		expect(queueDrawerHiddenFallback(true, false)).toBe(true);
+		expect(queueDrawerHiddenFallback(false, false)).toBe(false); // open drawer stays usable
+		expect(queueDrawerHiddenFallback(true, true)).toBe(false); // inert does the job
+		expect(queueDrawerHiddenFallback(false, true)).toBe(false);
+		// a dragged phone sheet is not inert, so never hidden by the fallback
+		const sliding = queueDrawerInert({ ...base, mobile: true, sheetOpen: false, sliding: true });
+		expect(queueDrawerHiddenFallback(sliding, false)).toBe(false);
 	});
 });

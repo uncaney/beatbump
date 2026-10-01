@@ -110,9 +110,17 @@ func ogResolveTrack(id string) *ogMeta {
 	return &ogMeta{Title: pr.VideoDetails.Title, Description: ogByline(pr.VideoDetails.Author, ""), Image: img}
 }
 
+// localAlbumIDRe is the shape of a local album browseId: the canonical
+// lb-<12 hex> id, optionally followed by "." + base64url hint
+// (localAlbumRef). L9-5: anything else never reaches Meili's document path.
+var localAlbumIDRe = regexp.MustCompile(`^lb-[0-9a-f]{12}(\.[A-Za-z0-9_-]+)?$`)
+
 func ogResolveAlbum(id string) *ogMeta {
 	var page map[string]interface{}
 	if isLocalAlbum(id) {
+		if !localAlbumIDRe.MatchString(id) {
+			return nil
+		}
 		p, ok := buildLocalAlbum(id)
 		if !ok {
 			return nil
@@ -443,8 +451,12 @@ func ogCacheKey(c echo.Context) string {
 func ogServe(c echo.Context) error {
 	key := ogCacheKey(c)
 	h := c.Response().Header()
+	// L9-6: a stored card answers the same Cache-Control / Vary as the MISS
+	// that produced it (only real cards are stored).
+	h.Set("Vary", "User-Agent")
 	if body, ok := ogCardCache.get(key); ok {
 		h.Set("X-Ytm-Cache", "HIT")
+		h.Set("Cache-Control", "public, max-age=600")
 		return c.HTMLBlob(http.StatusOK, body)
 	}
 	body, fallback := ogCard(c)
@@ -452,10 +464,10 @@ func ogServe(c echo.Context) error {
 		ogCardCache.set(key, body, ogCacheTTL)
 	}
 	h.Set("X-Ytm-Cache", "MISS")
-	h.Set("Cache-Control", "public, max-age=600")
-	h.Set("Vary", "User-Agent")
 	if fallback {
 		h.Set("Cache-Control", "no-cache")
+	} else {
+		h.Set("Cache-Control", "public, max-age=600")
 	}
 	return c.HTMLBlob(http.StatusOK, body)
 }
