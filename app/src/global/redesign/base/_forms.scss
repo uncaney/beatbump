@@ -122,6 +122,9 @@ input[type="search"] {
 	z-index: 5;
 	display: inline-grid;
 	place-items: center;
+	// U12-10: the search button measured 33x53 in the phone overlay (audit UX v12).
+	min-width: max(2.75rem, 44px);
+	min-height: max(2.75rem, 44px);
 	background-color: #0000;
 
 	z-index: 10;

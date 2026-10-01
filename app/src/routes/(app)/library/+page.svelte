@@ -305,6 +305,15 @@
 	button {
 		gap: 0.25rem;
 	}
+	// U12-10: "Sync Your Data" 138x30, "Export Data" 119x33, "Import Data"
+	// 120x33 on phones. The three header buttons (the raw button element and the two
+	// <Button> components, hence :global) get the 44 px floor; widths untouched.
+	header :global(button) {
+		display: inline-flex;
+		align-items: center;
+		box-sizing: border-box;
+		min-height: max(2.75rem, 44px);
+	}
 
 	.delete-all {
 		display: flex;
