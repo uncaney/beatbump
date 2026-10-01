@@ -25,6 +25,9 @@ import {
 } from "./resumeState";
 
 export const DEVICE_ID_KEY = "ytm-device-id";
+/** 40A: the name the user gave this device (Compte page), sent with each push. */
+export const DEVICE_NAME_KEY = "ytm-device-name";
+export const DEVICE_NAME_MAX = 40;
 export const REMOTE_CONSUMED_KEY = "ytm-remote-consumed";
 export const NOWPLAYING_SYNC_MS = 15000;
 /**
@@ -82,6 +85,34 @@ export function deviceNameFromUA(ua: string | null | undefined): string {
 	if (/Macintosh|Mac OS X/i.test(s)) return "Mac";
 	if (/Linux|X11/i.test(s)) return "Linux";
 	return "Appareil";
+}
+
+/** A user-given device name: trimmed, inner spaces collapsed, at most DEVICE_NAME_MAX characters. */
+export function normalizeDeviceName(raw: unknown): string {
+	if (typeof raw !== "string") return "";
+	return Array.from(raw.replace(/\s+/g, " ").trim()).slice(0, DEVICE_NAME_MAX).join("").trim();
+}
+
+/** The saved device name, or "" (none, private mode). */
+export function readDeviceName(storage: StorageLike | undefined): string {
+	try {
+		return normalizeDeviceName(storage?.getItem(DEVICE_NAME_KEY));
+	} catch {
+		return "";
+	}
+}
+
+/** Save (or, empty, forget) the device name; resolves the stored value, null when storage failed. */
+export function writeDeviceName(storage: StorageLike | undefined, raw: unknown): string | null {
+	const name = normalizeDeviceName(raw);
+	try {
+		if (!storage) return null;
+		if (name) storage.setItem(DEVICE_NAME_KEY, name);
+		else storage.removeItem?.(DEVICE_NAME_KEY);
+		return name;
+	} catch {
+		return null;
+	}
 }
 
 function randomId(): string {
@@ -456,12 +487,31 @@ const browserStorage = (): StorageLike | undefined => {
 	}
 };
 
-/** This browser's device id / name (stable across tabs and reloads). */
+/** The guessed name of this device, from its user agent. */
+export function guessedDeviceName(): string {
+	return deviceNameFromUA(typeof navigator === "undefined" ? "" : navigator.userAgent);
+}
+
+/**
+ * This browser's device id / name (stable across tabs and reloads). 40A: the
+ * name given on the Compte page ("iPhone de Camille") wins over the UA guess.
+ */
 export function localDevice(): { deviceId: string; deviceName: string } {
+	const storage = browserStorage();
 	return {
-		deviceId: getDeviceId(browserStorage()),
-		deviceName: deviceNameFromUA(typeof navigator === "undefined" ? "" : navigator.userAgent),
+		deviceId: getDeviceId(storage),
+		deviceName: readDeviceName(storage) || guessedDeviceName(),
 	};
+}
+
+/** The Compte page's field: save the name for this browser. */
+export function saveLocalDeviceName(raw: unknown): string | null {
+	return writeDeviceName(browserStorage(), raw);
+}
+
+/** The Compte page's field: the saved name ("" when none). */
+export function localDeviceName(): string {
+	return readDeviceName(browserStorage());
 }
 
 /** J3: the local C1 savedAt as it is NOW (null when nothing is saved). */

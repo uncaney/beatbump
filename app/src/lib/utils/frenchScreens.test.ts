@@ -67,6 +67,8 @@ export const FILES = [
 	// c39c B6-9: sleep timer sheet and its store (toasts, labels).
 	"lib/components/Player/SleepTimerSheet.svelte",
 	"lib/stores/sleepTimer.ts",
+	// c40a: live resume (card, "Continuer ici" toasts, device name).
+	"lib/stores/nowPlayingSync.ts",
 ] as const;
 
 /**

@@ -7,7 +7,12 @@ import {
 	REMOTE_REFRESH_THROTTLE_MS,
 	clockLabel,
 	consumedMarker,
+	DEVICE_NAME_KEY,
+	DEVICE_NAME_MAX,
 	deviceNameFromUA,
+	normalizeDeviceName,
+	readDeviceName,
+	writeDeviceName,
 	fitResumeState,
 	getDeviceId,
 	makeNowPlayingPusher,
@@ -61,6 +66,52 @@ describe("deviceNameFromUA", () => {
 	});
 	it("handles a missing UA", () => {
 		expect(deviceNameFromUA(undefined)).toBe("Appareil");
+	});
+});
+
+describe("device name (40A)", () => {
+	it("normalizes: trim, collapse spaces, cap the length", () => {
+		expect(normalizeDeviceName("  iPhone   de\tPaul ")).toBe("iPhone de Camille");
+		expect(normalizeDeviceName("x".repeat(80))).toHaveLength(DEVICE_NAME_MAX);
+		expect(normalizeDeviceName(null)).toBe("");
+	});
+	it("saves, reads back and forgets", () => {
+		const st = memStorage();
+		expect(writeDeviceName(st, " Mac du salon ")).toBe("Mac du salon");
+		expect(st.m.get(DEVICE_NAME_KEY)).toBe("Mac du salon");
+		expect(readDeviceName(st)).toBe("Mac du salon");
+		expect(writeDeviceName(st, "  ")).toBe("");
+		expect(st.m.has(DEVICE_NAME_KEY)).toBe(false);
+		expect(readDeviceName(st)).toBe("");
+	});
+	it("survives a missing or throwing storage", () => {
+		expect(writeDeviceName(undefined, "x")).toBeNull();
+		const bad = {
+			getItem: () => {
+				throw new Error("no");
+			},
+			setItem: () => {
+				throw new Error("no");
+			},
+		};
+		expect(writeDeviceName(bad, "x")).toBeNull();
+		expect(readDeviceName(bad)).toBe("");
+	});
+	it("the pusher reads the device at each push (a renamed device is sent at once)", async () => {
+		let name = "iPhone";
+		let t = 0;
+		const put = vi.fn(async (_b: NowPlayingBody, _k: boolean) => 200);
+		const push = makeNowPlayingPusher({
+			device: () => ({ deviceId: "me", deviceName: name }),
+			snapshot: () => ({ list: { mix: [track(0)], position: 0, currentMixType: "local" }, currentTime: t, duration: 200 }),
+			loggedIn: async () => true,
+			put,
+		});
+		await push();
+		name = "iPhone de Camille";
+		t = 30;
+		await push();
+		expect(put.mock.calls.map((c) => c[0].deviceName)).toEqual(["iPhone", "iPhone de Camille"]);
 	});
 });
 

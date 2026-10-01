@@ -3,6 +3,7 @@
 	import { migratedSummary, readMigration } from "$lib/identity";
 	import { whoami, login, logout } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
+	import { DEVICE_NAME_MAX, guessedDeviceName, localDeviceName, saveLocalDeviceName } from "$lib/stores/nowPlayingSync";
 	import { notify } from "$lib/utils/utils";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
@@ -38,7 +39,29 @@
 		}
 		loading = false;
 	}
+	// 40A: the name of this device on the other devices' "Reprendre depuis"
+	// card (localStorage, sent with each me/nowplaying push).
+	let deviceName = "";
+	let savedDeviceName = "";
+	let guessedName = "";
+	function saveDeviceName() {
+		const r = saveLocalDeviceName(deviceName);
+		if (r === null) {
+			notify("Nom de l'appareil non enregistré : stockage indisponible.", "error");
+			return;
+		}
+		if (r === savedDeviceName) {
+			deviceName = r;
+			return;
+		}
+		savedDeviceName = r;
+		deviceName = r;
+		notify(r ? `Cet appareil s'appelle maintenant « ${r} ».` : `Nom de l'appareil effacé : « ${guessedName} » sera affiché.`, "success");
+	}
+
 	onMount(() => {
+		savedDeviceName = deviceName = localDeviceName();
+		guessedName = guessedDeviceName();
 		void refresh();
 		const on = () => {
 			if (offline) void refresh();
@@ -151,6 +174,40 @@
 			utiliser n'importe quel prénom : c'est fait pour une instance de confiance (la maison, les amis).
 		</p>
 	{/if}
+
+	<section
+		class="device"
+		aria-labelledby="device-title"
+	>
+		<h2 id="device-title">Cet appareil</h2>
+		<form
+			class="row"
+			on:submit|preventDefault={saveDeviceName}
+		>
+			<label
+				class="sr-only"
+				for="device-name">Nom de cet appareil</label
+			>
+			<input
+				id="device-name"
+				type="text"
+				data-testid="device-name"
+				placeholder={`Ex. ${guessedName || "iPhone"} de ${current || "Camille"}`}
+				maxlength={DEVICE_NAME_MAX}
+				bind:value={deviceName}
+				on:blur={saveDeviceName}
+				autocomplete="off"
+			/>
+			<button
+				class="btn-secondary"
+				type="submit"
+				data-testid="device-name-save">Enregistrer</button
+			>
+		</form>
+		<p class="note">
+			Ce nom s'affiche sur tes autres appareils : « Reprendre depuis {savedDeviceName || guessedName || "cet appareil"} ».
+		</p>
+	</section>
 </main>
 
 <style lang="scss">
@@ -229,5 +286,15 @@
 	}
 	.state {
 		color: #999;
+	}
+	.device {
+		margin-top: 2rem;
+	}
+	.device h2 {
+		font-size: 1.1rem;
+		margin: 0 0 0.5rem;
+	}
+	.device .note {
+		margin-top: 0.5rem;
 	}
 </style>
