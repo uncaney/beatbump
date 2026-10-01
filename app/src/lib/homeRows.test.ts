@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+	REDISCOVER_MIN,
+	buildRediscoverRow,
 	UNKNOWN_ARTIST,
 	artistName,
 	buildForYouRow,
@@ -208,5 +210,27 @@ describe("ST1 week card", () => {
 		expect(shouldShowWeekCard(nextMonday, thisWeek)).toBe(true);
 		expect(shouldShowWeekCard(monday, null)).toBe(true);
 		expect(shouldShowWeekCard(monday, undefined)).toBe(true);
+	});
+});
+
+describe("Redécouvrir row (c29b D3)", () => {
+	it("hides the row under the minimum and keeps it otherwise", () => {
+		const five = ["a", "b", "c", "d", "e"].map((id) => song(id));
+		expect(buildRediscoverRow(five)).toEqual([]);
+		const six = [...five, song("f")];
+		expect(buildRediscoverRow(six).map((r) => r.videoId)).toEqual(["a", "b", "c", "d", "e", "f"]);
+		expect(REDISCOVER_MIN).toBe(6);
+	});
+	it("dedupes, drops unrenderable rows and caps before applying the minimum", () => {
+		const items = [song("a"), song("a"), { title: "no ref" }, null, ...["b", "c", "d", "e", "f", "g", "h"].map((id) => song(id))];
+		expect(buildRediscoverRow(items, 6).map((r) => r.videoId)).toEqual(["a", "b", "c", "d", "e", "f"]);
+		expect(buildRediscoverRow(items, 5)).toEqual([]);
+		expect(buildRediscoverRow(undefined)).toEqual([]);
+		expect(buildRediscoverRow("nope")).toEqual([]);
+	});
+	it("sanitizes subtitles", () => {
+		const items = ["a", "b", "c", "d", "e", "f"].map((id) => ({ ...song(id), subtitle: [{ text: undefined }] }));
+		const row = buildRediscoverRow(items);
+		expect(row[0].subtitle).toEqual([{ text: UNKNOWN_ARTIST }]);
 	});
 });

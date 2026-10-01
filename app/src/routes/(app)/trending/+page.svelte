@@ -5,6 +5,9 @@
 
 
 	import Icon from "$components/Icon/Icon.svelte";
+	import { APIClient } from "$lib/api";
+	import { localGenreLinks, type LocalGenreLink } from "$lib/localGenres";
+	import { onMount } from "svelte";
 
 	export let data;
 	const { carousels, page: path } = data;
@@ -32,6 +35,20 @@
 			},
 		};
 	}
+	// c29b EQ2 "Dans ta bibliothèque": up to 12 local genres (the same
+	// local/genres answer /library/genres renders) as links to the all-songs
+	// genre view. Client-only, after mount, hidden until loaded and when the
+	// library has no genre; the YouTube rows above never wait on it.
+	let localGenres: LocalGenreLink[] = [];
+	onMount(async () => {
+		try {
+			const res = await APIClient.fetch("/api/v1/local/genres");
+			if (res.ok) localGenres = localGenreLinks(await res.json());
+		} catch {
+			localGenres = [];
+		}
+	});
+
 	function scrollMoods(e: MouseEvent) {
 		const box = (e.currentTarget as HTMLElement).parentElement?.querySelector<HTMLElement>(".box");
 		box?.scrollBy({ left: box.clientWidth * 0.8, behavior: "smooth" });
@@ -90,6 +107,34 @@
 			</div>
 		{/if}
 	{/each}
+	{#if localGenres.length > 0}
+		<section
+			class="local-genres breakout"
+			data-testid="explore-local-genres"
+		>
+			<div class="header resp-content-width">
+				<span class="h2">Dans ta bibliothèque</span>
+				<a
+					class="link"
+					href="/library/genres"><small>Tous les genres</small></a
+				>
+			</div>
+			<ul class="genre-list resp-content-width">
+				{#each localGenres as g (g.name)}
+					<li>
+						<a
+							class="genre-chip"
+							href={g.href}
+							data-genre={g.name}
+						>
+							<span class="genre-name">{g.name}</span>
+							{#if g.count > 0}<span class="genre-count">{g.count}</span>{/if}
+						</a>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
 </main>
 
 <style lang="scss">
@@ -206,6 +251,42 @@
 		:global(.breakout.moods-scrollable:not(.moods-at-end)) > .scroll-btn {
 			display: inline-flex;
 		}
+	}
+
+	// c29b EQ2: library genre chips, same section rhythm as the moods grid.
+	.genre-list {
+		list-style: none;
+		margin: 0;
+		padding: 0.8rem;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+
+		@media screen and (max-width: 719px) {
+			padding: 0;
+		}
+	}
+	.genre-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-height: max(2.75rem, 44px);
+		padding: 0.4rem 0.9rem;
+		border-radius: 1.4rem;
+		background: #2727298a;
+		border-left: 0.5rem solid hsl(150deg 50% 50%);
+		color: inherit;
+		text-decoration: none;
+		font-family: "Commissioner Variable", sans-serif;
+		transition: background-color 120ms ease;
+
+		&:hover {
+			background: #3a3a3cb0;
+		}
+	}
+	.genre-count {
+		color: #999;
+		font-size: 0.85em;
 	}
 
 	.item-box {

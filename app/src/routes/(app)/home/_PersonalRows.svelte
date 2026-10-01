@@ -6,7 +6,7 @@
 	import { onMount } from "svelte";
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
-	import { buildForYouRow, buildResumeRow, capItems, isoWeekKey, readLastTrack, sanitizeCard, shouldShowWeekCard, WEEK_CARD_DISMISS_KEY } from "$lib/homeRows";
+	import { buildForYouRow, buildRediscoverRow, buildResumeRow, capItems, isoWeekKey, readLastTrack, sanitizeCard, shouldShowWeekCard, WEEK_CARD_DISMISS_KEY } from "$lib/homeRows";
 	import { peekHomeCache, clearHomeCache, writeHomeCache } from "$lib/homeCache";
 	import { getMix, getRecent, getStatsSummary, getTopBy, isAnonymousProfile, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
 	import { settings } from "$lib/stores";
@@ -27,6 +27,15 @@
 	// the other personal rows; no localStorage cache (AP1 covers reprendre/
 	// pour-toi/recemment-acquis only).
 	let neverPlayed: any[] = [];
+	// c29b D3: tracks played >= 3 times more than 60 days ago and not once
+	// in the last 30 days (GET me/stats/rediscover). Hidden for an anonymous
+	// profile and under 6 results (buildRediscoverRow), so a fresh profile
+	// never sees it.
+	let rediscover: any[] = [];
+	// c29b EQ3: local albums added in the last 30 days by a followed artist
+	// or one of the profile's top 20 artists (GET me/new-in-library). Local
+	// only, nothing is acquired. Hidden when empty.
+	let newInLibrary: any[] = [];
 
 	// ST1: a compact weekly recap card in the Reprendre area, Mondays only
 	// (local time), until dismissed for that ISO week. Hidden when the
@@ -151,11 +160,15 @@
 		forYouSource = "empty";
 		acquiredSource = "empty";
 		neverPlayed = [];
+		rediscover = [];
+		newInLibrary = [];
 		weekCard = null;
 		void loadResume();
 		void loadForYou();
 		void loadAcquired();
 		void loadNeverPlayed();
+		void loadRediscover();
+		void loadNewInLibrary();
 		void loadWeekCard();
 	}
 
@@ -294,6 +307,40 @@
 		}
 	}
 
+	const REDISCOVER_MAX = 12;
+	async function loadRediscover() {
+		try {
+			if (await isAnonymousProfile()) {
+				rediscover = [];
+				return;
+			}
+			const res = await APIClient.fetch(`/api/v1/me/stats/rediscover?limit=${REDISCOVER_MAX}`);
+			if (!res.ok) {
+				rediscover = [];
+				return;
+			}
+			const r = await res.json();
+			rediscover = buildRediscoverRow(r?.items, REDISCOVER_MAX).map(stripTrailingSeparator);
+		} catch {
+			rediscover = [];
+		}
+	}
+
+	const NEW_IN_LIBRARY_MAX = 12;
+	async function loadNewInLibrary() {
+		try {
+			const res = await APIClient.fetch(`/api/v1/me/new-in-library?days=30&limit=${NEW_IN_LIBRARY_MAX}`);
+			if (!res.ok) {
+				newInLibrary = [];
+				return;
+			}
+			const r = await res.json();
+			newInLibrary = capItems(r?.items, NEW_IN_LIBRARY_MAX).map(sanitizeCard);
+		} catch {
+			newInLibrary = [];
+		}
+	}
+
 	onMount(() => {
 		try {
 			saved = get(settings)?.playback?.["Remember Last Track"] === true ? readResumeState(localStorage) : null;
@@ -306,6 +353,8 @@
 		void loadForYou();
 		void loadAcquired();
 		void loadNeverPlayed();
+		void loadRediscover();
+		void loadNewInLibrary();
 		void loadWeekCard();
 		let unwireProfile: (() => void) | undefined;
 		if (typeof BroadcastChannel !== "undefined") {
@@ -438,6 +487,44 @@
 				type="trending"
 				isBrowseEndpoint={true}
 				seeAllHref="/library/albums"
+				seeAllLabel="Voir tout"
+			/>
+		</div>
+	</section>
+{/if}
+
+{#if newInLibrary.length > 0}
+	<section
+		class="home-row"
+		data-row="nouveautes-artistes"
+	>
+		<div data-testid="row-new-in-library">
+			<Carousel
+				items={newInLibrary}
+				header={{ title: "Nouveautés de tes artistes", subheading: "Albums ajoutés ces 30 derniers jours par les artistes que tu suis ou écoutes le plus" }}
+				type="trending"
+				isBrowseEndpoint={true}
+				seeAllHref="/library/albums"
+				seeAllLabel="Voir tout"
+			/>
+		</div>
+	</section>
+{/if}
+
+{#if rediscover.length > 0}
+	<section
+		class="home-row"
+		data-row="redecouvrir"
+	>
+		<!-- testid on a box-bearing wrapper: .home-row is display: contents, which a
+		     visibility check reads as an empty box. -->
+		<div data-testid="row-rediscover">
+			<Carousel
+				items={rediscover}
+				header={{ title: "Redécouvrir", subheading: "Des morceaux que tu aimais et que tu n'as plus écoutés depuis un mois" }}
+				type="trending"
+				isBrowseEndpoint={false}
+				seeAllHref="/library/recent"
 				seeAllLabel="Voir tout"
 			/>
 		</div>
