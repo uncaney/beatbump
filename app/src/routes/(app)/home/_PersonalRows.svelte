@@ -59,6 +59,8 @@
 		}
 	}
 	async function loadRemote() {
+		// K12: fetchRemoteResume short-circuits for an anonymous profile (memoised
+		// whoami, no me/nowplaying GET); nothing to offer then.
 		remote = await fetchRemoteResume();
 	}
 
