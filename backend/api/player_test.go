@@ -353,3 +353,44 @@ func TestSearch(t *testing.T) {
 		fmt.Print(s)
 	}
 }
+
+func TestPlayerNonLocalAudioGoesThroughIVVP(t *testing.T) {
+	fx := playerFixture("OK", "", true)
+	sd := fx["streamingData"].(map[string]interface{})
+	// What the bridge returns for a track that is not in the library: audio rewritten to
+	// the gost proxy (/vp?u=<googlevideo>), video left on googlevideo.
+	sd["adaptiveFormats"] = []interface{}{
+		map[string]interface{}{"itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 160000,
+			"url": "/vp?u=https%3A%2F%2Frr1---sn-test.googlevideo.com%2Fvideoplayback%3Fid%3D" + testVideoId + "%26itag%3D251"},
+		map[string]interface{}{"itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 128000,
+			"url": "/vp?u=https%3A%2F%2Frr1---sn-test.googlevideo.com%2Fvideoplayback%3Fid%3D" + testVideoId + "%26itag%3D140"},
+		map[string]interface{}{"itag": 137, "mimeType": "video/mp4; codecs=\"avc1.640028\"", "bitrate": 2000000,
+			"url": "https://rr1---sn-test.googlevideo.com/videoplayback?id=" + testVideoId + "&itag=137"},
+	}
+	srv := httptest.NewServer(companionJSON(t, fx, nil))
+	t.Cleanup(srv.Close)
+	t.Setenv("COMPANION_URL", srv.URL)
+	stubAutoCache(t)
+
+	rec, err := callPlayer(t, "videoId="+testVideoId, nil)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	af := got["streamingData"].(map[string]interface{})["adaptiveFormats"].([]interface{})
+	require.Len(t, af, 2, "one audio entry (iv-vp) + the untouched video entry")
+	audio := af[0].(map[string]interface{})
+	assert.Equal(t, "/aud/"+testVideoId, audio["url"])
+	assert.Equal(t, float64(140), audio["itag"])
+	assert.Contains(t, audio["mimeType"], "audio/mp4")
+	video := af[1].(map[string]interface{})
+	assert.Contains(t, video["url"], "googlevideo.com/videoplayback")
+
+	// Local-library tracks (/localf) are never rerouted.
+	sd["adaptiveFormats"] = []interface{}{map[string]interface{}{"itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "url": "/localf?p=ytm%2Fx.opus"}}
+	rec, err = callPlayer(t, "videoId="+testVideoId, nil)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	af = got["streamingData"].(map[string]interface{})["adaptiveFormats"].([]interface{})
+	assert.Equal(t, "/localf?p=ytm%2Fx.opus", af[0].(map[string]interface{})["url"])
+}

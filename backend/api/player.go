@@ -183,6 +183,7 @@ func PlayerEndpointHandler(c echo.Context) error {
 		format := &playerResponse.StreamingData.Formats[i]
 		format.URL = RewriteAudioURL(format.URL)
 	}
+	preferIVVPAudio(&playerResponse, videoId)
 
 	// Auto-cache on play: enqueue this track (+ its album + queue lookahead)
 	// into the owned library. Fire-and-forget; never delays the JSON response.
@@ -372,4 +373,42 @@ func enqueueLookahead(videoId string, playlistId string, limit int) {
 // classify it (typed upstream error, timeout, configuration).
 func callPlayerAPI(clientInfo api.ClientInfo, videoId string, playlistId string) ([]byte, error) {
 	return api.Player(videoId, playlistId, clientInfo, nil)
+}
+
+// preferIVVPAudio routes the audio of tracks that are not in the library through
+// iv-vp (/aud/<videoId>, itag 140 m4a with Range) instead of the gost /vp proxy.
+// The companion's googlevideo URLs carry an untransformed "n" parameter, so
+// googlevideo throttles /vp to ~18 KB/s (below a 128 kbps stream): the browser
+// ends in PIPELINE_ERROR_READ / DEMUXER_ERROR_NO_SUPPORTED_STREAMS. iv-vp
+// fetches at full speed (first byte after a few seconds, then cached) and the
+// next-track prefetch warms it. Video formats are left untouched. Disable with
+// YTM_PREFER_IVVP_AUDIO=0.
+func preferIVVPAudio(pr *_youtube.PlayerResponse, videoId string) {
+	if os.Getenv("YTM_PREFER_IVVP_AUDIO") == "0" || !ytVideoRe.MatchString(videoId) {
+		return
+	}
+	af := pr.StreamingData.AdaptiveFormats
+	kept := af[:0]
+	rerouted := false
+	for i := range af {
+		f := af[i]
+		if !strings.HasPrefix(f.MimeType, "audio/") || !strings.HasPrefix(f.URL, "/vp?") {
+			kept = append(kept, f)
+			continue
+		}
+		if rerouted {
+			continue // one audio entry is enough: every /vp audio maps to the same /aud file
+		}
+		f.URL = "/aud/" + videoId
+		f.Itag = 140
+		f.MimeType = "audio/mp4; codecs=\"mp4a.40.2\""
+		f.ContentLength = ""
+		f.InitRange.Start, f.InitRange.End = "", ""
+		f.IndexRange.Start, f.IndexRange.End = "", ""
+		kept = append(kept, f)
+		rerouted = true
+	}
+	if rerouted {
+		pr.StreamingData.AdaptiveFormats = kept
+	}
 }
