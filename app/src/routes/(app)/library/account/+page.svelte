@@ -1,5 +1,7 @@
 <script lang="ts">
+	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import { whoami, login, logout } from "$lib/me";
+	import { meLoadOffline } from "$lib/offline";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 
@@ -8,13 +10,30 @@
 	let loading = true;
 	let busy = false;
 	let msg = "";
+	// H2: whoami unreachable offline; without this the page showed the guest
+	// sign-in form as if the profile were gone.
+	let offline = false;
 
 	async function refresh() {
-		const w = await whoami();
-		current = w.name || "";
+		let w: any = null;
+		let err: unknown = undefined;
+		try {
+			w = await whoami();
+		} catch (e) {
+			err = e;
+		}
+		offline = meLoadOffline([w], err);
+		if (!offline) current = (w && w.name) || "";
 		loading = false;
 	}
-	onMount(refresh);
+	onMount(() => {
+		void refresh();
+		const on = () => {
+			if (offline) void refresh();
+		};
+		window.addEventListener("online", on);
+		return () => window.removeEventListener("online", on);
+	});
 
 	async function doLogin() {
 		if (busy || !name.trim()) return;
@@ -55,6 +74,8 @@
 
 	{#if loading}
 		<p class="state">Loading…</p>
+	{:else if offline}
+		<MeOffline text="Ton profil se lit sur le serveur : connexion et changement de profil reviennent avec le réseau." />
 	{:else}
 		<p class="who">
 			{#if current}

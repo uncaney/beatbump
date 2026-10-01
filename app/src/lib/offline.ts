@@ -577,3 +577,32 @@ export function removeOffline(item: any) {
 	if (ctrl && (t || lid)) ctrl.postMessage({ type: "uncache-audio", url: (t && t._offlineUrl) || "", videoId: lid || "" });
 	write(read().filter((x) => x.videoId !== lid));
 }
+
+// ---- me/* pages offline (audit v4 H2) ----
+// The SW never caches /api/v1/me/* (G16: no cross-profile leak); offline it
+// answers {"offline":true} in 200 instead, and without a SW the fetch throws.
+// Pages use these two checks to show "Hors connexion" instead of an empty or
+// logged-out state.
+
+/** Whether the device reports no connection (`navigator.onLine === false`). */
+export function deviceOffline(): boolean {
+	try {
+		return typeof navigator !== "undefined" && navigator.onLine === false;
+	} catch {
+		return false;
+	}
+}
+
+/** Whether a me/* JSON answer is the SW's offline placeholder (`{"offline":true}`). */
+export function isOfflineAnswer(r: unknown): boolean {
+	return !!r && typeof r === "object" && (r as { offline?: unknown }).offline === true;
+}
+
+/**
+ * A me/* load outcome: offline when the answer is the SW placeholder, or when
+ * the call threw (`err` set) while the device is offline.
+ */
+export function meLoadOffline(answers: unknown[], err?: unknown): boolean {
+	if (answers.some(isOfflineAnswer)) return true;
+	return err !== undefined && deviceOffline();
+}

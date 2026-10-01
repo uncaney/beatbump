@@ -214,70 +214,100 @@
 	// Toast when the SW refuses a pin because pinned bytes would exceed the quota (G7).
 	const QUOTA_MSG = "Quota atteint, augmente-le dans Réglages";
 
+	// Default size guess for a track not downloaded yet (no `_bytes`, empty cache).
+	const EST_TRACK_BYTES = 8 * 1024 * 1024;
+
 	// Download a not-yet-cached track (stable /localf or /aud URL straight to the
-	// SW, otherwise through the API URL resolution), then pin it. Runs in the
-	// background: the toast announces "en cours de téléchargement" at once and
-	// the list refreshes when the download lands.
-	async function downloadThenPin(t: any): Promise<boolean> {
+	// SW, otherwise through the API URL resolution), then pin it.
+	async function downloadThenPin(t: any): Promise<{ status: "ok" | "quota" | "failed"; bytes: number }> {
 		const r = isStableAudioUrl(t?._offlineUrl) ? await cacheTrackOffline(t, t._offlineUrl) : await downloadForOffline(t);
-		if (!r.ok) return false;
+		if (!r.ok) return { status: /quota/.test(r.reason || "") ? "quota" : "failed", bytes: 0 };
 		const p = await pinOffline(t, true);
-		if (!p.ok && p.reason === "quota") notify(QUOTA_MSG, "error");
-		return p.ok;
+		if (p.ok) return { status: "ok", bytes: Number(r.bytes) || 0 };
+		return { status: p.reason === "quota" ? "quota" : "failed", bytes: 0 };
+	}
+
+	// One toast for a pin batch (H5): "N épinglés · K refusés (quota) · F impossibles".
+	function pinSummary(total: number, pinnedCount: number, quotaCount: number, failedCount: number) {
+		if (total === 1) {
+			if (pinnedCount) return notify("Épinglé hors-ligne : jamais évincé", "success");
+			if (quotaCount) return notify(QUOTA_MSG, "error");
+			return notify("Impossible d'épingler ce morceau pour l'instant", "error");
+		}
+		if (pinnedCount === total) return notify(`${pinnedCount} morceaux épinglés hors-ligne`, "success");
+		const parts = [`${pinnedCount} ${pinnedCount > 1 ? "épinglés" : "épinglé"} sur ${total}`];
+		if (quotaCount) parts.push(`${quotaCount} ${quotaCount > 1 ? "refusés" : "refusé"} : ${QUOTA_MSG.charAt(0).toLowerCase()}${QUOTA_MSG.slice(1)}`);
+		if (failedCount) parts.push(`${failedCount} ${failedCount > 1 ? "impossibles" : "impossible"} à télécharger ou épingler`);
+		notify(parts.join(" · "), "error");
 	}
 
 	// Pin: a track (toggle) or an album ({ tracks, pinned }); pinned entries are
-	// never evicted. A track not cached yet is downloaded first, then pinned (G6);
-	// the toast is honest about partial results ("3 épinglés sur 5").
+	// never evicted. A track not cached yet is downloaded first, then pinned (G6).
+	// H5: the quota is checked BEFORE each download (pinned bytes + the track's
+	// estimated size), the batch stops downloading once the quota blocks (no
+	// download, hence no eviction, for a pin that would be refused), and the
+	// result is ONE final toast (épinglés / refusés quota / impossibles); a
+	// progress toast "M en cours de téléchargement" only says downloads started.
 	async function pin(d: any) {
 		const items: any[] = Array.isArray(d?.tracks) ? d.tracks : [d];
 		const album = Array.isArray(d?.tracks);
 		const pinned = album ? !!d.pinned : !d?._pinned;
+		const total = items.length;
+		if (!pinned) {
+			let ok = 0;
+			for (const t of items) if ((await pinOffline(t, false)).ok) ok++;
+			await refresh();
+			if (!ok) notify("Impossible de désépingler ce morceau", "error");
+			else notify(ok > 1 ? (ok < total ? `${ok} désépinglés sur ${total}` : `${ok} morceaux désépinglés`) : "Désépinglé", "success");
+			return;
+		}
 		let ok = 0;
 		let failed = 0;
 		let quotaHit = 0;
 		const toDownload: any[] = [];
 		for (const t of items) {
-			const r = await pinOffline(t, pinned);
+			const r = await pinOffline(t, true);
 			if (r.ok) ok++;
-			else if (pinned && r.reason === "not_cached") toDownload.push(t);
-			else if (pinned && r.reason === "quota") quotaHit++;
+			else if (r.reason === "not_cached") toDownload.push(t);
+			else if (r.reason === "quota") quotaHit++;
 			else failed++;
 		}
 		await refresh();
-		const total = items.length;
-		// Quota refused the pin (G7): say so, with the partial count when any landed.
-		if (quotaHit) {
-			notify((ok ? `${ok} ${ok > 1 ? "épinglés" : "épinglé"} sur ${total} · ` : "") + QUOTA_MSG, "error");
-			return;
-		}
-		if (!pinned) {
-			if (!ok) notify("Impossible de désépingler ce morceau", "error");
-			else notify(ok > 1 ? (ok < total ? `${ok} désépinglés sur ${total}` : `${ok} morceaux désépinglés`) : "Désépinglé", "success");
-			return;
-		}
-		if (toDownload.length) {
-			// Background download + pin; one refresh and one toast at the end.
-			void (async () => {
-				let done = 0;
-				for (const t of toDownload) if (await downloadThenPin(t)) done++;
-				await refresh();
-				if (done === toDownload.length) notify(done > 1 ? `${done} morceaux téléchargés et épinglés` : "Téléchargé et épinglé hors-ligne", "success");
-				else notify(`${done} téléchargés et épinglés sur ${toDownload.length} ; télécharge d'abord les autres morceaux`, "error");
-			})();
-		}
-		if (ok === total) {
-			notify(ok > 1 ? `${ok} morceaux épinglés hors-ligne` : "Épinglé hors-ligne : jamais évincé", "success");
-			return;
-		}
-		if (!ok && !toDownload.length) {
-			notify(total > 1 ? "Aucun morceau épinglé : télécharge-les d'abord" : "Télécharge d'abord ce morceau", "error");
-			return;
-		}
-		const parts = [`${ok} ${ok > 1 ? "épinglés" : "épinglé"} sur ${total}`];
-		if (toDownload.length) parts.push(`${toDownload.length} en cours de téléchargement`);
-		if (failed) parts.push(`${failed} ${failed > 1 ? "impossibles" : "impossible"} à épingler`);
-		notify(parts.join(", "), ok ? "success" : "error");
+		if (!toDownload.length) return pinSummary(total, ok, quotaHit, failed);
+		// The quota already refused a cached track: every download would be
+		// refused too (and could evict other tracks for nothing).
+		if (quotaHit) return pinSummary(total, ok, quotaHit + toDownload.length, failed);
+		const l = await listCachedAudio().catch(() => null);
+		const entries = (l && Array.isArray(l.entries) ? l.entries : []) as any[];
+		const quota = Number(l?.quota) || 0;
+		let pinnedBytes = Number(l?.pinnedBytes) || 0;
+		const avg = entries.length ? Math.round(entries.reduce((s, e) => s + (Number(e?.bytes) || 0), 0) / entries.length) : 0;
+		const estimate = (t: any) => Number(t?._bytes) || avg || EST_TRACK_BYTES;
+		if (quota > 0 && pinnedBytes + estimate(toDownload[0]) > quota) return pinSummary(total, ok, toDownload.length, failed);
+		notify(
+			(ok ? `${ok} ${ok > 1 ? "épinglés" : "épinglé"} · ` : "") +
+				`${toDownload.length} en cours de téléchargement…`,
+			"success",
+		);
+		void (async () => {
+			for (let i = 0; i < toDownload.length; i++) {
+				const t = toDownload[i];
+				if (quota > 0 && pinnedBytes + estimate(t) > quota) {
+					quotaHit += toDownload.length - i;
+					break;
+				}
+				const r = await downloadThenPin(t);
+				if (r.status === "ok") {
+					ok++;
+					pinnedBytes += r.bytes || estimate(t);
+				} else if (r.status === "quota") {
+					quotaHit += toDownload.length - i;
+					break;
+				} else failed++;
+			}
+			await refresh();
+			pinSummary(total, ok, quotaHit, failed);
+		})();
 	}
 </script>
 
@@ -420,9 +450,9 @@
 					id="offline-recache"
 					type="button"
 					aria-busy={!!recaching}
-					aria-disabled={!!recaching}
-					disabled={!!recaching}
-					title="Retélécharger les morceaux que le cache a évincés"
+					aria-disabled={!!recaching || !online}
+					disabled={!!recaching || !online}
+					title={online ? "Retélécharger les morceaux que le cache a évincés" : "Hors connexion : disponible avec le réseau"}
 					on:click={recacheAll}
 				>
 					<Icon
@@ -464,6 +494,7 @@
 					<AlbumCard
 						{album}
 						{activeId}
+						{online}
 						bind:open={openAlbums[album.key]}
 						on:play={(e) => start(e.detail.tracks, e.detail.index, { shuffle: e.detail.shuffle })}
 						on:remove={(e) => remove(e.detail)}
@@ -536,6 +567,7 @@
 									<AlbumCard
 										{album}
 										{activeId}
+										{online}
 										showArtist={false}
 										bind:open={openAlbums["a:" + album.key]}
 										on:play={(e) => start(e.detail.tracks, e.detail.index, { shuffle: e.detail.shuffle })}
@@ -555,6 +587,7 @@
 					<OfflineTrackRow
 						track={t}
 						active={t.videoId === activeId}
+						{online}
 						on:play={() => start(recent, i)}
 						on:remove={(e) => remove(e.detail)}
 						on:pin={(e) => pin(e.detail)}

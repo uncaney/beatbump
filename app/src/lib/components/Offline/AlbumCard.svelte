@@ -17,6 +17,8 @@
 	export let activeId = "";
 	export let open = false;
 	export let showArtist = true;
+	/** Passed to each row: "Retélécharger" is disabled offline (H6). */
+	export let online = true;
 
 	const dispatch = createEventDispatcher<{
 		play: { tracks: any[]; index: number; shuffle?: boolean };
@@ -124,6 +126,7 @@
 					number={album.isSingles ? undefined : i + 1}
 					showArtist={album.isSingles ? showArtist : false}
 					active={t.videoId === activeId}
+					{online}
 					on:play={() => dispatch("play", { tracks: album.tracks, index: i })}
 					on:remove={(e) => dispatch("remove", e.detail)}
 					on:pin={(e) => dispatch("pin", e.detail)}
