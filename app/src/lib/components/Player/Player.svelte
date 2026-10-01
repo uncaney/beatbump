@@ -97,6 +97,7 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId } from "$lib/local";
 	import { recordHistory } from "$lib/me";
+	import { historyThreshold, isLoopRestart } from "$stores/statsPlayCount";
 	import { downloadToDevice } from "$lib/offline";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { clickOutside } from "$lib/actions/clickOutside";
@@ -151,13 +152,21 @@
 	// track change. One event per track playback: the flag resets when the
 	// videoId changes, so seeks / pauses never double-count and skips < 30 s
 	// are never counted. Payload unchanged (the full current item).
-	const HISTORY_MIN_SECONDS = 30;
+	// G10 (audit v4): in "repeat one" the <audio> loops without a track change;
+	// each loop (time wrapping from the end to the start, see isLoopRestart in
+	// $stores/statsPlayCount) starts a new play, counted after 30 s again.
 	const { currentTimeStore: historyTime, durationStore: historyDuration } = AudioPlayer;
 	let _historyId = "";
 	let _historySent = false;
 	$: if (browser && ($currentTrack?.videoId ?? "") !== _historyId) {
 		_historyId = $currentTrack?.videoId ?? "";
 		_historySent = false;
+	}
+	let _historyPrevTime = 0;
+	$: if (browser) {
+		const t = $historyTime;
+		if (_historySent && isLoopRestart(_historyPrevTime, t, $historyDuration)) _historySent = false;
+		_historyPrevTime = t;
 	}
 	$: if (
 		browser &&
@@ -168,11 +177,6 @@
 	) {
 		_historySent = true;
 		recordHistory($currentTrack);
-	}
-
-	/** Seconds of playback after which a play counts (30 s, or 50 % of a short track). */
-	function historyThreshold(duration: number): number {
-		return duration > 0 && duration < 2 * HISTORY_MIN_SECONDS ? duration / 2 : HISTORY_MIN_SECONDS;
 	}
 
 	// F2: favourite state of the playing track (mini-bar + fullscreen hearts).
