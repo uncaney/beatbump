@@ -35,6 +35,7 @@ import {
     type PlaybackContext,
     type PlaybackContextInput,
 } from "./playbackContext";
+import { continueAfterQueue, pickLocalContinuation, relatedQuery } from "./localContinuation";
 import { fetchNext } from "./utils.list";
 import { APIClient } from "$lib/api";
 import { SERVER_DOMAIN } from "../../../env";
@@ -590,7 +591,12 @@ export class ListService {
         const nextTrack = this._$.value.mix[this._$.value.position + 1];
 
         if (!nextTrack) {
-            if (this.isLocal) return; // Don't fetch more for local
+            // Local queue: never YouTube's continuation. C4: carry on with
+            // related library tracks (setting ON by default), else stop.
+            if (this.isLocal) {
+                await this.continueLocalQueue();
+                return;
+            }
             const currentTrack = this._$.value.mix[this._$.value.position];
             Logger.dev("No next track", { nextSrc, _$: this._$ });
             await this.getSessionContinuation(
@@ -657,6 +663,44 @@ export class ListService {
 
             syncTabs.updatePosition(position);
         }
+    }
+
+    /**
+     * C4: the local queue ran out. Append up to 10 owned-library tracks
+     * related to the last row (`local/related`, deduped against the queue,
+     * max 2 per album, through applyMixOp) and play the first one. Resolves
+     * false (playback stops, as before) when the setting is off, offline, or
+     * nothing new comes back.
+     */
+    private async continueLocalQueue(): Promise<boolean> {
+        if (!get(continueAfterQueue)) return false;
+        const before = this._state.mix;
+        const qs = relatedQuery(before[before.length - 1]);
+        if (!qs) return false;
+        let candidates: unknown = [];
+        try {
+            const res = await fetch(`/api/v1/local/related?${qs}`, { credentials: "same-origin" });
+            if (!res.ok) return false;
+            const body = await res.json();
+            candidates = body?.items;
+        } catch {
+            return false;
+        }
+        const picked = pickLocalContinuation(this._state.mix, candidates).map(
+            (t) => ({ ...t, IS_LOCAL: true }) as unknown as Item,
+        );
+        if (!picked.length) return false;
+        await this.#sanitizeAndUpdate("APPLY", {
+            mix: ["append", picked] satisfies MixListAppendOp,
+        });
+        notify("Suite : dans ta bibliothèque", "success");
+        let position = await this.updatePosition("next");
+        if (position >= this._state.mix.length) position = this._state.position;
+        const track = this._state.mix[position];
+        await getSrc(track?.videoId, track?.playlistId, undefined, true);
+        syncTabs.updateSessionList(this._state);
+        syncTabs.updatePosition(position);
+        return true;
     }
 
     /**

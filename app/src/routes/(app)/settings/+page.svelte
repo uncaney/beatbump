@@ -9,6 +9,7 @@
 	import Header from "$components/Layouts/Header.svelte";
 	import { AudioPlayer } from "$lib/player";
 	import { settings, type Theme } from "$stores/settings";
+	import { continueAfterQueue } from "$lib/stores/list/localContinuation";
 	import OfflineSettings from "./OfflineSettings.svelte";
 	import { installPrompt, isInstalled, isIOS, promptInstall } from "$lib/stores/pwa";
 	import { notify } from "$lib/utils";
@@ -102,6 +103,26 @@
 		</section>
 		<section>
 			<span class="h5">Playback</span>
+			<div class="setting">
+				<!-- svelte-ignore a11y-label-has-associated-control -->
+				<label
+					>Continuer après la fin de la file
+					<span class="help"
+						>À la fin d'une file locale, enchaîne des titres proches de ta bibliothèque</span
+					>
+				</label>
+				<input
+					name="continue-after-queue"
+					id="continue-after-queue"
+					type="checkbox"
+					data-testid="setting-continue-after-queue"
+					bind:checked={$continueAfterQueue}
+				/>
+				<label
+					for="continue-after-queue"
+					class="switch"
+				/>
+			</div>
 			<div class="setting">
 				<!-- svelte-ignore a11y-label-has-associated-control -->
 				<label
