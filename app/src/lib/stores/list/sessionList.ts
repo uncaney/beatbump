@@ -617,48 +617,18 @@ export class ListService {
                 await this.updatePosition("next");
                 updatePlayerSrc({ original_url: url, url });
             } else {
+                // No warm URL (prefetch failed / expired, or next() came right
+                // after a queue edit): the queue already knows the next row, so
+                // resolve it directly. `next.json` was asked here before (G13),
+                // which rewrote a hand-built queue ("Ajouter à la file") with
+                // YouTube's own continuation; it is still used when the queue
+                // runs out (the `!nextTrack` branch above).
                 let position = await this.updatePosition("next");
                 if (position >= this._$.value.mix.length) {
                     position = this._$.value.position;
                 }
-
-                if (this.isLocal) {
-                    await getSrc(
-                        this._$.value.mix[position].videoId,
-                        this._$.value.mix[position].playlistId,
-                        undefined,
-                        true,
-                    );
-                } else {
-                    const currentTrack = this.#currentTrack(position);
-                    const data = await fetchNext({
-                        ...(this._$.value?.visitorData && {
-                            visitorData: this._$.value.visitorData,
-                        }),
-                        params: "gAQBiAQB",
-                        playlistSetVideoId: currentTrack?.playlistSetVideoId,
-                        index: position,
-                        loggingContext:
-                            currentTrack?.loggingContext?.vssLoggingContext
-                                ?.serializedContextData,
-                        videoId: currentTrack?.videoId,
-                        playlistId: this.currentMixId,
-                        ...(this?.clickTrackingParams && {
-                            clickTracking: this.clickTrackingParams,
-                        }),
-                    });
-                    if (!data) return console.log("no data on next", { data });
-
-                    const state = await this.#sanitizeAndUpdate("APPLY", data);
-                    await getSrc(
-                        state.mix[currentPosition + 1].videoId,
-                        state.mix[currentPosition + 1].playlistId,
-                        undefined,
-                        true,
-                    );
-                    // The mix was just extended: position + 1 may only exist now.
-                    this.schedulePrefetch(state.position);
-                }
+                const track = this._$.value.mix[position];
+                await getSrc(track?.videoId, track?.playlistId, undefined, true);
             }
             const position = this._$.value.position;
             if (update) {
@@ -1025,13 +995,17 @@ export class ListService {
     /**
      * Tracks to insert for a row: local / offline items are inserted as-is (a
      * lid is not a YouTube id; the row already carries title, thumbnails and
-     * videoId, and getSrc() plays a lid or a `localUrl` directly). YouTube
-     * items go through `get_queue.json` (a playlist/album row expands to its
-     * tracks); when that returns nothing the row itself is inserted so a
-     * flaky endpoint never silently drops the action.
+     * videoId, and getSrc() plays a lid or a `localUrl` directly). A YouTube
+     * track row (videoId + title) is inserted as-is too: `get_queue.json` has
+     * nothing to add for a single track and fails upstream (G22). Only rows
+     * without a videoId (album / single / playlist) are expanded, through the
+     * album or playlist page, then `get_queue.json` as a last resort; when
+     * that returns nothing the row itself is inserted so a flaky endpoint
+     * never silently drops the action.
      */
     private async resolveQueueItems(item: Item): Promise<Item[]> {
         if (item.localUrl || isLocalTrackId(item.videoId)) return [{ ...item }];
+        if (item.videoId && item.title) return [{ ...item }];
         // Album / single / playlist rows (search results, carousels) carry no videoId:
         // expand them through the album or playlist page, which get_queue cannot do.
         const pageType = String((item as any)?.endpoint?.pageType || "");
