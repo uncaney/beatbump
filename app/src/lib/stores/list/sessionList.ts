@@ -28,8 +28,8 @@ import { derived, get } from "svelte/store";
 import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
-import { planInsert, planReorder, removeAt } from "./queueOps";
-import { fetchNext, filterList } from "./utils.list";
+import { applyMixOp, planInsert, planReorder, removeAt } from "./queueOps";
+import { fetchNext } from "./utils.list";
 import { APIClient } from "$lib/api";
 import { SERVER_DOMAIN } from "../../../env";
 
@@ -1303,20 +1303,32 @@ export class ListService {
                             if (key === "position" && (to[key] as number) < 0) {
                                 old[key] = 0;
                             }
+                            // A mix op sets the (re-anchored) cursor itself (H3).
+                            if (key === "position" && Array.isArray(to.mix)) continue;
 
                             // `mix` has a slightly altered type here
                             if (key === "mix") {
                                 if (!Array.isArray(to.mix)) continue;
                                 // index 0 = operation
                                 // index 1 = data
-                                if (to.mix[0] === "append") {
-                                    old.mix.push(...(to.mix[1] as Item[]));
-                                    old.mix = filterList(old.mix);
-                                } else if (to.mix[0] === "set") {
-                                    old.mix = (to.mix as MixListAppendOp)[1];
-                                }
-                                if (filterAutoPlay.value) {
-                                    old.mix = filterList(old.mix);
+                                // Dedupe Automix (H3): `filterAutoPlay` is a derived
+                                // store (no `.value`): read it with get(), and apply
+                                // it to the initial queue (`set`) and the
+                                // continuation (`append`) alike; the cursor follows
+                                // the playing row (requested position if given).
+                                const op = to.mix[0];
+                                if (op === "append" || op === "set") {
+                                    const requested =
+                                        typeof to.position === "number" ? Math.max(0, to.position) : old.position;
+                                    const applied = applyMixOp(
+                                        old.mix ?? [],
+                                        requested,
+                                        op,
+                                        ((to.mix as MixListAppendOp)[1] ?? []) as Item[],
+                                        !!get(filterAutoPlay),
+                                    );
+                                    old.mix = applied.mix;
+                                    old.position = applied.position;
                                 }
                             } else if (to[key] !== undefined && to[key] !== null) {
                                 old[key] = to[key] as never;

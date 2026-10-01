@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planInsert, planReorder, removeAt } from "./queueOps";
+import { applyMixOp, planDragCommit, planInsert, planReorder, rebaseMove, removeAt } from "./queueOps";
 
 const row = (videoId: string) => ({ videoId, title: "T " + videoId });
 const ids = (list: { videoId?: string }[]) => list.map((r) => r.videoId);
@@ -108,5 +108,103 @@ describe("planReorder (G1)", () => {
 		const q = [dup, row("B"), dup];
 		expect(planReorder(q, 1, [dup, dup, q[1]])!.position).toBe(2);
 		expect(planReorder(q, 1, [dup, q[1], q[1]])).toBeNull();
+	});
+});
+
+describe("applyMixOp (H3, Dedupe Automix)", () => {
+	it("set with dedupe ON drops later duplicates (initial queue)", () => {
+		const a = row("A");
+		const r = applyMixOp([], 0, "set", [a, row("B"), row("A")], true);
+		expect(ids(r.mix)).toEqual(["A", "B"]);
+		expect(r.mix[r.position]).toBe(a);
+	});
+	it("set with dedupe OFF keeps duplicates and the requested cursor", () => {
+		const r = applyMixOp([], 2, "set", [row("A"), row("B"), row("A")], false);
+		expect(ids(r.mix)).toEqual(["A", "B", "A"]);
+		expect(r.position).toBe(2);
+	});
+	it("append with dedupe OFF keeps duplicates (continuation respects the setting)", () => {
+		const mix = [row("A"), row("B")];
+		const r = applyMixOp(mix, 1, "append", [row("B"), row("C")], false);
+		expect(ids(r.mix)).toEqual(["A", "B", "B", "C"]);
+		expect(r.position).toBe(1);
+		expect(mix.length).toBe(2); // input untouched
+	});
+	it("append with dedupe ON re-anchors on the playing row by identity", () => {
+		const mix = [row("A"), row("B"), row("A"), row("C")];
+		const playing = mix[2];
+		const r = applyMixOp(mix, 2, "append", [row("D"), row("C")], true);
+		expect(r.mix[r.position]).toBe(playing);
+		expect(ids(r.mix)).toEqual(["B", "A", "C", "D"]);
+		expect(r.mix[r.position + 1].videoId).toBe("C"); // "next" is C, not skipped
+	});
+	it("append with dedupe ON, cursor before the duplicates: stays on the same row", () => {
+		const mix = [row("A"), row("B"), row("C")];
+		const r = applyMixOp(mix, 1, "append", [row("A"), row("D")], true);
+		expect(ids(r.mix)).toEqual(["A", "B", "C", "D"]);
+		expect(r.mix[r.position]).toBe(mix[1]);
+	});
+	it("out-of-range cursor and rows without videoId are tolerated", () => {
+		const r = applyMixOp([], 5, "set", [row("A"), {} as { videoId?: string }, row("A")], true);
+		expect(r.mix.length).toBe(2);
+		expect(r.position).toBe(1);
+	});
+});
+
+describe("planDragCommit / rebaseMove (H4, queue changed during a drag)", () => {
+	const make = () => {
+		const [a, b, c, d] = [row("A"), row("B"), row("C"), row("D")];
+		return { a, b, c, d, base: [a, b, c] };
+	};
+	it("queue unchanged: commits the private copy as is", () => {
+		const { a, b, c, base } = make();
+		const r = planDragCommit(base, [a, c, b], c, base.slice());
+		expect(r.kind).toBe("apply");
+		if (r.kind === "apply") {
+			expect(r.mix).toEqual([a, c, b]);
+			expect(r.rebased).toBe(false);
+		}
+	});
+	it("no move: noop", () => {
+		const { base } = make();
+		expect(planDragCommit(base, base.slice(), base[2], [...base, row("X")]).kind).toBe("noop");
+	});
+	it("continuation appended during the drag: the move is rebased, new rows kept", () => {
+		const { a, b, c, d, base } = make();
+		const fresh = [a, b, c, d];
+		const r = planDragCommit(base, [a, c, b], c, fresh);
+		expect(r.kind).toBe("apply");
+		if (r.kind === "apply") {
+			expect(r.mix).toEqual([a, c, b, d]);
+			expect(r.rebased).toBe(true);
+			// still a permutation of the fresh queue: planReorder accepts it and
+			// anchors the cursor on the fresh playing row
+			const plan = planReorder(fresh, 1, r.mix);
+			expect(plan?.mix[plan.position]).toBe(b);
+		}
+	});
+	it("a row removed during the drag: rebases on the next neighbour", () => {
+		const { a, b, c, d } = make();
+		const base = [a, b, c, d];
+		// C dragged to the front... [C, A, B, D]; meanwhile A was removed
+		const r = rebaseMove([b, c, d], base, [c, a, b, d], c);
+		expect(r).toEqual([c, b, d]);
+		// D dragged after A; meanwhile A was removed: falls back to before B
+		expect(rebaseMove([b, c, d], base, [a, d, b, c], d)).toEqual([d, b, c]);
+	});
+	it("rows re-created with the same videoId are matched by videoId", () => {
+		const { a, b, c, base } = make();
+		const fresh = [row("A"), row("B"), row("C"), row("D")];
+		expect(ids(rebaseMove(fresh, base, [c, a, b], c) ?? [])).toEqual(["C", "A", "B", "D"]);
+	});
+	it("aborts when the dragged row is gone or the drag was not a single move", () => {
+		const { a, b, c, d, base } = make();
+		expect(planDragCommit(base, [a, c, b], c, [a, b, d]).kind).toBe("abort");
+		expect(planDragCommit(base, [c, a, b], c, [a, b, c, d]).kind).toBe("apply");
+		// not a single move of the dragged row (a jump swapped two rows)
+		expect(rebaseMove([a, b, c, d], base, [b, c, a], b)).toBeNull();
+		expect(planDragCommit(base, [b, c, a], b, [a, b, c, d]).kind).toBe("abort");
+		expect(planDragCommit(base, [c, b, a], c, [a, b, c, d]).kind).toBe("abort");
+		expect(planDragCommit(base, [c, a, b], null, [a, b, c, d]).kind).toBe("abort");
 	});
 });
