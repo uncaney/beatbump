@@ -28,6 +28,12 @@ export interface PlaybackContextInput {
 	kind: PlaybackContextKind;
 	title: string;
 	href: string;
+	/**
+	 * c40b: query of GET /api/v1/local/mix the queue came from
+	 * ("decade=1990", "genre=Rock", "decade=1990&genre=Rock", "year=1997"),
+	 * so the continuation draws more of the same mix (mixQueryFor).
+	 */
+	mix?: string;
 }
 
 export interface PlaybackContext extends PlaybackContextInput {
@@ -73,11 +79,13 @@ export function makeContext(
 	const ids = (Array.isArray(mix) ? mix : [])
 		.slice(0, CONTEXT_MAX_IDS)
 		.map((t) => (t && typeof t.videoId === "string" ? t.videoId : ""));
+	const mixQuery = cleanMixQuery(input.mix);
 	return {
 		kind: input.kind,
 		title: typeof input.title === "string" ? input.title : "",
 		href: typeof input.href === "string" ? input.href : "",
 		ids,
+		...(mixQuery ? { mix: mixQuery } : {}),
 	};
 }
 
@@ -90,12 +98,66 @@ export function normalizeContext(raw: unknown): PlaybackContext | null {
 	const ids = Array.isArray(r.ids)
 		? r.ids.slice(0, CONTEXT_MAX_IDS).map((x) => (typeof x === "string" ? x : ""))
 		: [];
+	const mix = cleanMixQuery(r.mix);
 	return {
 		kind: r.kind as PlaybackContextKind,
 		title: typeof r.title === "string" ? r.title.slice(0, 200) : "",
 		href,
 		ids,
+		...(mix ? { mix } : {}),
 	};
+}
+
+/** c40b: the context kinds whose source is a local/mix filter. */
+export const MIX_CONTEXT_KINDS: ReadonlySet<PlaybackContextKind> = new Set(["decade", "genre", "year", "crossover"]);
+
+/**
+ * A local/mix query reduced to its decade / year / genre params (sorted,
+ * re-encoded); "" when none is usable (decade and year are exclusive).
+ */
+export function cleanMixQuery(raw: unknown): string {
+	if (typeof raw !== "string" || !raw || raw.length > 300) return "";
+	let q: URLSearchParams;
+	try {
+		q = new URLSearchParams(raw);
+	} catch {
+		return "";
+	}
+	const decade = (q.get("decade") ?? "").trim();
+	const year = (q.get("year") ?? "").trim();
+	const genre = (q.get("genre") ?? "").trim().slice(0, 100);
+	const out: string[] = [];
+	if (/^\d{3}0$/.test(decade)) out.push("decade=" + decade);
+	else if (/^\d{4}$/.test(year)) out.push("year=" + year);
+	if (genre) out.push("genre=" + encodeURIComponent(genre));
+	return out.join("&");
+}
+
+/**
+ * c40b: the local/mix query a context stands for: its stored `mix`, else
+ * derived from the kind + title the mix cards give ("Années 1990",
+ * "Rock des années 1990", "1997", a genre name). "" for any other context.
+ */
+export function mixQueryFor(ctx: PlaybackContext | PlaybackContextInput | null | undefined): string {
+	if (!ctx || !MIX_CONTEXT_KINDS.has(ctx.kind)) return "";
+	const stored = cleanMixQuery(ctx.mix);
+	if (stored) return stored;
+	const title = typeof ctx.title === "string" ? ctx.title.trim() : "";
+	if (!title) return "";
+	let m: RegExpMatchArray | null;
+	switch (ctx.kind) {
+		case "genre":
+			return cleanMixQuery("genre=" + encodeURIComponent(title));
+		case "year":
+			return /^\d{4}$/.test(title) ? "year=" + title : "";
+		case "decade":
+			m = title.match(/(\d{3}0)\b/);
+			return m ? "decade=" + m[1] : "";
+		case "crossover":
+			m = title.match(/^(.+?) des années (\d{3}0)$/i);
+			return m ? cleanMixQuery(`decade=${m[2]}&genre=${encodeURIComponent(m[1])}`) : "";
+	}
+	return "";
 }
 
 export interface ContextView {

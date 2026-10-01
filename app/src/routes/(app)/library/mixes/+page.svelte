@@ -130,7 +130,13 @@
 			}
 			if (unavailable.has(card.key)) clearUnavailable(card.key);
 			await playTracks(items, {
-				context: { kind: card.kind === "artist" ? "radio" : card.kind, title: card.title, href: "/library/mixes" },
+				// c40b: `mix` = the local/mix filter, so the end of the queue continues the same mix.
+				context: {
+					kind: card.kind === "artist" ? "radio" : card.kind,
+					title: card.title,
+					href: "/library/mixes",
+					...(card.kind === "artist" ? {} : { mix: card.query }),
+				},
 			});
 		} catch (err) {
 			console.error("mix play failed", err);

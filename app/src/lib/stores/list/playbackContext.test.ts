@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { continuedContext, describeContext, makeContext, normalizeContext, playAllContextFor } from "./playbackContext";
+import { cleanMixQuery, continuedContext, describeContext, makeContext, mixQueryFor, normalizeContext, playAllContextFor } from "./playbackContext";
 
 const row = (videoId: string) => ({ videoId });
 const album = ["a1", "a2", "a3", "a4"].map(row);
@@ -119,5 +119,37 @@ describe("year kind (c39b B6-3)", () => {
 		const c = makeContext({ kind: "year", title: "1997", href: "/library/mixes" }, [{ videoId: "a1" }]);
 		expect(normalizeContext(c)?.kind).toBe("year");
 		expect(describeContext(c, [{ videoId: "a1" }], 0)?.label).toBe("Année : 1997 · 1/1");
+	});
+});
+
+describe("c40b: the mix filter of a context", () => {
+	const mix = [{ videoId: "a" }, { videoId: "b" }];
+	it("makeContext / normalizeContext keep a clean mix query, drop junk", () => {
+		const c = makeContext({ kind: "decade", title: "Années 1990", href: "/library/mixes", mix: "decade=1990" }, mix)!;
+		expect(c.mix).toBe("decade=1990");
+		expect(normalizeContext(JSON.parse(JSON.stringify(c)))!.mix).toBe("decade=1990");
+		expect(normalizeContext({ ...c, mix: "decade=1995&evil=1" })!.mix).toBeUndefined();
+		expect("mix" in makeContext({ kind: "album", title: "X", href: "/album/x" }, mix)!).toBe(false);
+	});
+	it("cleanMixQuery keeps decade|year + genre only", () => {
+		expect(cleanMixQuery("genre=Rock&decade=1990&x=1")).toBe("decade=1990&genre=Rock");
+		expect(cleanMixQuery("decade=1990&year=1994")).toBe("decade=1990");
+		expect(cleanMixQuery("year=97")).toBe("");
+		expect(cleanMixQuery(42)).toBe("");
+	});
+	it("mixQueryFor: stored, else derived from the card title, only for mix kinds", () => {
+		expect(mixQueryFor({ kind: "genre", title: "Rock", href: "" })).toBe("genre=Rock");
+		expect(mixQueryFor({ kind: "year", title: "1997", href: "" })).toBe("year=1997");
+		expect(mixQueryFor({ kind: "decade", title: "Années 2000", href: "" })).toBe("decade=2000");
+		expect(mixQueryFor({ kind: "crossover", title: "Electronic des années 1980", href: "" })).toBe("decade=1980&genre=Electronic");
+		expect(mixQueryFor({ kind: "album", title: "1997", href: "", mix: "year=1997" })).toBe("");
+		expect(mixQueryFor(null)).toBe("");
+	});
+	it("the kept context label after a same-mix continuation", () => {
+		const ctx = makeContext({ kind: "decade", title: "Années 1990", href: "/library/mixes", mix: "decade=1990" }, mix)!;
+		const longer = [...mix, { videoId: "c" }, { videoId: "d" }];
+		const kept = makeContext(ctx, longer)!;
+		expect(kept.mix).toBe("decade=1990");
+		expect(describeContext(kept, longer, 2)!.label).toBe("Décennie : Années 1990 · 3/4");
 	});
 });
