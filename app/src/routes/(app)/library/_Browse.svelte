@@ -343,6 +343,9 @@
 		align-items: center;
 		gap: 0.4rem;
 		white-space: nowrap;
+		/* U12-9: undo the global small caps of _forms.scss (original Beatbump forms only). */
+		font-variant-caps: normal;
+		letter-spacing: normal;
 	}
 	.sort select {
 		min-height: max(2.75rem, 44px);

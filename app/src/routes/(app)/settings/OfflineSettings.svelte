@@ -470,6 +470,7 @@
 			sans-serif;
 		font-size: 1em;
 		text-transform: none !important;
+		font-variant-caps: normal;
 		font-variant: unset;
 		gap: 0.125em;
 		line-height: 1.4;
