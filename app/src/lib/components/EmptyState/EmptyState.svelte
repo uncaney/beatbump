@@ -33,7 +33,7 @@
 		<p class="text">{text}</p>
 	{/if}
 	<a
-		class="action"
+		class="action btn-secondary"
 		{href}>{cta}</a
 	>
 </div>
@@ -41,7 +41,6 @@
 <style lang="scss">
 	$text: var(--color-dark, #fafafa);
 	$muted: #b3b3b3; // >= 9:1 on the page background
-	$accent: #1ed760;
 
 	.empty-state {
 		display: flex;
@@ -76,32 +75,12 @@
 		line-height: 1.45;
 		color: $muted;
 	}
-	// Pill CTA, same recipe as the Offline page's .cta.primary (44px, accent).
+	// Layout only (audit UX v9 BACKLOG P3): colour/border/background now come
+	// from the shared .btn-secondary button-system class (_button.scss),
+	// dropping the accent-green fill this used to share with the Offline
+	// page's .cta.primary.
 	.action {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		box-sizing: border-box;
-		min-height: 2.75rem;
 		margin-top: 0.75rem;
-		padding: 0.55rem 1.4rem;
-		border-radius: 999px;
-		background: $accent;
-		color: #000;
-		font-size: 1rem;
-		font-weight: 600;
-		line-height: 1.2;
 		text-decoration: none;
-		text-transform: none;
-		white-space: nowrap;
-		&:hover,
-		&:focus {
-			background: #22e668;
-			color: #000;
-		}
-		&:focus-visible {
-			outline: 2px solid $accent;
-			outline-offset: 2px;
-		}
 	}
 </style>
