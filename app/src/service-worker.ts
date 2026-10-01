@@ -186,6 +186,42 @@ async function purgeProfileScopedApiCache(): Promise<void> {
 		const c = await caches.open(API_CACHE);
 		const keys = await c.keys();
 		await Promise.all(keys.filter((k) => isProfileScopedApi(new URL(k.url))).map((k) => c.delete(k)));
+		await pruneApiCache(c);
+	} catch {
+		/* best effort */
+	}
+}
+
+// K15 (audit perf v2): the API cache was unbounded (every search.json, 605 KB
+// raw, went in). Answers above API_MAX_BYTES are not stored; the cache is
+// capped at API_MAX_ENTRIES, the oldest entries (Cache API keys are in
+// insertion order) pruned at activate and every API_PRUNE_EVERY puts.
+const API_MAX_BYTES = 300 * 1024;
+const API_MAX_ENTRIES = 200;
+const API_PRUNE_EVERY = 50;
+let apiPuts = 0;
+async function pruneApiCache(c: Cache): Promise<void> {
+	try {
+		const keys = await c.keys();
+		const extra = keys.length - API_MAX_ENTRIES;
+		if (extra <= 0) return;
+		await Promise.all(keys.slice(0, extra).map((k) => c.delete(k)));
+	} catch {
+		/* best effort */
+	}
+}
+async function putApiResponse(c: Cache, req: Request, res: Response): Promise<void> {
+	try {
+		const declared = Number(res.headers.get("Content-Length"));
+		if (declared > API_MAX_BYTES) return;
+		const body = await res.arrayBuffer();
+		if (body.byteLength > API_MAX_BYTES) return;
+		// The body is already decoded: drop the transfer headers of the network answer.
+		const headers = new Headers(res.headers);
+		headers.delete("Content-Encoding");
+		headers.delete("Content-Length");
+		await c.put(req, new Response(body, { status: res.status, statusText: res.statusText, headers }));
+		if (++apiPuts % API_PRUNE_EVERY === 0) await pruneApiCache(c);
 	} catch {
 		/* best effort */
 	}
@@ -506,7 +542,9 @@ self.addEventListener("fetch", (event) => {
 					const res = await fetch(req);
 					// Only JSON is an API answer worth replaying offline: an HTML shell
 					// (SPA fallback for an unknown path) must never be cached as data.
-					if (!profileScoped && res.ok && /json/i.test(res.headers.get("Content-Type") || "")) c.put(req, res.clone());
+					if (!profileScoped && res.ok && /json/i.test(res.headers.get("Content-Type") || "")) {
+						event.waitUntil(putApiResponse(c, req, res.clone())); // K15: bounded
+					}
 					return res;
 				} catch {
 					const hit = profileScoped ? undefined : await c.match(req);
