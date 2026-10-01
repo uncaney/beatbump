@@ -56,6 +56,7 @@
 	import { describeContext } from "$lib/stores/list/playbackContext";
 	import ShareLinkButton from "$components/ShareLinkButton/ShareLinkButton.svelte";
 	import { formatCountFr } from "$lib/utils/formatFr";
+	import { queueDrawerInert } from "./queueDrawer";
 	export let state: "open" | "closed";
 
 	// F2: heart label (state is refreshed by Player.svelte on track change)
@@ -426,6 +427,22 @@
 	}, 100);
 
 	$: $progressBarSeek && setVideoTime();
+
+	// Audit UX v11 section 4: the drawer body (tab bar + rows, ~100 links)
+	// is inert while it is not shown, so keyboard / AT users never land on
+	// invisible rows. The handle (.sheet-head) stays outside and tappable.
+	// `inert` is the real mechanism; aria-hidden is the AT fallback for
+	// engines without it (a tabindex on the wrapper would not stop descendant
+	// focus, and Svelte's a11y check rejects it on a plain div). The closed
+	// phone sheet is also visibility:hidden (.sheet-closed), which drops
+	// focusability there regardless.
+	$: drawerInert = queueDrawerInert({
+		playerState: state,
+		mobile: $isMobileMQ,
+		sheetOpen,
+		sliding,
+		panelOpen: queueOpen,
+	});
 
 	// P2: "Album : Discovery · 4/14" (link to the source), "Revenir à l'album".
 	$: playbackContext = describeContext(
@@ -962,6 +979,18 @@
 				</span>
 			</div>
 			</div>
+			<!-- display:contents keeps the Tabs / scroller height chain exactly as
+			     before (the wrapper has no box); `inert` works on the DOM subtree
+			     regardless, and `.sheet-closed > :not(.sheet-head)` still hides it
+			     on phones (visibility inherits). -->
+			<div
+				class="drawer-body"
+				data-testid="queue-drawer-body"
+				data-inert={drawerInert ? "1" : "0"}
+				inert={drawerInert || undefined}
+				aria-hidden={drawerInert ? "true" : undefined}
+				style="display: contents;"
+			>
 			<Tabs
 				{tabs}
 				{active}
@@ -1085,6 +1114,7 @@
 					{/if}
 				</svelte:fragment>
 			</Tabs>
+			</div>
 		</div>
 	</div>
 </div>
