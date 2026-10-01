@@ -979,17 +979,17 @@
 				</span>
 			</div>
 			</div>
-			<!-- display:contents keeps the Tabs / scroller height chain exactly as
-			     before (the wrapper has no box); `inert` works on the DOM subtree
-			     regardless, and `.sheet-closed > :not(.sheet-head)` still hides it
-			     on phones (visibility inherits). -->
+			<!-- The wrapper mirrors its parent box (flex column, height: inherit) so the
+			     `.scroller { height: inherit }` chain below is unchanged. display:contents
+			     broke it (the scroller inherited `auto` and collapsed to 0: chain 33, empty
+			     Up Next panel). `inert` works on the DOM subtree; `.sheet-closed > :not(.sheet-head)`
+			     still hides it on phones (visibility inherits). -->
 			<div
 				class="drawer-body"
 				data-testid="queue-drawer-body"
 				data-inert={drawerInert ? "1" : "0"}
 				inert={drawerInert || undefined}
 				aria-hidden={drawerInert ? "true" : undefined}
-				style="display: contents;"
 			>
 			<Tabs
 				{tabs}
@@ -1260,6 +1260,16 @@
 	.text-shadow {
 		text-shadow: 0.1em 0.1em 0.2em rgb(0 0 0 / 69.2%),
 			-0.1em -0.1em 0.2em rgb(0 0 0 / 41.8%);
+	}
+
+	// Inert wrapper of the queue body (c32b): same box as its parent so the
+	// scroller keeps inheriting the panel / sheet height.
+	.drawer-body {
+		display: flex;
+		flex-direction: column;
+		height: inherit;
+		min-height: 0;
+		background: inherit;
 	}
 
 	.scroller {
