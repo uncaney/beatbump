@@ -24,6 +24,22 @@
 
 	setContext("library", { isLibrary: true });
 
+	// "Delete All Playlists" asks for an inline confirmation first (audit F19).
+	let confirmDeleteAll = false;
+	let deletingAll = false;
+
+	async function deleteAllPlaylists() {
+		if (deletingAll) return;
+		deletingAll = true;
+		try {
+			await IDBService.sendMessage("delete", "playlists");
+			await updatePlaylists();
+		} finally {
+			deletingAll = false;
+			confirmDeleteAll = false;
+		}
+	}
+
 	const updatePlaylists = async () => {
 		playlists = (await IDBService.sendMessage("get", "playlists")) || [];
 		playlists = [...playlists];
@@ -167,18 +183,46 @@
 				showPlaylistModal = true;
 			}}
 		>
-			<button
+			<div
 				slot="buttons"
-				class="outlined"
-				style="margin-top:0.75em;"
-				on:click={() => {
-					IDBService.sendMessage("delete", "playlists");
-				}}
-				><Icon
-					name="x"
-					size="1.1em"
-				/><span class="btn-text">Delete All Playlists</span></button
-			></Grid
+				class="delete-all"
+			>
+				{#if confirmDeleteAll}
+					<span
+						class="confirm-text"
+						role="alert"
+						>Supprimer toutes les playlists ({playlists.length}) ? Cette action est définitive.</span
+					>
+					<button
+						type="button"
+						style="margin-top:0.75em;"
+						data-testid="confirm-delete-all"
+						disabled={deletingAll}
+						on:click={deleteAllPlaylists}>Confirmer la suppression</button
+					>
+					<button
+						type="button"
+						class="outlined"
+						style="margin-top:0.75em;"
+						data-testid="cancel-delete-all"
+						disabled={deletingAll}
+						on:click={() => (confirmDeleteAll = false)}>Annuler</button
+					>
+				{:else}
+					<button
+						type="button"
+						class="outlined"
+						style="margin-top:0.75em;"
+						data-testid="delete-all-playlists"
+						disabled={playlists.length === 0}
+						on:click={() => (confirmDeleteAll = true)}
+						><Icon
+							name="x"
+							size="1.1em"
+						/><span class="btn-text">Delete All Playlists</span></button
+					>
+				{/if}
+			</div></Grid
 		>
 	</section>
 </main>
@@ -196,6 +240,19 @@
 
 	button {
 		gap: 0.25rem;
+	}
+
+	.delete-all {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.confirm-text {
+		width: 100%;
+		color: var(--text-secondary);
+		font-size: 0.9em;
 	}
 
 	header {
