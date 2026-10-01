@@ -74,6 +74,8 @@ export const FILES = [
 	"routes/(app)/library/stats/_Clock.svelte",
 	"routes/(app)/library/stats/_Year.svelte",
 	"lib/meStats.ts",
+	"lib/components/ShareWeek/ShareWeek.svelte",
+	"lib/utils/shareWeek.ts",
 ] as const;
 
 /**

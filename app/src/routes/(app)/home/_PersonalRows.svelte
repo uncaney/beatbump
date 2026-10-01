@@ -12,6 +12,7 @@
 	// after Pour toi on a bonus slot: the 4-row cap stays 4 personal rows +
 	// this card.
 	import { NNBSP, formatCountFr } from "$lib/utils/formatFr";
+	import ShareWeek from "$lib/components/ShareWeek/ShareWeek.svelte";
 	import { onMount } from "svelte";
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
@@ -649,6 +650,8 @@
 					class="btn-reset btn-secondary week-card-link"
 					href="/library/stats">Voir mes stats</a
 				>
+				<!-- 41A (B6-13): the person shares their own week (decision 6). -->
+				<ShareWeek />
 				<button
 					type="button"
 					class="btn-reset week-card-dismiss"
@@ -963,6 +966,8 @@
 	   layout itself lives here. */
 	.week-card {
 		display: flex;
+		/* 41A: the share button wraps under the text on a phone. */
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.75rem;
 		margin: 0.5em 1rem 0;
@@ -971,7 +976,7 @@
 		background: hsl(0deg 0% 100% / 6%);
 	}
 	.week-card-body {
-		flex: 1 1 auto;
+		flex: 1 1 12rem;
 		min-width: 0;
 	}
 	.week-card-title {

@@ -26,6 +26,8 @@ export async function shareLink(
 	data: { title?: string; text?: string; url: string },
 	nav: ShareNavigator | undefined = typeof navigator !== "undefined" ? navigator : undefined,
 	toast: typeof notify = notify,
+	/** 41A: what the clipboard fallback copies (default data.url) and its toast (default "Lien copié"). */
+	opts: { copyText?: string; copiedToast?: string } = {},
 ): Promise<ShareOutcome> {
 	if (nav && typeof nav.share === "function" && (typeof nav.canShare !== "function" || nav.canShare(data))) {
 		try {
@@ -37,8 +39,8 @@ export async function shareLink(
 	}
 	try {
 		if (!nav?.clipboard?.writeText) throw new Error("no clipboard");
-		await nav.clipboard.writeText(data.url);
-		toast("Lien copié", "success");
+		await nav.clipboard.writeText(opts.copyText ?? data.url);
+		toast(opts.copiedToast ?? "Lien copié", "success");
 		return "copied";
 	} catch {
 		toast("Impossible de copier le lien", "error");

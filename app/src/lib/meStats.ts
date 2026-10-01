@@ -3,7 +3,9 @@
 // minutes east of UTC) so days and hours are local, like me/stats/summary.
 // Pure helpers are exported for vitest.
 import { APIClient } from "$lib/api";
+import { getStatsSummary, getTopBy, type TopRow } from "$lib/me";
 import { formatCountFr } from "$lib/utils/formatFr";
+import type { WeekShare } from "$lib/utils/shareWeek";
 
 export interface StreakDay {
 	date: string; // YYYY-MM-DD, viewer local
@@ -149,4 +151,18 @@ export function decadeShares(rows: DecadeRow[]): { decade: number; pct: number }
 	const total = rows.reduce((a, r) => a + (r.minutes || 0), 0);
 	if (!(total > 0)) return [];
 	return rows.map((r) => ({ decade: r.decade, pct: Math.round(((r.minutes || 0) / total) * 100) }));
+}
+
+/** 41A (B6-13): the profile's own last 7 days for "Partager ma semaine"; null without plays. */
+export async function loadWeekShare(): Promise<WeekShare | null> {
+	const [summary, artists, albums] = await Promise.all([getStatsSummary(7), getTopBy("artists", 7, 1), getTopBy("albums", 7, 1)]);
+	if (!summary || !(summary.plays > 0)) return null;
+	const album = (albums?.rows?.[0] ?? null) as (TopRow & { albumId?: string }) | null;
+	return {
+		minutes: summary.minutes,
+		tracks: summary.distinctTracks,
+		topArtist: artists?.rows?.[0]?.title ?? "",
+		topAlbum: album?.title,
+		topAlbumId: album?.albumId || undefined,
+	};
 }
