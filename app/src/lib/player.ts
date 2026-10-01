@@ -875,7 +875,8 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 				// instead of advancing; repeat / shuffle state is left untouched and the
 				// normal auto-advance resumes on the next play().
 				if (this._sleepHold) return;
-				if (shouldStopAtTrackEnd()) {
+				// c39c B6-9: "album" / "tracks" modes stop after a queue index.
+				if (shouldStopAtTrackEnd(SessionListService.position)) {
 					this._sleepHold = true;
 					this.nextSrc.url = undefined;
 					this.pause();

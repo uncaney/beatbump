@@ -60,6 +60,9 @@ export const FILES = [
 	"lib/offlineFailed.ts",
 	"lib/utils/shareLink.ts",
 	"lib/utils/retryOnce.ts",
+	// c39c B6-9: sleep timer sheet and its store (toasts, labels).
+	"lib/components/Player/SleepTimerSheet.svelte",
+	"lib/stores/sleepTimer.ts",
 ] as const;
 
 /**
