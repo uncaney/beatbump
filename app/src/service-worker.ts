@@ -536,7 +536,7 @@ function sameOrigin(u: string): boolean {
 	}
 }
 
-type CacheResult = { ok: boolean; bytes: number; reason?: string; already?: boolean; cachedUrl?: string };
+type CacheResult = { ok: boolean; bytes: number; reason?: string; already?: boolean; cachedUrl?: string; pinnedBytes?: number; quota?: number };
 
 // Fetch the full audio and store it. Same-origin: a real (non-opaque) response
 // whose status and Content-Type we can verify, so a PoW/error HTML page is never
@@ -614,6 +614,19 @@ async function cacheAudio(rawUrl: string, videoId: string, pinNow = false): Prom
 	// I15: `pinNow` (cache-audio { pinned: true }) stamps X-YTM-Pinned at write
 	// time, so a "Garder hors-ligne" download is never evicted between its
 	// write and its pin.
+	// J10: same rule as pin-audio (G7): pinned entries are never evicted, so a
+	// pinned write must keep the pinned total within the quota, else the LRU
+	// could never bring the cache back under it. Refused with reason "quota":
+	// nothing written, nothing evicted. The previous entry of this track is
+	// replaced by this write, so its bytes do not count.
+	if (pinNow) {
+		const quota = await getQuota();
+		if (quota > 0) {
+			const others = (await listEntries(c)).reduce((s, x) => s + (x.pinned && !(videoId && x.videoId === videoId) ? x.bytes : 0), 0);
+			const pinnedBytes = others + buf.byteLength;
+			if (pinnedBytes > quota) return { ok: false, bytes: 0, reason: "quota", pinnedBytes, quota };
+		}
+	}
 	let pinned = pinNow;
 	if (videoId) {
 		const old = await getMeta(videoId);
