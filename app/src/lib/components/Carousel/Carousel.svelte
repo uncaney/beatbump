@@ -158,6 +158,8 @@
 	<button
 		class="left"
 		class:showMoreBtn={!moreOnLeft}
+		type="button"
+		aria-label="Défiler vers la gauche"
 		on:click={() => {
 			if (!items || scrollPositions.left <= 25) return;
 			onScroll("left");
@@ -172,6 +174,8 @@
 	<button
 		class="right"
 		class:showMoreBtn={!moreOnRight}
+		type="button"
+		aria-label="Défiler vers la droite"
 		on:click={() => {
 			if (!items || scrollPositions.right <= 25) return;
 			onScroll("right");
