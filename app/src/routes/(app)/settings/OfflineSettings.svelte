@@ -5,17 +5,21 @@
 	import { onMount, tick } from "svelte";
 	import { settings } from "$stores/settings";
 	import {
+		applySwEviction,
 		getOfflineTracks,
 		listCachedAudio,
 		reconcileOfflineList,
 		removeOffline,
 		requestPersistentStorage,
+		scheduleSwAudioRefresh,
 		setAudioQuota,
 		storageStatus,
 		swRequest,
 		type AudioListEntry,
 	} from "$lib/offline";
+	import { freeUpSummary, planFreeUp, type FreeUpPlan } from "$lib/offlineFreeUp";
 	import { notify } from "$lib/utils";
+	import { currentTrack } from "$lib/stores/list";
 
 	const MB = 1024 * 1024;
 	const GB = 1024 * MB;
@@ -32,7 +36,7 @@
 	let loading = true;
 	let error = "";
 	let message = "";
-	let busy: "" | "quota" | "clear" | "resync" = "";
+	let busy: "" | "quota" | "clear" | "resync" | "freeup" = "";
 	let entries: AudioListEntry[] = [];
 	let total = 0;
 	// Bytes held by pinned entries (never evicted, G7): the quota cannot go below.
@@ -185,6 +189,98 @@
 			confirmClear = false;
 			await tick();
 			clearButton?.focus();
+		}
+	}
+
+	// HL2 "Libérer de l'espace": plan (planFreeUp, LRU, pinned never touched),
+	// show count + Mo, apply on confirm (uncache-audio per entry, sequential so
+	// each ack matches, then applySwEviction so `cachedIds` / badges follow at
+	// once) and show the new total. The plan (then the outcome) is exposed in
+	// window.__ytmFreeUpPlan for the browser harness.
+	const FREE_UP_TARGET = 500 * MB;
+	let freePlan: FreeUpPlan<AudioListEntry> | null = null;
+	let freeResult = "";
+	let freeConfirmButton: HTMLButtonElement | null = null;
+	let freeUpButton: HTMLButtonElement | null = null;
+	type FreeUpWindow = Window & { __ytmFreeUpPlan?: Record<string, unknown> };
+	function exposePlan(extra: Record<string, unknown> = {}) {
+		if (!freePlan || typeof window === "undefined") return;
+		(window as FreeUpWindow).__ytmFreeUpPlan = {
+			target: freePlan.target,
+			count: freePlan.count,
+			bytes: freePlan.bytes,
+			reached: freePlan.reached,
+			protectedBytes: freePlan.protectedBytes,
+			videoIds: freePlan.entries.map((e) => e.videoId),
+			...extra,
+		};
+	}
+	async function askFreeUp() {
+		if (busy) return;
+		busy = "freeup";
+		error = "";
+		message = "";
+		freeResult = "";
+		try {
+			// Fresh listing: lastAccess moves with every play.
+			const l = await listCachedAudio();
+			if (!l || !Array.isArray(l.entries)) {
+				error = SW_UNAVAILABLE;
+				return;
+			}
+			entries = l.entries;
+			total = l.total || 0;
+			pinnedBytes = Number(l.pinnedBytes) || 0;
+			const playing = $currentTrack?.videoId;
+			freePlan = planFreeUp(entries, FREE_UP_TARGET, { protect: playing ? [playing] : [] });
+			exposePlan({ applied: false });
+			await tick();
+			freeConfirmButton?.focus();
+		} catch (e) {
+			error = `Impossible de préparer la libération : ${(e as Error)?.message ?? e}`;
+		} finally {
+			busy = "";
+		}
+	}
+	async function cancelFreeUp() {
+		freePlan = null;
+		await tick();
+		freeUpButton?.focus();
+	}
+	async function doFreeUp() {
+		if (busy || !freePlan || !freePlan.count) return;
+		busy = "freeup";
+		error = "";
+		message = "";
+		const plan = freePlan;
+		try {
+			let failed = 0;
+			const removed: string[] = [];
+			for (const e of plan.entries) {
+				const r = await swRequest<{ type: "audio-uncached"; ok: boolean }>(
+					{ type: "uncache-audio", url: e.url || "", videoId: e.videoId || "" },
+					"audio-uncached",
+					5_000,
+				);
+				if (r && r.ok) removed.push(e.videoId);
+				else failed++;
+			}
+			// Same path as an SW eviction: badges and the local list follow at once,
+			// then the debounced list-audio refresh confirms.
+			if (removed.length) applySwEviction(removed);
+			scheduleSwAudioRefresh();
+			await refresh();
+			const freed = plan.entries.filter((e) => removed.includes(e.videoId)).reduce((s, e) => s + (Number(e.bytes) || 0), 0);
+			freeResult = `${freeUpSummary({ count: removed.length, bytes: freed })} libéré${removed.length > 1 ? "s" : ""}${failed ? ` · ${failed} impossible${failed > 1 ? "s" : ""}` : ""} · ${fmtBytes(total)} restants`;
+			exposePlan({ applied: true, removed: removed.length, failed, freedBytes: freed, totalAfter: total });
+			notify(freeResult, failed ? "error" : "success");
+		} catch (e) {
+			error = `Impossible de libérer de l'espace : ${(e as Error)?.message ?? e}`;
+		} finally {
+			busy = "";
+			freePlan = null;
+			await tick();
+			freeUpButton?.focus();
 		}
 	}
 
@@ -345,6 +441,82 @@
 				{/each}
 			</select>
 		</div>
+	</div>
+
+	<!-- HL2: smart free-up, least recently played first, pinned never touched. -->
+	<div class="setting">
+		<label
+			for="offline-free-up"
+			id="offline-free-up-label"
+		>
+			Libérer de l'espace
+			<span id="offline-free-up-desc"
+				>Retire les morceaux les moins écoutés jusqu'à 500 Mo. Les morceaux
+				épinglés ne sont jamais touchés.</span
+			>
+			{#if freeResult}
+				<span
+					id="offline-free-up-result"
+					data-testid="free-up-result"
+					aria-live="polite">{freeResult}</span
+				>
+			{/if}
+		</label>
+		{#if !freePlan}
+			<button
+				type="button"
+				id="offline-free-up"
+				class="btn btn-secondary"
+				data-testid="free-up"
+				aria-describedby="offline-free-up-desc"
+				disabled={loading || !!busy || cachedTracks === 0}
+				bind:this={freeUpButton}
+				on:click={askFreeUp}
+			>
+				{busy === "freeup" ? "Calcul…" : "Libérer 500 Mo"}
+			</button>
+		{:else}
+			<div
+				class="confirm neutral"
+				role="group"
+				aria-labelledby="offline-free-up-plan"
+			>
+				<span
+					id="offline-free-up-plan"
+					data-testid="free-up-plan"
+					data-count={freePlan.count}
+					data-bytes={freePlan.bytes}
+					>{#if freePlan.count}{freeUpSummary(freePlan)} seront libérés{#if !freePlan.reached}
+							(moins que 500 Mo : le reste est épinglé ou en lecture){/if}.{:else}Rien à libérer : tout
+						est épinglé ou en lecture.{/if}</span
+				>
+				<div class="confirm-actions">
+					{#if freePlan.count}
+						<button
+							type="button"
+							id="offline-free-up-confirm"
+							class="btn btn-secondary danger"
+							data-testid="free-up-confirm"
+							disabled={!!busy}
+							bind:this={freeConfirmButton}
+							on:click={doFreeUp}
+						>
+							{busy === "freeup" ? "Libération…" : "Libérer"}
+						</button>
+					{/if}
+					<button
+						type="button"
+						id="offline-free-up-cancel"
+						class="btn btn-secondary"
+						data-testid="free-up-cancel"
+						disabled={!!busy}
+						on:click={cancelFreeUp}
+					>
+						{freePlan.count ? "Annuler" : "Fermer"}
+					</button>
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	<div class="setting">
@@ -624,6 +796,12 @@
 		border: 1px solid rgb(220 53 69 / 45%);
 		font-size: 0.9375em;
 		line-height: 1.3;
+
+		/* HL2 free-up plan / HL3 pack progress: informative, not destructive. */
+		&.neutral {
+			background: rgb(255 255 255 / 6%);
+			border-color: rgb(255 255 255 / 25%);
+		}
 	}
 	.confirm-actions {
 		display: flex;
