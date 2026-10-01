@@ -343,8 +343,10 @@
 		}
 		// Audit v7 TOP 7: no hero image -> no image band; the initials badge
 		// and the name make the header (name at y < 200 on phones).
+		// Audit v8 TOP 4: the hero variant passes under the fixed nav with its
+		// 20vh/33vh band; the compact one must clear it explicitly.
 		&.compact {
-			padding-top: 0.5rem;
+			padding-top: calc(var(--top-bar-height, 56px) + 0.75rem);
 		}
 	}
 

@@ -322,6 +322,7 @@
 
 	import { goto } from "$app/navigation";
 	import { resolveArtistId, entityHref } from "$lib/local";
+	import { coverLabel, hueFor, initials } from "$lib/utils/initials";
 	import { UNAVAILABLE_OFFLINE_MSG, cachedIds, downloadToDevice, networkOffline } from "$lib/offline";
 	import { keepItemOffline, rowOfflineState } from "$lib/offlineBatch";
 	import { addToQueueEnd, playNext } from "$lib/queueActions";
@@ -386,6 +387,13 @@
 	// V1: cached rows get the badge; offline, the others are muted and a
 	// click explains instead of failing.
 	$: offlineState = rowOfflineState(item?.videoId, $cachedIds, $networkOffline);
+
+	// Cover placeholder (initials on a deterministic hue) once the <img> errors
+	// (audit v8 TOP 4: local tracks without artwork, same as LocalListItem).
+	let imgBroken = false;
+	$: coverName = coverLabel(item);
+	$: coverInitials = initials(coverName);
+	$: coverHue = hueFor(coverName);
 
 	// Keyboard activation of the labelled thumbnail ("Lire {title}").
 	function thumbKeydown(e: KeyboardEvent) {
@@ -547,7 +555,15 @@
 					width={item.thumbnails[0]?.width}
 					height={item.thumbnails[0]?.height}
 					alt=""
+					on:error={() => (imgBroken = true)}
 				/>
+				{#if imgBroken && coverInitials}
+					<span
+						class="cover-initials"
+						aria-hidden="true"
+						style="--cover-hue: {coverHue}; font-size: 1.5em;">{coverInitials}</span
+					>
+				{/if}
 			</div>
 		{/if}
 		<div class="column">
