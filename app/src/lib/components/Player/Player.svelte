@@ -319,6 +319,12 @@
 				{#if $currentTrack?.artistInfo?.artist?.[0]?.browseId}
 					<a class="now-playing-artist" style="color:inherit;text-decoration:none"
 						href={`/artist/${$currentTrack.artistInfo.artist[0].browseId}`}
+						on:click|preventDefault|stopPropagation={(e) => {
+							// Never let this tap reach the bar's fullscreen toggle; stopping
+							// propagation also hides it from SvelteKit's router, so navigate here.
+							fullscreenStore.set("closed");
+							goto(e.currentTarget.getAttribute("href") ?? "/");
+						}}
 						>{$currentTrack?.artistInfo?.artist?.[0]?.text}</a
 					>
 				{:else}

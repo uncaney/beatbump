@@ -23,7 +23,7 @@
     import {syncTabs} from "$lib/tabSync.js";
     import {Logger, notify} from "$lib/utils";
     import {SessionListService} from "$stores/list/sessionList";
-    import {onMount} from "svelte";
+    import {onDestroy, onMount} from "svelte";
     import {get, writable} from "svelte/store";
 
     export let data;
@@ -46,13 +46,26 @@
 
     let isFullscreen = false;
 
-    $: $fullscreenStore === "open"
-        ? setTimeout(() => {
-            isFullscreen = true;
-        }, 425)
-        : setTimeout(() => {
+    // Mirror the store into `isFullscreen` with ONE live timer: every store change
+    // cancels the pending one, "open" waits 425 ms (enter animation) and "closed"
+    // applies immediately. Two uncancelled timers let a late "open" (425 ms)
+    // overwrite an earlier-resolved "closed" (0 ms), leaving the player painted
+    // over a "closed" store that no further set("closed") could ever notify.
+    let fsTimer: ReturnType<typeof setTimeout> | undefined;
+    const syncFullscreen = (state: "open" | "closed") => {
+        clearTimeout(fsTimer);
+        fsTimer = undefined;
+        if (state === "open") {
+            fsTimer = setTimeout(() => {
+                fsTimer = undefined;
+                isFullscreen = true;
+            }, 425);
+        } else {
             isFullscreen = false;
-        }, 0);
+        }
+    };
+    $: syncFullscreen($fullscreenStore);
+    onDestroy(() => clearTimeout(fsTimer));
 
     let queueAlreadyPopulated = false;
 
