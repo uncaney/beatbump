@@ -280,7 +280,8 @@
 	.srv-sub {
 		grid-area: sub;
 		color: #aaa;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
+		line-height: 1.3;
 	}
 	.srv-go {
 		grid-area: go;

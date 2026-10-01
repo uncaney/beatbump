@@ -263,7 +263,7 @@
 	.group-sub {
 		margin: -0.3rem 0 0.6rem;
 		color: #999;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 	}
 	/* Tile = card (play) + corner keep icon; the coloured edge is the card kind. */
 	.mix-tile {
@@ -327,7 +327,8 @@
 	}
 	.mix-sub {
 		color: #aaa;
-		font-size: 0.85em;
+		// U12-11 leftover: 0.85em of the card was 11.33 px on phones.
+		font-size: var(--text-secondary-size);
 	}
 	.state {
 		text-align: center;
