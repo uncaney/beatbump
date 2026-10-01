@@ -6,6 +6,7 @@
 	import Header from "$lib/components/Layouts/Header.svelte";
 	import Loading from "$lib/components/Loading/Loading.svelte";
 	import PersonalRows from "./_PersonalRows.svelte";
+	import FirstRun from "./_FirstRun.svelte";
 	import { homeChipContext } from "$lib/contexts";
 	import type { PageData } from "./$types";
     import {APIClient} from "$lib/api";
@@ -151,6 +152,7 @@
 			invalidate("home:load");
 		}}
 	/>
+	<FirstRun />
 	<PersonalRows />
 	{#each carousels as carousel (carousel.items)}
 		<Carousel
