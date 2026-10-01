@@ -56,13 +56,48 @@ func isSoundtrackName(p string) bool {
 	return k != "" && soundtrackKey.MatchString(k)
 }
 
-// genreSlashWhole: slash names that are ONE genre (lowercase).
-var genreSlashWhole = map[string]bool{
-	"singer/songwriter": true,
-	"ac/dc":             true,
-	"r&b/soul":          true,
-	"hip-hop/rap":       true,
-	"hip hop/rap":       true,
+// genreSlashWhole: slash names that are ONE genre (lowercase), kept whole as
+// the displayed name. L12-12: the value lists the genres such a name ALSO
+// belongs to ("R&B/Soul" counts in "Soul" and "R&B", and their filters match
+// it); nil for a name that is nothing else ("AC/DC").
+var genreSlashWhole = map[string][]string{
+	"singer/songwriter": nil,
+	"ac/dc":             nil,
+	"r&b/soul":          {"R&B", "Soul"},
+	"hip-hop/rap":       {"Hip-Hop", "Rap"},
+	"hip hop/rap":       {"Hip Hop", "Rap"},
+}
+
+// isSlashWhole reports whether a segment is a whole slash name.
+func isSlashWhole(seg string) bool {
+	_, ok := genreSlashWhole[strings.ToLower(seg)]
+	return ok
+}
+
+// genreNamesOf lists the clean genre names a raw tag value belongs to: its
+// split parts plus, for a whole slash name, the genres it also stands for.
+// Deduplicated by key, split parts first.
+func genreNamesOf(raw string) []string {
+	parts := splitGenreValue(raw)
+	out := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	add := func(name string) {
+		k := genreKey(name)
+		if k == "" || seen[k] {
+			return
+		}
+		seen[k] = true
+		out = append(out, name)
+	}
+	for _, p := range parts {
+		add(p)
+	}
+	for _, p := range parts {
+		for _, also := range genreSlashWhole[strings.ToLower(p)] {
+			add(also)
+		}
+	}
+	return out
 }
 
 // genreSlashMinSide: "/" splits only when every side has this many characters
@@ -73,7 +108,7 @@ func cleanGenrePart(p string) string { return strings.Join(strings.Fields(p), " 
 
 // splitSlash splits one segment on "/" when the rules allow it.
 func splitSlash(seg string) []string {
-	if !strings.Contains(seg, "/") || genreSlashWhole[strings.ToLower(seg)] {
+	if !strings.Contains(seg, "/") || isSlashWhole(seg) {
 		return []string{seg}
 	}
 	parts := strings.Split(seg, "/")
@@ -125,7 +160,9 @@ type genreEntry struct {
 }
 
 // normalizeGenres turns the raw facet (value -> track count) into the
-// deduplicated genre list, by count desc then name.
+// deduplicated genre list, by count desc then name. L12-12: a whole slash
+// name ("R&B/Soul") keeps its own entry and also counts in the genres it
+// stands for ("Soul", "R&B"), as its tracks answer those filters.
 func normalizeGenres(raw map[string]int) []genreEntry {
 	type acc struct {
 		count    int
@@ -133,13 +170,8 @@ func normalizeGenres(raw map[string]int) []genreEntry {
 	}
 	byKey := map[string]*acc{}
 	for value, n := range raw {
-		seen := map[string]bool{}
-		for _, name := range splitGenreValue(value) {
+		for _, name := range genreNamesOf(value) {
 			key := strings.ToLower(name)
-			if seen[key] {
-				continue // "Rock;rock" counts once
-			}
-			seen[key] = true
 			a := byKey[key]
 			if a == nil {
 				a = &acc{spelling: map[string]int{}}
@@ -169,12 +201,12 @@ func normalizeGenres(raw map[string]int) []genreEntry {
 }
 
 // rawGenresFor lists the raw facet values holding `name` (case-insensitive),
-// sorted for a stable filter.
+// sorted for a stable filter. L12-12: "R&B/Soul" is one of "Soul"'s values.
 func rawGenresFor(name string, raw map[string]int) []string {
 	key := genreKey(name)
 	out := []string{}
 	for value := range raw {
-		for _, g := range splitGenreValue(value) {
+		for _, g := range genreNamesOf(value) {
 			if genreKey(g) == key {
 				out = append(out, value)
 				break
@@ -242,6 +274,11 @@ func genreSongsFilter(name string) string {
 // genreFacetSearchTTL: how long the facet-search values of a name are reused.
 const genreFacetSearchTTL = 5 * time.Minute
 
+// genreFacetCacheMax bounds the memo (L12-12): one entry per genre key
+// asked, least recently used evicted first, so ?genre=<random> cannot grow
+// the map without limit.
+const genreFacetCacheMax = 256
+
 type genreFacetMemo struct {
 	at   time.Time
 	vals map[string]int
@@ -250,7 +287,58 @@ type genreFacetMemo struct {
 var (
 	genreFacetMu    sync.Mutex
 	genreFacetCache = map[string]genreFacetMemo{}
+	// genreFacetOrder lists the cached keys, least recently used first.
+	genreFacetOrder []string
 )
+
+// genreFacetTouch moves key to the recent end (genreFacetMu held).
+func genreFacetTouch(key string) {
+	for i, k := range genreFacetOrder {
+		if k == key {
+			genreFacetOrder = append(genreFacetOrder[:i], genreFacetOrder[i+1:]...)
+			break
+		}
+	}
+	genreFacetOrder = append(genreFacetOrder, key)
+}
+
+// genreFacetGet reads a fresh memo entry and marks it recently used.
+func genreFacetGet(key string) (map[string]int, bool) {
+	genreFacetMu.Lock()
+	defer genreFacetMu.Unlock()
+	m, ok := genreFacetCache[key]
+	if !ok {
+		return nil, false
+	}
+	if time.Since(m.at) >= genreFacetSearchTTL {
+		delete(genreFacetCache, key)
+		genreFacetTouch(key)
+		genreFacetOrder = genreFacetOrder[:len(genreFacetOrder)-1]
+		return nil, false
+	}
+	genreFacetTouch(key)
+	return m.vals, true
+}
+
+// genreFacetPut stores an answer, evicting the least recently used keys
+// beyond genreFacetCacheMax.
+func genreFacetPut(key string, vals map[string]int) {
+	genreFacetMu.Lock()
+	defer genreFacetMu.Unlock()
+	genreFacetCache[key] = genreFacetMemo{at: time.Now(), vals: vals}
+	genreFacetTouch(key)
+	for len(genreFacetOrder) > genreFacetCacheMax {
+		delete(genreFacetCache, genreFacetOrder[0])
+		genreFacetOrder = genreFacetOrder[1:]
+	}
+}
+
+// genreFacetCacheLen is the number of memoised keys (tests).
+func genreFacetCacheLen() int {
+	genreFacetMu.Lock()
+	defer genreFacetMu.Unlock()
+	return len(genreFacetCache)
+}
 
 // genreFacetQueries: what to ask the facet search for a genre name (one
 // query, or every soundtrack spelling for "Bande originale").
@@ -272,12 +360,9 @@ func genreFacetSearchValues(name string) map[string]int {
 	if key == "" {
 		return nil
 	}
-	genreFacetMu.Lock()
-	if m, ok := genreFacetCache[key]; ok && time.Since(m.at) < genreFacetSearchTTL {
-		genreFacetMu.Unlock()
-		return m.vals
+	if vals, ok := genreFacetGet(key); ok {
+		return vals
 	}
-	genreFacetMu.Unlock()
 	queries := genreFacetQueries(name)
 	vals := map[string]int{}
 	var mu sync.Mutex
@@ -315,9 +400,7 @@ func genreFacetSearchValues(name string) map[string]int {
 		}
 		return vals
 	}
-	genreFacetMu.Lock()
-	genreFacetCache[key] = genreFacetMemo{at: time.Now(), vals: vals}
-	genreFacetMu.Unlock()
+	genreFacetPut(key, vals)
 	return vals
 }
 
@@ -325,5 +408,6 @@ func genreFacetSearchValues(name string) map[string]int {
 func resetGenreFacetCache() {
 	genreFacetMu.Lock()
 	genreFacetCache = map[string]genreFacetMemo{}
+	genreFacetOrder = nil
 	genreFacetMu.Unlock()
 }

@@ -241,3 +241,34 @@ func TestLoginHarnessNeverMerges(t *testing.T) {
 		t.Fatalf("opt-in harness: %s", out.raw)
 	}
 }
+
+// L12-6: skips recorded anonymously follow the device into the named profile.
+func TestLoginMovesSkipEvents(t *testing.T) {
+	useMergeDB(t)
+	if err := db.DB.AutoMigrate(&db.SkipEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	seedProfile(t, "anon-sk", 1, nil, nil, nil)
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		db.DB.Create(&db.SkipEvent{ProfileID: "anon-sk", Ref: "0123456789a", Position: 4, Source: "player", Origin: "local", SkippedAt: now.Add(-time.Duration(i) * time.Hour)})
+	}
+	db.DB.Create(&db.SkipEvent{ProfileID: "someone-else", Ref: "0123456789a", Position: 4, SkippedAt: now})
+	out, _ := login(t, "anon-sk", "Skipper", nil)
+	if out.Migrated == nil || out.Migrated.Skips != 3 || out.Migrated.Plays != 1 {
+		t.Fatalf("migrated %s", out.raw)
+	}
+	if n := countWhere(t, &db.SkipEvent{}, "anon-sk"); n != 0 {
+		t.Fatalf("%d skips left on the anonymous profile", n)
+	}
+	if n := countWhere(t, &db.SkipEvent{}, out.ID); n != 3 {
+		t.Fatalf("named profile has %d skips, want 3", n)
+	}
+	if n := countWhere(t, &db.SkipEvent{}, "someone-else"); n != 1 {
+		t.Fatalf("another profile's skip moved")
+	}
+	// the moved skips exclude the ref like the named profile's own
+	if refs := skippedRefs(out.ID, time.Now()); !refs["0123456789a"] {
+		t.Fatalf("moved skips not excluded: %v", refs)
+	}
+}

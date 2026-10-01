@@ -13,6 +13,7 @@ package api
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"regexp"
 	"sort"
@@ -27,9 +28,14 @@ import (
 
 const (
 	// dupScanCap bounds the albums scan (the library holds ~7 000 albums).
+	// L12-13: past it the OLDEST albums (dateAdded desc) are left out and the
+	// answer says so (`truncated`).
 	dupScanCap  = 8000
 	dupScanPage = 1000
-	dupMemoTTL  = 10 * time.Minute
+	// dupQualityCap bounds the quality lookups to the copies of the largest
+	// groups (100 per multi-search): the rest keep an unknown quality.
+	dupQualityCap = 2000
+	dupMemoTTL    = 10 * time.Minute
 	// dupDefaultLimit / dupMaxLimit page GET /local/duplicates.
 	dupDefaultLimit = 50
 	dupMaxLimit     = 200
@@ -88,15 +94,18 @@ type dupGroup struct {
 	Suggested string     `json:"suggested"`
 }
 
-// dupAlbumScanFn reads one page of the albums index, newest first (a
-// variable for tests).
-var dupAlbumScanFn = func(off, lim int) []map[string]interface{} {
-	hits, _ := meiliBrowse("albums", map[string]interface{}{
+// dupAlbumScanFn reads one page of the albums index, newest first, and the
+// index's total (0 when unknown); a variable for tests.
+var dupAlbumScanFn = func(off, lim int) ([]map[string]interface{}, int) {
+	return meiliBrowse("albums", map[string]interface{}{
 		"q": "", "offset": off, "limit": lim, "sort": []string{"dateAdded:desc"},
 		"attributesToRetrieve": []string{"id", "album", "albumArtist", "year", "trackCount", "source", "dateAdded"},
 	})
-	return hits
 }
+
+// dupBetterFn orders the copies of a group (a variable so tests can make
+// one group fail).
+var dupBetterFn = dupBetter
 
 // dupQualityFn returns the best track qualityScore of each album (by id),
 // one Meili multi-search for every album of every group (a variable for
@@ -146,14 +155,19 @@ func dupYear(a dupAlbum) int {
 }
 
 // dupBetter reports whether copy a should be kept over copy b: more tracks,
-// then higher quality (lossless first), then newest (year, then date added),
-// then the smaller id so the answer is stable.
+// then higher quality (lossless first), then the unqualified title ("Album"
+// over "Album (Deluxe Edition)", L12-4: never the reissue just because it is
+// newer), then newest (year, then date added), then the smaller id so the
+// answer is stable.
 func dupBetter(a, b dupAlbum) bool {
 	if a.TrackCount != b.TrackCount {
 		return a.TrackCount > b.TrackCount
 	}
 	if a.Quality != b.Quality {
 		return a.Quality > b.Quality
+	}
+	if qa, qb := matchHasPackaging(a.Title), matchHasPackaging(b.Title); qa != qb {
+		return !qa
 	}
 	if ya, yb := dupYear(a), dupYear(b); ya != yb {
 		return ya > yb
@@ -205,8 +219,9 @@ func groupDuplicateAlbums(docs []map[string]interface{}, quality map[string]int)
 		if len(albums) < 2 {
 			continue
 		}
-		sort.SliceStable(albums, func(i, j int) bool { return dupBetter(albums[i], albums[j]) })
-		groups = append(groups, dupGroup{Key: dupGroupKey(k), Albums: albums, Suggested: albums[0].ID})
+		if g, ok := dupBuildGroup(k, albums); ok {
+			groups = append(groups, g)
+		}
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
 		a, b := groups[i], groups[j]
@@ -219,6 +234,20 @@ func groupDuplicateAlbums(docs []map[string]interface{}, quality map[string]int)
 		return strings.ToLower(a.Albums[0].Title) < strings.ToLower(b.Albums[0].Title)
 	})
 	return groups
+}
+
+// dupBuildGroup orders one group's copies and names the suggested one.
+// L12-13: a panic while building one group (bad data) drops that group
+// with a log line instead of killing the scan, and the server with it.
+func dupBuildGroup(k string, albums []dupAlbum) (g dupGroup, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("duplicates: group %s skipped: %v", dupGroupKey(k), r)
+			g, ok = dupGroup{}, false
+		}
+	}()
+	sort.SliceStable(albums, func(i, j int) bool { return dupBetterFn(albums[i], albums[j]) })
+	return dupGroup{Key: dupGroupKey(k), Albums: albums, Suggested: albums[0].ID}, true
 }
 
 // splitByTrackCount keeps, inside each group, only copies whose track counts
@@ -258,69 +287,93 @@ func splitByTrackCount(groups []dupGroup) []dupGroup {
 // scanDuplicateGroups is the full (unmemoised) computation: the bounded
 // albums scan, the grouping, the quality lookup for the grouped copies only,
 // then the final ordering. ok is false when the scan read nothing (Meili
-// down): such an answer is not memoised.
-func scanDuplicateGroups() (groups []dupGroup, ok bool) {
+// down): such an answer is not memoised. L12-13: truncated is true when the
+// scan stopped at dupScanCap with albums left behind (the index total, or a
+// full last page when the total is unknown). A panic anywhere in the scan
+// is recovered here (logged, ok=false, nothing memoised).
+func scanDuplicateGroups() (groups []dupGroup, truncated bool, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("duplicates: scan failed: %v", r)
+			groups, truncated, ok = []dupGroup{}, false, false
+		}
+	}()
 	var docs []map[string]interface{}
+	total, lastFull := 0, false
 	for off := 0; off < dupScanCap; off += dupScanPage {
-		page := dupAlbumScanFn(off, dupScanPage)
+		page, n := dupAlbumScanFn(off, dupScanPage)
 		docs = append(docs, page...)
-		if len(page) < dupScanPage {
+		if n > total {
+			total = n
+		}
+		lastFull = len(page) >= dupScanPage
+		if !lastFull || (total > 0 && len(docs) >= total) {
 			break
 		}
 	}
 	if len(docs) == 0 {
-		return []dupGroup{}, false
+		return []dupGroup{}, false, false
+	}
+	if len(docs) >= dupScanCap && lastFull && (total == 0 || total > len(docs)) {
+		truncated = true
 	}
 	groups = groupDuplicateAlbums(docs, nil)
 	var copies []dupAlbum
 	for _, g := range groups {
+		if len(copies)+len(g.Albums) > dupQualityCap {
+			break // largest groups first: the rest keep an unknown quality
+		}
 		copies = append(copies, g.Albums...)
 	}
 	if len(copies) == 0 {
-		return groups, true
+		return groups, truncated, true
 	}
 	quality := dupQualityFn(copies)
 	inGroups := map[string]bool{}
-	for _, a := range copies {
-		inGroups[a.ID] = true
+	for _, g := range groups {
+		for _, a := range g.Albums {
+			inGroups[a.ID] = true
+		}
 	}
-	kept := make([]map[string]interface{}, 0, len(copies))
+	kept := make([]map[string]interface{}, 0, len(inGroups))
 	for _, d := range docs {
 		if inGroups[mstr(d, "id")] {
 			kept = append(kept, d)
 		}
 	}
-	return groupDuplicateAlbums(kept, quality), true
+	return groupDuplicateAlbums(kept, quality), truncated, true
 }
 
 var (
-	dupMu      sync.Mutex
-	dupMemo    []dupGroup
-	dupMemoAt  time.Time
-	dupMemoNow = time.Now // swapped by tests
+	dupMu        sync.Mutex
+	dupMemo      []dupGroup
+	dupMemoTrunc bool
+	dupMemoAt    time.Time
+	dupMemoNow   = time.Now // swapped by tests
 )
 
 // duplicateGroups is scanDuplicateGroups behind a dupMemoTTL memo. The lock
-// is held during a recompute so concurrent callers share one scan.
-func duplicateGroups() []dupGroup {
+// is held during a recompute so concurrent callers share one scan. The
+// second value says whether the scan left albums out (L12-13).
+func duplicateGroups() ([]dupGroup, bool) {
 	dupMu.Lock()
 	defer dupMu.Unlock()
 	now := dupMemoNow()
 	if dupMemo != nil && now.Sub(dupMemoAt) < dupMemoTTL {
-		return dupMemo
+		return dupMemo, dupMemoTrunc
 	}
-	groups, ok := scanDuplicateGroups()
+	groups, truncated, ok := scanDuplicateGroups()
 	if ok {
-		dupMemo, dupMemoAt = groups, now
+		dupMemo, dupMemoTrunc, dupMemoAt = groups, truncated, now
 		setDuplicatePreferred(groups, now)
 	}
-	return groups
+	return groups, truncated
 }
 
 // resetDuplicateMemo drops the memo (tests).
 func resetDuplicateMemo() {
 	dupMu.Lock()
-	dupMemo, dupMemoAt = nil, time.Time{}
+	dupMemo, dupMemoTrunc, dupMemoAt = nil, false, time.Time{}
 	dupMu.Unlock()
 	dupPrefMu.Lock()
 	dupPref, dupPrefAt = nil, time.Time{}
@@ -335,7 +388,7 @@ func resetDuplicateMemo() {
 // Answer: {"groups": [{key, albums: [{id, title, artist, year, trackCount,
 // source, quality?, bitrateHint?}], suggested}], "total": N, "offset", "limit"}.
 // albums[0] is always the suggested copy (more tracks, then lossless / higher
-// qualityScore, then newest). An empty library or no duplicate answers
+// qualityScore, then the title without a packaging qualifier, then newest). An empty library or no duplicate answers
 // {"groups": [], "total": 0} (never null). Read only: nothing is deleted.
 //
 //	?key=dk-…            one group: {"group": {...}, "groups": [{...}],
@@ -347,8 +400,10 @@ func resetDuplicateMemo() {
 //
 // Harness contract: `total` is always a number and `groups` always an array,
 // so a check can read `.groups[0].key` and fetch it back with ?key=.
+// L12-13: `truncated` (bool) says the scan stopped at dupScanCap albums,
+// the oldest ones left out.
 func LocalDuplicatesHandler(c echo.Context) error {
-	groups := duplicateGroups()
+	groups, truncated := duplicateGroups()
 	if c.QueryParam("sameTracks") == "1" {
 		groups = splitByTrackCount(groups)
 	}
@@ -379,7 +434,7 @@ func LocalDuplicatesHandler(c echo.Context) error {
 		page = groups[off:end]
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"groups": page, "total": len(groups), "offset": off, "limit": lim,
+		"groups": page, "total": len(groups), "offset": off, "limit": lim, "truncated": truncated,
 	})
 }
 
@@ -422,6 +477,13 @@ func refreshDuplicatesAsync() {
 	}
 	go func() {
 		defer dupRefreshing.Store(false)
+		// L12-13: a panic in a bare goroutine kills the whole server; the
+		// scan recovers its own, this is the last net.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("duplicates: background refresh failed: %v", r)
+			}
+		}()
 		duplicateGroups()
 	}()
 }

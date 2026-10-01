@@ -423,6 +423,7 @@ func MeRecordPlayHandler(c echo.Context) error {
 	ev := db.PlayEvent{ProfileID: pid, Ref: ref, Title: title, Artist: artist, ArtistID: artistID, Album: itemAlbum(string(raw)), Source: source, Data: string(raw), PlayedAt: playedAt}
 	db.DB.Create(&ev)
 	invalidateMixCache(pid)
+	invalidateStatsTimeMemo(pid)
 	return c.JSON(http.StatusOK, map[string]interface{}{"ok": true})
 }
 

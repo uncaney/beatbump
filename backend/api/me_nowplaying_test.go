@@ -81,7 +81,7 @@ func TestNowPlayingPutThenGetUpserts(t *testing.T) {
 		Index int `json:"index"`
 	}
 	_ = json.Unmarshal(out.Payload, &p)
-	if out.DeviceID != "dev-b" || out.DeviceName != "Mac" || out.Position != 42.5 || p.Index != 3 || out.UpdatedAt == 0 {
+	if out.DeviceID != "dev-b" || out.DeviceName != "Mac" || out.Position != 42.5 || p.Index != 3 || out.UpdatedAt == 0 || out.Now == 0 {
 		t.Fatalf("unexpected row: %+v index=%d", out, p.Index)
 	}
 }

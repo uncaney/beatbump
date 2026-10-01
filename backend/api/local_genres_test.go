@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -251,5 +252,98 @@ func TestGenreSongsFilterFacetSearchUnavailable(t *testing.T) {
 	_ = genreSongsFilter("Rock")
 	if facetCalls != 3 {
 		t.Fatalf("a failed facet search must not be memoised: %d calls", facetCalls)
+	}
+}
+
+// L12-12: a whole slash name stays one displayed genre but also belongs to
+// the genres it stands for: "R&B/Soul" counts in "Soul" and answers its
+// filter; "AC/DC" stands for nothing else.
+func TestGenreSlashWholeAlsoCountsInMembers(t *testing.T) {
+	raw := map[string]int{"R&B/Soul": 5, "Soul": 10, "Rock": 1, "AC/DC": 2}
+	if got := rawGenresFor("Soul", raw); !reflect.DeepEqual(got, []string{"R&B/Soul", "Soul"}) {
+		t.Fatalf("rawGenresFor(Soul) = %q", got)
+	}
+	if got := rawGenresFor("r&b", raw); !reflect.DeepEqual(got, []string{"R&B/Soul"}) {
+		t.Fatalf("rawGenresFor(r&b) = %q", got)
+	}
+	if got := rawGenresFor("DC", raw); len(got) != 0 {
+		t.Fatalf("AC/DC must not feed a DC genre: %q", got)
+	}
+	if f := genreFilterFor("Soul", raw); f != `genre IN ["R&B/Soul", "Soul"]` {
+		t.Fatalf("Soul filter = %s", f)
+	}
+	if f := genreFilterFor("R&B/Soul", raw); f != `genre = "R&B/Soul"` {
+		t.Fatalf("R&B/Soul keeps its exact filter: %s", f)
+	}
+	got := normalizeGenres(raw)
+	want := []genreEntry{
+		{Name: "Soul", Count: 15},
+		{Name: "R&B", Count: 5},
+		{Name: "R&B/Soul", Count: 5},
+		{Name: "AC/DC", Count: 2},
+		{Name: "Rock", Count: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeGenres = %+v\nwant %+v", got, want)
+	}
+}
+
+// L12-12: the facet-search memo holds at most genreFacetCacheMax keys; the
+// least recently used go first and a read keeps a key alive.
+func TestGenreFacetCacheBounded(t *testing.T) {
+	resetGenreFacetCache()
+	t.Cleanup(resetGenreFacetCache)
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/indexes/tracks/facet-search" {
+			http.NotFound(w, r)
+			return
+		}
+		calls++
+		var body map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		q, _ := body["facetQuery"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"facetHits": []interface{}{
+			map[string]interface{}{"value": q, "count": 1.0},
+		}})
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MEILI_URL", srv.URL)
+	name := func(i int) string { return fmt.Sprintf("Genre %03d", i) }
+	for i := 0; i < genreFacetCacheMax; i++ {
+		if v := genreFacetSearchValues(name(i)); v[name(i)] != 1 {
+			t.Fatalf("facet values for %s: %v", name(i), v)
+		}
+	}
+	if calls != genreFacetCacheMax || genreFacetCacheLen() != genreFacetCacheMax {
+		t.Fatalf("after %d names: %d calls, %d cached", genreFacetCacheMax, calls, genreFacetCacheLen())
+	}
+	// A read of the oldest key marks it recently used.
+	genreFacetSearchValues(name(0))
+	if calls != genreFacetCacheMax {
+		t.Fatalf("a cached key was asked again (%d calls)", calls)
+	}
+	// 50 more names: the map stays bounded, the least recently used leave first.
+	for i := genreFacetCacheMax; i < genreFacetCacheMax+50; i++ {
+		genreFacetSearchValues(name(i))
+	}
+	if n := genreFacetCacheLen(); n != genreFacetCacheMax {
+		t.Fatalf("memo not bounded: %d keys", n)
+	}
+	calls = 0
+	genreFacetSearchValues(name(0)) // touched before the overflow: still cached
+	if calls != 0 {
+		t.Fatalf("the touched key was evicted")
+	}
+	genreFacetSearchValues(name(1)) // least recently used: evicted, asked again
+	if calls != 1 {
+		t.Fatalf("the least recently used key was not evicted (%d calls)", calls)
+	}
+	genreFacetSearchValues(name(genreFacetCacheMax + 49)) // newest: cached
+	if calls != 1 {
+		t.Fatalf("the newest key was evicted (%d calls)", calls)
+	}
+	if n := genreFacetCacheLen(); n != genreFacetCacheMax {
+		t.Fatalf("memo not bounded after the re-ask: %d keys", n)
 	}
 }

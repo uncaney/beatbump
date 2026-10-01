@@ -365,6 +365,8 @@ export interface NowPlayingRow {
 	updatedAt: number; // unix ms (server clock)
 	takenBy?: string; // 40A: device that pressed "Continuer ici"
 	takenAt?: number; // unix ms (server clock)
+	/** L12-9: the server clock at the answer (unix ms), the reference for takenAt / updatedAt. */
+	now?: number;
 }
 /**
  * Upsert this device's resume state; resolves the HTTP status (0 = network
@@ -401,7 +403,17 @@ export async function getNowPlaying(): Promise<NowPlayingRow | null> {
 		const r = await APIClient.fetch(`/api/v1/me/nowplaying`, { cache: "no-store" });
 		if (!r?.ok) return null;
 		const j = await r.json();
-		return j && typeof j === "object" && j.payload ? (j as NowPlayingRow) : null;
+		if (!j || typeof j !== "object" || !j.payload) return null;
+		const row = j as NowPlayingRow;
+		// L12-9: the server clock comes with the row (`now`); an older server
+		// gives at least its `Date` header. Without either, the caller falls
+		// back to the local clock.
+		if (typeof row.now !== "number" || !isFinite(row.now) || row.now <= 0) {
+			const d = Date.parse(r.headers?.get?.("Date") ?? "");
+			if (isFinite(d) && d > 0) row.now = d;
+			else delete row.now;
+		}
+		return row;
 	} catch {
 		return null;
 	}

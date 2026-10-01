@@ -191,12 +191,21 @@ export interface RemoteNowPlaying {
 	/** 40A: the device that took the playback over ("Continuer ici"). */
 	takenBy?: string;
 	takenAt?: number;
+	/** L12-9: the server clock when the row was read (unix ms), see `takenAway`. */
+	now?: number;
 }
 
 /** 40A: a take older than this no longer pauses anyone (server guard: 10 min). */
 export const TAKE_GUARD_MS = 10 * 60 * 1000;
 
-/** The device that holds the playback away from `localDeviceId`, from a GET row; else null. */
+/**
+ * The device that holds the playback away from `localDeviceId`, from a GET
+ * row; else null. L12-9: the rule is the server's (`takeLive` in
+ * me_nowplaying.go): the take lives while the taker's last news, the later
+ * of `takenAt` and `updatedAt` (its own pushes extend it), is less than
+ * TAKE_GUARD_MS before the SERVER clock (`row.now`); `now` (this device's
+ * clock) only serves when the server did not say.
+ */
 export function takenAway(
 	row: RemoteNowPlaying | null | undefined,
 	localDeviceId: string,
@@ -204,8 +213,87 @@ export function takenAway(
 ): { deviceId: string; deviceName: string } | null {
 	if (!row || typeof row !== "object" || !row.takenBy || row.takenBy === localDeviceId) return null;
 	const at = Number(row.takenAt);
-	if (!isFinite(at) || at <= 0 || now - at > TAKE_GUARD_MS) return null;
+	if (!isFinite(at) || at <= 0) return null;
+	const updated = Number(row.updatedAt);
+	const last = Math.max(at, isFinite(updated) ? updated : 0);
+	const serverNow = Number(row.now);
+	const ref = isFinite(serverNow) && serverNow > 0 ? serverNow : now;
+	if (ref - last >= TAKE_GUARD_MS) return null;
 	return { deviceId: row.takenBy, deviceName: row.deviceId === row.takenBy ? row.deviceName : "" };
+}
+
+/**
+ * L12-9: a `play` counts as the user's own only within this long after a
+ * pointer / key gesture on the page (or while the browser reports a
+ * transient user activation). Later plays are automatic: a Bluetooth
+ * headset sending "play" on reconnection, Android Auto's autoplay, a
+ * restored session. Those never take the playback back from another device.
+ */
+export const GESTURE_WINDOW_MS = 5 * 1000;
+
+export interface GestureTracker {
+	/** A pointer / key gesture happened now. */
+	mark(): void;
+	/** Whether a play at this moment comes from the user. */
+	recent(): boolean;
+}
+
+/** Pure: the gesture memory behind `wireGestureTracker` (tests inject the clock). */
+export function makeGestureTracker(deps: {
+	now?: () => number;
+	/** `navigator.userActivation.isActive` where supported. */
+	userActive?: () => boolean;
+	windowMs?: number;
+} = {}): GestureTracker {
+	const now = deps.now ?? Date.now;
+	const windowMs = deps.windowMs ?? GESTURE_WINDOW_MS;
+	let last = -Infinity;
+	return {
+		mark: () => {
+			last = now();
+		},
+		recent: () => {
+			if (now() - last <= windowMs) return true;
+			try {
+				return deps.userActive?.() === true;
+			} catch {
+				return false;
+			}
+		},
+	};
+}
+
+/** Wire `tracker.mark` to the page's pointer and key gestures (capture, passive); returns the cleanup. */
+export function wireGestureTracker(tracker: GestureTracker, win: Window | null = null): () => void {
+	const w = win ?? (typeof window === "undefined" ? undefined : window);
+	if (!w) return () => {};
+	const mark = () => tracker.mark();
+	const opts = { capture: true, passive: true } as const;
+	for (const ev of ["pointerdown", "keydown"]) w.addEventListener(ev, mark, opts);
+	return () => {
+		for (const ev of ["pointerdown", "keydown"]) w.removeEventListener(ev, mark, opts);
+	};
+}
+
+/** The browser's transient user activation, false where unsupported. */
+function browserUserActive(): boolean {
+	try {
+		const n = typeof navigator === "undefined" ? undefined : (navigator as Navigator & { userActivation?: { isActive?: boolean } });
+		return n?.userActivation?.isActive === true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * L12-9, the take-back rule (pure): after a take elsewhere, this device
+ * claims the row again only when its play came from the user. Resolves
+ * whether `claim` ran.
+ */
+export function claimOnPlay(pusher: Pick<NowPlayingPusher, "lostTo" | "claim">, gesture: GestureTracker): boolean {
+	if (!pusher.lostTo() || !gesture.recent()) return false;
+	pusher.claim();
+	return true;
 }
 
 /** The toast on the device that lost the playback. */
@@ -575,6 +663,12 @@ export function startNowPlayingSync(): () => void {
 		};
 		let playing = false;
 		let first = true;
+		// L12-9: only a play that follows a gesture on this page (or a
+		// transient user activation) takes the playback back; an automatic
+		// play (Bluetooth reconnection, Android Auto, a restored session)
+		// leaves the other device playing and keeps this one silent.
+		const gesture = makeGestureTracker({ userActive: browserUserActive });
+		cleanups.push(wireGestureTracker(gesture));
 		cleanups.push(
 			AudioPlayer.paused.subscribe((paused) => {
 				playing = !paused;
@@ -587,14 +681,12 @@ export function startNowPlayingSync(): () => void {
 					return;
 				}
 				// 40A: play pressed here after a take elsewhere: take it back now.
-				if (pusher.lostTo()) {
-					pusher.claim();
-					void push();
-				}
+				if (claimOnPlay(pusher, gesture)) void push();
 			}),
 		);
 		// 40A: on the ytm-profile channel, a playing device checks at once
 		// whether another one took the playback over (else: next push, 15 s).
+		// L12-9: the row carries the server clock, takenAway compares to it.
 		const checkTaken = async () => {
 			if (stopped || !playing || pusher.lostTo() || !(await loggedIn())) return;
 			const by = takenAway(await me.getNowPlaying(), localDevice().deviceId, Date.now());

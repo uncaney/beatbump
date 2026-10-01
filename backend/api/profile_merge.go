@@ -21,6 +21,9 @@ type migratedCounts struct {
 	Favorites int64 `json:"favorites"`
 	Follows   int64 `json:"follows"`
 	Playlists int64 `json:"playlists"`
+	// Skips (L12-6): early "next" presses, so "Pour toi" keeps excluding
+	// what the device skipped anonymously.
+	Skips int64 `json:"skips"`
 }
 
 // playlistDeviceSuffix marks a moved playlist whose name the named profile
@@ -43,7 +46,8 @@ func mergeableSource(from, to string) bool {
 // Duplicates are resolved in favour of the target: a favourite (kind, ref) or
 // a follow (artistId) the target already has is dropped from the source; a
 // playlist whose name the target already uses is kept with " (appareil)"
-// appended; now_playings keeps the most recent row. Counts are the moved rows.
+// appended; now_playings keeps the most recent row; skip events move as
+// they are. Counts are the moved rows.
 func mergeProfileInto(tx *gorm.DB, from, to string) (migratedCounts, error) {
 	var out migratedCounts
 	// play events: plain move.
@@ -109,6 +113,15 @@ func mergeProfileInto(tx *gorm.DB, from, to string) (migratedCounts, error) {
 		return out, err
 	}
 
+	// skip events (L12-6): plain move.
+	if tx.Migrator().HasTable(&db.SkipEvent{}) {
+		r = tx.Model(&db.SkipEvent{}).Where("profile_id = ?", from).Update("profile_id", to)
+		if r.Error != nil {
+			return out, r.Error
+		}
+		out.Skips = r.RowsAffected
+	}
+
 	// now_playings: one row per profile, keep the most recent.
 	if err := mergeNowPlaying(tx, from, to); err != nil {
 		return out, err
@@ -171,6 +184,8 @@ func loginAndMerge(from, to, name string, merge bool) (*migratedCounts, error) {
 		invalidateMixCache(to)
 		dropNeverPlayedMemoFor(from)
 		dropNeverPlayedMemoFor(to)
+		invalidateStatsTimeMemo(from)
+		invalidateStatsTimeMemo(to)
 	}
 	return moved, nil
 }

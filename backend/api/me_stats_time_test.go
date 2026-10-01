@@ -21,7 +21,7 @@ func TestComputeStreaks_GapsAndRecord(t *testing.T) {
 	}
 	evs = append(evs, ev("A", day(0)), ev("B", day(0))) // several plays on one day count once
 	mins := map[string]float64{"A": 4, "B": 2}
-	s := computeStreaks(evs, mins, now, 0)
+	s := computeStreaks(evs, mins, now, fixedTZ(0))
 	if s.Current != 3 || s.Longest != 4 {
 		t.Fatalf("current=%d longest=%d, want 3 / 4", s.Current, s.Longest)
 	}
@@ -42,19 +42,19 @@ func TestComputeStreaks_GapsAndRecord(t *testing.T) {
 func TestComputeStreaks_TodayWithoutPlay(t *testing.T) {
 	now := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
 	evs := []statEvent{ev("A", now.AddDate(0, 0, -2)), ev("A", now.AddDate(0, 0, -1))}
-	if s := computeStreaks(evs, nil, now, 0); s.Current != 2 || s.Longest != 2 {
+	if s := computeStreaks(evs, nil, now, fixedTZ(0)); s.Current != 2 || s.Longest != 2 {
 		t.Fatalf("yesterday keeps the streak alive: current=%d longest=%d", s.Current, s.Longest)
 	}
 	// two days ago only: the streak is broken.
 	evs = []statEvent{ev("A", now.AddDate(0, 0, -3)), ev("A", now.AddDate(0, 0, -2))}
-	if s := computeStreaks(evs, nil, now, 0); s.Current != 0 || s.Longest != 2 {
+	if s := computeStreaks(evs, nil, now, fixedTZ(0)); s.Current != 0 || s.Longest != 2 {
 		t.Fatalf("broken streak: current=%d longest=%d", s.Current, s.Longest)
 	}
-	if s := computeStreaks(nil, nil, now, 0); s.Current != 0 || s.Longest != 0 || s.LastDay != "" || len(s.Days) != streakWindowDays {
+	if s := computeStreaks(nil, nil, now, fixedTZ(0)); s.Current != 0 || s.Longest != 0 || s.LastDay != "" || len(s.Days) != streakWindowDays {
 		t.Fatalf("empty: %+v", s)
 	}
 	// unknown ref length: the 3.5 min estimate
-	s := computeStreaks([]statEvent{ev("Z", now)}, map[string]float64{}, now, 0)
+	s := computeStreaks([]statEvent{ev("Z", now)}, map[string]float64{}, now, fixedTZ(0))
 	if s.Days[len(s.Days)-1].Minutes != 3.5 {
 		t.Fatalf("estimate: %v", s.Days[len(s.Days)-1].Minutes)
 	}
@@ -70,20 +70,20 @@ func TestComputeStreaks_TimezoneEdge(t *testing.T) {
 	b := time.Date(2026, 10, 2, 22, 30, 0, 0, time.UTC)
 	now := time.Date(2026, 10, 2, 23, 0, 0, 0, time.UTC)
 	evs := []statEvent{ev("A", a), ev("A", b)}
-	if s := computeStreaks(evs, nil, now, 0); s.Current != 2 || s.LastDay != "2026-10-02" {
+	if s := computeStreaks(evs, nil, now, fixedTZ(0)); s.Current != 2 || s.LastDay != "2026-10-02" {
 		t.Fatalf("utc: %+v", s.Current)
 	}
-	if s := computeStreaks(evs, nil, now, 120); s.Current != 2 || s.LastDay != "2026-10-03" || s.Days[len(s.Days)-1].Date != "2026-10-03" {
+	if s := computeStreaks(evs, nil, now, fixedTZ(120)); s.Current != 2 || s.LastDay != "2026-10-03" || s.Days[len(s.Days)-1].Date != "2026-10-03" {
 		t.Fatalf("utc+2: current=%d lastDay=%s", s.Current, s.LastDay)
 	}
 	// Two plays 90 min apart around UTC midnight: two days in UTC, ONE day
 	// in UTC+2 (both after local midnight... 01:15 and 02:45).
 	c := time.Date(2026, 10, 1, 23, 15, 0, 0, time.UTC)
 	d := time.Date(2026, 10, 2, 0, 45, 0, 0, time.UTC)
-	if s := computeStreaks([]statEvent{ev("A", c), ev("A", d)}, nil, d, 0); s.Longest != 2 {
+	if s := computeStreaks([]statEvent{ev("A", c), ev("A", d)}, nil, d, fixedTZ(0)); s.Longest != 2 {
 		t.Fatalf("utc split: longest=%d", s.Longest)
 	}
-	if s := computeStreaks([]statEvent{ev("A", c), ev("A", d)}, nil, d, 120); s.Longest != 1 || s.Current != 1 {
+	if s := computeStreaks([]statEvent{ev("A", c), ev("A", d)}, nil, d, fixedTZ(120)); s.Longest != 1 || s.Current != 1 {
 		t.Fatalf("utc+2 same day: longest=%d current=%d", s.Longest, s.Current)
 	}
 }
@@ -122,7 +122,7 @@ func TestComputeClock(t *testing.T) {
 	sat2 := time.Date(2026, 10, 3, 21, 30, 0, 0, time.UTC)
 	mon := time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC)
 	mins := map[string]float64{"A": 4, "B": 2}
-	c := computeClock([]statEvent{ev("A", sat1), ev("A", sat2), ev("B", mon)}, mins, 0)
+	c := computeClock([]statEvent{ev("A", sat1), ev("A", sat2), ev("B", mon)}, mins, fixedTZ(0))
 	if c.Minutes[5][20] != 4 || c.Minutes[5][21] != 4 || c.Minutes[0][8] != 2 {
 		t.Fatalf("matrix: sat20=%v sat21=%v mon8=%v", c.Minutes[5][20], c.Minutes[5][21], c.Minutes[0][8])
 	}
@@ -130,11 +130,11 @@ func TestComputeClock(t *testing.T) {
 		t.Fatalf("topDay=%d total=%v", c.TopDay, c.Total)
 	}
 	// UTC+4: Saturday 21:30 UTC is Sunday 01:30 local.
-	c = computeClock([]statEvent{ev("A", sat2)}, mins, 240)
+	c = computeClock([]statEvent{ev("A", sat2)}, mins, fixedTZ(240))
 	if c.Minutes[6][1] != 4 || c.TopDay != 6 || c.TopHour != 1 {
 		t.Fatalf("tz shift: sun1=%v topDay=%d topHour=%d", c.Minutes[6][1], c.TopDay, c.TopHour)
 	}
-	if e := computeClock(nil, nil, 0); e.TopDay != -1 || e.TopHour != -1 || e.Total != 0 {
+	if e := computeClock(nil, nil, fixedTZ(0)); e.TopDay != -1 || e.TopHour != -1 || e.Total != 0 {
 		t.Fatalf("empty: %+v", e)
 	}
 }
@@ -153,5 +153,107 @@ func TestMeClockHandler(t *testing.T) {
 	}
 	if out["days"].(float64) != 30 {
 		t.Fatalf("days %v", out["days"])
+	}
+}
+
+// L12-11: an IANA zone places each play with the offset in force AT the
+// play, across the 2026-10-25 change (03:00 CEST -> 02:00 CET, 01:00 UTC).
+func TestStatsZoneAcrossDST(t *testing.T) {
+	paris := parseStatsTZ("Europe/Paris")
+	if paris == nil {
+		t.Fatal("Europe/Paris not loaded (time/tzdata)")
+	}
+	evs := []statEvent{
+		ev("A", time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)),
+		ev("A", time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)),
+		// 00:30 CEST on Sunday 25: the only play of that local day
+		ev("A", time.Date(2026, 10, 24, 22, 30, 0, 0, time.UTC)),
+		// 00:30 CET on Monday 26 (after the change)
+		ev("A", time.Date(2026, 10, 25, 23, 30, 0, 0, time.UTC)),
+	}
+	now := time.Date(2026, 10, 26, 13, 0, 0, 0, time.UTC)
+	s := computeStreaks(evs, nil, now, paris)
+	if s.Current != 4 || s.Longest != 4 || s.LastDay != "2026-10-26" || s.TZ != 60 || s.Zone != "Europe/Paris" {
+		t.Fatalf("zone streak: %+v", s)
+	}
+	// The fixed winter offset (what tz=60 sends after the change) loses the
+	// Sunday: 22:30 UTC becomes 23:30 on Saturday.
+	if f := computeStreaks(evs, nil, now, fixedTZ(60)); f.Current != 1 || f.Zone != "" {
+		t.Fatalf("fixed offset should break the run: %+v", f)
+	}
+	c := computeClock(evs, map[string]float64{"A": 3}, paris)
+	if c.Minutes[6][0] != 3 || c.Minutes[0][0] != 3 || c.Minutes[5][23] != 0 {
+		t.Fatalf("clock: sun0=%v mon0=%v sat23=%v", c.Minutes[6][0], c.Minutes[0][0], c.Minutes[5][23])
+	}
+	// Year: a play at 22:30 UTC on 31 March 2026 (00:30 CEST, 1 April) is an
+	// April play; New Year's Eve 23:30 UTC 2025 is a 2026 play in Paris.
+	yevs := []statEvent{
+		ev("A", time.Date(2026, 3, 31, 22, 30, 0, 0, time.UTC)),
+		ev("A", time.Date(2025, 12, 31, 23, 30, 0, 0, time.UTC)),
+	}
+	rows := []playRow{{Ref: "A", Cnt: 2, Data: `{"videoId":"A","title":"T","length":{"text":"3:00"}}`}}
+	y := computeYear(yevs, rows, 2026, paris)
+	if y.Months[3] == 0 || y.Months[2] != 0 || y.Months[0] == 0 || y.Plays != 2 {
+		t.Fatalf("year months %v plays %d", y.Months, y.Plays)
+	}
+}
+
+func TestParseStatsTZ(t *testing.T) {
+	cases := map[string]string{
+		"Europe/Paris":     "Europe/Paris",
+		"America/New_York": "America/New_York",
+		"120":              "viewer",
+		"-300":             "viewer",
+		"9999":             "viewer", // out of range: 0
+		"Local":            "",
+		"../../etc/passwd": "",
+		"Nowhere/Atlantis": "",
+		"":                 "",
+	}
+	for in, want := range cases {
+		got := ""
+		if loc := parseStatsTZ(in); loc != nil {
+			got = loc.String()
+		}
+		if got != want {
+			t.Errorf("parseStatsTZ(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if loc := parseStatsTZ("9999"); tzOffsetMin(loc, time.Now()) != 0 {
+		t.Error("out-of-range offset should be 0")
+	}
+}
+
+func TestMeStreaksHandler_ZoneNameAndMemo(t *testing.T) {
+	useTestDB(t)
+	seedPlays(t)
+	out := getJSON(t, MeStreaksHandler, "/api/v1/me/stats/streaks?tz=Europe%2FParis&tzo=120")
+	if out["zone"] != "Europe/Paris" {
+		t.Fatalf("zone: %v", out["zone"])
+	}
+	// an unknown name falls back to tzo
+	if fb := getJSON(t, MeStreaksHandler, "/api/v1/me/stats/streaks?tz=Nowhere%2FAtlantis&tzo=120"); fb["tz"] != 120.0 || fb["zone"] != nil {
+		t.Fatalf("fallback: tz=%v zone=%v", fb["tz"], fb["zone"])
+	}
+	before := out["longest"]
+	// A play written behind the handler's back is not seen (memo) ...
+	db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: "Z", Title: "Z", Data: `{"videoId":"Z"}`, PlayedAt: time.Now().AddDate(0, 0, -2)})
+	db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: "Z", Title: "Z", Data: `{"videoId":"Z"}`, PlayedAt: time.Now().AddDate(0, 0, -3)})
+	if again := getJSON(t, MeStreaksHandler, "/api/v1/me/stats/streaks?tz=Europe%2FParis&tzo=120"); again["longest"] != before {
+		t.Fatalf("memo not used: %v -> %v", before, again["longest"])
+	}
+	// ... until the profile's memo is dropped (new play) or 5 min pass.
+	statsTimeNow = func() time.Time { return time.Now().Add(statsTimeMemoTTL + time.Second) }
+	t.Cleanup(func() { statsTimeNow = time.Now })
+	if later := getJSON(t, MeStreaksHandler, "/api/v1/me/stats/streaks?tz=Europe%2FParis&tzo=120"); later["longest"] == before {
+		t.Fatalf("memo outlived its TTL: %v", later["longest"])
+	}
+	statsTimeNow = time.Now
+	invalidateStatsTimeMemo("p-test")
+	statsTimeMu.Lock()
+	n := len(statsTimeMemo)
+	statsTimeMu.Unlock()
+	if n != 0 {
+		t.Fatalf("invalidate left %d entries", n)
 	}
 }

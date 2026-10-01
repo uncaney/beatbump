@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { clockSummary, decadeLabel, decadeShares, localDateKey, streakLabel, streakNeedsToday } from "./meStats";
+import {
+	clockSummary,
+	decadeLabel,
+	decadeShares,
+	localDateKey,
+	streakLabel,
+	streakNeedsToday,
+	tzQuery,
+} from "./meStats";
 
 describe("streakLabel", () => {
 	it("says the run and the record", () => {
@@ -61,5 +69,20 @@ describe("decades", () => {
 			{ decade: 2000, pct: 25 },
 		]);
 		expect(decadeShares([])).toEqual([]);
+	});
+});
+
+describe("tzQuery (L12-11)", () => {
+	it("sends the IANA zone with the offset as a fallback", () => {
+		expect(tzQuery("Europe/Paris", 120)).toBe("tz=Europe%2FParis&tzo=120");
+		expect(tzQuery("America/Argentina/Buenos_Aires", -180)).toBe("tz=America%2FArgentina%2FBuenos_Aires&tzo=-180");
+	});
+	it("falls back to the minutes form without a usable zone name", () => {
+		expect(tzQuery("", 60)).toBe("tz=60");
+		expect(tzQuery("bad zone?", 60)).toBe("tz=60");
+		expect(tzQuery("Europe/Paris", Number.NaN)).toBe("tz=Europe%2FParis&tzo=0");
+	});
+	it("defaults to the browser's zone", () => {
+		expect(tzQuery()).toMatch(/^tz=/);
 	});
 });

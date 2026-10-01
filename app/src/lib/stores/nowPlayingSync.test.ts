@@ -19,6 +19,10 @@ import {
 	makeRemoteRefresher,
 	shouldOfferRemote,
 	TAKE_GUARD_MS,
+	GESTURE_WINDOW_MS,
+	claimOnPlay,
+	makeGestureTracker,
+	wireGestureTracker,
 	takeRemoteResume,
 	takenAway,
 	takenToast,
@@ -33,6 +37,8 @@ import {
 	wireProfileChannel,
 } from "./nowPlayingSync";
 import { RESUME_KEY, buildResumeState } from "./resumeState";
+
+type DeviceInfoLike = { deviceId: string; deviceName: string };
 
 const track = (i: number, pad = 0) => ({
 	videoId: "0123456789" + (i % 10),
@@ -543,8 +549,100 @@ describe("Continuer ici (40A)", () => {
 		expect(takenAway(row(), "mac", now)).toEqual({ deviceId: "phone", deviceName: "iPhone de Camille" });
 		expect(takenAway(row(), "phone", now)).toBeNull();
 		expect(takenAway(row({ takenBy: undefined }), "mac", now)).toBeNull();
-		expect(takenAway(row({ takenAt: now - TAKE_GUARD_MS - 1 }), "mac", now)).toBeNull();
+		expect(takenAway(row({ takenAt: now - TAKE_GUARD_MS - 1, updatedAt: now - TAKE_GUARD_MS - 1 }), "mac", now)).toBeNull();
 		expect(takenAway(null, "mac", now)).toBeNull();
+	});
+	it("takenAway follows the server rule (L12-9): the taker's pushes extend the take", () => {
+		const now = 100_000_000;
+		const old = now - TAKE_GUARD_MS - 60_000;
+		const row = (over: Record<string, unknown> = {}) => ({
+			deviceId: "phone",
+			deviceName: "iPhone de Camille",
+			position: 1,
+			payload: {},
+			updatedAt: old,
+			takenBy: "phone",
+			takenAt: old,
+			...over,
+		});
+		// an old takenAt, but the taker pushed 15 s ago: still taken (server: max(takenAt, updatedAt))
+		expect(takenAway(row({ updatedAt: now - 15_000 }), "mac", now)).not.toBeNull();
+		// exactly at the guard: the server says not live
+		expect(takenAway(row({ updatedAt: now - TAKE_GUARD_MS }), "mac", now)).toBeNull();
+		expect(takenAway(row({ updatedAt: now - TAKE_GUARD_MS + 1 }), "mac", now)).not.toBeNull();
+	});
+	it("takenAway compares to the server clock, not this device's (L12-9)", () => {
+		const serverNow = 100_000_000;
+		const row = (over: Record<string, unknown> = {}) => ({
+			deviceId: "phone",
+			deviceName: "iPhone de Camille",
+			position: 1,
+			payload: {},
+			updatedAt: serverNow - 5_000,
+			takenBy: "phone",
+			takenAt: serverNow - 5_000,
+			now: serverNow,
+			...over,
+		});
+		// this device's clock is 20 min ahead: the server still says taken
+		expect(takenAway(row(), "mac", serverNow + 20 * 60_000)).not.toBeNull();
+		// this device's clock is 20 min behind: the server says the take is stale
+		expect(takenAway(row({ now: serverNow + TAKE_GUARD_MS + 5_000 }), "mac", serverNow - 20 * 60_000)).toBeNull();
+		// no server clock in the row: the local clock decides, as before
+		expect(takenAway(row({ now: undefined }), "mac", serverNow + TAKE_GUARD_MS)).toBeNull();
+		expect(takenAway(row({ now: 0 }), "mac", serverNow)).not.toBeNull();
+	});
+	it("only a play after a gesture takes the playback back (L12-9)", () => {
+		let t = 1_000_000;
+		let active = false;
+		const gesture = makeGestureTracker({ now: () => t, userActive: () => active });
+		const claim = vi.fn();
+		const lost = { deviceId: "phone", deviceName: "iPhone" };
+		const pusher = { lostTo: () => lost as DeviceInfoLike | null, claim };
+		// automatic play (Bluetooth reconnection): nothing claimed
+		expect(claimOnPlay(pusher, gesture)).toBe(false);
+		expect(claim).not.toHaveBeenCalled();
+		// a tap, then play within the window
+		gesture.mark();
+		t += GESTURE_WINDOW_MS;
+		expect(claimOnPlay(pusher, gesture)).toBe(true);
+		expect(claim).toHaveBeenCalledTimes(1);
+		// past the window: automatic again
+		t += 1;
+		expect(claimOnPlay(pusher, gesture)).toBe(false);
+		// the browser's transient activation counts as a gesture (MediaSession play after interaction)
+		active = true;
+		expect(claimOnPlay(pusher, gesture)).toBe(true);
+		active = false;
+		// nothing lost: never claims, whatever the gesture
+		gesture.mark();
+		expect(claimOnPlay({ lostTo: () => null, claim }, gesture)).toBe(false);
+		expect(claim).toHaveBeenCalledTimes(2);
+		// a throwing userActivation is not a gesture
+		const throwing = makeGestureTracker({
+			now: () => t,
+			userActive: () => {
+				throw new Error("no");
+			},
+		});
+		expect(claimOnPlay(pusher, throwing)).toBe(false);
+	});
+	it("wireGestureTracker marks pointerdown and keydown, and unwires", () => {
+		let t = 0;
+		const gesture = makeGestureTracker({ now: () => t });
+		const win = new EventTarget() as unknown as Window;
+		const unwire = wireGestureTracker(gesture, win);
+		expect(gesture.recent()).toBe(false);
+		win.dispatchEvent(new Event("pointerdown"));
+		expect(gesture.recent()).toBe(true);
+		t += GESTURE_WINDOW_MS + 1;
+		expect(gesture.recent()).toBe(false);
+		win.dispatchEvent(new Event("keydown"));
+		expect(gesture.recent()).toBe(true);
+		t += GESTURE_WINDOW_MS + 1;
+		unwire();
+		win.dispatchEvent(new Event("pointerdown"));
+		expect(gesture.recent()).toBe(false);
 	});
 	it("takenToast names the device in French", () => {
 		expect(takenToast("iPhone de Camille")).toBe("Lecture reprise sur iPhone de Camille");

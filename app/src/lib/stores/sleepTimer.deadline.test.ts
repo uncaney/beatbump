@@ -24,8 +24,8 @@ vi.mock("$lib/player", () => ({ AudioPlayer: player.AudioPlayer }));
 
 import { get } from "svelte/store";
 import {
+	TRACK_END_DEDUPE_MS,
 	_setVolumeReadOnlyForTest,
-	albumEndIndex,
 	cancelSleepTimer,
 	detectVolumeReadOnly,
 	extendDeadline,
@@ -36,10 +36,13 @@ import {
 	sleepFading,
 	sleepLabel,
 	sleepMode,
+	sleepQueueAction,
+	sleepQueueChanged,
 	sleepRemaining,
 	sleepTracksLeft,
 	startSleepTimer,
-	stopsAt,
+	trackEndStep,
+	type SleepDeadline,
 } from "./sleepTimer";
 
 const A = (id: string) => ({ videoId: id, album: { browseId: "MPREb_A", title: "Discovery" } });
@@ -50,40 +53,86 @@ describe("sleepDeadline", () => {
 	it("minutes: a wall-clock deadline", () => {
 		expect(sleepDeadline({ minutes: 15 }, { now, position: 2 })).toEqual({ at: "time", endsAt: now + 15 * 60_000 });
 	});
-	it("track: stop after the current index", () => {
-		expect(sleepDeadline("track", { now, position: 4 })).toEqual({ at: "trackEnd", stopAfter: 4 });
+	it("track: stop at the end of the playing track", () => {
+		expect(sleepDeadline("track", { now, position: 4 })).toEqual({ at: "trackEnd", mode: "track" });
 	});
-	it("tracks: the current track is the first of N", () => {
-		expect(sleepDeadline({ tracks: 3 }, { now, position: 4 })).toEqual({ at: "trackEnd", stopAfter: 6 });
-		expect(sleepDeadline({ tracks: 0 }, { now, position: 4 })).toEqual({ at: "trackEnd", stopAfter: 4 });
+	it("tracks: a counter of track ends, not a queue index", () => {
+		expect(sleepDeadline({ tracks: 3 }, { now, position: 4 })).toEqual({ at: "trackEnd", mode: "tracks", left: 3, lastEnd: "", lastAt: 0 });
+		expect(sleepDeadline({ tracks: 0 }, { now, position: 4 })).toMatchObject({ mode: "tracks", left: 1 });
 	});
-	it("album: last consecutive row of the current album", () => {
-		const mix = [B("b0"), A("a1"), A("a2"), A("a3"), B("b4"), A("a5")];
-		expect(sleepDeadline("album", { now, position: 1, mix })).toEqual({ at: "trackEnd", stopAfter: 3 });
-		expect(sleepDeadline("album", { now, position: 3, mix })).toEqual({ at: "trackEnd", stopAfter: 3 });
-		expect(sleepDeadline("album", { now, position: 0, mix })).toEqual({ at: "trackEnd", stopAfter: 0 });
+	it("album: remembers the album key (and the album context ids)", () => {
+		const mix = [B("b0"), A("a1"), A("a2")];
+		expect(sleepDeadline("album", { now, position: 1, mix })).toEqual({ at: "trackEnd", mode: "album", key: "id:MPREb_A", ids: [] });
+		const ctx = { kind: "album", ids: ["a1", "a2"] };
+		expect(sleepDeadline("album", { now, position: 1, mix, context: ctx })).toMatchObject({ ids: ["a1", "a2"] });
+		// a track outside the context keeps its own album only
+		expect(sleepDeadline("album", { now, position: 0, mix, context: ctx })).toMatchObject({ key: "id:MPREb_B", ids: [] });
+		// no album information: end of this track
+		expect(sleepDeadline("album", { now, position: 0, mix: [{ videoId: "1" }] })).toEqual({ at: "trackEnd", mode: "track" });
 	});
 });
 
-describe("albumEndIndex", () => {
-	it("album queue: the playback context's ids set the boundary", () => {
-		const mix = [{ videoId: "a1" }, { videoId: "a2" }, { videoId: "a3" }, { videoId: "x9" }];
-		const context = { kind: "album", ids: ["a1", "a2", "a3"] };
-		expect(albumEndIndex({ position: 0, mix, context })).toBe(2);
-		// a track outside the context ("Lire ensuite") falls back to its own album
-		expect(albumEndIndex({ position: 3, mix, context })).toBe(3);
+describe("trackEndStep", () => {
+	const tracks = (n: number): SleepDeadline => sleepDeadline({ tracks: n }, { now: 0, position: 0 });
+	it("'Dans 3 titres' counts ends whatever the queue does (L12-1)", () => {
+		let d: SleepDeadline | null = tracks(3);
+		// started at index 10 of a 30-track queue
+		let r = trackEndStep(d, { position: 10, mix: [], now: 1_000 });
+		expect(r.stop).toBe(false);
+		d = r.next;
+		// the queue is replaced by another album: position 0
+		r = trackEndStep(d, { position: 0, mix: [], now: 200_000 });
+		expect(r.stop).toBe(false);
+		d = r.next;
+		expect(d).toMatchObject({ left: 1 });
+		r = trackEndStep(d, { position: 1, mix: [], now: 400_000 });
+		expect(r).toEqual({ stop: true, next: null });
 	});
-	it("matches by album title when there is no browseId (slimmed offline rows)", () => {
-		const mix = [
-			{ videoId: "1", album: { text: "Moon Safari" } },
-			{ videoId: "2", album: { title: "moon safari" } },
-			{ videoId: "3", album: { text: "Talkie Walkie" } },
-		];
-		expect(albumEndIndex({ position: 0, mix })).toBe(1);
+	it("the same end reported twice counts once", () => {
+		const mix = [{ videoId: "x" }];
+		const r1 = trackEndStep(tracks(2), { position: 0, mix, now: 1_000 });
+		const r2 = trackEndStep(r1.next, { position: 0, mix, now: 1_000 + TRACK_END_DEDUPE_MS - 1 });
+		expect(r2).toEqual({ stop: false, next: r1.next });
+		// repeat-one: the same track ending again later is a new end
+		expect(trackEndStep(r1.next, { position: 0, mix, now: 1_000 + TRACK_END_DEDUPE_MS + 1 }).stop).toBe(true);
 	});
-	it("no album info: the current track", () => {
-		expect(albumEndIndex({ position: 1, mix: [{ videoId: "1" }, { videoId: "2" }, { videoId: "3" }] })).toBe(1);
-		expect(albumEndIndex({ position: 5, mix: [] })).toBe(5);
+	it("'Fin de l'album' stops when the next row leaves the album or the queue ends", () => {
+		const d = sleepDeadline("album", { now: 0, position: 0, mix: [A("a0")] });
+		const mix = [A("a0"), A("a1"), B("b2")];
+		expect(trackEndStep(d, { position: 0, mix, now: 0 }).stop).toBe(false);
+		expect(trackEndStep(d, { position: 1, mix, now: 0 }).stop).toBe(true);
+		expect(trackEndStep(d, { position: 0, mix: [A("a0")], now: 0 }).stop).toBe(true);
+	});
+	it("album after a shuffle: the live next row decides, not a stored index", () => {
+		const d = sleepDeadline("album", { now: 0, position: 0, mix: [A("a0"), A("a1"), A("a2"), B("b3")] });
+		// shuffled after the current index: B row moved up
+		expect(trackEndStep(d, { position: 0, mix: [A("a0"), B("b3"), A("a1"), A("a2")], now: 0 }).stop).toBe(true);
+		// a whole-album queue shuffled: keeps going until the album runs out
+		expect(trackEndStep(d, { position: 0, mix: [A("a0"), A("a2"), A("a1")], now: 0 }).stop).toBe(false);
+	});
+	it("album context ids: rows without album info still belong", () => {
+		const d = sleepDeadline("album", { now: 0, position: 0, mix: [{ videoId: "a1" }], context: { kind: "album", ids: ["a1", "a2"] } });
+		const mix = [{ videoId: "a1" }, { videoId: "a2" }, { videoId: "x9" }];
+		expect(trackEndStep(d, { position: 0, mix, now: 0 }).stop).toBe(false);
+		expect(trackEndStep(d, { position: 1, mix, now: 0 }).stop).toBe(true);
+	});
+	it("'track' always stops, a minute deadline never does", () => {
+		expect(trackEndStep({ at: "trackEnd", mode: "track" }, { position: 3, now: 0 }).stop).toBe(true);
+		expect(trackEndStep({ at: "time", endsAt: 0 }, { position: 3, now: 0 }).stop).toBe(false);
+		expect(trackEndStep(null, { position: 3, now: 0 }).stop).toBe(false);
+	});
+});
+
+describe("sleepQueueAction", () => {
+	const d = sleepDeadline("album", { now: 0, position: 0, mix: [A("a0")] });
+	it("keeps while the album plays, cancels once another album plays", () => {
+		expect(sleepQueueAction(d, { position: 4, mix: [B("b"), B("b"), B("b"), B("b"), A("a4")] })).toBe("keep");
+		expect(sleepQueueAction(d, { position: 0, mix: [B("b0"), B("b1")] })).toBe("cancel");
+	});
+	it("rows without album info and counters are kept", () => {
+		expect(sleepQueueAction(d, { position: 0, mix: [{ videoId: "z" }] })).toBe("keep");
+		expect(sleepQueueAction(d, { position: 0, mix: [] })).toBe("keep");
+		expect(sleepQueueAction(sleepDeadline({ tracks: 3 }, { now: 0, position: 0 }), { position: 0, mix: [B("b0")] })).toBe("keep");
 	});
 });
 
@@ -93,19 +142,8 @@ describe("extendDeadline (+10 min)", () => {
 	});
 	it("counts from now when the deadline passed, or replaces a track-end mode", () => {
 		expect(extendDeadline({ at: "time", endsAt: 500 }, 10, 1_000)).toEqual({ at: "time", endsAt: 601_000 });
-		expect(extendDeadline({ at: "trackEnd", stopAfter: 3 }, 10, 1_000)).toEqual({ at: "time", endsAt: 601_000 });
+		expect(extendDeadline({ at: "trackEnd", mode: "track" }, 10, 1_000)).toEqual({ at: "time", endsAt: 601_000 });
 		expect(extendDeadline(null, 10, 1_000)).toEqual({ at: "time", endsAt: 601_000 });
-	});
-});
-
-describe("stopsAt", () => {
-	it("stops once the position reaches the stop index", () => {
-		const d = { at: "trackEnd", stopAfter: 6 } as const;
-		expect(stopsAt(d, 4)).toBe(false);
-		expect(stopsAt(d, 6)).toBe(true);
-		expect(stopsAt(d, 7)).toBe(true);
-		expect(stopsAt({ at: "time", endsAt: 0 }, 9)).toBe(false);
-		expect(stopsAt(null, 9)).toBe(false);
 	});
 });
 
@@ -142,16 +180,39 @@ describe("runtime", () => {
 		expect(get(sleepLabel)).toBe("3 titres");
 		expect(shouldStopAtTrackEnd(2)).toBe(false);
 		expect(get(sleepTracksLeft)).toBe(2);
+		vi.advanceTimersByTime(60_000);
 		expect(shouldStopAtTrackEnd(3)).toBe(false);
 		expect(get(sleepLabel)).toBe("1 titre");
+		vi.advanceTimersByTime(60_000);
 		expect(shouldStopAtTrackEnd(4)).toBe(true);
 	});
 
+	it("'Dans 3 titres' started at index 10 survives a queue replacement (L12-1)", () => {
+		startSleepTimer("tracks", { position: 10, mix: [] });
+		expect(shouldStopAtTrackEnd(10)).toBe(false);
+		vi.advanceTimersByTime(60_000);
+		sleepQueueChanged({ position: 0, mix: [B("b0"), B("b1"), B("b2")] });
+		expect(get(sleepMode)).toBe("tracks");
+		expect(shouldStopAtTrackEnd(0)).toBe(false);
+		vi.advanceTimersByTime(60_000);
+		expect(shouldStopAtTrackEnd(1)).toBe(true);
+	});
+
 	it("'Fin de l'album' stops after the album's last queued track", () => {
-		startSleepTimer("album", { position: 1, mix: [B("b0"), A("a1"), A("a2"), B("b3")] });
+		const mix = [B("b0"), A("a1"), A("a2"), B("b3")];
+		startSleepTimer("album", { position: 1, mix });
 		expect(get(sleepLabel)).toBe("Fin de l'album");
-		expect(shouldStopAtTrackEnd(1)).toBe(false);
-		expect(shouldStopAtTrackEnd(2)).toBe(true);
+		expect(shouldStopAtTrackEnd(1, { mix })).toBe(false);
+		expect(shouldStopAtTrackEnd(2, { mix })).toBe(true);
+	});
+
+	it("'Fin de l'album' is cancelled when another album replaces the queue", () => {
+		startSleepTimer("album", { position: 0, mix: [A("a0"), A("a1")] });
+		sleepQueueChanged({ position: 0, mix: [A("a0"), A("a1"), A("a2")] });
+		expect(get(sleepMode)).toBe("album");
+		sleepQueueChanged({ position: 24, mix: Array.from({ length: 30 }, (_, i) => B(`b${i}`)) });
+		expect(get(sleepMode)).toBeNull();
+		expect(shouldStopAtTrackEnd(24)).toBe(false);
 	});
 
 	it("'À la fin du morceau' keeps stopping at whatever track ends", () => {

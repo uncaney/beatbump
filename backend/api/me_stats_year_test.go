@@ -127,7 +127,7 @@ func TestComputeYear(t *testing.T) {
 		ev("a", at(2026, 3, 2, 12)),
 		ev("c", at(2026, 12, 31, 23)), // UTC: December; UTC+2: 1 Jan 2027
 	}
-	y := computeYear(evs, rows, 2026, 0)
+	y := computeYear(evs, rows, 2026, fixedTZ(0))
 	if y.Plays != 5 || y.Minutes != 20 || y.DistinctAlbums != 3 || y.DistinctArtists != 3 {
 		t.Fatalf("totals: plays=%d minutes=%v albums=%d artists=%d", y.Plays, y.Minutes, y.DistinctAlbums, y.DistinctArtists)
 	}
@@ -144,11 +144,11 @@ func TestComputeYear(t *testing.T) {
 		t.Fatalf("new artists: %d %v", y.NewArtists, y.NewArtistNames)
 	}
 	// UTC+2: the 31 Dec 23:00 UTC play moves to 2027.
-	y2 := computeYear(evs, rows, 2026, 120)
+	y2 := computeYear(evs, rows, 2026, fixedTZ(120))
 	if y2.Plays != 4 || y2.Months[11] != 0 || y2.NewArtists != 1 {
 		t.Fatalf("tz edge: plays=%d dec=%v new=%d", y2.Plays, y2.Months[11], y2.NewArtists)
 	}
-	if e := computeYear(evs, rows, 2024, 0); e.Plays != 0 || e.TopArtist != nil || e.TopAlbum != nil || e.NewArtistNames == nil {
+	if e := computeYear(evs, rows, 2024, fixedTZ(0)); e.Plays != 0 || e.TopArtist != nil || e.TopAlbum != nil || e.NewArtistNames == nil {
 		t.Fatalf("empty year: %+v", e)
 	}
 }

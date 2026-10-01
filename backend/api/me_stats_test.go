@@ -33,6 +33,7 @@ func useTestDB(t *testing.T) {
 	}
 	db.DB = d
 	resetNeverPlayedMemo()
+	resetStatsTimeMemo()
 	t.Cleanup(func() { db.DB = prev; _ = sqlDB.Close() })
 }
 

@@ -58,6 +58,9 @@ type nowPlayingOut struct {
 	UpdatedAt  int64           `json:"updatedAt"`         // unix ms
 	TakenBy    string          `json:"takenBy,omitempty"` // 40A
 	TakenAt    int64           `json:"takenAt,omitempty"` // unix ms
+	// Now is the server clock at the answer (unix ms): the client compares
+	// TakenAt / UpdatedAt to it, never to its own clock (L12-9).
+	Now int64 `json:"now"`
 }
 
 func clip(s string, n int) string {
@@ -158,6 +161,7 @@ func MeNowPlayingPutHandler(c echo.Context) error {
 			"takenBy":    *holder.TakenBy,
 			"deviceName": holder.DeviceName,
 			"takenAt":    at,
+			"now":        now.UnixMilli(),
 		})
 	}
 	if err != nil {
@@ -184,6 +188,7 @@ func MeNowPlayingGetHandler(c echo.Context) error {
 		Position:   row.Position,
 		Payload:    json.RawMessage(row.Payload),
 		UpdatedAt:  row.UpdatedAt.UnixMilli(),
+		Now:        time.Now().UnixMilli(),
 	}
 	if row.TakenBy != nil && *row.TakenBy != "" {
 		out.TakenBy = *row.TakenBy
