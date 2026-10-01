@@ -161,6 +161,9 @@ func newServer() *echo.Echo {
 
 	// ST2 "A propos / Etat": library size + build version (no profile data).
 	e.GET("/api/v1/stats/library", api.LibraryStatsHandler)
+	// ST3: client error reports, in-memory ring of 500 (no profile data).
+	e.POST("/api/v1/client-log", api.ClientLogPostHandler)
+	e.GET("/api/v1/client-log", api.ClientLogGetHandler)
 
 	// Download & Settings
 	e.GET("/api/v1/download/playlist", api.DownloadPlaylistHandler)
