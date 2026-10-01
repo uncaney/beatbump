@@ -414,6 +414,7 @@
 										bind:open={openAlbums["a:" + album.key]}
 										on:play={(e) => start(e.detail.tracks, e.detail.index, { shuffle: e.detail.shuffle })}
 										on:remove={(e) => remove(e.detail)}
+										on:pin={(e) => pin(e.detail)}
 									/>
 								{/each}
 							</div>

@@ -11,7 +11,7 @@
 	export let number: number | undefined = undefined;
 	export let showArtist = true;
 
-	const dispatch = createEventDispatcher<{ play: any; remove: any }>();
+	const dispatch = createEventDispatcher<{ play: any; remove: any; pin: any }>();
 
 	$: thumb = thumbnailOf(track);
 	$: artist = artistName(track);

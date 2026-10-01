@@ -21,6 +21,7 @@
 	const dispatch = createEventDispatcher<{
 		play: { tracks: any[]; index: number; shuffle?: boolean };
 		remove: any;
+		pin: any;
 	}>();
 
 	let imgBroken = false;
