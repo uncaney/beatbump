@@ -83,5 +83,12 @@ COPY --from=frontend-builder /app/build /app/build
 # https://docs.docker.com/engine/reference/builder/#expose
 EXPOSE 8080
 
+# c43c B7-14: this image has no shell and no HTTP client (scratch + ffmpeg),
+# so the container healthcheck is the binary itself (`/app/beat-server
+# -healthcheck`, see healthcheck.go). agents/promote.sh reads this label and
+# writes the compose healthcheck block only when it is "1": an older binary
+# would ignore the argument and start a second server instead.
+LABEL fr.ekaii.ytm.healthcheck="1"
+
 # Run
 ENTRYPOINT ["/app/beat-server"]

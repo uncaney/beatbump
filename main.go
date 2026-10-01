@@ -5,6 +5,7 @@ import (
 	"beatbump-server/backend/api/downloader"
 	"beatbump-server/backend/db"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +18,12 @@ import (
 var version = "dev"
 
 func main() {
+	// c43c B7-14: `beat-server -healthcheck` is the container healthcheck
+	// (FROM scratch image: no wget / curl). Decided before any side effect:
+	// no DB, no worker, no listener (healthcheck.go).
+	if isHealthcheckArg(os.Args) {
+		runHealthcheck()
+	}
 	db.InitDB()
 	downloader.StartWorker()
 	// c41b B6-19: first duplicate-albums scan in the background, so mixes
