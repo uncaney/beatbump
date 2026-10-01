@@ -4,11 +4,13 @@
 	import { queryParams } from "$lib/utils";
 	import { debounce } from "$lib/utils/sync";
 	import { settings } from "$stores/settings";
-	import { createEventDispatcher, onMount } from "svelte";
+	import { createEventDispatcher, onDestroy, onMount } from "svelte";
 	import { fullscreenStore } from "../Player/channel";
 	import { searchFilter } from "./options";
 	import { APIClient } from "$lib/api";
 	import { browser } from "$app/environment";
+	import SessionListService from "$lib/stores/list";
+	import type { Item } from "$lib/types";
 
 	export let type: "inline";
 	export let query = "";
@@ -20,6 +22,23 @@
 	let recentSearches: string[] = [];
 	let showRecentSearches = false;
 
+	// Local-first suggestions (R1): the owned library (Meili, typo tolerant) is
+	// queried from the first letter and rendered ABOVE the YouTube suggestions.
+	const LOCAL_SONGS_MAX = 5;
+	const LOCAL_ARTISTS_MAX = 3;
+	const LOCAL_DEBOUNCE_MS = 150;
+	let localSongs: Item[] = [];
+	let localArtists: Item[] = [];
+	let localTimer: ReturnType<typeof setTimeout> | null = null;
+	let localAbort: AbortController | null = null;
+	let localSeq = 0;
+
+	$: localRows = [
+		...localSongs.slice(0, LOCAL_SONGS_MAX),
+		...localArtists.slice(0, LOCAL_ARTISTS_MAX),
+	];
+	$: hasLocal = localRows.length > 0;
+
 	onMount(() => {
 		if (browser) {
 			const stored = localStorage.getItem("recentSearches");
@@ -28,6 +47,10 @@
 			}
 			showRecentSearches = true;
 		}
+	});
+
+	onDestroy(() => {
+		cancelLocal();
 	});
 
 	function addToRecentSearches(searchQuery: string) {
@@ -42,6 +65,7 @@
 
 	async function handleSubmit() {
 		if (!query.length) return;
+		cancelLocal();
 		addToRecentSearches(query);
 		dispatch("submitted", { submitted: true, filter, query });
 		fullscreenStore.set("closed");
@@ -51,6 +75,126 @@
 		});
 		let url = `/search/${encodeURIComponent(query)}?${params}`;
 		goto(url);
+	}
+
+	/** Cancels the pending debounce and any in-flight local fetch. */
+	function cancelLocal() {
+		if (localTimer) {
+			clearTimeout(localTimer);
+			localTimer = null;
+		}
+		if (localAbort) {
+			localAbort.abort();
+			localAbort = null;
+		}
+		localSeq++;
+	}
+
+	/** Debounced (150 ms) local lookup; a newer keystroke cancels the older one. */
+	function scheduleLocal() {
+		cancelLocal();
+		const q = query.trim();
+		if (!q) {
+			localSongs = [];
+			localArtists = [];
+			return;
+		}
+		showRecentSearches = false;
+		localTimer = setTimeout(() => {
+			localTimer = null;
+			fetchLocal(q);
+		}, LOCAL_DEBOUNCE_MS);
+	}
+
+	async function fetchLocal(q: string) {
+		const controller = new AbortController();
+		localAbort = controller;
+		const seq = ++localSeq;
+		const enc = encodeURIComponent(q);
+		try {
+			const [songsRes, artistsRes] = await Promise.all([
+				APIClient.fetch(`/api/v1/local/songs?q=${enc}&limit=${LOCAL_SONGS_MAX}`, {
+					signal: controller.signal,
+				}),
+				APIClient.fetch(
+					`/api/v1/local/artists?q=${enc}&limit=${LOCAL_ARTISTS_MAX}`,
+					{ signal: controller.signal },
+				),
+			]);
+			const [songs, artists] = await Promise.all([
+				songsRes.ok ? songsRes.json() : { items: [] },
+				artistsRes.ok ? artistsRes.json() : { items: [] },
+			]);
+			// A newer keystroke (or a submit) superseded this lookup: drop it.
+			if (seq !== localSeq) return;
+			localSongs = Array.isArray(songs?.items) ? songs.items : [];
+			localArtists = Array.isArray(artists?.items) ? artists.items : [];
+		} catch (e) {
+			if ((e as Error)?.name === "AbortError") return;
+			if (seq !== localSeq) return;
+			localSongs = [];
+			localArtists = [];
+		} finally {
+			if (localAbort === controller) localAbort = null;
+		}
+	}
+
+	function localArtistName(item: Item): string {
+		return (
+			item?.artistInfo?.artist?.[0]?.text ?? item?.subtitle?.[0]?.text ?? ""
+		);
+	}
+
+	function localArtistBrowseId(item: Item): string {
+		return (item as any)?.endpoint?.browseId ?? (item as any)?.browseId ?? "";
+	}
+
+	/** Closes the overlay (Nav listens to `submitted`) without navigating. */
+	function closeOverlay() {
+		cancelLocal();
+		dispatch("submitted", { submitted: false, filter, query });
+	}
+
+	/**
+	 * Plays an owned track straight from the overlay: one-item "local" mix
+	 * (next/previous stay local, no continuation fetch), no /search navigation.
+	 */
+	async function playLocalSong(item: Item) {
+		const lid = item?.videoId;
+		if (!lid) return;
+		closeOverlay();
+		await SessionListService.initAutoMixSession({
+			videoId: lid,
+			clickedItem: item,
+			mode: "local",
+			localItems: [item],
+		});
+	}
+
+	function openLocalArtist(item: Item) {
+		const id = localArtistBrowseId(item);
+		if (!id) return;
+		closeOverlay();
+		goto(`/artist/${id}`);
+	}
+
+	function activateLocal(item: Item, kind: "song" | "artist") {
+		if (kind === "artist") openLocalArtist(item);
+		else playLocalSong(item);
+	}
+
+	/** Group headers are not selectable: walk past them. */
+	function skipHeaders(
+		el: Element | null | undefined,
+		dir: "next" | "prev",
+	): HTMLElement | null {
+		let cur = (el ?? null) as HTMLElement | null;
+		while (cur && cur.classList.contains("group-header")) {
+			cur = (
+				dir === "next" ? cur.nextElementSibling : cur.previousElementSibling
+			) as HTMLElement | null;
+		}
+		return cur;
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
@@ -64,10 +208,13 @@
 			)
 				return;
 
-			const next =
+			const next = skipHeaders(
 				target.nextElementSibling?.parentElement === listbox
 					? (target.nextElementSibling as HTMLElement)
-					: (listbox.querySelector("li") as HTMLLIElement);
+					: (listbox.querySelector("li") as HTMLLIElement),
+				"next",
+			);
+			if (!next) return;
 
 			next.tabIndex = 0;
 			target.tabIndex = -1;
@@ -83,16 +230,21 @@
 			)
 				return;
 
-			const next =
-				target.previousElementSibling?.parentElement === listbox
-					? (target.previousElementSibling as HTMLElement)
-					: target.parentElement?.previousElementSibling?.classList.contains(
-							"nav-item",
-					  ) === true
+			const input =
+				target.parentElement?.previousElementSibling?.classList.contains(
+					"nav-item",
+				) === true
 					? (target.parentElement?.previousElementSibling?.querySelector<HTMLInputElement>(
 							"input",
 					  ) as HTMLInputElement)
-					: (listbox.querySelector("li") as HTMLLIElement);
+					: null;
+
+			const next =
+				target.previousElementSibling?.parentElement === listbox
+					? skipHeaders(target.previousElementSibling as HTMLElement, "prev") ??
+					  input
+					: input ?? (listbox.querySelector("li") as HTMLLIElement);
+			if (!next) return;
 
 			next.tabIndex = 0;
 			target.tabIndex = -1;
@@ -152,6 +304,7 @@
 				autocorrect="off"
 				type="search"
 				placeholder="Search"
+				on:input={scheduleLocal}
 				on:keyup={(e) => {
 					if (e.shiftKey && e.ctrlKey && e.repeat) return;
 					typeahead();
@@ -163,7 +316,7 @@
 			/>
 		</div>
 	</div>
-	{#if (results.length > 0 && !showRecentSearches) || (showRecentSearches && recentSearches.length > 0)}
+	{#if ((results.length > 0 || hasLocal) && !showRecentSearches) || (showRecentSearches && recentSearches.length > 0)}
 		<ul
 			role="listbox"
 			id="suggestions"
@@ -171,7 +324,7 @@
 			class="suggestions"
 		>
 			{#if showRecentSearches}
-				<li class="recent-searches-header">Recent Searches</li>
+				<li class="recent-searches-header group-header">Recent Searches</li>
 				{#each recentSearches as recentQuery}
 					<li
 						tabindex="0"
@@ -195,6 +348,45 @@
 					</li>
 				{/each}
 			{:else}
+				{#if hasLocal}
+					<li
+						class="recent-searches-header group-header"
+						data-testid="local-suggestions-header">Dans ta bibliothèque</li
+					>
+					{#each localRows as item, i (item.videoId ?? localArtistBrowseId(item) ?? i)}
+						{@const kind = i < Math.min(localSongs.length, LOCAL_SONGS_MAX) ? "song" : "artist"}
+						<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+						<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+						<li
+							tabindex="0"
+							class="local-row"
+							data-testid="local-suggestion"
+							data-kind={kind}
+							data-lid={kind === "song" ? item.videoId : localArtistBrowseId(item)}
+							on:click={() => activateLocal(item, kind)}
+							on:keydown={(e) => {
+								if (e.key === "Enter" || e.key === " ") {
+									e.preventDefault();
+									e.stopPropagation();
+									activateLocal(item, kind);
+								}
+							}}
+						>
+							<Icon
+								name={kind === "song" ? "play" : "artist"}
+								size="1rem"
+								style="color: var(--text-secondary);"
+							/>
+							<span class="local-text">
+								<span class="local-title">{item.title}</span>
+								{#if kind === "song" && localArtistName(item)}
+									<span class="local-artist">{localArtistName(item)}</span>
+								{/if}
+							</span>
+							<span class="local-badge">bibliothèque</span>
+						</li>
+					{/each}
+				{/if}
 				<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 				{#each results as result (result.id)}
 					<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
@@ -322,6 +514,52 @@
 
 			&:hover {
 				background: rgb(255 255 255 / 10%);
+			}
+		}
+
+		li.group-header {
+			cursor: default;
+
+			&:hover {
+				background: var(--top-bg);
+			}
+		}
+
+		li.local-row {
+			padding-block: 0.7em;
+
+			.local-text {
+				display: flex;
+				flex-direction: column;
+				min-width: 0;
+				flex: 1 1 auto;
+				line-height: 1.2;
+			}
+
+			.local-title {
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.local-artist {
+				font-size: 0.75em;
+				color: var(--text-secondary);
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			.local-badge {
+				flex: 0 0 auto;
+				font-size: 0.6em;
+				font-weight: 600;
+				letter-spacing: 0.02em;
+				text-transform: uppercase;
+				padding: 0.2em 0.6em;
+				border-radius: 999px;
+				color: var(--text-secondary);
+				border: 1px solid hsl(0deg 0% 66.7% / 35%);
 			}
 		}
 	}
