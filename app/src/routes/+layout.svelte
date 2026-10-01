@@ -34,13 +34,18 @@
     // Settings > Application can offer the install button.
     if (browser) initPwa();
 
-    // Create a writable store to hold data
+    // K1 (audit perf v2): the Wrapper keys its content on `key`. It used to
+    // start as '' and get the pathname in onMount, which recreated the whole
+    // page once after its first mount (every entry page's onMount ran twice:
+    // me/mix, me/stats/recent, local/albums, me/nowplaying each x2 per GET /).
+    // Initialised synchronously, the first value is already the final one.
+    const ua = browser ? navigator.userAgent : "";
     const layoutData = writable({
-        key: '',
-        page: '',
-        origin: '',
-        iOS: false,
-        Android: false,
+        key: browser ? location.pathname : '',
+        page: browser ? location.pathname : '',
+        origin: browser ? location.origin : '',
+        iOS: ua.includes('iPhone') || ua.includes('iPad'),
+        Android: ua.includes('Android'),
     });
 
     $: ({key} = $layoutData);
@@ -140,17 +145,6 @@
         };
     });
     onMount(() => {
-
-        const url = new URL(window.location.href);
-
-        layoutData.set({
-            key: url.pathname,
-            page: url.pathname,
-            origin: url.origin,
-            iOS: navigator.userAgent.includes('iPhone') || navigator.userAgent.includes('iPad'),
-            Android: navigator.userAgent.includes('Android'),
-        });
-
         // C1 exact resume: the saved queue comes back as it was, PAUSED at the
         // saved position (no YouTube radio, works offline for a local queue).
         // `lastTrack` alone (state saved before C1) keeps the old behaviour.
