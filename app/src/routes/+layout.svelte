@@ -235,6 +235,7 @@ left: 0; background: var(--base-bg); font-size: 1.1rem; display: flex; flex-dire
 			scrollTop = !e.detail ? 100 : 0;
 		}}
         {key}
+        animate={!$page.error}
         bind:main
     >
         <slot/>
