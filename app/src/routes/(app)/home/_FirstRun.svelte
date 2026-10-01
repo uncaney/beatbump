@@ -136,6 +136,10 @@
 				hasSavedQueue = false;
 			}
 			if (hasSavedQueue) return;
+			// PF3-6: the memoised whoami first (no request once known); the
+			// history check then shares PersonalRows' me/stats/recent call
+			// (getRecent memo) instead of issuing its own.
+			const anon = await isAnonymousProfile();
 			let recentCount = 0;
 			try {
 				const r = await getRecent(1);
@@ -145,7 +149,7 @@
 				recentCount = 0;
 			}
 			if (recentCount > 0) return;
-			anonymous = await isAnonymousProfile();
+			anonymous = anon;
 			visible = true;
 		})();
 		// A play starting (this session, from any source) means the "first
