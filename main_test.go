@@ -114,3 +114,35 @@ func TestHTMLAnswersAreNoCache(t *testing.T) {
 		}
 	}
 }
+
+// L9-4: X-Forwarded-For is only honoured from a trusted proxy (loopback or
+// private network: Traefik on the docker network); X-Real-IP never.
+func TestRealIPTrustsOnlyPrivateProxies(t *testing.T) {
+	e := newServer()
+	var got string
+	e.GET("/__realip", func(c echo.Context) error { got = c.RealIP(); return c.NoContent(http.StatusNoContent) })
+	for _, tc := range []struct {
+		remote, xff, xri, want string
+	}{
+		{"172.18.0.5:41000", "198.51.100.7", "", "198.51.100.7"},           // via Traefik
+		{"172.18.0.5:41000", "10.0.0.9, 198.51.100.7", "", "198.51.100.7"}, // rightmost untrusted hop
+		{"203.0.113.5:5555", "10.0.0.42", "", "203.0.113.5"},               // direct client, spoofed XFF
+		{"203.0.113.5:5555", "", "10.0.0.43", "203.0.113.5"},               // direct client, spoofed X-Real-IP
+		{"172.18.0.5:41000", "", "198.51.100.8", "172.18.0.5"},             // X-Real-IP ignored
+		{"127.0.0.1:41000", "198.51.100.9", "", "198.51.100.9"},            // local harness proxy
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/__realip", nil)
+		req.RemoteAddr = tc.remote
+		if tc.xff != "" {
+			req.Header.Set("X-Forwarded-For", tc.xff)
+		}
+		if tc.xri != "" {
+			req.Header.Set("X-Real-IP", tc.xri)
+		}
+		got = ""
+		e.ServeHTTP(httptest.NewRecorder(), req)
+		if got != tc.want {
+			t.Errorf("remote %s xff %q xri %q: RealIP %q, want %q", tc.remote, tc.xff, tc.xri, got, tc.want)
+		}
+	}
+}
