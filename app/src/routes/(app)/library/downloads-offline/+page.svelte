@@ -41,6 +41,8 @@
 	import { notify } from "$lib/utils";
 	import { formatCountFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
+	import { keepJobs, keepSummary, startKeepJob } from "$lib/offlineBatch";
+	import { failedDownloads, failedLine, failedSnapshot } from "$lib/offlineFailed";
 	import CollectionNav from "../_CollectionNav.svelte";
 	import SpaceCard from "./_SpaceCard.svelte";
 
@@ -232,6 +234,28 @@
 		}
 	}
 
+	// UX9: keep / pack downloads that failed ($lib/offlineFailed, fed by every
+	// keep job); "Réessayer" re-queues them as one keep job (keepOffline), the
+	// ones that land leave the list, the ones that fail again stay.
+	const RETRY_KEY = "retry:failed";
+	$: failedCount = $failedDownloads.length;
+	$: retryJob = $keepJobs.get(RETRY_KEY);
+	$: retryText = retryJob
+		? `Nouvel essai : ${retryJob.progress?.ready ?? 0}/${retryJob.progress?.total ?? failedCount} prêts`
+		: failedLine(failedCount);
+	function retryFailed() {
+		if (retryJob || !online) return;
+		const items = failedSnapshot();
+		if (!items.length) return;
+		void startKeepJob(RETRY_KEY, () => items, {
+			onDone: (r) => {
+				const s = keepSummary(r);
+				notify(s.text, s.type);
+				refresh();
+			},
+		});
+	}
+
 	// Toast when the SW refuses a pin because pinned bytes would exceed the quota (G7).
 	const QUOTA_MSG = "Quota atteint, augmente-le dans Réglages";
 
@@ -356,6 +380,27 @@
 	     used to sit in Settings > Offline); one size selector for both. Always
 	     rendered: a pack is the way to fill an empty cache before a trip. -->
 	<SpaceCard on:changed={refresh} />
+	{#if failedCount || retryJob}
+		<p
+			class="failed-bar"
+			data-testid="failed-downloads"
+			data-count={failedCount}
+			role="status"
+			aria-live="polite"
+		>
+			<span>{retryText}</span>
+			<button
+				type="button"
+				class="btn-reset btn-secondary"
+				data-testid="retry-failed"
+				disabled={!!retryJob || !online}
+				title={online ? "Relancer le téléchargement des morceaux en échec" : "Hors connexion : disponible avec le réseau"}
+				on:click={retryFailed}
+			>
+				Réessayer
+			</button>
+		</p>
+	{/if}
 	{#if tracks.length === 0}
 		<!-- Empty state with one action (audit 2.4): the explanation lives here
 		     instead of the .note above so it is not said twice on an empty page. -->
@@ -671,6 +716,19 @@
 	}
 	.recache-bar {
 		margin: 0 0 1rem;
+	}
+	.failed-bar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem 0.75rem;
+		margin: 0 0 1rem;
+		padding: 0.4rem 0.75rem;
+		border-radius: 0.5rem;
+		border: 1px solid rgba(220, 53, 69, 0.45);
+		background: rgba(220, 53, 69, 0.08);
+		color: #ffb3b3;
+		font-size: var(--text-secondary-size);
 	}
 	.status {
 		color: $accent;
