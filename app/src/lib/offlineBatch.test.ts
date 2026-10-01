@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 // as a parameter, so the module is stubbed out here.
 vi.mock("$lib/offline", () => ({
 	cacheTrackOffline: vi.fn(),
+	deviceOffline: () => false,
 	downloadForOffline: vi.fn(),
 	isStableAudioUrl: () => false,
 	listCachedAudio: vi.fn(),
@@ -11,7 +12,7 @@ vi.mock("$lib/offline", () => ({
 	requestPersistentStorage: vi.fn(),
 }));
 
-import { cancelKeepJob, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
+import { cancelKeepJob, findKeepJob, jobMatchesKey, keepAliases, keepItemOfflineWith, keepMenuKey, KEEP_OFFLINE_MSG, KEEP_RUNNING_MSG, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
 import { get } from "svelte/store";
 
 const MB = 1024 * 1024;
@@ -174,5 +175,70 @@ describe("keepJobs (I12)", () => {
 		cancelKeepJob("/album/y");
 		const r = await p;
 		expect(r?.cancelled).toBe(true);
+	});
+});
+
+describe("menu Garder hors-ligne (I13)", () => {
+	const album = { title: "Discovery", playlistId: "OLAK5uy_abc", endpoint: { pageType: "MUSIC_PAGE_TYPE_ALBUM", browseId: "MPREb_disc" } };
+	const menuDeps = (over: Partial<Parameters<typeof keepItemOfflineWith>[1]> = {}) => {
+		const toasts: Array<{ msg: string; action?: { label: string; run: () => void } }> = [];
+		const fetched: string[] = [];
+		const { deps } = fakeDeps({});
+		return {
+			toasts,
+			fetched,
+			deps: {
+				offline: () => false,
+				notify: (msg: string, _t: "success" | "error", action?: { label: string; run: () => void }) => void toasts.push({ msg, action }),
+				fetchQueue: async (id: string) => {
+					fetched.push(id);
+					return [tr("a"), tr("b"), tr("c")];
+				},
+				keep: deps,
+				...over,
+			},
+		};
+	};
+	it("offline: says so and starts nothing", async () => {
+		const m = menuDeps({ offline: () => true });
+		expect(await keepItemOfflineWith(album, m.deps)).toBeNull();
+		expect(m.toasts.map((t) => t.msg)).toEqual([KEEP_OFFLINE_MSG]);
+		expect(m.fetched).toEqual([]);
+		expect(get(keepJobs).size).toBe(0);
+	});
+	it("a second menu click on the same album joins the running batch (déjà en cours)", async () => {
+		const m = menuDeps();
+		const p1 = keepItemOfflineWith(album, m.deps);
+		const p2 = keepItemOfflineWith({ ...album }, m.deps);
+		expect(m.toasts.some((t) => t.msg === KEEP_RUNNING_MSG && t.action?.label === "Annuler")).toBe(true);
+		const r = await p1;
+		expect(await p2).toBe(r);
+		expect(r?.ready).toBe(3);
+		expect(m.fetched).toEqual(["OLAK5uy_abc"]);
+	});
+	it("the start toast cancels the batch", async () => {
+		const m = menuDeps();
+		const p = keepItemOfflineWith(album, m.deps);
+		await new Promise((r) => setTimeout(r, 0));
+		const start = m.toasts.find((t) => /morceaux : téléchargement/.test(t.msg));
+		expect(start?.action?.label).toBe("Annuler");
+		start!.action!.run();
+		const r = await p;
+		expect(r?.cancelled).toBe(true);
+		expect(m.toasts.at(-1)?.msg).toMatch(/^Annulé/);
+	});
+	it("matches the album page button key and the menu key", () => {
+		expect(keepAliases(album)).toEqual(["MPREb_disc", "OLAK5uy_abc"]);
+		expect(keepMenuKey(album)).toBe("keep:MPREb_disc");
+		const menuJob = { key: "keep:MPREb_disc", aliases: keepAliases(album) };
+		expect(jobMatchesKey(menuJob, "/release?type=album&id=MPREb_disc")).toBe(true);
+		expect(jobMatchesKey(menuJob, "/release?id=MPREb_discX")).toBe(false);
+		const pageJob = { key: "/release?id=MPREb_disc", aliases: [] };
+		expect(jobMatchesKey(pageJob, "keep:MPREb_disc", keepAliases(album))).toBe(true);
+		expect(jobMatchesKey(pageJob, "keep:other", ["other"])).toBe(false);
+		const jobs = new Map([[pageJob.key, { ...pageJob, progress: null, ctrl: new AbortController(), done: Promise.resolve(null) }]]);
+		expect(findKeepJob(jobs, "keep:MPREb_disc", keepAliases(album))?.key).toBe("/release?id=MPREb_disc");
+		expect(keepAliases(tr("solo"))).toEqual(["solo"]);
+		expect(keepAliases(tr("solo", { endpoint: { browseId: "MPREb_disc" } }))).toEqual(["solo"]);
 	});
 });

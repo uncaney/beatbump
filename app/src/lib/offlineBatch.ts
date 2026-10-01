@@ -8,6 +8,7 @@
 // text (`keepSummary`), both covered by offlineBatch.test.ts.
 import {
 	cacheTrackOffline,
+	deviceOffline,
 	downloadForOffline,
 	isStableAudioUrl,
 	listCachedAudio,
@@ -189,33 +190,121 @@ export function isCollectionItem(item: any): boolean {
 	return !!item && !!item.playlistId && /ALBUM|PLAYLIST|SINGLE/.test(String(item?.endpoint?.pageType ?? ""));
 }
 
+/** I13: toast for a menu "Garder hors-ligne" while the device is offline. */
+export const KEEP_OFFLINE_MSG = "Indisponible hors connexion";
+/** I13: toast when the same album / playlist / track is already being kept. */
+export const KEEP_RUNNING_MSG = "Garder hors-ligne : déjà en cours";
+
+/** I13: ids naming a menu item's source (album browseId, playlistId, videoId). */
+export function keepAliases(item: any): string[] {
+	if (!item || typeof item !== "object") return [];
+	// A track row is its own source (its endpoint may name its album).
+	const out = isCollectionItem(item) ? [item?.endpoint?.browseId, item?.browseId, item?.playlistId] : [item?.videoId];
+	return out.filter((x, i, a): x is string => typeof x === "string" && x.length > 0 && a.indexOf(x) === i);
+}
+
+/** I13: job key of a menu "Garder hors-ligne" (one per source). */
+export function keepMenuKey(item: any): string {
+	return "keep:" + (keepAliases(item)[0] ?? "");
+}
+
+/** I13: whether `key` (a page URL or a menu key) names the source id `a`. */
+function keyNames(key: string, a: string): boolean {
+	if (!key || !a) return false;
+	if (key === "keep:" + a) return true;
+	for (const sep of ["=", "/"]) {
+		let i = key.indexOf(sep + a);
+		while (i !== -1) {
+			const end = key.charAt(i + 1 + a.length);
+			if (end === "" || end === "&" || end === "/" || end === "#") return true;
+			i = key.indexOf(sep + a, i + 1);
+		}
+	}
+	return false;
+}
+
+/**
+ * I13: whether job `j` keeps the same source as `key` / `aliases`: same key,
+ * the key names one of the job's aliases, or the job key (a page URL such as
+ * /release?id=MPREb…) names one of `aliases`.
+ */
+export function jobMatchesKey(j: Pick<KeepJob, "key" | "aliases">, key: string, aliases: string[] = []): boolean {
+	if (key && j.key === key) return true;
+	if ((j.aliases ?? []).some((a) => keyNames(key, a))) return true;
+	return aliases.some((a) => keyNames(j.key, a));
+}
+
+/** I13: the running job for `key` (exact, else by alias), if any. */
+export function findKeepJob(jobs: Map<string, KeepJob>, key: string, aliases: string[] = []): KeepJob | undefined {
+	const exact = key ? jobs.get(key) : undefined;
+	if (exact) return exact;
+	for (const j of jobs.values()) if (jobMatchesKey(j, key, aliases)) return j;
+	return undefined;
+}
+
+export type KeepMenuDeps = {
+	offline: () => boolean;
+	notify: (msg: string, type: "success" | "error", action?: { label: string; run: () => void }) => void;
+	/** Tracks of an album / playlist card (get_queue.json). */
+	fetchQueue: (playlistId: string) => Promise<any[]>;
+	keep?: KeepDeps;
+};
+
+/**
+ * Menu ⋮ "Garder hors-ligne" core (I13): offline → "Indisponible hors
+ * connexion", nothing starts; the same source already running → "déjà en
+ * cours" (+ Annuler) and the running batch is joined; otherwise a keep job
+ * (I12 store, so the page button and the toast can cancel it) whose toasts
+ * carry an "Annuler" action. Ends with the batch toast.
+ */
+export async function keepItemOfflineWith(item: any, deps: KeepMenuDeps): Promise<KeepResult | null> {
+	const cancelAction = (key: string) => ({ label: "Annuler", run: () => cancelKeepJob(key) });
+	if (deps.offline()) {
+		deps.notify(KEEP_OFFLINE_MSG, "error");
+		return null;
+	}
+	const key = keepMenuKey(item);
+	const running = findKeepJob(get(_keepJobs), key, keepAliases(item));
+	if (running) {
+		deps.notify(KEEP_RUNNING_MSG, "success", cancelAction(running.key));
+		return running.done;
+	}
+	return startKeepJob(
+		key,
+		async () => {
+			let tracks: any[] = [item];
+			if (isCollectionItem(item)) tracks = await deps.fetchQueue(item.playlistId).catch(() => []);
+			const n = keepableTracks(tracks).length;
+			if (n > 1) deps.notify(`${n} morceaux : téléchargement hors-ligne en cours…`, "success", cancelAction(key));
+			return tracks;
+		},
+		{
+			aliases: keepAliases(item),
+			deps: deps.keep,
+			onDone: (r) => {
+				const s = keepSummary(r);
+				deps.notify(s.text, s.type);
+			},
+		},
+	);
+}
+
 /**
  * Menu ⋮ "Garder hors-ligne" (dropdowns.config "Download offline"): one track,
  * or every track of an album / playlist card. Ends with the batch toast.
  */
 export async function keepItemOffline(item: any): Promise<KeepResult | null> {
 	const { notify } = await import("$lib/utils");
-	let tracks: any[] = [item];
-	if (isCollectionItem(item)) {
-		try {
+	return keepItemOfflineWith(item, {
+		offline: deviceOffline,
+		notify: (msg, type, action) => notify(msg, type, action),
+		fetchQueue: async (playlistId) => {
 			const { APIClient } = await import("$lib/api");
-			const res = await APIClient.fetch(`/api/v1/get_queue.json?playlistId=` + encodeURIComponent(item.playlistId));
+			const res = await APIClient.fetch(`/api/v1/get_queue.json?playlistId=` + encodeURIComponent(playlistId));
 			const data = await res.json();
-			tracks = Array.isArray(data) ? data : [];
-		} catch {
-			tracks = [];
-		}
-	}
-	if (!keepableTracks(tracks).length) {
-		notify("Aucun morceau à garder hors-ligne", "error");
-		return null;
-	}
-	const n = keepableTracks(tracks).length;
-	if (n > 1) notify(`${n} morceaux : téléchargement hors-ligne en cours…`, "success");
-	const r = await keepOffline(tracks);
-	const s = keepSummary(r);
-	notify(s.text, s.type);
-	return r;
+			return Array.isArray(data) ? data : [];
+		},
+	});
 }
 
 /**
@@ -235,7 +324,14 @@ export function rowOfflineState(videoId: string | null | undefined, cached: Set<
 /* A reopened page finds its job and shows its progress.                    */
 /* ------------------------------------------------------------------------ */
 
-export type KeepJob = { key: string; progress: KeepProgress | null; ctrl: AbortController; done: Promise<KeepResult | null> };
+export type KeepJob = {
+	key: string;
+	progress: KeepProgress | null;
+	ctrl: AbortController;
+	done: Promise<KeepResult | null>;
+	/** I13: source ids (album / playlist / track) so another entry point finds this job. */
+	aliases?: string[];
+};
 const _keepJobs = writable<Map<string, KeepJob>>(new Map());
 export const keepJobs: Readable<Map<string, KeepJob>> = { subscribe: _keepJobs.subscribe };
 
@@ -260,14 +356,14 @@ function patchJob(key: string, fn: (j: KeepJob) => KeepJob | null): void {
 export function startKeepJob(
 	key: string,
 	getTracks: () => Promise<any[]> | any[],
-	opts: { onDone?: (r: KeepResult) => void; deps?: KeepDeps } = {},
+	opts: { onDone?: (r: KeepResult) => void; deps?: KeepDeps; aliases?: string[] } = {},
 ): Promise<KeepResult | null> {
 	const running = get(_keepJobs).get(key);
 	if (running) return running.done;
 	const ctrl = new AbortController();
 	let resolveDone: (r: KeepResult | null) => void = () => {};
 	const done = new Promise<KeepResult | null>((r) => (resolveDone = r));
-	_keepJobs.update((m) => new Map(m).set(key, { key, progress: null, ctrl, done }));
+	_keepJobs.update((m) => new Map(m).set(key, { key, progress: null, ctrl, done, aliases: opts.aliases ?? [] }));
 	void (async () => {
 		let result: KeepResult | null = null;
 		try {
