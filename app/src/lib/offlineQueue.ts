@@ -465,7 +465,12 @@ export function toPlayableItems(tracks: OfflineTrack[], confirmed?: Map<string, 
 export async function play(
 	items: OfflineTrack[],
 	startIndex = 0,
-	opts: { shuffle?: boolean; confirmed?: Map<string, string> } = {},
+	opts: {
+		shuffle?: boolean;
+		confirmed?: Map<string, string>;
+		/** Source shown by the player (P2); default "Hors-ligne". */
+		context?: import("$lib/stores/list/playbackContext").PlaybackContextInput;
+	} = {},
 ): Promise<boolean> {
 	let confirmed = opts.confirmed;
 	if (!confirmed) {
@@ -496,7 +501,11 @@ export async function play(
 		import("$lib/stores/list"),
 		import("$lib/player"),
 	]);
-	await SessionListService.setMix(list, "local");
+	await SessionListService.setMix(
+		list,
+		"local",
+		opts.context ?? { kind: "offline", title: "Hors-ligne", href: "/library/downloads-offline" },
+	);
 	await SessionListService.updatePosition(idx);
 	const t = list[idx];
 	await getSrc(t.videoId, t.playlistId, undefined, true);

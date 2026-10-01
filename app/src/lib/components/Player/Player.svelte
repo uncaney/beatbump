@@ -135,6 +135,7 @@
 	import SessionListService from "$stores/list/sessionList";
 	import { SITE_ORIGIN_URL } from "$stores/url";
 	import PlayerButton from "./PlayerButton.svelte";
+	import { describeContext } from "$lib/stores/list/playbackContext";
 	const { paused, volume: AudioPlayerVolume } = AudioPlayer;
 
 	$: volume = $AudioPlayerVolume;
@@ -287,6 +288,12 @@
 		"/": focusSearch,
 		"?": () => showShortcutsSheet.update((v) => !v),
 	};
+
+	$: miniContext = describeContext(
+		$list.context ?? null,
+		$list.mix,
+		$list.position,
+	);
 </script>
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -334,6 +341,12 @@
 				{:else}
 					<span class="now-playing-artist"
 						>{$currentTrack?.artistInfo?.artist?.[0]?.text}</span
+					>
+				{/if}
+				{#if miniContext}
+					<span
+						class="now-playing-context"
+						data-testid="miniplayer-context">{miniContext.label}</span
 					>
 				{/if}
 			</div>
@@ -632,6 +645,18 @@
 		@media screen and (max-width: 575.75px) {
 			display: none !important;
 			visibility: hidden !important;
+		}
+	}
+	// P2 context subtitle: desktop mini-bar only (no room on mobile).
+	.now-playing-context {
+		display: none;
+		font-size: 11px;
+		color: rgba(255, 255, 255, 0.55);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		@media screen and (min-width: 720px) {
+			display: block;
 		}
 	}
 	.now-playing-artist {

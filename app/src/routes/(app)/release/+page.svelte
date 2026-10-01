@@ -57,8 +57,16 @@
 
 	onMount(() => {
 		const release = listItemPageContext.add("playlist");
-		return release;
+		return () => {
+			release?.();
+			list.offerContext(null, null);
+		};
 	});
+	// P2: a session started on this album (Play Album or a track row) shows
+	// "Album : <title> · n/N" with a link back here.
+	$: list.offerContext(releaseInfo?.playlistId, releaseInfo?.title
+		? { kind: "album", title: releaseInfo.title, href: `/release?id=${encodeURIComponent(id ?? "")}` }
+		: null);
 
 	CTX_ListItem.set({
 		parentPlaylistId: data?.items?.releaseInfo?.playlistId,

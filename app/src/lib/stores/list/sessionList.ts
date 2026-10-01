@@ -29,6 +29,13 @@ import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
 import { applyMixOp, planInsert, planReorder, removeAt } from "./queueOps";
+import {
+    describeContext,
+    makeContext,
+    type PlaybackContext,
+    type PlaybackContextInput,
+} from "./playbackContext";
+import { continueAfterQueue, pickLocalContinuation, relatedQuery } from "./localContinuation";
 import { fetchNext } from "./utils.list";
 import { APIClient } from "$lib/api";
 import { SERVER_DOMAIN } from "../../../env";
@@ -74,7 +81,11 @@ const VALID_KEYS = [
     "related",
     "mix",
     "position",
+    "context",
 ] as const;
+
+/** Playlist ids compare without YouTube's "VL" browse prefix. */
+const normPlaylistId = (id: string) => (id.startsWith("VL") ? id.slice(2) : id);
 
 export class ListService {
     private isLocal = false;
@@ -93,7 +104,15 @@ export class ListService {
             mix: [],
             position: 0,
             related: null,
+            context: null,
         });
+
+    /**
+     * Context offered by the page on screen (P2): the release page registers
+     * its album here, and a playlist / automix session started on that
+     * playlist id (Play Album button or a track row) takes it as its context.
+     */
+    private _offeredContext: { playlistId: string; ctx: PlaybackContextInput } | null = null;
 
     constructor() {
         this._$.set(this._state);
@@ -429,6 +448,7 @@ export class ListService {
                         mix: ["append", data.results],
                     },
                 );
+                this.setContext(makeContext(this.offeredContextFor(playlistId), state.mix));
                 await tick();
                 const selectedVideoId = videoId ||
                     item?.videoId ||
@@ -523,6 +543,7 @@ export class ListService {
                     mix: ["set", data.results],
                     currentMixType: "playlist",
                 });
+                this.setContext(makeContext(this.offeredContextFor(playlistId), state.mix));
 
                 const playbackIndex =
                     index === 0
@@ -570,7 +591,12 @@ export class ListService {
         const nextTrack = this._$.value.mix[this._$.value.position + 1];
 
         if (!nextTrack) {
-            if (this.isLocal) return; // Don't fetch more for local
+            // Local queue: never YouTube's continuation. C4: carry on with
+            // related library tracks (setting ON by default), else stop.
+            if (this.isLocal) {
+                await this.continueLocalQueue();
+                return;
+            }
             const currentTrack = this._$.value.mix[this._$.value.position];
             Logger.dev("No next track", { nextSrc, _$: this._$ });
             await this.getSessionContinuation(
@@ -637,6 +663,44 @@ export class ListService {
 
             syncTabs.updatePosition(position);
         }
+    }
+
+    /**
+     * C4: the local queue ran out. Append up to 10 owned-library tracks
+     * related to the last row (`local/related`, deduped against the queue,
+     * max 2 per album, through applyMixOp) and play the first one. Resolves
+     * false (playback stops, as before) when the setting is off, offline, or
+     * nothing new comes back.
+     */
+    private async continueLocalQueue(): Promise<boolean> {
+        if (!get(continueAfterQueue)) return false;
+        const before = this._state.mix;
+        const qs = relatedQuery(before[before.length - 1]);
+        if (!qs) return false;
+        let candidates: unknown = [];
+        try {
+            const res = await fetch(`/api/v1/local/related?${qs}`, { credentials: "same-origin" });
+            if (!res.ok) return false;
+            const body = await res.json();
+            candidates = body?.items;
+        } catch {
+            return false;
+        }
+        const picked = pickLocalContinuation(this._state.mix, candidates).map(
+            (t) => ({ ...t, IS_LOCAL: true }) as unknown as Item,
+        );
+        if (!picked.length) return false;
+        await this.#sanitizeAndUpdate("APPLY", {
+            mix: ["append", picked] satisfies MixListAppendOp,
+        });
+        notify("Suite : dans ta bibliothèque", "success");
+        let position = await this.updatePosition("next");
+        if (position >= this._state.mix.length) position = this._state.position;
+        const track = this._state.mix[position];
+        await getSrc(track?.videoId, track?.playlistId, undefined, true);
+        syncTabs.updateSessionList(this._state);
+        syncTabs.updatePosition(position);
+        return true;
     }
 
     /**
@@ -993,7 +1057,78 @@ export class ListService {
         return true;
     }
 
-    public async setMix(mix: Item[], type?: "auto" | "playlist" | "local") {
+    /**
+     * C1 exact resume: put a saved queue back as it was (rows, cursor, type,
+     * context) without fetching anything; the caller loads the track.
+     * Resolves to the restored cursor.
+     */
+    public async restoreSession(saved: {
+        mix: Item[];
+        position: number;
+        type: "auto" | "playlist" | "local" | null;
+        context?: PlaybackContext | null;
+        currentMixId?: string;
+        visitorData?: string;
+    }): Promise<number> {
+        this.invalidatePrefetch();
+        const mix = Array.isArray(saved.mix) ? saved.mix.slice() : [];
+        const position = Math.min(Math.max(0, saved.position | 0), Math.max(0, mix.length - 1));
+        await this.lockedSet({
+            clickTrackingParams: "",
+            continuation: "",
+            currentMixId: saved.currentMixId ?? "",
+            currentMixType: saved.type ?? null,
+            visitorData: saved.visitorData ?? "",
+            mix,
+            position,
+            related: null,
+            context: saved.context ?? null,
+        });
+        this.isLocal = saved.type === "local";
+        this.schedulePrefetch(position);
+        return position;
+    }
+
+    /** The page on screen offers its playlist as the context of a session started on it (P2). */
+    public offerContext(playlistId: string | undefined | null, ctx: PlaybackContextInput | null) {
+        this._offeredContext = playlistId && ctx ? { playlistId: normPlaylistId(playlistId), ctx } : null;
+    }
+
+    private offeredContextFor(playlistId: string | undefined): PlaybackContextInput | null {
+        const o = this._offeredContext;
+        return o && playlistId && normPlaylistId(playlistId) === o.playlistId ? o.ctx : null;
+    }
+
+    private setContext(context: PlaybackContext | null) {
+        this._$.update((s) => ({ ...s, context }));
+    }
+
+    /**
+     * "Revenir à l'album" (P2): a track outside the context ("Lire ensuite")
+     * is playing; jump to the next context track in the queue.
+     */
+    public async returnToContext(): Promise<boolean> {
+        const view = describeContext(this._state.context ?? null, this._state.mix, this._state.position);
+        if (!view || view.returnIndex < 0) return false;
+        const position = await this.updatePosition(view.returnIndex);
+        const track = this._state.mix[position];
+        await getSrc(track?.videoId, track?.playlistId, undefined, true);
+        if (groupSession?.initialized && groupSession?.hasActiveSession) {
+            updateGroupPosition(undefined, position);
+        }
+        syncTabs.updatePosition(position);
+        return true;
+    }
+
+    /**
+     * Replace the queue. `context` (P2) names the source shown by the player
+     * ("Album : Discovery · 4/14", link back to it); omitted = plain queue.
+     */
+    public async setMix(
+        mix: Item[],
+        type?: "auto" | "playlist" | "local",
+        context?: PlaybackContextInput | PlaybackContext | null,
+    ) {
         this.invalidatePrefetch();
         const guard = await mutex.do(async () => {
             await tick();
@@ -1002,6 +1137,7 @@ export class ListService {
                     ...this._state,
                     mix: ["set", mix],
                     currentMixType: type,
+                    context: makeContext(context ?? null, mix),
                 }),
                     resolve(this._state);
             });
@@ -1259,6 +1395,7 @@ export class ListService {
             visitorData: "",
             position: 0,
             related: null,
+            context: null,
         });
         return this._state;
     }

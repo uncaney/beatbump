@@ -23,6 +23,7 @@
     import {syncTabs} from "$lib/tabSync.js";
     import {Logger, notify} from "$lib/utils";
     import {SessionListService} from "$stores/list/sessionList";
+    import {restoreResumeState, startResumePersistence} from "$lib/stores/resumeState";
     import {onDestroy, onMount} from "svelte";
     import {get, writable} from "svelte/store";
 
@@ -116,6 +117,9 @@
         if (main) main.scrollTo({top: 0});
     });
 
+    let stopResumePersistence: (() => void) | undefined;
+    onDestroy(() => stopResumePersistence?.());
+
     let scrollTop = 0;
     // Offline banner: the service worker answers API calls with {"offline":true}
     // when the network is gone, which leaves pages empty without explanation.
@@ -143,23 +147,26 @@
             Android: navigator.userAgent.includes('Android'),
         });
 
-        try {
-            if (
-                $settings["playback"]["Remember Last Track"] &&
-                localStorage["lastTrack"]
-            ) {
-                const track = JSON.parse(
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    localStorage.getItem("lastTrack")! as string,
-                ) as unknown as typeof $currentTrack;
+        // C1 exact resume: the saved queue comes back as it was, PAUSED at the
+        // saved position (no YouTube radio, works offline for a local queue).
+        // `lastTrack` alone (state saved before C1) keeps the old behaviour.
+        const remember = () => get(settings)?.playback?.["Remember Last Track"] === true;
+        stopResumePersistence = startResumePersistence(remember);
+        if (remember()) {
+            void restoreResumeState({autoplay: false})
+                .then((restored) => {
+                    if (restored || !localStorage["lastTrack"]) return;
+                    const track = JSON.parse(
+                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                        localStorage.getItem("lastTrack")! as string,
+                    ) as unknown as typeof $currentTrack;
 
-                SessionListService.setTrackWillPlayNext(track, 0);
-                SessionListService.getMoreLikeThis({
-                    playlistId: track?.playlistId ?? track?.autoMixList,
-                });
-            }
-        } catch (err) {
-            Logger.err(err);
+                    SessionListService.setTrackWillPlayNext(track, 0);
+                    SessionListService.getMoreLikeThis({
+                        playlistId: track?.playlistId ?? track?.autoMixList,
+                    });
+                })
+                .catch((err) => Logger.err(err));
         }
         syncTabs.connect();
 

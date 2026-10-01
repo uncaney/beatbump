@@ -2,6 +2,7 @@ import type { Item } from "$lib/types";
 import type { Nullable } from "$lib/types/utilities";
 import type { ResponseBody } from "$lib/utils/utils";
 import type { Writable } from "svelte/store";
+import type { PlaybackContext, PlaybackContextInput } from "./playbackContext";
 
 export interface ISessionListProvider {
 	clickTrackingParams: Nullable<string>;
@@ -19,6 +20,8 @@ export interface ISessionListProvider {
 		};
 	} | null;
 	visitorData: null | string;
+	/** Source of the queue (P2), null for a plain queue. */
+	context?: PlaybackContext | null;
 }
 
 export interface ISessionListService {
@@ -81,7 +84,11 @@ export interface ISessionListService {
 	reorder(mix: Item[]): boolean;
 	/** "Vider la file": keep only the current track */
 	clearQueue(): Promise<boolean>;
-	setMix(mix: Item[], type?: "auto" | "playlist" | "local"): void;
+	setMix(
+		mix: Item[],
+		type?: "auto" | "playlist" | "local",
+		context?: PlaybackContextInput | PlaybackContext | null,
+	): void;
 	/** Inserts the item (or the tracks it expands to) at key + 1; true when inserted */
 	setTrackWillPlayNext(item: Item, key: number): Promise<boolean>;
 	/** "Lire ensuite": right after the current track */
