@@ -247,3 +247,32 @@ func TestLocalDuplicatesMeiliDownNotMemoised(t *testing.T) {
 		t.Fatalf("an empty scan must not be memoised: %+v", out)
 	}
 }
+
+func TestLocalDuplicatesByKey(t *testing.T) {
+	s := &dupStub{albums: []map[string]interface{}{
+		dupDoc("lb-000000000001", "Linkin Park", "Meteora (Bonus Edition)", 2, "2003", "ytm", 50),
+		dupDoc("lb-000000000002", "Linkin Park", "Meteora", 13, "2003", "lidarr", 40),
+		dupDoc("lb-000000000003", "Boston", "Don’t Look Back", 8, "1978", "lidarr", 30),
+		dupDoc("lb-000000000004", "Boston", "Don't Look Back", 1, "1978", "soulseek", 20),
+	}}
+	startDupStub(t, s)
+	all, _ := getDuplicates(t, "")
+	if all.Total != 2 {
+		t.Fatalf("want 2 groups: %+v", all)
+	}
+	key := all.Groups[1].Key
+	one, raw := getDuplicates(t, "?key="+key)
+	if one.Total != 1 || len(one.Groups) != 1 || one.Groups[0].Key != key || !strings.Contains(raw, `"group":{`) {
+		t.Fatalf("by key: %s", raw)
+	}
+	if one.Groups[0].Suggested != all.Groups[1].Suggested {
+		t.Errorf("by key suggests %s, list suggests %s", one.Groups[0].Suggested, all.Groups[1].Suggested)
+	}
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/local/duplicates?key=dk-000000000000", nil)
+	rec := httptest.NewRecorder()
+	LocalDuplicatesHandler(e.NewContext(req, rec))
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"groups":[]`) || !strings.Contains(rec.Body.String(), `"total":0`) {
+		t.Errorf("unknown key: %d %s", rec.Code, rec.Body.String())
+	}
+}

@@ -332,10 +332,28 @@ func resetDuplicateMemo() {
 // albums[0] is always the suggested copy (more tracks, then lossless / higher
 // qualityScore, then newest). An empty library or no duplicate answers
 // {"groups": [], "total": 0} (never null). Read only: nothing is deleted.
+//
+//	?key=dk-…            one group: {"group": {...}, "groups": [{...}],
+//	                     "total": 1}; an unknown key answers 404
+//	                     {"error": "not_found", "group": null, "groups": [],
+//	                     "total": 0}. Keys are stable while the copies keep
+//	                     their tags (sha1 of the normalised pair); a
+//	                     sameTracks=1 split adds a "-1", "-2" suffix.
+//
+// Harness contract: `total` is always a number and `groups` always an array,
+// so a check can read `.groups[0].key` and fetch it back with ?key=.
 func LocalDuplicatesHandler(c echo.Context) error {
 	groups := duplicateGroups()
 	if c.QueryParam("sameTracks") == "1" {
 		groups = splitByTrackCount(groups)
+	}
+	if key := strings.TrimSpace(c.QueryParam("key")); key != "" {
+		for _, g := range groups {
+			if g.Key == key {
+				return c.JSON(http.StatusOK, map[string]interface{}{"group": g, "groups": []dupGroup{g}, "total": 1})
+			}
+		}
+		return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "not_found", "group": nil, "groups": []dupGroup{}, "total": 0})
 	}
 	off, lim := 0, dupDefaultLimit
 	if v, err := strconv.Atoi(c.QueryParam("offset")); err == nil && v > 0 {
