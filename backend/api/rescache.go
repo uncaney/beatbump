@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"container/list"
+	"context"
 	"net/http"
 	"os"
 	"sort"
@@ -21,6 +22,10 @@ import (
 // Only 200 responses are stored. Key = path + sorted query string. Entries are
 // capped (LRU eviction) and bounded in size. Disabled with YTM_API_CACHE=0.
 // Cached routes answer X-Ytm-Cache: HIT|MISS|BYPASS.
+//
+// CacheResponseSWR adds stale-while-revalidate (audit PF3-2): an expired entry
+// is kept for a grace window and served at once with X-Ytm-Cache: STALE while
+// one background refresh per key (singleflight) replaces it.
 
 const (
 	resCacheMaxEntries = 500
@@ -32,6 +37,7 @@ type resCacheEntry struct {
 	body        []byte
 	contentType string
 	expires     time.Time
+	staleUntil  time.Time // >= expires; the entry may be served STALE until then
 	elem        *list.Element
 }
 
@@ -41,40 +47,63 @@ type responseCache struct {
 	lru     *list.List // front = most recently used
 	max     int
 	now     func() time.Time
+
+	refreshing map[string]struct{} // keys with a background refresh in flight
+	bg         sync.WaitGroup      // background refreshes (tests wait on it)
 }
 
 func newResponseCache(max int) *responseCache {
-	return &responseCache{entries: map[string]*resCacheEntry{}, lru: list.New(), max: max, now: time.Now}
+	return &responseCache{entries: map[string]*resCacheEntry{}, lru: list.New(), max: max, now: time.Now, refreshing: map[string]struct{}{}}
 }
 
+// get returns a fresh entry only.
 func (rc *responseCache) get(key string) (*resCacheEntry, bool) {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	e, ok := rc.entries[key]
-	if !ok {
+	e, fresh, ok := rc.lookup(key)
+	if !ok || !fresh {
 		return nil, false
 	}
-	if rc.now().After(e.expires) {
-		rc.lru.Remove(e.elem)
-		delete(rc.entries, key)
-		return nil, false
-	}
-	rc.lru.MoveToFront(e.elem)
 	return e, true
 }
 
+// lookup returns the entry if it is fresh or still inside its grace window
+// (fresh=false). Entries past the grace window are evicted.
+func (rc *responseCache) lookup(key string) (e *resCacheEntry, fresh bool, ok bool) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	e, ok = rc.entries[key]
+	if !ok {
+		return nil, false, false
+	}
+	now := rc.now()
+	if now.After(e.staleUntil) {
+		rc.lru.Remove(e.elem)
+		delete(rc.entries, key)
+		return nil, false, false
+	}
+	rc.lru.MoveToFront(e.elem)
+	return e, !now.After(e.expires), true
+}
+
 func (rc *responseCache) set(key string, body []byte, contentType string, ttl time.Duration) {
+	rc.setWithGrace(key, body, contentType, ttl, 0)
+}
+
+func (rc *responseCache) setWithGrace(key string, body []byte, contentType string, ttl, grace time.Duration) {
 	if len(body) > resCacheMaxBody || ttl <= 0 {
 		return
 	}
+	if grace < 0 {
+		grace = 0
+	}
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
+	expires := rc.now().Add(ttl)
 	if e, ok := rc.entries[key]; ok {
-		e.body, e.contentType, e.expires = body, contentType, rc.now().Add(ttl)
+		e.body, e.contentType, e.expires, e.staleUntil = body, contentType, expires, expires.Add(grace)
 		rc.lru.MoveToFront(e.elem)
 		return
 	}
-	e := &resCacheEntry{key: key, body: body, contentType: contentType, expires: rc.now().Add(ttl)}
+	e := &resCacheEntry{key: key, body: body, contentType: contentType, expires: expires, staleUntil: expires.Add(grace)}
 	e.elem = rc.lru.PushFront(e)
 	rc.entries[key] = e
 	for rc.lru.Len() > rc.max {
@@ -82,6 +111,23 @@ func (rc *responseCache) set(key string, body []byte, contentType string, ttl ti
 		rc.lru.Remove(last)
 		delete(rc.entries, last.Value.(*resCacheEntry).key)
 	}
+}
+
+// beginRefresh claims the single background refresh slot for key.
+func (rc *responseCache) beginRefresh(key string) bool {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if _, busy := rc.refreshing[key]; busy {
+		return false
+	}
+	rc.refreshing[key] = struct{}{}
+	return true
+}
+
+func (rc *responseCache) endRefresh(key string) {
+	rc.mu.Lock()
+	delete(rc.refreshing, key)
+	rc.mu.Unlock()
 }
 
 func (rc *responseCache) len() int {
@@ -182,6 +228,74 @@ func LocalRelatedCached(ttl time.Duration) echo.HandlerFunc {
 }
 
 func cacheResponseWith(rc *responseCache, ttl time.Duration, next echo.HandlerFunc) echo.HandlerFunc {
+	return cacheResponseSWRWith(rc, ttl, 0, next)
+}
+
+// CacheResponseSWR is CacheResponse with stale-while-revalidate: once ttl has
+// passed the entry is still served (X-Ytm-Cache: STALE) for up to grace while
+// a single background refresh per key re-runs the handler.
+func CacheResponseSWR(ttl, grace time.Duration, next echo.HandlerFunc) echo.HandlerFunc {
+	return cacheResponseSWRWith(apiResponseCache, ttl, grace, next)
+}
+
+// swrRefreshTimeout bounds one background refresh.
+const swrRefreshTimeout = 30 * time.Second
+
+// bufferWriter is a minimal http.ResponseWriter for background refreshes.
+type bufferWriter struct {
+	header http.Header
+	status int
+	buf    bytes.Buffer
+}
+
+func (w *bufferWriter) Header() http.Header { return w.header }
+func (w *bufferWriter) WriteHeader(code int) {
+	if w.status == 0 {
+		w.status = code
+	}
+}
+func (w *bufferWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	if w.buf.Len()+len(p) <= resCacheMaxBody {
+		w.buf.Write(p)
+	}
+	return len(p), nil
+}
+
+// refreshInBackground re-runs next for the request behind c, detached from
+// the client connection, and stores a 200 answer. At most one per key.
+func refreshInBackground(rc *responseCache, key string, c echo.Context, ttl, grace time.Duration, next echo.HandlerFunc) {
+	if !rc.beginRefresh(key) {
+		return
+	}
+	req := c.Request()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(req.Context()), swrRefreshTimeout)
+	r2 := req.Clone(ctx)
+	e := c.Echo()
+	if e == nil {
+		e = echo.New()
+	}
+	path, names, values := c.Path(), append([]string(nil), c.ParamNames()...), append([]string(nil), c.ParamValues()...)
+	rc.bg.Add(1)
+	go func() {
+		defer rc.bg.Done()
+		defer rc.endRefresh(key)
+		defer cancel()
+		bw := &bufferWriter{header: http.Header{}}
+		c2 := e.NewContext(r2, bw)
+		c2.SetPath(path)
+		c2.SetParamNames(names...)
+		c2.SetParamValues(values...)
+		if err := next(c2); err != nil || bw.status != http.StatusOK || bw.buf.Len() == 0 {
+			return // keep serving the stale entry until its grace runs out
+		}
+		rc.setWithGrace(key, append([]byte(nil), bw.buf.Bytes()...), bw.header.Get(echo.HeaderContentType), ttl, grace)
+	}()
+}
+
+func cacheResponseSWRWith(rc *responseCache, ttl, grace time.Duration, next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		req := c.Request()
 		if !responseCacheEnabled() || req.Method != http.MethodGet {
@@ -189,9 +303,14 @@ func cacheResponseWith(rc *responseCache, ttl time.Duration, next echo.HandlerFu
 			return next(c)
 		}
 		key := responseCacheKey(req)
-		if e, ok := rc.get(key); ok {
+		if e, fresh, ok := rc.lookup(key); ok {
 			h := c.Response().Header()
-			h.Set("X-Ytm-Cache", "HIT")
+			if fresh {
+				h.Set("X-Ytm-Cache", "HIT")
+			} else {
+				h.Set("X-Ytm-Cache", "STALE")
+				refreshInBackground(rc, key, c, ttl, grace, next)
+			}
 			if e.contentType != "" {
 				h.Set(echo.HeaderContentType, e.contentType)
 			}
@@ -202,7 +321,7 @@ func cacheResponseWith(rc *responseCache, ttl time.Duration, next echo.HandlerFu
 		c.Response().Writer = cw
 		err := next(c)
 		if err == nil && cw.status == http.StatusOK && cw.buf.Len() > 0 {
-			rc.set(key, append([]byte(nil), cw.buf.Bytes()...), c.Response().Header().Get(echo.HeaderContentType), ttl)
+			rc.setWithGrace(key, append([]byte(nil), cw.buf.Bytes()...), c.Response().Header().Get(echo.HeaderContentType), ttl, grace)
 		}
 		return err
 	}
