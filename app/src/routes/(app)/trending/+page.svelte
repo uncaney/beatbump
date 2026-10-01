@@ -96,10 +96,18 @@
 	a small {
 		$color: rgb(175 175 175);
 
-		font-size: 0.95rem;
+		/* Same "See All" as the Carousel header (audit v5 TOP 7): normal caps at
+		   13px in a 28px box, not 7px-tall petite caps. */
+		display: inline-flex;
+		align-items: center;
+		box-sizing: border-box;
+		min-height: 28px;
+		padding: 0.25rem 0;
+		font-size: max(0.8125rem, 13px);
 		font-weight: 700;
-		font-variant-caps: all-petite-caps;
-		letter-spacing: 0.05rem;
+		font-variant-caps: normal;
+		text-transform: none;
+		letter-spacing: 0;
 		transition: ease-in color 75ms;
 		color: $color;
 

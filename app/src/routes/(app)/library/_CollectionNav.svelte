@@ -4,13 +4,31 @@
 
 	export let active = "";
 	let nav: HTMLElement;
-	// Phones: the bar scrolls horizontally (one row), so bring the active tab
-	// into view on load when it sits past the right edge.
+	// Phones: the bar scrolls horizontally (one row). Centre the active chip on
+	// load (audit v5 TOP 9: Hors-ligne / Account opened on a half-cut chip) and
+	// fade whichever edge still has chips beyond it.
+	let fadeStart = false;
+	let fadeEnd = false;
+	const updateFades = () => {
+		if (!nav) return;
+		const max = nav.scrollWidth - nav.clientWidth;
+		fadeStart = max > 1 && nav.scrollLeft > 1;
+		fadeEnd = max > 1 && nav.scrollLeft < max - 1;
+	};
 	onMount(() => {
 		const el = nav?.querySelector<HTMLElement>("a.active");
-		if (!el || !nav || nav.scrollWidth <= nav.clientWidth) return;
-		const left = el.getBoundingClientRect().left - nav.getBoundingClientRect().left + nav.scrollLeft;
-		if (left + el.offsetWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, left - 16);
+		if (el && nav && nav.scrollWidth > nav.clientWidth) {
+			// scrollLeft, not scrollIntoView: never scroll the page vertically.
+			const left =
+				el.getBoundingClientRect().left -
+				nav.getBoundingClientRect().left +
+				nav.scrollLeft;
+			nav.scrollLeft = Math.max(0, left - (nav.clientWidth - el.offsetWidth) / 2);
+		}
+		updateFades();
+		const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateFades) : undefined;
+		ro?.observe(nav);
+		return () => ro?.disconnect();
 	});
 	const tabs = [
 		{ key: "for-you", label: "For You", href: "/library/for-you" },
@@ -30,7 +48,10 @@
 
 <nav
 	class="collnav"
+	class:fade-start={fadeStart}
+	class:fade-end={fadeEnd}
 	bind:this={nav}
+	on:scroll={updateFades}
 >
 	{#each tabs as t}
 		<a
@@ -88,6 +109,33 @@
 		}
 		.collnav::-webkit-scrollbar {
 			display: none;
+		}
+		/* Edge fades (same idea as the home context chips): 24px on each side
+		   that still has chips past it (audit v5 TOP 9). */
+		.collnav.fade-start,
+		.collnav.fade-end {
+			--fade-l: 0px;
+			--fade-r: 0px;
+			-webkit-mask-image: linear-gradient(
+				to right,
+				transparent 0,
+				#000 var(--fade-l),
+				#000 calc(100% - var(--fade-r)),
+				transparent 100%
+			);
+			mask-image: linear-gradient(
+				to right,
+				transparent 0,
+				#000 var(--fade-l),
+				#000 calc(100% - var(--fade-r)),
+				transparent 100%
+			);
+		}
+		.collnav.fade-start {
+			--fade-l: 24px;
+		}
+		.collnav.fade-end {
+			--fade-r: 24px;
 		}
 		a {
 			flex: 0 0 auto;

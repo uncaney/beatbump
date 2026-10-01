@@ -87,6 +87,19 @@
 	justify-content: center;
 overflow:hidden;
 }
+/* Artist-link tap box (audit v5 TOP 4): the 26px span box sticks 6px above
+   and below the subtitle text, but every `overflow: hidden` ancestor
+   (.metadata, .column, .artists) cut the hit-test at the text line, so the
+   real target stayed ~17px. Clip horizontally only on the wrappers (keeps
+   the ellipsis width) and give .artists a 6px block padding cancelled by a
+   negative margin, so its clip box covers the span box without moving text. */
+@supports (overflow: clip) {
+	.metadata,
+	.column {
+		overflow-x: clip;
+		overflow-y: visible;
+	}
+}
 
 .artists {
 	font-family: "Commissioner Variable", sans-serif;
@@ -96,6 +109,12 @@ overflow:hidden;
 	-webkit-box-orient: vertical;
 	line-clamp: 2;
 	overflow: hidden;
+	padding-block: 6px;
+	margin-block: -6px;
+	/* The padding box would show the top of a clamped 3rd line in the bottom
+	   6px: paint only the content box (masks do not change hit-testing). */
+	-webkit-mask: linear-gradient(#000 0 0) content-box;
+	mask: linear-gradient(#000 0 0) content-box;
 	> a,
 	span {
 		color: rgb(212, 212, 212);
@@ -155,22 +174,25 @@ overflow:hidden;
 	}
 }
 
-/* Touch screens have no hover: show a permanent 40px round play badge on the
+/* Touch screens have no hover: show a permanent round play badge on the
    row thumbnail (audit 2.5) so a tap on the row reads as "play". Pure CSS,
-   pointer-events none: the tap still lands on the row's click handler. */
+   pointer-events none: the tap still lands on the row's click handler.
+   Same badge as the search / library rows (global/redesign/modules/_item.scss,
+   audit v5 TOP 8): 36px anchored in the bottom-right corner, not a 40px disc
+   centred on the cover. */
 @media (hover: none) {
 	.thumbnail::after {
 		content: "";
 		position: absolute;
-		inset: 0;
-		margin: auto;
-		width: 40px;
-		height: 40px;
+		inset: auto 2px 2px auto;
+		width: 36px;
+		height: 36px;
 		border-radius: 50%;
+		z-index: 1;
 		pointer-events: none;
 		background: rgba(0, 0, 0, 0.55)
 			url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff'><path d='M8 5v14l11-7z'/></svg>")
-			center / 18px 18px no-repeat;
+			center / 16px 16px no-repeat;
 		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
 	}
 	.isPlaying .thumbnail::after {

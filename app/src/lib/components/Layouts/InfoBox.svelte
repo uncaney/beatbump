@@ -90,6 +90,43 @@
 			: undefined,
 	];
 
+	// Release header: every artist (the old `artist.slice(1, -2)` dropped a lone
+	// artist), then "Album · 12 titres · 2013". The backend sends
+	// { year, tracks: "12 songs", length } with no `type` and no rating, so build
+	// the line from what is present and only show the explicit icon when rated.
+	const TYPE_LABELS: Record<string, string> = {
+		album: "Album",
+		single: "Single",
+		ep: "EP",
+		playlist: "Playlist",
+	};
+	$: releaseArtists = (Array.isArray(artist) ? artist : []).filter(
+		(a) => a && a.name,
+	);
+	$: releaseSub = (
+		Array.isArray(subtitles) && subtitles[0] && typeof subtitles[0] === "object"
+			? subtitles[0]
+			: {}
+	) as Record<string, unknown>;
+	$: releaseExplicit = Boolean(releaseSub.contentRating || releaseSub.explicit);
+	$: releaseLine = buildReleaseLine(releaseSub);
+
+	function buildReleaseLine(sub: Record<string, unknown>): string {
+		const rawType = String(sub.type ?? "album").trim() || "album";
+		const typeLabel =
+			TYPE_LABELS[rawType.toLowerCase()] ??
+			rawType.charAt(0).toUpperCase() + rawType.slice(1);
+		const rawTracks = sub.tracks;
+		const n =
+			typeof rawTracks === "number"
+				? rawTracks
+				: parseInt(String(rawTracks ?? "").replace(/[^\d]+/g, " ").trim(), 10);
+		const tracks =
+			Number.isFinite(n) && n > 0 ? `${n} ${n > 1 ? "titres" : "titre"}` : "";
+		const year = String(sub.year ?? "").trim();
+		return [typeLabel, tracks, year].filter(Boolean).join(" · ");
+	}
+
 	const dispatch = createEventDispatcher<{
 		shuffle: void;
 		playlistAdd: void;
@@ -141,36 +178,36 @@
 				</span>
 			{/key}
 		{:else if type === "release"}
-			<p class="secondary">
-				{#each artist.slice(1, -2) as subtitle, index}
-					{#if subtitle.channelId}
+			<p class="secondary release-meta">
+				{#each releaseArtists as a, index}
+					{#if index !== 0}<span aria-hidden="true">, </span>{/if}
+					{#if a.channelId}
 						<a
-							class="secondary"
-							href={`/artist/${subtitle.channelId}`}>{subtitle.name}</a
+							class="secondary artist-link"
+							href={`/artist/${a.channelId}`}>{a.name}</a
 						>
-					{:else if index !== 0}
-						<span>{subtitle.name}</span>
-						{#if index === 0}
-							<br />
-						{/if}
+					{:else}
+						<span>{a.name}</span>
 					{/if}
 				{/each}
-				<br />
-				<small>
-					<Icon
-						name="explicit"
-						fill="hsla(0, 0%, 95%, 0.7)"
-						color="transparent"
-						--stroke="transparent"
-						style="margin-right: 0.1em; stroke-width: 4;font-weight: 800;"
-						size="1em"
-					>
-						<span class="sr-only">Explicit</span>
-					</Icon>
-					{#if "type" in subtitles[0] && "tracks" in subtitles[0] && "year" in subtitles[0]}
-						{subtitles[0].type} • {subtitles[0].tracks} • {subtitles[0].year}
-					{/if}
-				</small>
+				{#if releaseLine || releaseExplicit}
+					{#if releaseArtists.length}<br />{/if}
+					<small>
+						{#if releaseExplicit}
+							<Icon
+								name="explicit"
+								fill="hsla(0, 0%, 95%, 0.7)"
+								color="transparent"
+								--stroke="transparent"
+								style="margin-right: 0.1em; stroke-width: 4;font-weight: 800;"
+								size="1em"
+							>
+								<span class="sr-only">Explicit</span>
+							</Icon>
+						{/if}
+						{releaseLine}
+					</small>
+				{/if}
 			</p>
 		{/if}
 	</div>
@@ -202,5 +239,14 @@
 	p.secondary {
 		letter-spacing: -0.01em;
 		max-width: 40ch;
+	}
+	/* Play Album / Album Radio were 32px tall from rem (audit v5 TOP 5):
+	   40px on desktop, 44px floor on phones. */
+	.button-group :global(.button) {
+		box-sizing: border-box;
+		min-height: 40px;
+		@media only screen and (max-width: 719px) {
+			min-height: max(2.75rem, 44px);
+		}
 	}
 </style>
