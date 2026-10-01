@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMixOp, planDragCommit, planInsert, planReorder, rebaseMove, removeAt, isLibraryRow, playAllMixType } from "./queueOps";
+import { applyMixOp, planDragCommit, planInsert, planReorder, rebaseMove, removalAutoplay, removeAt, isLibraryRow, playAllMixType } from "./queueOps";
 
 const row = (videoId: string) => ({ videoId, title: "T " + videoId });
 const ids = (list: { videoId?: string }[]) => list.map((r) => r.videoId);
@@ -29,6 +29,12 @@ describe("removeAt (G3)", () => {
 		const r = removeAt(mix, 1, 3);
 		expect(r.position).toBe(1);
 		expect(r.replay).toBe(false);
+	});
+	it("H13: the replacement row starts only when the player was running", () => {
+		expect(removalAutoplay(true, false)).toBe(true);
+		expect(removalAutoplay(true, true)).toBe(false); // paused stays paused
+		expect(removalAutoplay(false, false)).toBe(false); // nothing to replay
+		expect(removalAutoplay(false, true)).toBe(false);
 	});
 	it("the only row: empty queue, nothing to replay; out of range is a no-op", () => {
 		const one = [row("A")];
@@ -97,6 +103,19 @@ describe("planReorder (G1)", () => {
 		const moved = planReorder(mix, 1, [mix[1], mix[0], mix[2]]);
 		expect(moved!.position).toBe(0);
 		expect(moved!.mix).not.toBe(mix); // a fresh array, so store subscribers are notified
+	});
+	it("H12: a row dragged across the cursor, either way: the cursor follows the playing row", () => {
+		const q = [row("A"), row("B"), row("C"), row("D")];
+		// playing C; D dragged before A (a drop before the cursor)
+		const r = planReorder(q, 2, [q[3], q[0], q[1], q[2]]);
+		expect(ids(r!.mix)).toEqual(["D", "A", "B", "C"]);
+		expect(r!.position).toBe(3);
+		// playing B; A (before the cursor) dragged to the end
+		const r2 = planReorder(q, 1, [q[1], q[2], q[3], q[0]]);
+		expect(ids(r2!.mix)).toEqual(["B", "C", "D", "A"]);
+		expect(r2!.position).toBe(0);
+		// playing A; the playing row itself dragged last
+		expect(planReorder(q, 0, [q[1], q[2], q[3], q[0]])!.position).toBe(3);
 	});
 	it("refuses a list that is not the same rows", () => {
 		expect(planReorder(mix, 0, [mix[0], mix[1]])).toBeNull();

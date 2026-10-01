@@ -25,6 +25,16 @@ export function removeAt<T>(mix: T[], position: number, index: number): { mix: T
 }
 
 /**
+ * H13: whether the row that takes a removed playing row's place should
+ * start right away: only when the removed row was the playing one
+ * (`replay`) AND the player was running. Paused stays paused: the new row
+ * is loaded, shown in the player bar, and waits for the user.
+ */
+export function removalAutoplay(replay: boolean, paused: boolean): boolean {
+	return replay && !paused;
+}
+
+/**
  * Insert `items` at `key + 1`. With `dedupe` (Dedupe Automix) a videoId is
  * kept once, first occurrence wins: an inserted row whose videoId already
  * sits at or before the insertion point is dropped (`inserted` counts the

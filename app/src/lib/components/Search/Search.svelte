@@ -73,6 +73,7 @@
 	import Icon from "$lib/components/Icon/Icon.svelte";
 	import { queryParams } from "$lib/utils";
 	import { debounce } from "$lib/utils/sync";
+	import { shouldTypeaheadOnKeyup } from "./typeaheadKeys";
 	import { settings } from "$stores/settings";
 	import { createEventDispatcher, onDestroy, onMount } from "svelte";
 	import { fullscreenStore } from "../Player/channel";
@@ -560,8 +561,12 @@
 		typeahead();
 	}
 
+	// H7b: the query the last YouTube lookup ran with; a keyup that leaves
+	// the text unchanged (arrows, modifiers, Home/End...) never re-runs it.
+	let lastTypeaheadQuery = "";
 	const typeahead = debounce(async () => {
 		cancelYt();
+		lastTypeaheadQuery = query;
 		if (!query) {
 			results = [];
 			showRecentSearches = true;
@@ -631,6 +636,8 @@
 				on:input={scheduleLocal}
 				on:keyup={(e) => {
 					if (e.shiftKey && e.ctrlKey && e.repeat) return;
+					// H7b: arrows / modifiers / an unchanged text never re-run the lookup.
+					if (!shouldTypeaheadOnKeyup(e.key, query, lastTypeaheadQuery)) return;
 					typeahead();
 				}}
 				on:focus={handleFocus}
