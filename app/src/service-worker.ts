@@ -120,6 +120,14 @@ export function shellCachesToDelete(keys: readonly string[], current: string, la
 // L10-3: name of the shell cache of the last SW that activated (META_CACHE, outside
 // META_PREFIX so the offline index ignores it).
 const LAST_SHELL_KEY = "/__ytm_last_shell__";
+async function readLastActiveShell(): Promise<string | null> {
+	try {
+		const r = await (await caches.open(META_CACHE)).match(LAST_SHELL_KEY);
+		return r ? (await r.text()).trim() || null : null;
+	} catch {
+		return null;
+	}
+}
 async function swapLastActiveShell(): Promise<string | null> {
 	try {
 		const m = await caches.open(META_CACHE);
@@ -157,19 +165,63 @@ export function conditionalHeaders(headers: { get(name: string): string | null }
 	return null;
 }
 
-// Carry "/" and the static files of `wanted` from the most recent older
-// shell cache into `c`, each revalidated (best effort, never throws): 304 ->
-// the old copy, 200 -> the new file, network error -> the old copy (an
-// offline boot still works), anything else -> nothing (addIfMissing then
-// tries the plain download).
+/**
+ * L11-4: the shell cache the install carries the static files from: the shell
+ * that was ACTIVE (`lastActive`, L10-3) when it is still there, else the highest
+ * build number (fallback, as before). null when there is no other shell.
+ */
+export function carrySourceShell(keys: readonly string[], current: string, lastActive?: string | null): string | null {
+	const others = keys.filter((k) => k.startsWith("ytm-shell-") && k !== current);
+	if (!others.length) return null;
+	if (lastActive && lastActive !== current && others.includes(lastActive)) return lastActive;
+	const ver = (k: string) => Number(k.slice("ytm-shell-".length)) || 0;
+	return [...others].sort((a, b) => ver(b) - ver(a))[0];
+}
+
+/**
+ * L11-4: what the install stores for a carried static path once revalidated:
+ * "old" (the previous copy), "new" (the fresh response) or "none" (nothing;
+ * addIfMissing then tries a plain download). "/" (index.html, rewritten by
+ * every build) is ONLY ever the fresh 200 HTML: never the previous build's copy,
+ * neither on a network error nor on a 304, or the new SW would boot the old
+ * build offline for its whole life. Other static files: 304 or network error
+ * -> old copy, fresh 200 (not an HTML fallback for an asset) -> new.
+ */
+export function staticCarryAction(path: string, outcome: { networkError?: boolean; status?: number; contentType?: string | null }): "old" | "new" | "none" {
+	if (path === "/") return !outcome.networkError && isInstallableResponse(path, outcome.status ?? 0, outcome.contentType ?? null) ? "new" : "none";
+	if (outcome.networkError) return "old";
+	if (outcome.status === 304) return "old";
+	return isInstallableResponse(path, outcome.status ?? 0, outcome.contentType ?? null) ? "new" : "none";
+}
+
+/**
+ * L11-4: a response the install may store for `path`: a 200 that is not the HTML
+ * fallback of a missing asset (L10-4), and for "/" a 200 text/html only.
+ */
+export function isInstallableResponse(path: string, status: number, contentType: string | null): boolean {
+	if (status !== 200) return false;
+	if (path === "/") return /^\s*text\/html\b/i.test(contentType ?? "");
+	return !isHtmlForAsset(path, contentType);
+}
+
+/**
+ * L10-7: non-hashed files (manifest, icons, logo, "/"...) are read from the
+ * CURRENT shell first and the other caches second; hashed /_app/immutable/
+ * paths are identical in every shell and keep the plain `caches.match`.
+ */
+export function currentShellFirst(pathname: string): boolean {
+	return !pathname.startsWith(IMMUTABLE);
+}
+
+// Carry the static files of `wanted` from the previous shell cache
+// (carrySourceShell) into `c`, each revalidated (best effort, never throws),
+// stored as staticCarryAction says: "/" only from a fresh 200 HTML (L11-4).
 async function carryOverStatics(c: Cache, wanted: readonly string[]): Promise<number> {
 	let reused = 0;
 	try {
-		const names = (await caches.keys()).filter((k) => k.startsWith("ytm-shell-") && k !== SHELL);
-		if (!names.length) return 0;
-		const ver = (k: string) => Number(k.slice("ytm-shell-".length)) || 0;
-		names.sort((a, b) => ver(b) - ver(a));
-		const old = await caches.open(names[0]);
+		const source = carrySourceShell(await caches.keys(), SHELL, await readLastActiveShell());
+		if (!source) return 0;
+		const old = await caches.open(source);
 		const byPath = new Map<string, Request>();
 		for (const k of await old.keys()) byPath.set(new URL(k.url).pathname, k);
 		const have = new Set((await c.keys()).map((k) => new URL(k.url).pathname));
@@ -180,17 +232,17 @@ async function carryOverStatics(c: Cache, wanted: readonly string[]): Promise<nu
 					if (!prev || !prev.ok) return;
 					const cond = conditionalHeaders(prev.headers);
 					if (!cond) return;
-					let res: Response;
+					let res: Response | null = null;
 					try {
 						res = await fetch(p, { headers: cond, cache: "no-store" });
 					} catch {
-						await c.put(p, prev);
-						return;
+						res = null;
 					}
-					if (res.status === 304) {
+					const action = staticCarryAction(p, res ? { status: res.status, contentType: res.headers.get("Content-Type") } : { networkError: true });
+					if (action === "old") {
 						await c.put(p, prev);
-						reused++;
-					} else if (res.ok && res.status === 200 && !isHtmlForAsset(p, res.headers.get("Content-Type"))) {
+						if (res) reused++;
+					} else if (action === "new" && res) {
 						await c.put(p, res);
 					}
 				} catch {
@@ -268,8 +320,9 @@ async function addIfMissing(c: Cache, path: string): Promise<boolean> {
 	try {
 		if (await c.match(path)) return true;
 		const res = await fetch(path);
-		// Same contract as Cache.add (non-2xx rejects) plus L10-4: never an HTML body for an asset.
-		if (!res.ok || isHtmlForAsset(path, res.headers.get("Content-Type"))) return false;
+		// Same contract as Cache.add (non-2xx rejects) plus L10-4: never an HTML body for an
+		// asset, and L11-4: "/" only as a 200 text/html.
+		if (!isInstallableResponse(path, res.status, res.headers.get("Content-Type"))) return false;
 		await c.put(path, res);
 		return true;
 	} catch {
@@ -917,7 +970,8 @@ self.addEventListener("fetch", (event) => {
 	if (url.origin === location.origin && (BUILD_SET.has(url.pathname) || FILES_SET.has(url.pathname) || url.pathname.startsWith(IMMUTABLE))) {
 		event.respondWith(
 			(async () => {
-				const hit = await caches.match(req);
+				// L10-7: a non-hashed file comes from THIS build's shell first.
+				const hit = (currentShellFirst(url.pathname) ? await (await caches.open(SHELL)).match(req) : undefined) || (await caches.match(req));
 				if (hit) return hit;
 				const res = await fetch(req);
 				// PF3-7: static files are no longer all precached; keep the ones
@@ -974,7 +1028,9 @@ self.addEventListener("fetch", (event) => {
 					return await fetch(req);
 				} catch {
 					const c = await caches.open(SHELL);
-					return (await c.match("/")) || (await c.match(req)) || Response.error();
+					// L11-4: this build's "/" first; the kept previous shell's "/" only when
+					// this one never got it (installed offline), its chunks are kept too.
+					return (await c.match("/")) || (await c.match(req)) || (await caches.match("/")) || Response.error();
 				}
 			})(),
 		);

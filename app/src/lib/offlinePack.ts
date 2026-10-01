@@ -5,11 +5,37 @@
 // network): the settings page fetches the three sources, plans, then hands
 // the items to keepOffline (downloaded + pinned, 2 at a time, cancellable).
 import { keepableTracks } from "$lib/offlineBatch";
+import { durationOf } from "$lib/offlineQueue";
 import { formatMoFr } from "$lib/utils/formatFr";
+import { formatDuration } from "$lib/utils/releaseMeta";
 
 /** Size guess for a track never downloaded (a ~3-4 min Opus / AAC stream). */
 export const PACK_EST_BYTES = 4 * 1024 * 1024;
 export const PACK_SIZES_MB = [100, 250, 500] as const;
+/** B6-16 "pack trajet": durations offered next to the sizes (seconds). */
+export const PACK_DURATIONS_SEC = [1800, 3600, 7200, 14400] as const;
+/** Duration guess for a track whose length is unknown. */
+export const PACK_EST_SECONDS = 4 * 60;
+
+/** A selector value: "100" (Mo) or "dur:3600" (seconds). */
+export type PackChoice = { kind: "bytes"; mb: number } | { kind: "seconds"; seconds: number };
+export function parsePackChoice(v: unknown): PackChoice | null {
+	const s = String(v ?? "").trim();
+	const d = s.match(/^dur:(\d+)$/);
+	if (d) {
+		const n = Number(d[1]);
+		return (PACK_DURATIONS_SEC as readonly number[]).includes(n) ? { kind: "seconds", seconds: n } : null;
+	}
+	if (/^\d+$/.test(s)) {
+		const n = Number(s);
+		return (PACK_SIZES_MB as readonly number[]).includes(n) ? { kind: "bytes", mb: n } : null;
+	}
+	return null;
+}
+/** "30 min" / "1 h" / "2 h" / "4 h". */
+export function packDurationLabel(seconds: number): string {
+	return formatDuration(seconds);
+}
 
 export type PackCandidates = {
 	favorites?: ReadonlyArray<any> | null;
@@ -21,13 +47,25 @@ export type PackCandidates = {
 	sizes?: ReadonlyMap<string, number> | null;
 };
 
-export type PackItem = { item: any; videoId: string; bytes: number; estimated: boolean; source: "favorites" | "recent" | "mix" };
+export type PackItem = {
+	item: any;
+	videoId: string;
+	bytes: number;
+	estimated: boolean;
+	/** Track length (seconds), PACK_EST_SECONDS when unknown. */
+	seconds: number;
+	source: "favorites" | "recent" | "mix";
+};
 export type PackPlan = {
 	items: PackItem[];
 	/** Planned bytes (known sizes + estimates). */
 	bytes: number;
+	/** Planned seconds (known durations + estimates). */
+	seconds: number;
 	count: number;
+	/** The budget, in bytes ("bytes" mode) or seconds ("seconds" mode). */
 	target: number;
+	mode: "bytes" | "seconds";
 	/** Candidate tracks (deduped, uncached) that did not fit. */
 	left: number;
 	/** Uncached candidates seen in total (count + left). */
@@ -42,13 +80,19 @@ export function packSizeOf(item: any, sizes?: ReadonlyMap<string, number> | null
 	return { bytes: PACK_EST_BYTES, estimated: true };
 }
 
+export function packSecondsOf(item: any): number {
+	const d = durationOf(item);
+	return d && d > 0 ? Math.round(d) : PACK_EST_SECONDS;
+}
+
 /**
- * Fill up to `targetBytes`: favourites, then recent plays, then mix, in their
+ * Fill up to `targetBytes` (or, with mode "seconds", up to `target` seconds of
+ * listening, each track at its `duration` else PACK_EST_SECONDS): favourites, then recent plays, then mix, in their
  * own order, one entry per videoId, cached ones skipped. A track that does
  * not fit the remaining budget is left out and the next ones are still
  * tried (first fit), so a long favourite never blocks three short ones.
  */
-export function planPack(candidates: PackCandidates | null | undefined, targetBytes: number): PackPlan {
+export function planPack(candidates: PackCandidates | null | undefined, targetBytes: number, mode: "bytes" | "seconds" = "bytes"): PackPlan {
 	const target = Number.isFinite(targetBytes) && targetBytes > 0 ? Math.floor(targetBytes) : 0;
 	const cached = new Set<string>();
 	for (const id of candidates?.cached ?? []) if (typeof id === "string" && id) cached.add(id);
@@ -56,6 +100,7 @@ export function planPack(candidates: PackCandidates | null | undefined, targetBy
 	const seen = new Set<string>();
 	const items: PackItem[] = [];
 	let bytes = 0;
+	let seconds = 0;
 	let left = 0;
 	let seenCandidates = 0;
 	const sources: Array<[PackItem["source"], ReadonlyArray<any> | null | undefined]> = [
@@ -71,15 +116,18 @@ export function planPack(candidates: PackCandidates | null | undefined, targetBy
 			if (cached.has(id) || item._cached === true) continue;
 			seenCandidates++;
 			const s = packSizeOf(item, sizes);
-			if (target <= 0 || bytes + s.bytes > target) {
+			const sec = packSecondsOf(item);
+			const used = mode === "seconds" ? seconds + sec : bytes + s.bytes;
+			if (target <= 0 || used > target) {
 				left++;
 				continue;
 			}
-			items.push({ item, videoId: id, bytes: s.bytes, estimated: s.estimated, source });
+			items.push({ item, videoId: id, bytes: s.bytes, estimated: s.estimated, seconds: sec, source });
 			bytes += s.bytes;
+			seconds += sec;
 		}
 	}
-	return { items, bytes, count: items.length, target, left, candidates: seenCandidates };
+	return { items, bytes, seconds, count: items.length, target, mode, left, candidates: seenCandidates };
 }
 
 /** "12 morceaux · 48 Mo" for a plan, "3/12 · 12 Mo sur 100 Mo" while running. */
@@ -87,4 +135,11 @@ export function packLabel(done: number, total: number, doneBytes: number, target
 	const mb = (n: number) => formatMoFr(Math.max(0, Math.round(n / (1024 * 1024))));
 	if (total <= 0) return "Aucun morceau à préparer";
 	return `${done}/${total} · ${mb(doneBytes)} sur ${mb(target)}`;
+}
+
+/** "12/30 · 48 min sur 1 h" while a duration pack runs. */
+export function packDurationText(done: number, total: number, doneSeconds: number, targetSeconds: number): string {
+	if (total <= 0) return "Aucun morceau à préparer";
+	const d = doneSeconds > 0 ? formatDuration(doneSeconds) : "0 min";
+	return `${done}/${total} · ${d} sur ${formatDuration(targetSeconds)}`;
 }

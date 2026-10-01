@@ -18,6 +18,12 @@
 	// choice is remembered both ways (localStorage SPACE_OPEN_KEY "1" / "0"),
 	// and a running pack opens it so its progress and "Annuler" stay in view.
 	// Harness free_up_and_pack expands it through space-toggle first.
+	//
+	// B6-16 (cycle 40, pack trajet): pack-size also offers durations
+	// (value "dur:1800" … "dur:14400"); sizes keep their values ("100" …).
+	// A duration fills the pack by track length (planPack mode "seconds") and
+	// "Libérer" is disabled then (it frees by size only). `?pack=dur:7200` (the
+	// home weekend card) preselects the choice and unfolds the card.
 	import { createEventDispatcher, onMount, tick } from "svelte";
 	import { get } from "svelte/store";
 	import {
@@ -31,7 +37,18 @@
 		type AudioListEntry,
 	} from "$lib/offline";
 	import { freeUpSummary, planFreeUp, type FreeUpPlan } from "$lib/offlineFreeUp";
-	import { PACK_SIZES_MB, packLabel, packSizeOf, planPack, type PackPlan } from "$lib/offlinePack";
+	import {
+		PACK_DURATIONS_SEC,
+		PACK_SIZES_MB,
+		packDurationLabel,
+		packDurationText,
+		packLabel,
+		packSecondsOf,
+		packSizeOf,
+		parsePackChoice,
+		planPack,
+		type PackPlan,
+	} from "$lib/offlinePack";
 	import { fmtBytesFr, spaceButtonLabels, spaceStatusLine } from "$lib/offlineSpace";
 	import { cancelKeepJob, defaultKeepDeps, keepDepsWithAbort, keepJobs, keepSummary, startKeepJob, type KeepProgress, type KeepResult } from "$lib/offlineBatch";
 	import { getFavorites, getMix, getRecent } from "$lib/me";
@@ -52,8 +69,12 @@
 	let total = 0;
 	let pinnedBytes = 0;
 	let quota = 0;
-	/** The one size (Mo) both actions use. */
-	let sizeMb: (typeof PACK_SIZES_MB)[number] = 100;
+	/** The selector value: a size in Mo ("100") or a duration ("dur:3600"). */
+	let choice = "100";
+	$: parsedChoice = parsePackChoice(choice) ?? { kind: "bytes" as const, mb: 100 };
+	/** The one size (Mo) both actions use (100 while a duration is chosen). */
+	$: sizeMb = parsedChoice.kind === "bytes" ? parsedChoice.mb : 100;
+	$: durationSec = parsedChoice.kind === "seconds" ? parsedChoice.seconds : 0;
 
 	/** U12-9: card folded to its summary line (default) or unfolded. */
 	let open = false;
@@ -67,7 +88,7 @@
 	}
 
 	$: cachedTracks = entries.length;
-	$: labels = spaceButtonLabels(sizeMb);
+	$: labels = durationSec ? { freeUp: spaceButtonLabels(sizeMb).freeUp, pack: `Préparer un pack de ${packDurationLabel(durationSec)}` } : spaceButtonLabels(sizeMb);
 	$: status = spaceStatusLine({ total, quota, pinnedBytes, loading, unknown: !!error && !entries.length });
 
 	async function refresh() {
@@ -194,6 +215,7 @@
 	let packPlan: PackPlan | null = null;
 	let packProgress: KeepProgress | null = null;
 	let packDoneBytes = 0;
+	let packDoneSeconds = 0;
 	let packResult = "";
 	let packOwned = false; // started by this instance (its onDone writes the outcome)
 	$: packJob = $keepJobs.get(PACK_KEY);
@@ -209,20 +231,26 @@
 	// U12-9: a pack in progress (started here or found running on mount) unfolds
 	// the card once; only `packRunning` is read, so the user can still fold it.
 	$: if (packRunning) open = true;
-	$: packTarget = packPlan ? packPlan.target : sizeMb * MB;
+	$: packTarget = packPlan ? packPlan.target : durationSec || sizeMb * MB;
+	$: packMode = packPlan ? packPlan.mode : durationSec ? "seconds" : "bytes";
 	$: packText =
 		packState === "planning"
 			? "Préparation…"
 			: packState === "running"
-				? packLabel(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, packDoneBytes, packTarget)
+				? packMode === "seconds"
+					? packDurationText(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, packDoneSeconds, packTarget)
+					: packLabel(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, packDoneBytes, packTarget)
 				: packResult;
 	type PackWindow = Window & { __ytmPackPlan?: Record<string, unknown> };
 	function exposePack(extra: Record<string, unknown> = {}) {
 		if (typeof window === "undefined") return;
 		(window as PackWindow).__ytmPackPlan = {
 			target: packTarget,
+			mode: packMode,
 			count: packPlan?.count ?? 0,
 			bytes: packPlan?.bytes ?? 0,
+			seconds: packPlan?.seconds ?? 0,
+			doneSeconds: packDoneSeconds,
 			left: packPlan?.left ?? 0,
 			candidates: packPlan?.candidates ?? 0,
 			videoIds: packPlan ? packPlan.items.map((i) => i.videoId) : [],
@@ -239,6 +267,7 @@
 		packPlan = null;
 		packProgress = null;
 		packDoneBytes = 0;
+		packDoneSeconds = 0;
 		packResult = "";
 		error = "";
 		try {
@@ -260,10 +289,10 @@
 				if (e.videoId && e.bytes > 0) sizes.set(e.videoId, e.bytes);
 			}
 			const favItems = Array.isArray(fav?.items) && fav.items.length ? fav.items : Array.isArray(fav?.favorites) ? fav.favorites : [];
-			packPlan = planPack({ favorites: favItems, recent: rec?.items, mix: mix?.items, cached, sizes }, sizeMb * MB);
+			packPlan = planPack({ favorites: favItems, recent: rec?.items, mix: mix?.items, cached, sizes }, durationSec || sizeMb * MB, durationSec ? "seconds" : "bytes");
 			if (!packPlan.count) {
 				packState = "done";
-				packResult = packPlan.candidates ? "Rien ne rentre dans ce pack : choisis une taille plus grande." : "Rien à préparer : tes favoris et tes écoutes récentes sont déjà hors-ligne.";
+				packResult = packPlan.candidates ? "Rien ne rentre dans ce pack : choisis une taille ou une durée plus grande." : "Rien à préparer : tes favoris et tes écoutes récentes sont déjà hors-ligne.";
 				exposePack();
 				return;
 			}
@@ -279,7 +308,10 @@
 						...defaultKeepDeps,
 						download: async (t, o) => {
 							const r = await defaultKeepDeps.download(t, o);
-							if (r.ok) packDoneBytes += Number(r.bytes) || packSizeOf(t, sizes).bytes;
+							if (r.ok) {
+								packDoneBytes += Number(r.bytes) || packSizeOf(t, sizes).bytes;
+								packDoneSeconds += packSecondsOf(t);
+							}
 							return r;
 						},
 					}),
@@ -287,7 +319,7 @@
 					packState = r.cancelled ? "cancelled" : "done";
 					packProgress = { ready: r.ready, failed: r.failed, refused: r.refused, total: r.total };
 					const s = keepSummary(r);
-					packResult = `${s.text} · ${fmtBytesFr(packDoneBytes)}`;
+					packResult = `${s.text} · ${plan.mode === "seconds" ? packDurationLabel(packDoneSeconds) || "0 min" : fmtBytesFr(packDoneBytes)}`;
 					notify(s.text, s.type);
 					exposePack({ result: { ...r } });
 					void refresh();
@@ -314,6 +346,18 @@
 			const stored = localStorage.getItem(SPACE_OPEN_KEY);
 			if (stored === "1") open = true;
 			else if (stored === "0" && !packRunning) open = false;
+		} catch {
+			/* ignore */
+		}
+		// B6-17: /library/downloads-offline?pack=dur:7200 (home weekend card)
+		// preselects the pack and unfolds the card, without storing a preference.
+		try {
+			const wanted = new URL(window.location.href).searchParams.get("pack");
+			if (wanted && parsePackChoice(wanted)) {
+				choice = wanted;
+				open = true;
+				void tick().then(() => document.getElementById("offline-pack-start")?.scrollIntoView({ block: "center" }));
+			}
 		} catch {
 			/* ignore */
 		}
@@ -379,7 +423,7 @@
 		<div class="space-row">
 			<label
 				class="size-label"
-				for="offline-space-size">Taille</label
+				for="offline-space-size">Taille ou durée</label
 			>
 			<div class="select">
 				<select
@@ -388,11 +432,18 @@
 					data-testid="pack-size"
 					aria-describedby="offline-space-desc"
 					disabled={packRunning || !!busy || !!freePlan}
-					bind:value={sizeMb}
+					bind:value={choice}
 				>
-					{#each PACK_SIZES_MB as mb}
-						<option value={mb}>{formatMoFr(mb)}</option>
-					{/each}
+					<optgroup label="Taille">
+						{#each PACK_SIZES_MB as mb}
+							<option value={String(mb)}>{formatMoFr(mb)}</option>
+						{/each}
+					</optgroup>
+					<optgroup label="Durée d'écoute">
+						{#each PACK_DURATIONS_SEC as sec}
+							<option value={`dur:${sec}`}>{packDurationLabel(sec)}</option>
+						{/each}
+					</optgroup>
 				</select>
 			</div>
 			{#if !freePlan}
@@ -402,8 +453,12 @@
 					class="btn-reset btn-secondary"
 					data-testid="free-up"
 					aria-describedby="offline-space-desc"
-					disabled={loading || !!busy || packRunning || cachedTracks === 0}
-					title={cachedTracks === 0 && !loading ? "Rien en cache : rien à libérer" : "Retire les morceaux les moins écoutés, jamais les épinglés"}
+					disabled={loading || !!busy || packRunning || cachedTracks === 0 || durationSec > 0}
+					title={durationSec > 0
+						? "Choisis une taille pour libérer de l'espace"
+						: cachedTracks === 0 && !loading
+							? "Rien en cache : rien à libérer"
+							: "Retire les morceaux les moins écoutés, jamais les épinglés"}
 					bind:this={freeUpButton}
 					on:click={askFreeUp}
 				>
@@ -439,8 +494,13 @@
 			class="space-desc"
 			id="offline-space-desc"
 		>
-			Libérer retire les morceaux les moins écoutés jusqu'à {formatMoFr(sizeMb)} (les épinglés ne sont jamais touchés) ; un pack télécharge
-			et épingle tes favoris, puis tes écoutes récentes, puis ta sélection, jusqu'à {formatMoFr(sizeMb)}.
+			{#if durationSec}
+				Un pack trajet télécharge et épingle tes favoris, puis tes écoutes récentes, puis ta sélection, jusqu'à {packDurationLabel(durationSec)}
+				d'écoute. Choisis une taille pour libérer de l'espace.
+			{:else}
+				Libérer retire les morceaux les moins écoutés jusqu'à {formatMoFr(sizeMb)} (les épinglés ne sont jamais touchés) ; un pack télécharge
+				et épingle tes favoris, puis tes écoutes récentes, puis ta sélection, jusqu'à {formatMoFr(sizeMb)}.
+			{/if}
 		</p>
 		{#if freePlan}
 			<div
@@ -502,6 +562,8 @@
 				data-ready={packProgress?.ready ?? 0}
 				data-total={packProgress?.total ?? packPlan?.count ?? 0}
 				data-bytes={packDoneBytes}
+				data-seconds={packDoneSeconds}
+				data-mode={packMode}
 				role="status"
 				aria-live="polite"
 			>

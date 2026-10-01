@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,5 +55,41 @@ func TestLocalAlbumsNeverPlayedAnonymous(t *testing.T) {
 	resp = getJSON(t, LocalAlbumsHandler, "/api/v1/local/albums?filter=never-played")
 	if resp["reason"] != nil || len(albumTitles(resp)) != 5 {
 		t.Fatalf("named never-played: %v", resp)
+	}
+}
+
+// L11-7: a database error on the profile lookup answers 500, never the
+// anonymous state (a named user must not be asked "Dis-moi ton prénom").
+func TestLocalAlbumsNeverPlayedProfileDBError(t *testing.T) {
+	useTestDB(t)
+	stub := newAlbumFilterStub(t)
+	if err := db.DB.Migrator().DropTable(&db.Profile{}); err != nil {
+		t.Fatal(err)
+	}
+	if anon, err := profileAnonymousErr("p-test"); err == nil || anon {
+		t.Fatalf("profileAnonymousErr on a broken table: anon %v err %v", anon, err)
+	}
+	if profileAnonymous("p-test") {
+		t.Fatalf("profileAnonymous must count a DB error as named")
+	}
+	c, rec := ctxFor(http.MethodGet, "/api/v1/local/albums?filter=never-played", "", nil)
+	if err := LocalAlbumsHandler(c); err != nil || rec.Code != http.StatusInternalServerError {
+		t.Fatalf("db error: err %v code %d body %s", err, rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "anonymous") {
+		t.Fatalf("db error answered as anonymous: %s", rec.Body.String())
+	}
+	if stub.trackCalls != 0 {
+		t.Fatalf("no scan on a profile error")
+	}
+}
+
+func TestProfileAnonymousErrMissingRow(t *testing.T) {
+	useTestDB(t)
+	if anon, err := profileAnonymousErr("p-nobody"); err != nil || !anon {
+		t.Fatalf("missing row: anon %v err %v", anon, err)
+	}
+	if anon, err := profileAnonymousErr(""); err != nil || !anon {
+		t.Fatalf("empty id: anon %v err %v", anon, err)
 	}
 }

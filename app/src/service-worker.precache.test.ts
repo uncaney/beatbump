@@ -123,6 +123,50 @@ describe("PF4-6: static files carried over and revalidated on deploy", () => {
 	});
 });
 
+describe("L11-4 + L10-7: install never carries the previous build's \"/\", statics read from this shell first", () => {
+	it("stores \"/\" only from a fresh 200 text/html", async () => {
+		const { staticCarryAction } = await import("./service-worker");
+		expect(staticCarryAction("/", { networkError: true })).toBe("none");
+		expect(staticCarryAction("/", { status: 304 })).toBe("none");
+		expect(staticCarryAction("/", { status: 200, contentType: "text/html; charset=utf-8" })).toBe("new");
+		expect(staticCarryAction("/", { status: 200, contentType: "application/json" })).toBe("none");
+		expect(staticCarryAction("/", { status: 500, contentType: "text/html" })).toBe("none");
+	});
+	it("keeps the previous copy of other statics on 304 or a network error, the new one on 200", async () => {
+		const { staticCarryAction } = await import("./service-worker");
+		expect(staticCarryAction("/manifest.json", { networkError: true })).toBe("old");
+		expect(staticCarryAction("/manifest.json", { status: 304 })).toBe("old");
+		expect(staticCarryAction("/manifest.json", { status: 200, contentType: "application/manifest+json" })).toBe("new");
+		expect(staticCarryAction("/manifest.json", { status: 200, contentType: "text/html" })).toBe("none");
+		expect(staticCarryAction("/logo.svg", { status: 404 })).toBe("none");
+	});
+	it("isInstallableResponse: \"/\" needs 200 HTML, assets a 200 that is not the HTML fallback", async () => {
+		const { isInstallableResponse } = await import("./service-worker");
+		expect(isInstallableResponse("/", 200, "text/html")).toBe(true);
+		expect(isInstallableResponse("/", 200, null)).toBe(false);
+		expect(isInstallableResponse("/", 204, "text/html")).toBe(false);
+		expect(isInstallableResponse("/_app/immutable/entry/app.x.js", 200, "text/html")).toBe(false);
+		expect(isInstallableResponse("/_app/immutable/entry/app.x.js", 200, "text/javascript")).toBe(true);
+		expect(isInstallableResponse("/favicon.ico", 200, "image/x-icon")).toBe(true);
+	});
+	it("carries from the last active shell when it is still there, else the highest build", async () => {
+		const { carrySourceShell } = await import("./service-worker");
+		const keys = ["ytm-shell-100", "ytm-shell-300", "ytm-shell-200", "ytm-offline-meta"];
+		expect(carrySourceShell(keys, "ytm-shell-400", "ytm-shell-100")).toBe("ytm-shell-100");
+		expect(carrySourceShell(keys, "ytm-shell-400", "ytm-shell-999")).toBe("ytm-shell-300");
+		expect(carrySourceShell(keys, "ytm-shell-400", null)).toBe("ytm-shell-300");
+		expect(carrySourceShell(keys, "ytm-shell-300", "ytm-shell-300")).toBe("ytm-shell-200");
+		expect(carrySourceShell(["ytm-shell-400"], "ytm-shell-400", null)).toBeNull();
+	});
+	it("non-hashed paths are looked up in the current shell first, hashed ones anywhere", async () => {
+		const { currentShellFirst } = await import("./service-worker");
+		expect(currentShellFirst("/manifest.json")).toBe(true);
+		expect(currentShellFirst("/logo.svg")).toBe(true);
+		expect(currentShellFirst("/")).toBe(true);
+		expect(currentShellFirst("/_app/immutable/chunks/scheduler.8818e2a0.js")).toBe(false);
+	});
+});
+
 describe("PF3-1: cover 404 memory", () => {
 	it("answers a missed lid for an hour, then asks again", async () => {
 		const { createCoverMissSet } = await import("./service-worker");
