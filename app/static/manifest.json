@@ -1,50 +1,83 @@
 {
-	"background_color": "#0E1117",
-	"theme_color": "#391e59",
+	"id": "/",
 	"name": "Beatbump",
 	"short_name": "Beatbump",
-	"display": "standalone",
-	"description": "Unlock your music.",
+	"description": "Votre musique, en ligne et hors ligne.",
+	"lang": "fr",
+	"dir": "ltr",
 	"start_url": "/",
+	"scope": "/",
+	"display": "standalone",
+	"orientation": "any",
+	"background_color": "#0E1117",
+	"theme_color": "#391e59",
+	"categories": ["music", "entertainment"],
 	"shortcuts": [
 		{
 			"name": "Home",
-			"url": "/home"
+			"url": "/home",
+			"icons": [{ "src": "android/android-launchericon-96-96.png", "sizes": "96x96" }]
 		},
 		{
 			"name": "Trending",
 			"url": "/trending",
-			"description": "See the hottest tracks and releases."
+			"description": "See the hottest tracks and releases.",
+			"icons": [{ "src": "android/android-launchericon-96-96.png", "sizes": "96x96" }]
 		},
 		{
 			"name": "Library",
-			"url": "/library"
+			"url": "/library",
+			"icons": [{ "src": "android/android-launchericon-96-96.png", "sizes": "96x96" }]
 		}
 	],
 	"icons": [
-    {
-      "src": "android/android-launchericon-512-512.png",
-      "sizes": "512x512"
-    },
-    {
-      "src": "android/android-launchericon-192-192.png",
-      "sizes": "192x192"
-    },
-    {
-      "src": "android/android-launchericon-144-144.png",
-      "sizes": "144x144"
-    },
-    {
-      "src": "android/android-launchericon-96-96.png",
-      "sizes": "96x96"
-    },
-    {
-      "src": "android/android-launchericon-72-72.png",
-      "sizes": "72x72"
-    },
-    {
-      "src": "android/android-launchericon-48-48.png",
-      "sizes": "48x48"
-    }
-  ]
+		{
+			"src": "android/android-launchericon-512-512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "android/android-launchericon-192-192.png",
+			"sizes": "192x192",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "android/android-launchericon-144-144.png",
+			"sizes": "144x144",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "android/android-launchericon-96-96.png",
+			"sizes": "96x96",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "android/android-launchericon-72-72.png",
+			"sizes": "72x72",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "android/android-launchericon-48-48.png",
+			"sizes": "48x48",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "maskable-icon-512x512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "maskable"
+		},
+		{
+			"src": "maskable-icon-192x192.png",
+			"sizes": "192x192",
+			"type": "image/png",
+			"purpose": "maskable"
+		}
+	]
 }

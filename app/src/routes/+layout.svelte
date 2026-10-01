@@ -18,6 +18,7 @@
     import {fullscreenStore} from "$lib/components/Player/channel";
     import {AudioPlayer} from "$lib/player";
     import {groupSession, settings} from "$lib/stores";
+    import {initPwa} from "$lib/stores/pwa";
     import {currentTrack, queue} from "$lib/stores/list";
     import {syncTabs} from "$lib/tabSync.js";
     import {Logger, notify} from "$lib/utils";
@@ -26,6 +27,10 @@
     import {get, writable} from "svelte/store";
 
     export let data;
+
+    // Capture `beforeinstallprompt` as early as possible (before onMount) so
+    // Settings > Application can offer the install button.
+    if (browser) initPwa();
 
     // Create a writable store to hold data
     const layoutData = writable({
@@ -163,7 +168,11 @@
                     // Playing: don't cut the music. Reload when the track ends or the
                     // user pauses (the paused store flips to true in both cases).
                     if (get(AudioPlayer.paused)) return reloadNow();
-                    notify("Nouvelle version installée, elle s'appliquera à la fin du morceau", "success");
+                    // Playing: offer an immediate reload, otherwise it happens at track end/pause.
+                    notify("Nouvelle version installée, elle s'appliquera à la fin du morceau", "success", {
+                        label: "Recharger maintenant",
+                        run: reloadNow,
+                    });
                     const unsub = AudioPlayer.paused.subscribe((paused) => {
                         if (!paused) return;
                         unsub();

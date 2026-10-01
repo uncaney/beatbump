@@ -10,6 +10,8 @@
 	import { AudioPlayer } from "$lib/player";
 	import { settings, type Theme } from "$stores/settings";
 	import OfflineSettings from "./OfflineSettings.svelte";
+	import { installPrompt, isInstalled, isIOS, promptInstall } from "$lib/stores/pwa";
+	import { notify } from "$lib/utils";
 	const themes: Theme[] = ["Dark", "Dim", "Midnight", "YTM"];
 
 	function handleStreamSelect() {
@@ -17,6 +19,21 @@
 			type: $settings.playback.Stream ?? "HTTP",
 		});
 	}
+
+	// PWA install (Settings > Application). States: installed (standalone or
+	// just installed) -> no button; Chromium fired beforeinstallprompt -> button;
+	// iOS -> Share > Add to Home Screen hint; otherwise -> browser-menu hint.
+	let installing = false;
+	const install = async () => {
+		if (installing) return;
+		installing = true;
+		try {
+			const outcome = await promptInstall();
+			if (outcome === "accepted") notify("Application installée", "success");
+		} finally {
+			installing = false;
+		}
+	};
 
 	const updatePrefsCookie = async () => {
 		await fetch("/settings/update.json", {
@@ -272,6 +289,49 @@
                 />
             </div>-->
 		</section>
+		<section
+			id="settings-app"
+			aria-labelledby="app-heading"
+		>
+			<span
+				class="h5"
+				id="app-heading">Application</span
+			>
+			<div class="setting">
+				<!-- svelte-ignore a11y-label-has-associated-control -->
+				<label id="pwa-install-label">
+					Installer l'application
+					<span
+						id="pwa-install-desc"
+						aria-live="polite"
+					>
+						{#if $isInstalled}
+							L'application est installée sur cet appareil.
+						{:else if $installPrompt}
+							Ajoute-la à l'écran d'accueil : elle s'ouvre en plein écran et
+							garde ta musique hors ligne.
+						{:else if $isIOS}
+							Sur iPhone : Partager > Sur l'écran d'accueil.
+						{:else}
+							Si ton navigateur le propose, l'installation se fait depuis son
+							menu (Chrome : « Installer l'application »).
+						{/if}
+					</span>
+				</label>
+				{#if !$isInstalled && $installPrompt}
+					<button
+						type="button"
+						id="pwa-install"
+						class="btn"
+						aria-describedby="pwa-install-desc"
+						disabled={installing}
+						on:click={install}
+					>
+						{installing ? "Installation…" : "Installer l'application"}
+					</button>
+				{/if}
+			</div>
+		</section>
 	</main>
 {/if}
 
@@ -398,5 +458,40 @@
 
 	[type="checkbox"] {
 		display: none;
+	}
+
+	/* Same button as Settings > Offline (OfflineSettings.svelte .btn). */
+	.btn {
+		all: unset;
+		box-sizing: border-box;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 2.75rem;
+		min-width: 2.75rem;
+		padding: 0.5rem 1rem;
+		border-radius: 0.5rem;
+		font: inherit;
+		font-weight: 500;
+		color: #f2f2f2 !important;
+		background: rgb(255 255 255 / 10%);
+		cursor: pointer;
+		transition: background-color 0.15s;
+
+		&:hover:not(:disabled) {
+			background: rgb(255 255 255 / 18%);
+			color: #fff !important;
+		}
+		&:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: 2px;
+		}
+		&:disabled {
+			opacity: 1;
+			color: #9a9a9a !important;
+			background: rgb(44, 44, 44) !important;
+			border: 1px solid rgba(255, 255, 255, 0.25);
+			cursor: not-allowed;
+		}
 	}
 </style>

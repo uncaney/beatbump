@@ -19,6 +19,7 @@ export {
 	showGroupSessionManager,
 	theme,
 } from "./stores";
-export type { Alert } from "./stores";
+export type { Alert, AlertAction } from "./stores";
+export { initPwa, installPrompt, isInstalled, isIOS, promptInstall } from "./pwa";
 export { isMobileMQ } from "./window";
 
