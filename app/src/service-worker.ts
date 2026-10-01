@@ -1,6 +1,7 @@
 /// <reference types="@sveltejs/kit" />
 // PWA service worker: precache the app shell (installable + offline app load),
-// network-first API with cache fallback (browsed library works offline), and a
+// network-first API with cache fallback (browsed library works offline; the
+// profile-scoped /api/v1/me/* answers are never cached, see G16 below), and a
 // dedicated audio cache ("ytm-offline-audio") that holds every track that was
 // played or explicitly saved, served cache-first with proper Range support so
 // the <audio> element plays it back when the device is offline.
@@ -71,10 +72,30 @@ self.addEventListener("activate", (event) => {
 		(async () => {
 			const keys = await caches.keys();
 			await Promise.all(keys.filter((k) => k.startsWith("ytm-shell-") && k !== SHELL).map((k) => caches.delete(k)));
+			await purgeProfileScopedApiCache(); // G16: entries stored by an older SW
 			await self.clients.claim();
 		})(),
 	);
 });
+
+// Profile-scoped API (favorites, follows, history, stats, mix, playlists): the
+// backend keys them by the `bbp` profile cookie. The SW cannot read that cookie
+// (no document.cookie, the Cookie header is not exposed on fetch events and
+// self.cookieStore is Chromium-only), so keying the cache by profile is not
+// reliably possible; and even keyed, the previous profile's favorites would stay
+// on the disk of a shared device. Safer option (G16): never cache these, and
+// purge any entry an older SW stored (activate). Offline, they answer
+// {"offline":true} like any uncached API call.
+const isProfileScopedApi = (u: URL) => u.pathname.startsWith("/api/v1/me/");
+async function purgeProfileScopedApiCache(): Promise<void> {
+	try {
+		const c = await caches.open(API_CACHE);
+		const keys = await c.keys();
+		await Promise.all(keys.filter((k) => isProfileScopedApi(new URL(k.url))).map((k) => c.delete(k)));
+	} catch {
+		/* best effort */
+	}
+}
 
 // Audio (and cover) endpoints served by our own origin (lane A1 makes them
 // relative: /localf?p=…, /vp?u=…, /aud/<id>, /cover?lid=…) plus the legacy
@@ -305,8 +326,10 @@ self.addEventListener("fetch", (event) => {
 		return;
 	}
 
-	// API GET → network-first, fall back to last cached (browsed data offline)
+	// API GET → network-first, fall back to last cached (browsed data offline).
+	// Profile-scoped answers (/api/v1/me/*) are NEVER cached nor replayed (G16).
 	if (url.pathname.startsWith("/api/")) {
+		const profileScoped = isProfileScopedApi(url);
 		event.respondWith(
 			(async () => {
 				const c = await caches.open(API_CACHE);
@@ -314,10 +337,11 @@ self.addEventListener("fetch", (event) => {
 					const res = await fetch(req);
 					// Only JSON is an API answer worth replaying offline: an HTML shell
 					// (SPA fallback for an unknown path) must never be cached as data.
-					if (res.ok && /json/i.test(res.headers.get("Content-Type") || "")) c.put(req, res.clone());
+					if (!profileScoped && res.ok && /json/i.test(res.headers.get("Content-Type") || "")) c.put(req, res.clone());
 					return res;
 				} catch {
-					return (await c.match(req)) || new Response('{"offline":true}', { headers: { "Content-Type": "application/json" } });
+					const hit = profileScoped ? undefined : await c.match(req);
+					return hit || new Response('{"offline":true}', { headers: { "Content-Type": "application/json" } });
 				}
 			})(),
 		);
