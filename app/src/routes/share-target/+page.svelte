@@ -4,10 +4,14 @@
 	// in-app route ($lib/shareTarget) and replaced in the history: a track
 	// opens the /listen preview (no acquisition before "Écouter", F12), a
 	// playlist its page. Anything else: "Lien non reconnu" + a link home.
+	// UX10: an album opens its local twin when the library owns it
+	// (local/albums/match), a shared title opens the song search.
 	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
 	import { page } from "$app/stores";
-	import { parseSharedLink, type SharedTarget } from "$lib/shareTarget";
+	import { APIClient } from "$lib/api";
+	import { albumInfoFromBrowse, parseSharedLink, resolveShareHref, type SharedTarget } from "$lib/shareTarget";
+	import { findOwnedAlbum } from "$lib/utils/alreadyOwned";
 
 	let state: "resolving" | "unrecognized" = "resolving";
 	let target: SharedTarget | null = null;
@@ -18,16 +22,29 @@
 		const params = { title: q.get("title") ?? "", text: q.get("text") ?? "", url: q.get("url") ?? "" };
 		shared = params.url || params.text || params.title;
 		target = parseSharedLink(params);
-		try {
-			(window as Window & { __ytmShareTarget?: unknown }).__ytmShareTarget = { params, target };
-		} catch {
-			/* harness only */
-		}
-		if (target) {
-			void goto(target.href, { replaceState: true });
-		} else {
+		const expose = (extra: Record<string, unknown> = {}) => {
+			try {
+				(window as Window & { __ytmShareTarget?: unknown }).__ytmShareTarget = { params, target, ...extra };
+			} catch {
+				/* harness only */
+			}
+		};
+		expose();
+		if (!target) {
 			state = "unrecognized";
+			return;
 		}
+		const t = target;
+		void resolveShareHref(t, {
+			albumInfo: async (id) => {
+				const res = await APIClient.fetch(`/api/v1/main.json?q=&endpoint=browse&browseId=${encodeURIComponent(id)}`);
+				return res.ok ? albumInfoFromBrowse(await res.json()) : null;
+			},
+			findOwned: findOwnedAlbum,
+		}).then(({ href, owned }) => {
+			expose({ href, owned });
+			void goto(href, { replaceState: true });
+		});
 	});
 </script>
 
@@ -60,7 +77,8 @@
 		>
 			<span class="title h4">Lien non reconnu</span>
 			<p class="hint">
-				Partage un lien YouTube ou YouTube Music (morceau ou playlist) pour l'ouvrir ici.
+				Partage un lien YouTube ou YouTube Music (morceau, album ou playlist), ou un titre « Artiste - Titre », pour
+				l'ouvrir ici.
 			</p>
 			{#if shared}
 				<p
