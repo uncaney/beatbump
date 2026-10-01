@@ -242,10 +242,18 @@
 	}
 
 	.search-head {
-		margin: 0.75em auto 0;
+		// The header sits outside <main>, so it must clear the fixed top bar itself
+		// (the global main rule pads by --top-bar-height + 2vh); main then only
+		// keeps a small gap so the shelves start right under the chips.
+		margin: 0 auto;
+		padding-top: calc(var(--top-bar-height) + 1.25vh);
 		display: flex;
 		flex-direction: column;
 		gap: 0.6em;
+	}
+
+	main {
+		padding-block-start: 0.75em !important;
 	}
 
 	.search-title {
