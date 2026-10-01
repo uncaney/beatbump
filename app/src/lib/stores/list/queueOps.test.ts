@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMixOp, planDragCommit, planInsert, planReorder, rebaseMove, removalAutoplay, removeAt, isLibraryRow, playAllMixType } from "./queueOps";
+import { applyMixOp, planDragCommit, planInsert, planReorder, rebaseMove, removalAutoplay, removeAt, isLibraryRow, playAllMixType, spreadShuffle } from "./queueOps";
 
 const row = (videoId: string) => ({ videoId, title: "T " + videoId });
 const ids = (list: { videoId?: string }[]) => list.map((r) => r.videoId);
@@ -336,5 +336,28 @@ describe("I20: playAllMixType / isLibraryRow", () => {
 		expect(playAllMixType([lib, yt])).toBe("playlist");
 		expect(playAllMixType([yt])).toBe("playlist");
 		expect(playAllMixType([])).toBe("playlist");
+	});
+});
+
+describe("c40b B6-10: spreadShuffle (queue Aléatoire)", () => {
+	const t = (videoId: string, artist: string) => ({ videoId, artistInfo: { artist: [{ text: artist }] } });
+	const artists = (list: any[]) => list.map((r) => r.artistInfo.artist[0].text);
+	it("no artist twice in a row while another is left, nothing dropped", () => {
+		const shuffled = [t("1", "A"), t("2", "A"), t("3", "A"), t("4", "B"), t("5", "C"), t("6", "B")];
+		const out = spreadShuffle(shuffled);
+		expect(out).toHaveLength(6);
+		expect(new Set(out)).toEqual(new Set(shuffled));
+		expect(artists(out)).toEqual(["A", "B", "A", "C", "A", "B"]);
+	});
+	it("the playing row counts as the previous track", () => {
+		const out = spreadShuffle([t("2", "A"), t("3", "B"), t("4", "C")], t("1", "A"));
+		expect(artists(out)[0]).not.toBe("A");
+		expect(out.map((r) => r.videoId).sort()).toEqual(["2", "3", "4"]);
+	});
+	it("a one-artist queue keeps its shuffled order", () => {
+		const shuffled = [t("3", "A"), t("1", "A"), t("2", "A")];
+		expect(spreadShuffle(shuffled, t("0", "A")).map((r) => r.videoId)).toEqual(["3", "1", "2"]);
+		expect(spreadShuffle([] as any[])).toEqual([]);
+		expect(spreadShuffle(null as any)).toEqual([]);
 	});
 });

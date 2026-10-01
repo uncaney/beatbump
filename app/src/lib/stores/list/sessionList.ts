@@ -28,7 +28,7 @@ import { derived, get } from "svelte/store";
 import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
-import { applyMixOp, planInsert, planReorder, removalAutoplay, removeAt } from "./queueOps";
+import { applyMixOp, planInsert, planReorder, removalAutoplay, removeAt, spreadShuffle } from "./queueOps";
 import {
     continuedContext,
     describeContext,
@@ -1324,14 +1324,20 @@ export class ListService {
                     .reduce((prev, cur) => (prev += cur), 0),
             );
         } else {
+            // c40b B6-10: no immediate repeat of the playing artist, nor of
+            // one artist twice in a row while another is left (spreadShuffle).
+            const current = this._$.value.mix[index];
             this._$.value.mix = [
                 ...this._$.value.mix.slice().slice(0, index),
-                this._$.value.mix[index],
-                ...seededShuffle(
-                    this._$.value.mix.slice().slice(index + 1),
-                    crypto
-                        .getRandomValues(new Uint8Array(8))
-                        .reduce((prev, cur) => (prev += cur), 0),
+                current,
+                ...spreadShuffle(
+                    seededShuffle(
+                        this._$.value.mix.slice().slice(index + 1),
+                        crypto
+                            .getRandomValues(new Uint8Array(8))
+                            .reduce((prev, cur) => (prev += cur), 0),
+                    ),
+                    current,
                 ),
             ];
         }

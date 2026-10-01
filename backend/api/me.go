@@ -653,7 +653,8 @@ func MeMixHandler(c echo.Context) error {
 		c.Response().Header().Set("X-Ytm-Mix-Cache", "MISS")
 	}
 	// c40b B6-10: twice-skipped refs are neither seeds nor items; ex (all the
-	// profile exclusions) keeps them out of the answer.
+	// profile exclusions, incl. what was played in the last 3 h: still a
+	// fine seed, not an item) keeps them out of the answer.
 	now := time.Now()
 	skipped := skippedRefs(pid, now)
 	ex := profileExclusions(pid, now)

@@ -3,7 +3,9 @@ package api
 // c40b B6-10: the personal answers (me/mix "Pour toi", the queue
 // continuation through local/related?personal=1 and local/mix?personal=1)
 // leave out
-//   - every ref skipped at least skipExcludeMin times in skipExcludeWindow.
+//   - every ref skipped at least skipExcludeMin times in skipExcludeWindow,
+//   - every ref played (or skipped) in the last recentPlayWindow: no repeat
+//     within 3 h (c40b item 3).
 
 import (
 	"strings"
@@ -19,6 +21,8 @@ const (
 	// personal mixes and the continuation.
 	skipExcludeMin    = 2
 	skipExcludeWindow = 30 * 24 * time.Hour
+	// recentPlayWindow: no repeat of a ref played (or skipped) this recently.
+	recentPlayWindow = 3 * time.Hour
 	// maxExcludeParam bounds the client exclude= list.
 	maxExcludeParam = 200
 )
@@ -40,9 +44,33 @@ func skippedRefs(pid string, now time.Time) map[string]bool {
 	return out
 }
 
-// profileExclusions: what the personal answers leave out for pid.
+// recentRefs: refs the profile played or skipped in recentPlayWindow.
+func recentRefs(pid string, now time.Time) map[string]bool {
+	out := map[string]bool{}
+	if pid == "" {
+		return out
+	}
+	since := now.Add(-recentPlayWindow)
+	var refs []string
+	db.DB.Model(&db.PlayEvent{}).Where("profile_id = ? AND played_at > ?", pid, since).Distinct().Pluck("ref", &refs)
+	for _, r := range refs {
+		out[r] = true
+	}
+	refs = nil
+	db.DB.Model(&db.SkipEvent{}).Where("profile_id = ? AND skipped_at > ?", pid, since).Distinct().Pluck("ref", &refs)
+	for _, r := range refs {
+		out[r] = true
+	}
+	return out
+}
+
+// profileExclusions = skippedRefs ∪ recentRefs.
 func profileExclusions(pid string, now time.Time) map[string]bool {
-	return skippedRefs(pid, now)
+	out := skippedRefs(pid, now)
+	for r := range recentRefs(pid, now) {
+		out[r] = true
+	}
+	return out
 }
 
 // requestExclusions: what a local/related or local/mix answer must leave

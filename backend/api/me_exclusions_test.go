@@ -48,7 +48,7 @@ func TestMixExcludesTwiceSkipped(t *testing.T) {
 		}
 	}
 	addSkips(t, "p-test", seed+"-p2", time.Hour, 3*24*time.Hour)
-	addSkips(t, "p-test", seed+"-p3", time.Hour)                        // once only
+	addSkips(t, "p-test", seed+"-p3", 5*time.Hour)                      // once only
 	addSkips(t, "p-test", seed+"-p1", 40*24*time.Hour, 41*24*time.Hour) // too old
 	addSkips(t, "other", seed+"-p1", time.Hour, 2*time.Hour)            // another profile
 	invalidateMixCache("p-test")
@@ -240,5 +240,49 @@ func TestRequestExclusionsBounded(t *testing.T) {
 	c, _ := ctxFor(http.MethodGet, "/api/v1/local/related?lid=x&exclude="+strings.Join(refs, ",")+",,%20", "", nil)
 	if n := len(requestExclusions(c)); n != maxExcludeParam {
 		t.Fatalf("exclusions = %d, want %d", n, maxExcludeParam)
+	}
+}
+
+// B6-10 item 3: nothing played (or skipped) in the last 3 h comes back in
+// "Pour toi"; a 4 h old play is fine again. A recent play still seeds.
+func TestMixAvoidsPlaysWithinThreeHours(t *testing.T) {
+	newMixTestEnv(t, 0)
+	if err := db.DB.AutoMigrate(&db.SkipEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	seed := "0123456789a"
+	now := time.Now()
+	db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: seed, Source: "local", PlayedAt: now.Add(-30 * time.Minute)})
+	db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: seed + "-p1", Source: "local", PlayedAt: now.Add(-2 * time.Hour)})
+	db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: seed + "-p2", Source: "local", PlayedAt: now.Add(-4 * time.Hour)})
+	db.DB.Create(&db.PlayEvent{ProfileID: "other", Ref: seed + "-p3", Source: "local", PlayedAt: now.Add(-time.Minute)})
+	_, m := getMix(t, "p-test")
+	ids := mixIDs(m)
+	if ids[seed] || ids[seed+"-p1"] {
+		t.Fatalf("a ref played < 3 h ago is back in me/mix: %v", ids)
+	}
+	if !ids[seed+"-p2"] || !ids[seed+"-p3"] {
+		t.Fatalf("4 h old play / other profile's play wrongly excluded: %v", ids)
+	}
+	if m.Seeds < 1 {
+		t.Fatalf("the recent play should still seed the mix")
+	}
+}
+
+// The continuation (local/related?personal=1) avoids this profile's plays of
+// the last 3 h, and refs skipped once in the last 3 h.
+func TestLocalRelatedAvoidsRecentPlays(t *testing.T) {
+	useSkipDB(t)
+	relatedFixture(t)
+	now := time.Now()
+	db.DB.Create(&db.PlayEvent{ProfileID: "p-rec", Ref: "a1b2c3d4e5f", Source: "local", PlayedAt: now.Add(-time.Hour)})
+	db.DB.Create(&db.PlayEvent{ProfileID: "p-rec", Ref: "bbbbbbbbbbb", Source: "local", PlayedAt: now.Add(-5 * time.Hour)})
+	addSkips(t, "p-rec", "0123456789a", 10*time.Minute)
+	got := relatedIDs(t, "/api/v1/local/related?lid=e182ccc85ad&personal=1", "p-rec")
+	if got["a1b2c3d4e5f"] || got["0123456789a"] {
+		t.Fatalf("recent play / skip came back: %v", got)
+	}
+	if !got["bbbbbbbbbbb"] {
+		t.Fatalf("a 5 h old play should be allowed: %v", got)
 	}
 }

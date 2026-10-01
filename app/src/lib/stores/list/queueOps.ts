@@ -6,6 +6,8 @@
  * as `filterList`).
  */
 
+import { spreadArtists } from "$lib/homeRows";
+
 type Row = { videoId?: string };
 
 const clamp = (position: number, length: number) =>
@@ -219,4 +221,18 @@ export function isLibraryRow(row: { videoId?: unknown; localUrl?: unknown } | nu
  */
 export function playAllMixType(rows: ReadonlyArray<{ videoId?: unknown; localUrl?: unknown } | null | undefined>): "local" | "playlist" {
 	return rows.length > 0 && rows.every((r) => isLibraryRow(r)) ? "local" : "playlist";
+}
+
+/**
+ * c40b B6-10: the queue "Aléatoire". `shuffled` (the rows after the playing
+ * one, already shuffled) is reordered so no two tracks of one artist follow
+ * each other while another artist is left (homeRows.spreadArtists, same
+ * artist identity as the home rows). `current` (the playing row) counts as
+ * the previous track: the first shuffled row does not repeat its artist.
+ * Rows are never dropped nor copied.
+ */
+export function spreadShuffle<T extends Row>(shuffled: T[], current?: T | null): T[] {
+	if (!Array.isArray(shuffled)) return [];
+	if (!current) return spreadArtists(shuffled as any[]) as T[];
+	return (spreadArtists([current, ...shuffled] as any[]) as T[]).slice(1);
 }
