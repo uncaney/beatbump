@@ -32,6 +32,7 @@ import { setWorkerInterval } from "./utils/workerTimeout";
 import { resumeKeptFor } from "./stores/resumeState";
 import {
 	mediaArtwork,
+	mediaMetadataFields,
 	mediaSessionSeekTarget,
 	positionState,
 	previousAction,
@@ -97,10 +98,12 @@ function metaDataHandler({
 		if (!currentTrack) return console.debug("no current track");
 		// C3: local tracks show the library cover (`/cover?lid=`, 512 px) on the
 		// lock screen; thumbnails are copied, never reversed in place (F14/G14).
+		// c39c B6-26: every artist, the album (row or album queue), sharp artwork.
+		const fields = mediaMetadataFields(currentTrack, sessionList.context);
 		navigator.mediaSession.metadata = new MediaMetadata({
-			title: currentTrack?.title,
-			artist: currentTrack?.artistInfo?.artist?.[0]?.text || "",
-			album: currentTrack?.album?.title ?? undefined,
+			title: fields.title,
+			artist: fields.artist,
+			album: fields.album,
 			artwork: mediaArtwork(currentTrack, typeof location !== "undefined" ? location.origin : ""),
 		});
 		navigator.mediaSession.setActionHandler("play", () => {

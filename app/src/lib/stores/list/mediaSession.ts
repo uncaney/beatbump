@@ -87,9 +87,22 @@ const absolute = (url: string, origin: string) => {
 	}
 };
 
+/** c39c B6-26: sizes declared to the lock screen, largest first. */
+export const ARTWORK_SIZES: ReadonlyArray<number> = [512, 384, 256, 192, 96];
+/** Thumbnails below this edge are never listed while a larger image exists. */
+const MIN_ARTWORK_EDGE = 96;
+// YouTube Music (googleusercontent) thumbnails carry their size in the URL.
+const GOOGLE_DIM_RE = /=w\d+-h\d+(?=-|$)/;
+
 /**
- * MediaMetadata artwork: the local library cover (`/cover?lid=`, declared
- * 512x512) first for owned tracks, then the row thumbnails, largest first.
+ * MediaMetadata artwork, largest first (a lock screen that takes the first
+ * entry never gets a blurry 60 px thumbnail; Chrome picks by `sizes`):
+ * - local tracks: the library cover (`/cover?lid=`) declared at 512 / 384 /
+ *   256 / 192 / 96 (the cover proxy has no size parameter, same URL);
+ * - YouTube rows with a resizable googleusercontent thumbnail: one URL per
+ *   declared size (`=wN-hN`);
+ * - other thumbnails: largest first, the ones under 96 px dropped when a
+ *   larger one exists.
  * Never mutates the row's thumbnails (F14/G14).
  */
 export function mediaArtwork(
@@ -104,14 +117,79 @@ export function mediaArtwork(
 	const vid = typeof track.videoId === "string" ? track.videoId : "";
 	const cover = coverThumb ? coverThumb.url : LID_RE.test(vid) ? `/cover?lid=${vid}` : "";
 	const out: ArtworkImage[] = [];
-	if (cover) out.push({ src: absolute(cover, origin), sizes: "512x512", type: "image/jpeg" });
-	for (const t of [...thumbs].reverse()) {
-		if (t.url === cover) continue;
+	const seen = new Set<string>();
+	const push = (img: ArtworkImage) => {
+		const key = `${img.src}|${img.sizes ?? ""}`;
+		if (seen.has(key)) return;
+		seen.add(key);
+		out.push(img);
+	};
+	if (cover) {
+		const src = absolute(cover, origin);
+		for (const s of ARTWORK_SIZES) push({ src, sizes: `${s}x${s}`, type: "image/jpeg" });
+	}
+	const rest = thumbs.filter((t) => t.url !== cover);
+	const edge = (t: Thumb) => Math.min(Number(t.width) || 0, Number(t.height) || 0);
+	// Largest first (row order is smallest first; unknown sizes keep their place).
+	const ordered = [...rest].reverse().sort((a, b) => edge(b) - edge(a));
+	const resizable = ordered.find((t) => GOOGLE_DIM_RE.test(t.url));
+	if (resizable) {
+		for (const s of ARTWORK_SIZES) {
+			push({
+				src: absolute(resizable.url.replace(GOOGLE_DIM_RE, `=w${s}-h${s}`), origin),
+				sizes: `${s}x${s}`,
+				type: "image/jpeg",
+			});
+		}
+	}
+	const hasLarge = out.length > 0 || ordered.some((t) => edge(t) >= MIN_ARTWORK_EDGE);
+	for (const t of ordered) {
+		if (resizable && GOOGLE_DIM_RE.test(t.url)) continue;
 		const w = Number(t.width);
 		const h = Number(t.height);
+		const known = w > 0 && h > 0;
+		if (known && hasLarge && Math.min(w, h) < MIN_ARTWORK_EDGE) continue;
 		const img: ArtworkImage = { src: absolute(t.url, origin), type: "image/jpeg" };
-		if (w > 0 && h > 0) img.sizes = `${w}x${h}`;
-		out.push(img);
+		if (known) img.sizes = `${w}x${h}`;
+		push(img);
 	}
 	return out;
+}
+
+type Run = { text?: unknown; pageType?: unknown };
+const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+/**
+ * c39c B6-26: lock-screen title / artist / album. Artist: every artist run
+ * (joined), else the subtitle ARTIST run, else a plain `artist` string.
+ * Album: the row's album (`title`, or `text` on slimmed offline rows), else
+ * the album the queue was started from when the track belongs to it.
+ */
+export function mediaMetadataFields(
+	track: {
+		title?: unknown;
+		videoId?: unknown;
+		artistInfo?: { artist?: unknown } | null;
+		subtitle?: unknown;
+		artist?: unknown;
+		album?: unknown;
+	} | null | undefined,
+	context?: { kind?: unknown; title?: unknown; ids?: unknown } | null,
+): { title: string; artist: string; album: string } {
+	if (!track) return { title: "", artist: "", album: "" };
+	const runs = Array.isArray(track.artistInfo?.artist) ? (track.artistInfo?.artist as Run[]) : [];
+	const names = runs.map((r) => text(r?.text)).filter((n) => n && n !== "&" && n !== ",");
+	let artist = [...new Set(names)].join(", ");
+	if (!artist && Array.isArray(track.subtitle)) {
+		const a = (track.subtitle as Run[]).find((s) => s && /ARTIST/.test(text(s.pageType)) && text(s.text));
+		if (a) artist = text(a.text);
+	}
+	if (!artist) artist = text(track.artist);
+	const al = track.album && typeof track.album === "object" ? (track.album as { title?: unknown; text?: unknown }) : null;
+	let album = al ? text(al.title) || text(al.text) : "";
+	if (!album && context && context.kind === "album" && Array.isArray(context.ids)) {
+		const vid = text(track.videoId);
+		if (vid && (context.ids as unknown[]).includes(vid)) album = text(context.title);
+	}
+	return { title: text(track.title), artist, album };
 }

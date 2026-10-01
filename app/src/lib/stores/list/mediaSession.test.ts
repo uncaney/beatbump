@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mediaArtwork, mediaSessionSeekTarget, positionState, previousAction, seekTarget } from "./mediaSession";
+import { ARTWORK_SIZES, mediaArtwork, mediaMetadataFields, mediaSessionSeekTarget, positionState, previousAction, seekTarget } from "./mediaSession";
 
 describe("positionState", () => {
 	it("clamps the position and defaults the rate", () => {
@@ -71,7 +71,9 @@ describe("mediaArtwork", () => {
 			{ videoId: "0123456789a", thumbnails: [{ url: "/cover?lid=fedcba98765" }] },
 			origin,
 		);
-		expect(art).toEqual([{ src: "https://music.example/cover?lid=fedcba98765", sizes: "512x512", type: "image/jpeg" }]);
+		expect(art.map((a) => a.sizes)).toEqual(["512x512", "384x384", "256x256", "192x192", "96x96"]);
+		expect(new Set(art.map((a) => a.src))).toEqual(new Set(["https://music.example/cover?lid=fedcba98765"]));
+		expect(art.every((a) => a.type === "image/jpeg")).toBe(true);
 	});
 	it("builds the cover from a lid without thumbnails", () => {
 		expect(mediaArtwork({ videoId: "0123456789a" }, origin)[0].src).toBe("https://music.example/cover?lid=0123456789a");
@@ -82,8 +84,59 @@ describe("mediaArtwork", () => {
 			{ url: "https://i/l.jpg", width: 544, height: 544 },
 		];
 		const art = mediaArtwork({ videoId: "dQw4w9WgXcQ", thumbnails }, origin);
-		expect(art.map((a) => a.src)).toEqual(["https://i/l.jpg", "https://i/s.jpg"]);
+		// the 60 px thumbnail is dropped while a larger one exists (B6-26)
+		expect(art.map((a) => a.src)).toEqual(["https://i/l.jpg"]);
 		expect(art[0].sizes).toBe("544x544");
 		expect(thumbnails[0].url).toBe("https://i/s.jpg");
+	});
+	it("keeps a lone small thumbnail rather than nothing", () => {
+		const art = mediaArtwork({ videoId: "dQw4w9WgXcQ", thumbnails: [{ url: "https://i/s.jpg", width: 60, height: 60 }] }, origin);
+		expect(art.map((a) => a.src)).toEqual(["https://i/s.jpg"]);
+	});
+	it("googleusercontent thumbnails: one URL per declared size, largest first", () => {
+		const thumbnails = [
+			{ url: "https://lh3.googleusercontent.com/abc=w60-h60-l90-rj", width: 60, height: 60 },
+			{ url: "https://lh3.googleusercontent.com/abc=w120-h120-l90-rj", width: 120, height: 120 },
+		];
+		const art = mediaArtwork({ videoId: "dQw4w9WgXcQ", thumbnails }, origin);
+		expect(art.map((a) => a.sizes)).toEqual(ARTWORK_SIZES.map((s) => `${s}x${s}`));
+		expect(art[0].src).toBe("https://lh3.googleusercontent.com/abc=w512-h512-l90-rj");
+		expect(art[4].src).toBe("https://lh3.googleusercontent.com/abc=w96-h96-l90-rj");
+		expect(thumbnails[0].url).toBe("https://lh3.googleusercontent.com/abc=w60-h60-l90-rj");
+	});
+	it("local cover, then the row thumbnails above 96 px", () => {
+		const art = mediaArtwork(
+			{ videoId: "0123456789a", thumbnails: [{ url: "https://i/s.jpg", width: 60, height: 60 }, { url: "https://i/m.jpg", width: 226, height: 226 }] },
+			origin,
+		);
+		expect(art).toHaveLength(6);
+		expect(art[0].src).toBe("https://music.example/cover?lid=0123456789a");
+		expect(art[5].src).toBe("https://i/m.jpg");
+	});
+});
+
+describe("mediaMetadataFields (B6-26)", () => {
+	it("joins every artist and reads the album title", () => {
+		expect(
+			mediaMetadataFields({
+				title: "Get Lucky",
+				artistInfo: { artist: [{ text: "Daft Punk" }, { text: "&" }, { text: "Pharrell Williams" }] },
+				album: { title: "Random Access Memories" },
+			}),
+		).toEqual({ title: "Get Lucky", artist: "Daft Punk, Pharrell Williams", album: "Random Access Memories" });
+	});
+	it("falls back to the subtitle artist, a slimmed album and the album queue", () => {
+		expect(
+			mediaMetadataFields({ title: "A", subtitle: [{ text: "Air", pageType: "MUSIC_PAGE_TYPE_ARTIST" }], album: { text: "Moon Safari" } }),
+		).toEqual({ title: "A", artist: "Air", album: "Moon Safari" });
+		expect(
+			mediaMetadataFields({ title: "B", videoId: "0123456789a", artist: "Air" }, { kind: "album", title: "Talkie Walkie", ids: ["0123456789a"] }),
+		).toEqual({ title: "B", artist: "Air", album: "Talkie Walkie" });
+		expect(
+			mediaMetadataFields({ title: "C", videoId: "zzzzzzzzzzz" }, { kind: "album", title: "Talkie Walkie", ids: ["0123456789a"] }).album,
+		).toBe("");
+	});
+	it("empty for no track", () => {
+		expect(mediaMetadataFields(null)).toEqual({ title: "", artist: "", album: "" });
 	});
 });
