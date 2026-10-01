@@ -4,6 +4,7 @@ import (
 	"beatbump-server/backend/_youtube"
 	"beatbump-server/backend/_youtube/api"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/labstack/echo/v4"
 	"net/http"
@@ -17,7 +18,11 @@ func ArtistEndpointHandler(c echo.Context) error {
 		return c.JSON(http.StatusOK, struct{}{})
 	}
 	if isLocalArtist(browseId) {
-		return c.JSON(http.StatusOK, buildLocalArtist(browseId))
+		local := buildLocalArtist(browseId)
+		if localArtistUnknown(local) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found", "reason": "unknown artist"})
+		}
+		return c.JSON(http.StatusOK, local)
 	}
 	var responseBytes []byte
 	var err error
@@ -28,7 +33,11 @@ func ArtistEndpointHandler(c echo.Context) error {
 	responseBytes, err = api.Browse(browseId, api.PageType_MusicPageTypeArtist, qparams, nil, nil, nil, api.WebMusic)
 
 	if err != nil {
-		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
+		var use *api.UpstreamStatusError
+		if errors.As(err, &use) && (use.StatusCode == http.StatusNotFound || use.StatusCode == http.StatusBadRequest) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found", "reason": "unknown artist"})
+		}
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "upstream", "reason": err.Error()})
 	}
 
 	/*if category == "" {
@@ -45,10 +54,19 @@ func ArtistEndpointHandler(c echo.Context) error {
 	var homeResponse _youtube.HomeResponse
 	err = json.Unmarshal(responseBytes, &homeResponse)
 	if err != nil {
-		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "upstream", "reason": "invalid upstream payload"})
+	}
+	// An unknown browseId comes back as a 200 with neither header nor tabs (audit UX v4
+	// regression 1): answer a JSON 404 instead of panicking on Tabs[0].
+	if artistUnknown(homeResponse) {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found", "reason": "unknown artist"})
 	}
 
-	r := parseArtist(homeResponse)
+	r, perr := safeParseArtist(homeResponse)
+	if perr != nil {
+		c.Logger().Errorf("artist %s: %v", browseId, perr)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "parse", "reason": "unexpected upstream layout"})
+	}
 
 	return c.JSON(http.StatusOK, r)
 
@@ -115,7 +133,7 @@ func parseArtist(homeResponse _youtube.HomeResponse) interface{} {
 		}
 	}
 	//var description Description = Description{}
-	if len(homeResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents) != 0 {
+	if len(homeResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs) != 0 && len(homeResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents) != 0 {
 		for _, section := range homeResponse.Contents.SingleColumnBrowseResultsRenderer.Tabs[0].TabRenderer.Content.SectionListRenderer.Contents {
 			musicShelf := Carousel{}
 			contents := make([]IListItemRenderer, 0)
@@ -289,4 +307,40 @@ func parseArtist(homeResponse _youtube.HomeResponse) interface{} {
 
 	return response
 
+}
+
+// artistUnknown reports an upstream answer that carries no artist at all (no header
+// title in either renderer and no tab): what YouTube returns for an unknown browseId.
+func artistUnknown(h _youtube.HomeResponse) bool {
+	return len(h.Header.MusicHeaderRenderer.Title.Runs) == 0 &&
+		len(h.Header.MusicImmersiveHeaderRenderer.Title.Runs) == 0 &&
+		len(h.Contents.SingleColumnBrowseResultsRenderer.Tabs) == 0
+}
+
+// localArtistUnknown reports a local artist page with neither a name nor any content.
+func localArtistUnknown(resp map[string]interface{}) bool {
+	if resp == nil {
+		return true
+	}
+	name := ""
+	if h, ok := resp["header"].(map[string]interface{}); ok {
+		name, _ = h["name"].(string)
+	}
+	n := 0
+	if cs, ok := resp["carousels"].([]Carousel); ok {
+		n = len(cs)
+	} else if cs, ok := resp["carousels"].([]interface{}); ok {
+		n = len(cs)
+	}
+	return name == "" && n == 0
+}
+
+// safeParseArtist turns a parser panic on an unexpected upstream layout into an error.
+func safeParseArtist(h _youtube.HomeResponse) (r interface{}, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("parseArtist panic: %v", rec)
+		}
+	}()
+	return parseArtist(h), nil
 }
