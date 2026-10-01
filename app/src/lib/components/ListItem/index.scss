@@ -29,6 +29,16 @@
    and stay left-aligned; desktop (>= 720 px) is a grid. Let the metadata take
    the free space for the release context only. */
 @media screen and (max-width: 719.98px) {
+	/* Every row (audit v6 TOP 3): a content-sized .metadata pushed the kebab
+	   (.length) off a 390 px screen on long artist-page titles and .title never
+	   ellipsed. Let the text column shrink, keep the kebab its own size. */
+	.m-item .metadata {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.m-item .length {
+		flex: 0 0 auto;
+	}
 	/* :global: index.scss is shared with LocalListItem, which never sets it. */
 	.m-item:global(.release-row) .metadata {
 		flex: 1 1 auto;
