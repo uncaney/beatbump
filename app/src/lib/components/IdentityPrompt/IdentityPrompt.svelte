@@ -26,6 +26,8 @@
 	let error = "";
 	let done = false;
 
+	// Re-opened from the banner after a "Plus tard": show again.
+	$: if (force) done = false;
 	$: visible = !done && anonymous && (force || eligible);
 
 	onMount(() => {

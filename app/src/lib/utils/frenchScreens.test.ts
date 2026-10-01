@@ -62,6 +62,7 @@ export const FILES = [
 	"lib/utils/retryOnce.ts",
 	// 39A: identity prompt and device-only banner.
 	"lib/components/IdentityPrompt/IdentityPrompt.svelte",
+	"lib/components/IdentityPrompt/DeviceOnlyBanner.svelte",
 	"lib/identity.ts",
 ] as const;
 
