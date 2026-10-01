@@ -5,6 +5,7 @@
 	import { queue } from "$lib/stores/list";
 	import { formatCountFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
+	import EmptyState from "$components/EmptyState/EmptyState.svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 
 	let playlists: any[] = [];
@@ -66,7 +67,7 @@
 	}
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active="my-playlists" />
 	<header class="head">
 		<h1>Mes playlists</h1>
@@ -77,13 +78,17 @@
 		>
 		<div class="actions">
 			<button
-				class="btn"
+				type="button"
+				class="btn-primary"
+				data-testid="playlists-srv-new"
 				on:click={newPlaylist}
 				disabled={busy || offline}
 				title={offline ? "Hors connexion" : undefined}>Nouvelle playlist</button
 			>
 			<button
-				class="btn"
+				type="button"
+				class="btn-secondary"
+				data-testid="playlists-srv-save-queue"
 				on:click={saveQueue}
 				disabled={busy || offline || !($queue && $queue.length)}
 				title={offline ? "Hors connexion" : "Enregistrer la file de lecture actuelle comme playlist"}
@@ -97,7 +102,15 @@
 	{:else if offline}
 		<MeOffline text="Tes playlists reviendront avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
 	{:else if playlists.length === 0}
-		<p class="state">Pas encore de playlist sur le serveur.</p>
+		<!-- U12-1: one pictogram, one sentence, one action (same block as Écoutes / Favoris). -->
+		<EmptyState
+			testid="empty-state"
+			icon="list"
+			title="Pas encore de playlist sur le serveur"
+			text="Crée-en une avec « Nouvelle playlist », ou enregistre ta file de lecture : elle te suivra sur tes appareils."
+			href="/library"
+			cta="Voir les playlists de cet appareil"
+		/>
 	{:else}
 		<div class="list">
 			{#each playlists as p (p.id)}
@@ -136,7 +149,7 @@
 		order: 1;
 		color: #bbb;
 		text-decoration: none;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 		min-height: max(2.75rem, 44px);
 		display: inline-flex;
 		align-items: center;
@@ -145,17 +158,9 @@
 		color: inherit;
 		text-decoration: underline;
 	}
-	.btn {
-		background: rgba(255, 255, 255, 0.1);
-		border: 1px solid rgba(255, 255, 255, 0.2);
-		border-radius: 0.4rem;
-		color: inherit;
-		padding: 0.45rem 0.9rem;
-		cursor: pointer;
-	}
-	.btn:disabled {
-		opacity: 0.5;
-		cursor: default;
+	/* U12-1: colours, casing and the 44 px floor come from .btn-primary / .btn-secondary. */
+	.actions {
+		flex-wrap: wrap;
 	}
 	.list {
 		display: flex;
@@ -166,6 +171,9 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		gap: 0.75rem;
+		min-height: max(2.75rem, 44px);
+		box-sizing: border-box;
 		padding: 0.7rem 0.9rem;
 		border-radius: 0.4rem;
 		background: rgba(255, 255, 255, 0.05);
@@ -176,8 +184,9 @@
 		background: rgba(255, 255, 255, 0.12);
 	}
 	.pl-item .count {
-		color: #999;
-		font-size: 0.9rem;
+		color: #b3b3b3;
+		font-size: var(--text-secondary-size);
+		flex-shrink: 0;
 	}
 	.state {
 		color: #999;
