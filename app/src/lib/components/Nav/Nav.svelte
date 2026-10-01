@@ -226,13 +226,6 @@
 </nav>
 
 {#if !hidden}
-    <button
-        class="sr-only"
-        on:click={() => {
-			hidden = true;
-		}}>Close Search Dialogue
-    </button
-    >
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <div
@@ -255,6 +248,7 @@
                 {filter}
                 {query}
                 type="inline"
+                closable
                 on:submitted={({ detail }) => {
 					if (preserve.includes("Category")) {
 						filter = detail?.filter;

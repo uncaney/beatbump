@@ -88,6 +88,8 @@
 	export let type: "inline";
 	export let query = "";
 	export let filter = searchFilter[0].params;
+	/** Visible close button (mobile overlay, audit v6 3.4 finitions). */
+	export let closable = false;
 
 	const dispatch = createEventDispatcher();
 	let results: Array<{ query: string; id: string }> = [];
@@ -421,6 +423,11 @@
 		dispatch("submitted", { submitted: false, filter, query });
 	}
 
+	function closeFromButton() {
+		cancelYt();
+		closeOverlay();
+	}
+
 	/**
 	 * Plays an owned track straight from the overlay: one-item "local" mix
 	 * (next/previous stay local, no continuation fetch), no /search navigation.
@@ -748,7 +755,6 @@
 								<span class="local-artist">{trendingSubtitle(item)}</span>
 							{/if}
 						</span>
-						<span class="local-badge">tendance</span>
 					</li>
 				{/each}
 			{/if}
@@ -787,6 +793,20 @@
 			</select>
 		</div>
 	</div>
+	{#if closable}
+		<button
+			type="button"
+			class="icon-btn search-close"
+			aria-label="Fermer la recherche"
+			title="Fermer la recherche"
+			on:click|stopPropagation={closeFromButton}
+		>
+			<Icon
+				name="x"
+				size="1.5rem"
+			/>
+		</button>
+	{/if}
 </form>
 
 <style lang="scss">
@@ -999,6 +1019,33 @@
 				color: var(--text-secondary);
 				border: 1px solid hsl(0deg 0% 66.7% / 35%);
 			}
+		}
+	}
+
+	// Close button of the overlay (audit v6 3.4): the only one used to be an
+	// sr-only "Close Search Dialogue" of 28x15; a 44 px round icon button at
+	// the end of the row now.
+	.search-close {
+		flex: 0 0 auto;
+		box-sizing: border-box;
+		width: 44px;
+		height: 44px;
+		min-width: 44px;
+		min-height: 44px;
+		margin: 0 0.25rem 0 0;
+		padding: 0;
+		display: grid;
+		place-items: center;
+		align-self: center;
+		border-radius: 999px;
+		border: 1px solid hsl(0deg 0% 66.7% / 35%);
+		background: transparent;
+		color: inherit;
+		cursor: pointer;
+		&:hover,
+		&:focus-visible {
+			background: rgb(255 255 255 / 10%);
+			border-color: hsl(0deg 0% 66.7% / 70%);
 		}
 	}
 

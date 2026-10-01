@@ -298,7 +298,7 @@
 				data-persisted={persisted === null ? "unknown" : String(persisted)}
 				>Stockage protégé : {persisted === null ? "inconnu" : persisted ? "oui" : "non"}{#if usage > 0}<span
 						id="offline-storage-usage"
-						> · {fmtBytes(usage)} utilisés{#if storageQuota > 0} sur {fmtBytes(storageQuota)}{/if}</span
+						>{" · "}{fmtBytes(usage)} utilisés{#if storageQuota > 0}{" sur "}{fmtBytes(storageQuota)}{/if}</span
 					>{/if}</span
 			>
 		</label>

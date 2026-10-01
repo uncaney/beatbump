@@ -122,10 +122,15 @@
 					class="name"
 					title={album.name}>{album.name}</span
 				>
-				<span class="sub">
-					{#if showArtist}<span class="artist">{album.artist}</span><span class="dot">·</span>{/if}
-					{count} {count > 1 ? "pistes" : "piste"}{#if size}<span class="dot">·</span>{size}{/if}
-				</span>
+				<!-- One space on each side of every " · " (audit v6 3.5): the line
+				     break after {/if} used to add a second one. -->
+				<span class="sub"
+					>{#if showArtist}<span class="artist">{album.artist}</span><span class="dot"
+							>{" · "}</span
+						>{/if}{count} {count > 1 ? "pistes" : "piste"}{#if size}<span class="dot"
+							>{" · "}</span
+						>{size}{/if}</span
+				>
 			</span>
 		</button>
 		<div class="actions">
@@ -363,7 +368,8 @@
 		color: $muted;
 	}
 	.dot {
-		margin: 0 0.3em;
+		margin: 0;
+		white-space: pre;
 	}
 	.actions {
 		flex: 0 0 auto;
