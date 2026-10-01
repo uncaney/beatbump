@@ -43,16 +43,59 @@ export function readLastTrack(storage: { getItem(key: string): string | null } |
 	}
 }
 
+/** localStorage key of the offline track list (same as `KEY` in $lib/offline). */
+export const OFFLINE_TRACKS_KEY = "ytm-offline-tracks";
+
+/**
+ * Tracks really held by the offline cache (`_cached === true`, kept in sync
+ * with the service worker by reconcileOfflineList), most recently cached first.
+ */
+export function readCachedTracks(storage: { getItem(key: string): string | null } | undefined): RowItem[] {
+	try {
+		const list = JSON.parse(storage?.getItem(OFFLINE_TRACKS_KEY) || "[]");
+		if (!Array.isArray(list)) return [];
+		return list
+			.filter((t: any) => t && t._cached === true && t._evicted !== true)
+			.sort((a: any, b: any) => (Number(b?._at) || 0) - (Number(a?._at) || 0));
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Default "Reprendre" fallback (audit v4 H8): only while the device is offline,
+ * the cached tracks. Online, an empty history stays empty (G17: fresh profile).
+ */
+export function offlineResumeFallback(): RowItem[] {
+	try {
+		if (typeof navigator === "undefined" || navigator.onLine !== false) return [];
+		return readCachedTracks(typeof localStorage === "undefined" ? undefined : localStorage);
+	} catch {
+		return [];
+	}
+}
+
 /**
  * "Reprendre": the last played track first, then the last `max` distinct plays.
  * `recent` is the profile history (me/stats/recent, most recent first). When it
- * is empty (call failed, offline, fresh profile) only the last track is shown:
- * the current session queue is NOT a resume (audit v3 G17), so the row stays
- * hidden on a fresh profile. The last track is never repeated inside the list.
+ * is empty: offline (H8, me/* answers {"offline":true}) the cached tracks from
+ * `fallback`, most recent first; online (failed call, fresh profile) only the
+ * last track is shown: the current session queue is NOT a resume (audit v3
+ * G17), so the row stays hidden on a fresh profile. The last track is never
+ * repeated inside the list.
  */
-export function buildResumeRow(last: RowItem | null, recent: unknown, max = 10): RowItem[] {
+export function buildResumeRow(
+	last: RowItem | null,
+	recent: unknown,
+	max = 10,
+	fallback: () => unknown = offlineResumeFallback,
+): RowItem[] {
 	const head = last && isRenderable(last) ? [last] : [];
-	const source = Array.isArray(recent) ? recent : [];
+	let source: unknown[] = Array.isArray(recent) ? recent : [];
+	if (capItems(source, 1).length === 0) {
+		const fb = fallback();
+		source = Array.isArray(fb) ? fb : [];
+	}
 	const rest = capItems(source, max + head.length);
 	const lastRef = head.length ? rowItemRef(head[0]) : "";
 	return [...head, ...rest.filter((it) => rowItemRef(it) !== lastRef).slice(0, max)];

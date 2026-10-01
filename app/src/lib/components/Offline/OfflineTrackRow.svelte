@@ -14,6 +14,8 @@
 	export let active = false;
 	export let number: number | undefined = undefined;
 	export let showArtist = true;
+	/** H6: "Retélécharger" needs the network; disabled while offline. */
+	export let online = true;
 
 	const dispatch = createEventDispatcher<{ play: any; remove: any; pin: any; recache: any }>();
 
@@ -107,8 +109,9 @@
 		<button
 			type="button"
 			class="btn recache"
-			title="Retélécharger ce morceau évincé du cache"
+			title={online ? "Retélécharger ce morceau évincé du cache" : "Hors connexion : disponible avec le réseau"}
 			aria-label="Retélécharger"
+			disabled={!online}
 			on:click|stopPropagation={() => dispatch("recache", track)}>
 			<Icon name="download" size="1em" />
 		</button>
@@ -350,6 +353,10 @@
 	.recache:active {
 		color: $warn !important;
 		border-color: rgba(224, 160, 0, 0.7) !important;
+	}
+	.recache:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
 	}
 	.pin.on,
 	.pin.on:hover,

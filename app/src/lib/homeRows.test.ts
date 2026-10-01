@@ -6,6 +6,8 @@ import {
 	buildResumeRow,
 	diversify,
 	capItems,
+	OFFLINE_TRACKS_KEY,
+	readCachedTracks,
 	hasCoverAndArtist,
 	readLastTrack,
 	rowItemRef,
@@ -116,6 +118,36 @@ describe("buildResumeRow", () => {
 	it("is empty when nothing is known", () => {
 		expect(buildResumeRow(null, undefined)).toEqual([]);
 		expect(buildResumeRow(null, { items: [] })).toEqual([]);
+	});
+	it("falls back to the cached tracks when the history is empty (offline, H8)", () => {
+		const cached = [song("c1"), song("last"), song("c2")];
+		const row = buildResumeRow(song("last"), [], 10, () => cached);
+		expect(row.map(rowItemRef)).toEqual(["last", "c1", "c2"]);
+	});
+	it("ignores the fallback when the history has items", () => {
+		const row = buildResumeRow(null, [song("r1")], 10, () => [song("c1")]);
+		expect(row.map(rowItemRef)).toEqual(["r1"]);
+	});
+	it("default fallback is empty outside an offline browser (G17 kept online)", () => {
+		expect(buildResumeRow(null, [], 10)).toEqual([]);
+	});
+});
+
+describe("readCachedTracks (H8)", () => {
+	const store = (v: unknown) => ({ getItem: (k: string) => (k === OFFLINE_TRACKS_KEY ? JSON.stringify(v) : null) });
+	it("keeps only entries the SW holds, most recently cached first", () => {
+		const list = [
+			{ ...song("old"), _cached: true, _at: 1 },
+			{ ...song("pending"), _cached: false, _at: 5 },
+			{ ...song("evicted"), _cached: true, _evicted: true, _at: 6 },
+			{ ...song("new"), _cached: true, _at: 9 },
+		];
+		expect(readCachedTracks(store(list)).map(rowItemRef)).toEqual(["new", "old"]);
+	});
+	it("is empty on missing or corrupt storage", () => {
+		expect(readCachedTracks(undefined)).toEqual([]);
+		expect(readCachedTracks({ getItem: () => "{nope" })).toEqual([]);
+		expect(readCachedTracks(store({ not: "a list" }))).toEqual([]);
 	});
 });
 

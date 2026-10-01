@@ -450,9 +450,9 @@
 					id="offline-recache"
 					type="button"
 					aria-busy={!!recaching}
-					aria-disabled={!!recaching}
-					disabled={!!recaching}
-					title="Retélécharger les morceaux que le cache a évincés"
+					aria-disabled={!!recaching || !online}
+					disabled={!!recaching || !online}
+					title={online ? "Retélécharger les morceaux que le cache a évincés" : "Hors connexion : disponible avec le réseau"}
 					on:click={recacheAll}
 				>
 					<Icon
@@ -494,6 +494,7 @@
 					<AlbumCard
 						{album}
 						{activeId}
+						{online}
 						bind:open={openAlbums[album.key]}
 						on:play={(e) => start(e.detail.tracks, e.detail.index, { shuffle: e.detail.shuffle })}
 						on:remove={(e) => remove(e.detail)}
@@ -566,6 +567,7 @@
 									<AlbumCard
 										{album}
 										{activeId}
+										{online}
 										showArtist={false}
 										bind:open={openAlbums["a:" + album.key]}
 										on:play={(e) => start(e.detail.tracks, e.detail.index, { shuffle: e.detail.shuffle })}
@@ -585,6 +587,7 @@
 					<OfflineTrackRow
 						track={t}
 						active={t.videoId === activeId}
+						{online}
 						on:play={() => start(recent, i)}
 						on:remove={(e) => remove(e.detail)}
 						on:pin={(e) => pin(e.detail)}
