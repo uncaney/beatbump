@@ -71,10 +71,14 @@ type playRow struct {
 }
 
 // windowRows returns one row per ref played by the profile in the window.
+// `data` is the stored item of the ref's MOST RECENT play (deterministic):
+// max(data) picked the lexicographically greatest JSON, so an old variant
+// without length/album could win over the current one (audit v3 G10).
 func windowRows(pid string, days int) []playRow {
 	var rows []playRow
+	latestData := "(SELECT p2.data FROM play_events p2 WHERE p2.profile_id = play_events.profile_id AND p2.ref = play_events.ref ORDER BY p2.played_at DESC, p2.id DESC LIMIT 1)"
 	q := db.DB.Model(&db.PlayEvent{}).
-		Select("ref, max(data) as data, max(title) as title, max(artist) as artist, count(*) as cnt").
+		Select("ref, "+latestData+" as data, max(title) as title, max(artist) as artist, count(*) as cnt").
 		Where("profile_id = ?", pid)
 	if days > 0 {
 		q = q.Where("played_at >= ?", time.Now().Add(-time.Duration(days)*24*time.Hour))

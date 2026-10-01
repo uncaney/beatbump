@@ -4,11 +4,23 @@ import (
 	"beatbump-server/backend/_youtube"
 	"beatbump-server/backend/_youtube/api"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"github.com/labstack/echo/v4"
 	"net/http"
 	"strconv"
 )
+
+// exploreError maps a failed explore lookup to a JSON answer. An upstream 404
+// (unknown category slug) becomes 404 {"error":"not_found"} so the page can
+// show "Catégorie introuvable" (audit v3 F22/G19); anything else stays a 500,
+// as JSON instead of the former text/plain body.
+func exploreError(c echo.Context, err error) error {
+	var ue *api.UpstreamStatusError
+	if errors.As(err, &ue) && ue.StatusCode == http.StatusNotFound {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "not_found", "reason": "unknown explore category"})
+	}
+	return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal", "reason": err.Error()})
+}
 
 func ExploreEndpointHandler(c echo.Context) error {
 	category := c.Param("category")
@@ -21,7 +33,7 @@ func ExploreEndpointHandler(c echo.Context) error {
 	responseBytes, err = api.Browse(browseID, api.PageType_MusicPageTypePlaylist, category, nil, nil, nil, api.WebMusic)
 
 	if err != nil {
-		return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
+		return exploreError(c, err)
 	}
 
 	if category == "" {
@@ -29,7 +41,7 @@ func ExploreEndpointHandler(c echo.Context) error {
 		var exploreResponse _youtube.Explore
 		err = json.Unmarshal(responseBytes, &exploreResponse)
 		if err != nil {
-			return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
+			return exploreError(c, err)
 		}
 
 		r := parseExplore(exploreResponse)
@@ -38,7 +50,7 @@ func ExploreEndpointHandler(c echo.Context) error {
 		var homeResponse _youtube.HomeResponse
 		err = json.Unmarshal(responseBytes, &homeResponse)
 		if err != nil {
-			return c.String(http.StatusInternalServerError, fmt.Sprintf("Error building API request: %s", err))
+			return exploreError(c, err)
 		}
 
 		r := ParseHome(homeResponse)

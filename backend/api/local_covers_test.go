@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,6 +78,72 @@ func TestAlbumCoversBatchesOneQuery(t *testing.T) {
 	albumCovers(coverHits())
 	if len(stub.queried) != 1 {
 		t.Fatalf("second batch must be served from the memo, queried %v", stub.queried)
+	}
+}
+
+// variousArtists returns n filler album docs sharing one albumArtist.
+func variousArtists(n int) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, n+1)
+	for i := 0; i < n; i++ {
+		out = append(out, map[string]interface{}{
+			"id": albumID("Various Artists", fmt.Sprintf("Comp %05d", i)), "albumArtist": "Various Artists", "coverLid": "ffffffffff0",
+		})
+	}
+	return out
+}
+
+// G9: an albumArtist with more than albumCoverBatchLimit albums: the wanted
+// album sits on the second page and must be resolved by a second query, not
+// memoised as absent.
+func TestAlbumCoversPagesPastBatchLimit(t *testing.T) {
+	stub := newShelfStub(t)
+	wanted := albumID("Various Artists", "Zebra Mix")
+	stub.hits["albums"] = append(variousArtists(albumCoverBatchLimit), map[string]interface{}{
+		"id": wanted, "albumArtist": "Various Artists", "coverLid": "e182ccc85ad",
+	})
+	hits := []map[string]interface{}{
+		{"lid": "0123456789a", "title": "Zebra", "artist": "Someone", "albumArtist": "Various Artists", "album": "Zebra Mix"},
+	}
+	covers := albumCovers(hits)
+	if covers[wanted] != "e182ccc85ad" {
+		t.Fatalf("album on the second page must resolve, got %+v", covers)
+	}
+	if strings.Join(stub.queried, ",") != "albums,albums" {
+		t.Fatalf("expected two paged albums queries, got %v", stub.queried)
+	}
+	if c, ok := albumCoverCached(wanted); !ok || c != "e182ccc85ad" {
+		t.Fatalf("resolved cover must be memoised, got %q/%v", c, ok)
+	}
+	// the row carries the album cover
+	if got := thumbLid(t, localSongItemsWithCovers(hits)[0].Thumbnails); got != "e182ccc85ad" {
+		t.Fatalf("row must carry the paged album cover, got %s", got)
+	}
+}
+
+// G9: when the page cap is reached without finding the album, nothing
+// negative is memoised, so the per-item document GET can still resolve it.
+func TestAlbumCoversNoNegativeMemoWhenCapped(t *testing.T) {
+	stub := newShelfStub(t)
+	stub.pageless = true // every page is full and never carries the wanted id
+	stub.hits["albums"] = variousArtists(albumCoverBatchLimit)
+	wanted := albumID("Various Artists", "Zebra Mix")
+	hits := []map[string]interface{}{
+		{"lid": "0123456789a", "title": "Zebra", "artist": "Someone", "albumArtist": "Various Artists", "album": "Zebra Mix"},
+	}
+	covers := albumCovers(hits)
+	if c, ok := covers[wanted]; !ok || c != "" {
+		t.Fatalf("unresolved album must be an empty entry of this batch, got %+v", covers)
+	}
+	if len(stub.queried) != albumCoverMaxPages {
+		t.Fatalf("expected %d paged queries, got %v", albumCoverMaxPages, len(stub.queried))
+	}
+	if _, ok := albumCoverCached(wanted); ok {
+		t.Fatalf("album beyond the page cap must NOT be memoised as absent")
+	}
+	// the per-item fallback (document GET) still finds it
+	stub.hits["albums"] = append(stub.hits["albums"], map[string]interface{}{"id": wanted, "albumArtist": "Various Artists", "coverLid": "e182ccc85ad"})
+	if got := albumCoverFor(wanted); got != "e182ccc85ad" {
+		t.Fatalf("document GET fallback must resolve the album, got %q", got)
 	}
 }
 

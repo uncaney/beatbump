@@ -14,9 +14,16 @@ import (
 // canned list (filters are recorded, not evaluated); a document GET on an index
 // ("<index>/doc" in queried) answers the canned doc with that id, else 404.
 type shelfStub struct {
-	hits    map[string][]map[string]interface{}
-	queried []string
-	filters []string
+	hits     map[string][]map[string]interface{}
+	queried  []string
+	filters  []string
+	pageless bool // ignore offset: every page is the first one (G9 cap test)
+}
+
+// stubInt reads a JSON number from a decoded request body (0 when absent).
+func stubInt(v interface{}) int {
+	f, _ := v.(float64)
+	return int(f)
 }
 
 func (s *shelfStub) handler() http.Handler {
@@ -43,8 +50,20 @@ func (s *shelfStub) handler() http.Handler {
 		var body map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&body)
 		s.filters = append(s.filters, mstr(body, "filter"))
+		all := s.hits[index]
+		off, lim := stubInt(body["offset"]), stubInt(body["limit"])
+		if s.pageless {
+			off = 0
+		}
+		if off > len(all) {
+			off = len(all)
+		}
+		all = all[off:]
+		if lim > 0 && lim < len(all) {
+			all = all[:lim]
+		}
 		hits := []interface{}{}
-		for _, h := range s.hits[index] {
+		for _, h := range all {
 			hits = append(hits, h)
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"hits": hits})

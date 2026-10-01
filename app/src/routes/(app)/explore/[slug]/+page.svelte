@@ -7,6 +7,22 @@
 	export let data;
 </script>
 
+{#if data.notFound}
+	<Header
+		title="Catégorie introuvable"
+		url={data.path}
+		desc="Cette catégorie n'existe pas ou n'est plus proposée."
+	/>
+	<main>
+		<div class="header">
+			<h1>Catégorie introuvable</h1>
+		</div>
+		<p class="not-found" data-testid="explore-not-found">
+			Cette catégorie n'existe pas ou n'est plus proposée.
+			<a href="/explore">Retour à Explorer</a>
+		</p>
+	</main>
+{:else}
 <Header
 	title="{data.response.header} Playlists"
 	url={data.path}
@@ -44,6 +60,14 @@
             </Grid>
     {/each}-->
 </main>
+{/if}
 
 <style lang="scss">
+	.not-found {
+		color: var(--text-secondary);
+	}
+	.not-found a {
+		margin-left: 0.25em;
+		text-decoration: underline;
+	}
 </style>

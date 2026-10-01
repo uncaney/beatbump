@@ -96,24 +96,24 @@ describe("buildResumeRow", () => {
 	it("puts the last track first and never repeats it", () => {
 		const last = song("last");
 		const recent = [song("last"), song("r1"), song("r2")];
-		expect(buildResumeRow(last, recent, [], 10).map(rowItemRef)).toEqual(["last", "r1", "r2"]);
+		expect(buildResumeRow(last, recent, 10).map(rowItemRef)).toEqual(["last", "r1", "r2"]);
 	});
 	it("caps the history part to max, independent of the last track", () => {
 		const recent = Array.from({ length: 15 }, (_, i) => song(`r${i}`));
-		const row = buildResumeRow(song("last"), recent, [], 10);
+		const row = buildResumeRow(song("last"), recent, 10);
 		expect(row).toHaveLength(11);
 		expect(rowItemRef(row[0])).toBe("last");
 		expect(rowItemRef(row[10])).toBe("r9");
 	});
-	it("falls back to the session queue when history is empty", () => {
-		const row = buildResumeRow(null, [], [song("q1"), song("q2"), song("q1")], 10);
-		expect(row.map(rowItemRef)).toEqual(["q1", "q2"]);
+	it("stays empty when history is empty: the current queue is not a resume (G17)", () => {
+		expect(buildResumeRow(null, [], 10)).toEqual([]);
+		expect(buildResumeRow(null, undefined, 10)).toEqual([]);
 	});
-	it("ignores the queue when history has items", () => {
-		expect(buildResumeRow(null, [song("h")], [song("q")], 10).map(rowItemRef)).toEqual(["h"]);
+	it("shows only the last track when history is empty", () => {
+		expect(buildResumeRow(song("last"), [], 10).map(rowItemRef)).toEqual(["last"]);
 	});
 	it("is empty when nothing is known", () => {
-		expect(buildResumeRow(null, undefined, undefined)).toEqual([]);
-		expect(buildResumeRow(null, { items: [] }, "x")).toEqual([]);
+		expect(buildResumeRow(null, undefined)).toEqual([]);
+		expect(buildResumeRow(null, { items: [] })).toEqual([]);
 	});
 });
