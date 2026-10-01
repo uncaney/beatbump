@@ -3,7 +3,8 @@
 	import Listing from "$components/Item/Listing.svelte";
 	import PlayAllBar from "$components/PlayAllBar/PlayAllBar.svelte";
 	import KeepOfflineButton from "$lib/components/ListItem/KeepOfflineButton.svelte";
-	import { getPlaylist, deletePlaylist } from "$lib/me";
+	import Icon from "$components/Icon/Icon.svelte";
+	import { getPlaylist, deletePlaylist, removeFromPlaylist } from "$lib/me";
 	import { goto } from "$app/navigation";
 	import { onMount } from "svelte";
 	import CollectionNav from "../../_CollectionNav.svelte";
@@ -11,6 +12,8 @@
 	let pl: any = null;
 	let tracks: any[] = [];
 	let loading = true;
+	/** videoId of the row mid-removal (disables only that row's button). */
+	let removingRef = "";
 
 	onMount(async () => {
 		try {
@@ -26,6 +29,22 @@
 	async function remove() {
 		await deletePlaylist($page.params.id);
 		goto("/library/playlists-srv");
+	}
+
+	// BI1: per-track removal (DELETE me/playlists/:id/items?ref=…, already
+	// wired in $lib/me as removeFromPlaylist, never called from the UI).
+	async function removeTrack(item: any) {
+		const ref = item?.videoId || item?.lid || "";
+		if (!ref || removingRef) return;
+		removingRef = ref;
+		try {
+			await removeFromPlaylist($page.params.id, item);
+			tracks = tracks.filter((t) => (t.videoId || t.lid) !== ref);
+		} catch (err) {
+			console.error("remove from playlist failed", err);
+		} finally {
+			removingRef = "";
+		}
 	}
 </script>
 
@@ -61,7 +80,21 @@
 			/>
 			<section>
 				{#each tracks as item (item.videoId || item.title)}
-					<Listing data={item} />
+					<div class="track-row">
+						<Listing data={item} />
+						<button
+							type="button"
+							class="btn-reset btn-secondary remove-track"
+							aria-label="Retirer de la playlist"
+							disabled={removingRef === (item.videoId || item.lid)}
+							on:click={() => removeTrack(item)}
+						>
+							<Icon
+								name="trash"
+								size="1em"
+							/>
+						</button>
+					</div>
 				{/each}
 			</section>
 		{/if}
@@ -101,5 +134,28 @@
 	.state {
 		color: #999;
 		margin: 1rem 0;
+	}
+	.track-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.track-row :global(.listing),
+	.track-row > :global(*:first-child) {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.remove-track {
+		flex: 0 0 auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.25rem;
+		height: 2.25rem;
+		border-radius: 50%;
+		padding: 0;
+	}
+	.remove-track:disabled {
+		cursor: progress;
 	}
 </style>
