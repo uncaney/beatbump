@@ -42,7 +42,7 @@
 	});
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active="for-you" />
 	<header class="head">
 		<div>
@@ -91,6 +91,10 @@
 		justify-content: space-between;
 		gap: 1rem;
 		margin-bottom: 1rem;
+		// UX1: the title block shrinks so "Rafraîchir" stays inside the gutter.
+		> div {
+			min-width: 0;
+		}
 	}
 	.sub {
 		color: #999;

@@ -108,7 +108,7 @@
 	}
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active="mixes" />
 	<header class="head">
 		<h1>Mixes</h1>

@@ -60,7 +60,10 @@
 	}
 </script>
 
-<main data-testid="rediscover-page">
+<main
+	class="resp-content-width"
+	data-testid="rediscover-page"
+>
 	<CollectionNav active="recent" />
 	<header class="head">
 		<div>
