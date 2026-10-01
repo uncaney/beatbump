@@ -11,6 +11,12 @@
 	// free-up, free-up-plan, free-up-confirm, free-up-cancel, free-up-result,
 	// pack-size, pack-start, pack-progress, pack-cancel and the globals
 	// window.__ytmFreeUpPlan / window.__ytmPackPlan are unchanged.
+	//
+	// UX8 (cycle 35): the card folds to one summary line behind
+	// [data-testid=space-toggle] so "Tout lire" stays above the fold. It is
+	// open by default (no stored preference, harness free_up_and_pack clicks
+	// free-up right after goto) and stays folded only once the user folded it
+	// (localStorage SPACE_OPEN_KEY).
 	import { createEventDispatcher, onMount, tick } from "svelte";
 	import { get } from "svelte/store";
 	import {
@@ -33,6 +39,8 @@
 	import { currentTrack } from "$lib/stores/list";
 
 	const MB = 1024 * 1024;
+	/** UX8: "0" = the user folded the card; anything else (or nothing) = open. */
+	const SPACE_OPEN_KEY = "ytm-offline-space-open";
 	const SW_UNAVAILABLE = "Cache hors-ligne indisponible : le service worker n'a pas répondu (première visite, fenêtre privée ou rechargement nécessaire).";
 	const dispatch = createEventDispatcher<{ changed: void }>();
 
@@ -45,6 +53,17 @@
 	let quota = 0;
 	/** The one size (Mo) both actions use. */
 	let sizeMb: (typeof PACK_SIZES_MB)[number] = 100;
+
+	/** UX8: card unfolded (default) or folded to its summary line. */
+	let open = true;
+	function toggleOpen() {
+		open = !open;
+		try {
+			localStorage.setItem(SPACE_OPEN_KEY, open ? "1" : "0");
+		} catch {
+			/* private mode: the choice lasts for this visit only */
+		}
+	}
 
 	$: cachedTracks = entries.length;
 	$: labels = spaceButtonLabels(sizeMb);
@@ -287,6 +306,11 @@
 	}
 
 	onMount(() => {
+		try {
+			if (localStorage.getItem(SPACE_OPEN_KEY) === "0") open = false;
+		} catch {
+			/* ignore */
+		}
 		void refresh();
 	});
 </script>
@@ -297,165 +321,191 @@
 	aria-labelledby="offline-space-heading"
 	aria-busy={loading || !!busy || packRunning}
 >
-	<div class="space-head">
-		<h2 id="offline-space-heading">Espace</h2>
-		<span
-			class="space-status"
-			id="offline-space-status"
-			aria-live="polite">{status.text}</span
-		>
-	</div>
-	<div class="space-row">
-		<label
-			class="size-label"
-			for="offline-space-size">Taille</label
-		>
-		<div class="select">
-			<select
-				id="offline-space-size"
-				name="offline-space-size"
-				data-testid="pack-size"
-				aria-describedby="offline-space-desc"
-				disabled={packRunning || !!busy || !!freePlan}
-				bind:value={sizeMb}
-			>
-				{#each PACK_SIZES_MB as mb}
-					<option value={mb}>{formatMoFr(mb)}</option>
-				{/each}
-			</select>
-		</div>
-		{#if !freePlan}
-			<button
-				type="button"
-				id="offline-free-up"
-				class="btn-reset btn-secondary"
-				data-testid="free-up"
-				aria-describedby="offline-space-desc"
-				disabled={loading || !!busy || packRunning || cachedTracks === 0}
-				title={cachedTracks === 0 && !loading ? "Rien en cache : rien à libérer" : "Retire les morceaux les moins écoutés, jamais les épinglés"}
-				bind:this={freeUpButton}
-				on:click={askFreeUp}
-			>
-				{busy === "freeup" ? "Calcul…" : labels.freeUp}
-			</button>
-		{/if}
-		{#if packState === "running"}
-			<button
-				type="button"
-				id="offline-pack-cancel"
-				class="btn-reset btn-secondary danger"
-				data-testid="pack-cancel"
-				on:click={cancelPack}
-			>
-				Annuler
-			</button>
-		{:else}
-			<button
-				type="button"
-				id="offline-pack-start"
-				class="btn-reset btn-secondary"
-				data-testid="pack-start"
-				aria-describedby="offline-space-desc"
-				disabled={loading || !!busy || packRunning || !!freePlan}
-				title="Télécharge et épingle tes favoris, puis tes écoutes récentes, puis ta sélection"
-				on:click={startPack}
-			>
-				{packState === "planning" ? "Préparation…" : labels.pack}
-			</button>
-		{/if}
-	</div>
-	<p
-		class="space-desc"
-		id="offline-space-desc"
+	<h2
+		class="space-head"
+		class:open
+		id="offline-space-heading"
 	>
-		Libérer retire les morceaux les moins écoutés jusqu'à {formatMoFr(sizeMb)} (les épinglés ne sont jamais touchés) ; un pack télécharge
-		et épingle tes favoris, puis tes écoutes récentes, puis ta sélection, jusqu'à {formatMoFr(sizeMb)}.
-	</p>
-	{#if freePlan}
-		<div
-			class="panel"
-			role="group"
-			aria-labelledby="offline-free-up-plan"
+		<button
+			type="button"
+			class="btn-reset space-toggle"
+			data-testid="space-toggle"
+			aria-expanded={open}
+			aria-controls={open ? "offline-space-body" : undefined}
+			title={open ? "Replier l'espace" : "Gérer l'espace : libérer ou préparer un pack"}
+			on:click={toggleOpen}
 		>
 			<span
-				id="offline-free-up-plan"
-				data-testid="free-up-plan"
-				data-count={freePlan.count}
-				data-bytes={freePlan.bytes}
-				>{#if freePlan.count}{freeUpSummary(freePlan)} seront libérés{#if !freePlan.reached}
-						(moins que {formatMoFr(sizeMb)} : le reste est épinglé ou en lecture){/if}.{:else}Rien à libérer : tout est épinglé ou
-					en lecture.{/if}</span
+				class="chev"
+				class:open
+				aria-hidden="true">›</span
 			>
-			<div class="panel-actions">
-				{#if freePlan.count}
-					<button
-						type="button"
-						id="offline-free-up-confirm"
-						class="btn-reset btn-secondary danger"
-						data-testid="free-up-confirm"
-						disabled={!!busy}
-						bind:this={freeConfirmButton}
-						on:click={doFreeUp}
-					>
-						{busy === "freeup" ? "Libération…" : "Libérer"}
-					</button>
-				{/if}
+			<span class="space-title">Espace</span>
+			<span
+				class="space-status"
+				id="offline-space-status"
+				aria-live="polite">{status.text}{#if !open}{packState === "running" ? " · pack en cours" : " · Libérer · Préparer un pack"}{/if}</span
+			>
+		</button>
+	</h2>
+	{#if open}
+		<div
+			class="space-body"
+			id="offline-space-body"
+		>
+		<div class="space-row">
+			<label
+				class="size-label"
+				for="offline-space-size">Taille</label
+			>
+			<div class="select">
+				<select
+					id="offline-space-size"
+					name="offline-space-size"
+					data-testid="pack-size"
+					aria-describedby="offline-space-desc"
+					disabled={packRunning || !!busy || !!freePlan}
+					bind:value={sizeMb}
+				>
+					{#each PACK_SIZES_MB as mb}
+						<option value={mb}>{formatMoFr(mb)}</option>
+					{/each}
+				</select>
+			</div>
+			{#if !freePlan}
 				<button
 					type="button"
-					id="offline-free-up-cancel"
-					class="btn-reset btn-ghost"
-					data-testid="free-up-cancel"
-					disabled={!!busy}
-					on:click={cancelFreeUp}
+					id="offline-free-up"
+					class="btn-reset btn-secondary"
+					data-testid="free-up"
+					aria-describedby="offline-space-desc"
+					disabled={loading || !!busy || packRunning || cachedTracks === 0}
+					title={cachedTracks === 0 && !loading ? "Rien en cache : rien à libérer" : "Retire les morceaux les moins écoutés, jamais les épinglés"}
+					bind:this={freeUpButton}
+					on:click={askFreeUp}
 				>
-					{freePlan.count ? "Annuler" : "Fermer"}
+					{busy === "freeup" ? "Calcul…" : labels.freeUp}
 				</button>
-			</div>
+			{/if}
+			{#if packState === "running"}
+				<button
+					type="button"
+					id="offline-pack-cancel"
+					class="btn-reset btn-secondary danger"
+					data-testid="pack-cancel"
+					on:click={cancelPack}
+				>
+					Annuler
+				</button>
+			{:else}
+				<button
+					type="button"
+					id="offline-pack-start"
+					class="btn-reset btn-secondary"
+					data-testid="pack-start"
+					aria-describedby="offline-space-desc"
+					disabled={loading || !!busy || packRunning || !!freePlan}
+					title="Télécharge et épingle tes favoris, puis tes écoutes récentes, puis ta sélection"
+					on:click={startPack}
+				>
+					{packState === "planning" ? "Préparation…" : labels.pack}
+				</button>
+			{/if}
 		</div>
-	{/if}
-	{#if freeResult}
 		<p
-			class="space-result"
-			id="offline-free-up-result"
-			data-testid="free-up-result"
-			aria-live="polite"
+			class="space-desc"
+			id="offline-space-desc"
 		>
-			{freeResult}
+			Libérer retire les morceaux les moins écoutés jusqu'à {formatMoFr(sizeMb)} (les épinglés ne sont jamais touchés) ; un pack télécharge
+			et épingle tes favoris, puis tes écoutes récentes, puis ta sélection, jusqu'à {formatMoFr(sizeMb)}.
 		</p>
-	{/if}
-	{#if packState}
-		<div
-			class="panel pack-progress"
-			data-testid="pack-progress"
-			data-state={packState}
-			data-ready={packProgress?.ready ?? 0}
-			data-total={packProgress?.total ?? packPlan?.count ?? 0}
-			data-bytes={packDoneBytes}
-			role="status"
-			aria-live="polite"
-		>
-			<progress
-				max={Math.max(1, packProgress?.total ?? packPlan?.count ?? 1)}
-				value={packProgress?.ready ?? 0}
-				aria-label="Progression du pack"
-			/>
-			<span id="offline-pack-text">{packText}</span>
-		</div>
-	{/if}
-	{#if error}
-		<p
-			class="space-error"
-			id="offline-space-error"
-			role="alert"
-		>
-			{error}
-			<button
-				type="button"
-				class="btn-reset btn-ghost"
-				disabled={loading || !!busy}
-				on:click={refresh}>Réessayer</button
+		{#if freePlan}
+			<div
+				class="panel"
+				role="group"
+				aria-labelledby="offline-free-up-plan"
 			>
-		</p>
+				<span
+					id="offline-free-up-plan"
+					data-testid="free-up-plan"
+					data-count={freePlan.count}
+					data-bytes={freePlan.bytes}
+					>{#if freePlan.count}{freeUpSummary(freePlan)} seront libérés{#if !freePlan.reached}
+							(moins que {formatMoFr(sizeMb)} : le reste est épinglé ou en lecture){/if}.{:else}Rien à libérer : tout est épinglé ou
+						en lecture.{/if}</span
+				>
+				<div class="panel-actions">
+					{#if freePlan.count}
+						<button
+							type="button"
+							id="offline-free-up-confirm"
+							class="btn-reset btn-secondary danger"
+							data-testid="free-up-confirm"
+							disabled={!!busy}
+							bind:this={freeConfirmButton}
+							on:click={doFreeUp}
+						>
+							{busy === "freeup" ? "Libération…" : "Libérer"}
+						</button>
+					{/if}
+					<button
+						type="button"
+						id="offline-free-up-cancel"
+						class="btn-reset btn-ghost"
+						data-testid="free-up-cancel"
+						disabled={!!busy}
+						on:click={cancelFreeUp}
+					>
+						{freePlan.count ? "Annuler" : "Fermer"}
+					</button>
+				</div>
+			</div>
+		{/if}
+		{#if freeResult}
+			<p
+				class="space-result"
+				id="offline-free-up-result"
+				data-testid="free-up-result"
+				aria-live="polite"
+			>
+				{freeResult}
+			</p>
+		{/if}
+		{#if packState}
+			<div
+				class="panel pack-progress"
+				data-testid="pack-progress"
+				data-state={packState}
+				data-ready={packProgress?.ready ?? 0}
+				data-total={packProgress?.total ?? packPlan?.count ?? 0}
+				data-bytes={packDoneBytes}
+				role="status"
+				aria-live="polite"
+			>
+				<progress
+					max={Math.max(1, packProgress?.total ?? packPlan?.count ?? 1)}
+					value={packProgress?.ready ?? 0}
+					aria-label="Progression du pack"
+				/>
+				<span id="offline-pack-text">{packText}</span>
+			</div>
+		{/if}
+		{#if error}
+			<p
+				class="space-error"
+				id="offline-space-error"
+				role="alert"
+			>
+				{error}
+				<button
+					type="button"
+					class="btn-reset btn-ghost"
+					disabled={loading || !!busy}
+					on:click={refresh}>Réessayer</button
+				>
+			</p>
+		{/if}
+		</div>
 	{/if}
 </section>
 
@@ -466,25 +516,56 @@
 	// Compact card: one heading line, one control row, one help line.
 	.space {
 		margin: 0.25rem 0 1rem;
-		padding: 0.75rem 0.9rem;
+		padding: 0.25rem 0.9rem 0.5rem;
 		border-radius: 0.8rem;
 		background: rgba(255, 255, 255, 0.05);
 		border: 1px solid rgba(255, 255, 255, 0.1);
 	}
 	.space-head {
+		margin: 0;
+		font-size: 1.05rem;
+		&.open {
+			margin-bottom: 0.5rem;
+		}
+	}
+	// UX8: the whole summary line is the disclosure (44 px target).
+	.space-toggle {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: baseline;
-		gap: 0.25rem 0.75rem;
-		margin-bottom: 0.5rem;
+		gap: 0.25rem 0.6rem;
+		width: 100%;
+		min-height: max(2.75rem, 44px);
+		padding: 0.25rem 0;
+		background: none;
+		border: 0;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+		&:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: 2px;
+			border-radius: 0.4rem;
+		}
 	}
-	h2 {
-		margin: 0;
-		font-size: 1.05rem;
+	.chev {
+		display: inline-block;
+		align-self: center;
+		width: 1em;
+		color: $muted;
+		transition: transform 0.15s ease;
+		&.open {
+			transform: rotate(90deg);
+		}
+	}
+	.space-title {
+		font-weight: 700;
 	}
 	.space-status {
 		color: $muted;
 		font-size: var(--text-secondary-size);
+		font-weight: 400;
 	}
 	.space-row {
 		display: flex;
