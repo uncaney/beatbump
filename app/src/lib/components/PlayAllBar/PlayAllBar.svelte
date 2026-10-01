@@ -125,7 +125,7 @@
 	>
 		<button
 			type="button"
-			class="pab-btn primary btn-reset"
+			class="pab-btn btn-reset btn-primary"
 			data-testid="play-all"
 			disabled={busy}
 			on:click={() => start(false)}
@@ -138,7 +138,7 @@
 		</button>
 		<button
 			type="button"
-			class="pab-btn btn-reset"
+			class="pab-btn btn-reset btn-secondary"
 			data-testid="play-shuffle"
 			disabled={busy}
 			on:click={() => start(true)}
@@ -165,29 +165,10 @@
 		gap: 0.6rem;
 		margin: 0.5rem 0 1rem;
 	}
-	.pab-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-		// btn-reset: keep own colour/weight, no title-casing, and a 44px touch
-		// target on phones (2.75rem = 33px at the 12px mobile root, px floor wins).
-		min-height: max(2.75rem, 44px);
-		padding: 0.45rem 1rem;
-		border-radius: 2rem;
-		border: 1px solid rgba(255, 255, 255, 0.25);
-		background: rgba(255, 255, 255, 0.08);
-		color: inherit;
-		text-transform: none;
-		font-weight: 600;
-		cursor: pointer;
-	}
-	.pab-btn.primary {
-		background: #fff;
-		color: #000;
-		border-color: #fff;
-	}
+	// Shape, colours, 44px floor and plain case come from the button system
+	// (global/redesign/modules/_button.scss: .btn-primary "Lire tout",
+	// .btn-secondary "Aléatoire"); only the busy state lives here.
 	.pab-btn:disabled {
-		opacity: 0.6;
 		cursor: progress;
 	}
 	.pab-count {

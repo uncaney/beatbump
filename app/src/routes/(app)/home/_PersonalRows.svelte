@@ -153,7 +153,7 @@
 			<div class="resume-queue">
 				<button
 					type="button"
-					class="btn-reset resume-remote"
+					class="btn-reset btn-secondary resume-remote"
 					data-testid="resume-remote"
 					disabled={restoringRemote}
 					on:click={resumeRemote}
@@ -184,7 +184,7 @@
 			<div class="resume-queue">
 				<button
 					type="button"
-					class="btn-reset"
+					class="btn-reset btn-primary"
 					data-testid="resume-queue"
 					disabled={resuming}
 					on:click={resumeQueue}
@@ -248,27 +248,16 @@
 		   part of the "Reprendre" row, not floating against the edge. */
 		padding: 0.5em 1rem 0;
 	}
-	/* btn-reset: the pill keeps its own white colour (it was black-on-dark under
-	   the global button rule), plain case, and a 44px touch target on phones. */
+	/* Colours, 44px floor and plain case come from the button system
+	   (.btn-primary for the local queue, global/redesign/modules/_button.scss);
+	   only the long-label ellipsis and the busy cursor live here. */
 	.resume-queue button {
 		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		display: inline-flex;
-		align-items: center;
-		min-height: max(2.75rem, 44px);
-		padding: 0.55em 1.1em;
-		border-radius: 999px;
-		border: 1px solid #fff;
-		background: #fff;
-		color: #0f0f0f;
-		font-weight: 600;
-		text-transform: none;
-		cursor: pointer;
 	}
 	.resume-queue button:disabled {
-		opacity: 0.6;
 		cursor: progress;
 	}
 	/* Audit v7 TOP 9: the remote-resume card is "another device", not the local
@@ -276,12 +265,10 @@
 	   card, left-aligned, led by a device glyph so it reads as a cross-device
 	   hand-off. Keeps [data-testid=resume-remote] and the full sentence text. */
 	.resume-queue button.resume-remote {
+		/* .btn-secondary colours; card radius and sentence weight are its own. */
 		justify-content: flex-start;
 		gap: 0.5rem;
-		background: rgba(255, 255, 255, 0.08);
-		border: 1px solid rgba(255, 255, 255, 0.28);
 		border-radius: 0.9rem;
-		color: #fff;
 		font-weight: 500;
 	}
 	.resume-remote .rr-device {

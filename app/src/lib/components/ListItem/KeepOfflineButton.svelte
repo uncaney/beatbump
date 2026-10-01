@@ -66,7 +66,7 @@
 <span class="keep-offline">
 	<button
 		type="button"
-		class="keep-btn btn-reset"
+		class="keep-btn btn-reset btn-secondary"
 		data-testid="keep-offline"
 		data-state={state}
 		data-ready={progress ? progress.ready : 0}
@@ -79,7 +79,7 @@
 	{#if running}
 		<button
 			type="button"
-			class="keep-btn cancel btn-reset"
+			class="keep-btn cancel btn-reset btn-ghost"
 			data-testid="keep-offline-cancel"
 			on:click|stopPropagation={cancel}>Annuler</button
 		>
@@ -93,27 +93,17 @@
 		align-items: center;
 		flex-wrap: wrap;
 	}
+	// Shape and colours come from the button system (.btn-secondary, "Annuler"
+	// as .btn-ghost; global/redesign/modules/_button.scss). States only here.
 	.keep-btn {
-		background: rgba(255, 255, 255, 0.1);
-		border: 1px solid rgba(255, 255, 255, 0.2);
-		border-radius: 2rem;
-		// btn-reset: own colour, no title-casing, 44px touch target even with
-		// the 12px mobile root (2.75rem = 33px there, so the px floor wins).
-		color: inherit;
-		text-transform: none;
-		padding: 0.45rem 1rem;
-		min-height: max(2.75rem, 44px);
-		cursor: pointer;
-		font: inherit;
 		&:disabled {
+			// "9/14 prêts" is a progress label, not a disabled control.
 			cursor: progress;
 			opacity: 1;
 		}
 		&[data-state="ready"] {
+			// Green is the state colour: "Prêt hors-ligne", border only.
 			border-color: rgba(120, 220, 150, 0.6);
-		}
-		&.cancel {
-			background: transparent;
 		}
 	}
 </style>
