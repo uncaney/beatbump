@@ -14,12 +14,12 @@
 	import EmptyState from "$components/EmptyState/EmptyState.svelte";
 	import AlbumCard from "$components/Offline/AlbumCard.svelte";
 	import OfflineTrackRow from "$components/Offline/OfflineTrackRow.svelte";
-	import { getOfflineTracks, removeOffline, reconcileOfflineList } from "$lib/offline";
+	import MixtapeSheet from "$components/Offline/MixtapeSheet.svelte";
+	import { getOfflineTracks, listCachedAudio, removeOffline, reconcileOfflineList } from "$lib/offline";
 	import {
 		formatBytes,
 		groupByAlbum,
 		groupByArtist,
-		mixtape,
 		play,
 		recentlyCached,
 		totalBytes,
@@ -39,8 +39,16 @@
 	let openAlbums: Record<string, boolean> = {};
 	let openArtists: Record<string, boolean> = {};
 	let starting = false;
+	// Mixtape options sheet (idea O3): opened from the Mixtape button; `lastPlayed`
+	// comes from the service worker's audio index (`lastAccess` = last time the
+	// cached audio was served, i.e. last played on this device): undefined while
+	// loading, null when unavailable (option disabled in the sheet).
+	let mixtapeOpen = false;
+	let lastPlayed: Map<string, number> | null | undefined = undefined;
+	let mixtapeBtn: HTMLButtonElement;
 
 	$: albums = groupByAlbum(tracks) as AlbumGroup[];
+	$: ready = tracks.filter((t) => t?._cached === true);
 	$: artists = groupByArtist(tracks) as ArtistGroup[];
 	$: recent = recentlyCached(tracks, -1);
 	$: size = formatBytes(totalBytes(tracks));
@@ -133,9 +141,29 @@
 		if (!canShuffle) return notify(shuffleTitle, "error");
 		start(recent, 0, { shuffle: true });
 	}
-	function playMixtape() {
+	function openMixtape() {
 		if (!canMixtape) return notify(mixtapeTitle, "error");
-		start(mixtape(tracks, { avoidSameArtistInARow: true }), 0);
+		if (mixtapeOpen) return closeMixtape();
+		mixtapeOpen = true;
+		lastPlayed = undefined;
+		Promise.resolve(listCachedAudio())
+			.then((l) => {
+				const map = new Map<string, number>();
+				for (const e of (l && Array.isArray(l.entries) ? l.entries : []) as any[]) {
+					const at = Number(e?.lastAccess) || Number(e?.at) || 0;
+					if (e?.videoId && at > 0) map.set(e.videoId, at);
+				}
+				lastPlayed = map.size ? map : null;
+			})
+			.catch(() => (lastPlayed = null));
+	}
+	function closeMixtape() {
+		mixtapeOpen = false;
+		mixtapeBtn?.focus();
+	}
+	function playMixtape(items: any[]) {
+		mixtapeOpen = false;
+		start(items, 0);
 	}
 
 	function remove(t: any) {
@@ -219,22 +247,37 @@
 				/>
 				Aléatoire
 			</button>
-			<button
-				class="cta"
-				class:is-disabled={!canMixtape}
-				type="button"
-				title={mixtapeTitle}
-				aria-disabled={!canMixtape || starting}
-				aria-describedby={readyCount < tracks.length ? "offline-ready" : undefined}
-				disabled={starting}
-				on:click={playMixtape}
-			>
-				<Icon
-					name="radio"
-					size="1em"
-				/>
-				Mixtape
-			</button>
+			<div class="mixtape-wrap">
+				<button
+					class="cta"
+					class:is-disabled={!canMixtape}
+					id="offline-mixtape"
+					type="button"
+					title={mixtapeTitle}
+					aria-disabled={!canMixtape || starting}
+					aria-describedby={readyCount < tracks.length ? "offline-ready" : undefined}
+					aria-haspopup="dialog"
+					aria-expanded={mixtapeOpen}
+					aria-controls="mixtape-sheet"
+					disabled={starting}
+					bind:this={mixtapeBtn}
+					on:click={openMixtape}
+				>
+					<Icon
+						name="radio"
+						size="1em"
+					/>
+					Mixtape
+				</button>
+				{#if mixtapeOpen}
+					<MixtapeSheet
+						tracks={ready}
+						{lastPlayed}
+						on:close={closeMixtape}
+						on:play={(e) => playMixtape(e.detail.items)}
+					/>
+				{/if}
+			</div>
 		</div>
 		<!-- "N prêts sur M" only while some tracks are still being cached; when
 		     every track is ready the header counter already says it all. -->
@@ -434,6 +477,11 @@
 		flex-wrap: wrap;
 		gap: 0.5rem;
 		margin-bottom: 0.5rem;
+	}
+	// Anchor for the desktop mixtape popover (MixtapeSheet is absolute inside).
+	.mixtape-wrap {
+		position: relative;
+		display: inline-flex;
 	}
 	.ready {
 		margin: 0 0 1rem;

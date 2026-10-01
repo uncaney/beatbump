@@ -34,10 +34,28 @@ export interface ArtistGroup {
 }
 
 export interface MixtapeOptions {
+	/** No two consecutive tracks by the same artist (when the pool allows it). Default true. */
 	avoidSameArtistInARow?: boolean;
 	maxPerArtist?: number;
+	/** Deterministic shuffle; a new seed = a new mixtape from the same pool. */
 	seed?: number;
+	/**
+	 * Target length in seconds: tracks are added until their summed duration
+	 * reaches it, and a track is only added when the sum stays <= 110 % of the
+	 * target. Omit (or Infinity) for the whole pool. Tracks without a known
+	 * duration count as DEFAULT_DURATION_SEC.
+	 */
+	targetSec?: number;
+	/** videoId -> last time the track was played (ms epoch), see $lib/offline listCachedAudio `lastAccess`. */
+	lastPlayed?: Map<string, number>;
+	/** With `lastPlayed`: drop tracks played within this window (ms). Unknown tracks stay eligible. */
+	notPlayedSinceMs?: number;
+	/** Clock for `notPlayedSinceMs` (tests). Default Date.now(). */
+	now?: number;
 }
+
+/** Assumed length of a track whose duration is unknown (3 min 30). */
+export const DEFAULT_DURATION_SEC = 210;
 
 const UNKNOWN_ARTIST = "Artiste inconnu";
 const SINGLES = "Singles";
@@ -137,6 +155,64 @@ export function formatBytes(n: number | undefined): string {
 	}
 	const digits = i === 0 ? 0 : v < 10 ? 1 : 0;
 	return `${v.toFixed(digits).replace(".", ",")} ${units[i]}`;
+}
+
+/**
+ * Duration in seconds from any shape we have seen: `durationSec` / `duration` /
+ * `lengthSeconds` (numbers or numeric strings) or `length` as "m:ss" / "h:mm:ss"
+ * (YouTube items and local tracks, kept by slimTrack). undefined when unknown.
+ */
+export function durationOf(t: OfflineTrack): number | undefined {
+	for (const v of [t?.durationSec, t?.duration, t?.lengthSeconds]) {
+		const n = typeof v === "number" ? v : typeof v === "string" && /^\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : NaN;
+		if (Number.isFinite(n) && n > 0) return n;
+	}
+	const s = typeof t?.length === "string" ? t.length.trim() : "";
+	const m = s.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
+	if (m) {
+		const n = (+(m[1] || 0)) * 3600 + +m[2] * 60 + +m[3];
+		if (n > 0) return n;
+	}
+	return undefined;
+}
+
+/** Sum of durations; unknown ones count as DEFAULT_DURATION_SEC. */
+export function totalDuration(tracks: OfflineTrack[]): number {
+	let sum = 0;
+	for (const t of tracks || []) if (t) sum += durationOf(t) ?? DEFAULT_DURATION_SEC;
+	return sum;
+}
+
+/** "1 h 05 min" / "32 min" / "45 s" (French, for the mixtape sheet). */
+export function formatDuration(sec: number): string {
+	if (!Number.isFinite(sec) || sec < 0) return "";
+	const s = Math.round(sec);
+	if (s < 60) return `${s} s`;
+	const h = Math.floor(s / 3600);
+	const min = Math.round((s % 3600) / 60);
+	if (h === 0) return `${min} min`;
+	return min === 60 ? `${h + 1} h` : `${h} h ${String(min).padStart(2, "0")} min`;
+}
+
+/**
+ * Tracks eligible for a mixtape under the "not played since" rule: a track is
+ * dropped when `lastPlayed` knows it and it was played within the window.
+ * Tracks the map does not know stay eligible. Without a map or window, the
+ * input is returned unchanged.
+ */
+export function notPlayedSince(
+	tracks: OfflineTrack[],
+	lastPlayed: Map<string, number> | undefined,
+	windowMs: number | undefined,
+	now = Date.now(),
+): OfflineTrack[] {
+	if (!lastPlayed || typeof windowMs !== "number" || !(windowMs > 0)) return (tracks || []).filter(Boolean);
+	const cutoff = now - windowMs;
+	return (tracks || []).filter((t) => {
+		if (!t) return false;
+		const at = lastPlayed.get(t?.videoId);
+		return !(typeof at === "number" && at > cutoff);
+	});
 }
 
 function trackNumber(t: OfflineTrack): number {
@@ -271,15 +347,23 @@ export function shuffle<T>(tracks: T[], seed?: number): T[] {
 /**
  * Mixtape: shuffle, cap tracks per artist, and interleave artists so the same
  * artist is not played twice in a row whenever the pool allows it.
+ *
+ * With `targetSec`, tracks are picked until the summed duration reaches the
+ * target; a track is only taken when it keeps the sum <= 110 % of the target
+ * (so the result lands in [target, 1.1 x target] whenever the pool allows it,
+ * and is shorter only when nothing fits any more). With `lastPlayed` +
+ * `notPlayedSinceMs`, tracks played within the window are left out first.
+ * Same seed + same pool + same options = same mixtape.
  */
 export function mixtape(tracks: OfflineTrack[], opts: MixtapeOptions = {}): OfflineTrack[] {
-	const { avoidSameArtistInARow = true, maxPerArtist, seed } = opts;
+	const { avoidSameArtistInARow = true, maxPerArtist, seed, lastPlayed, notPlayedSinceMs, now } = opts;
+	const target = typeof opts.targetSec === "number" && Number.isFinite(opts.targetSec) && opts.targetSec > 0 ? opts.targetSec : Infinity;
 	const rand = rng(seed);
 	const seedFor = (i: number) => (typeof seed === "number" ? seed + i + 1 : undefined);
+	const dur = (t: OfflineTrack) => durationOf(t) ?? DEFAULT_DURATION_SEC;
 
 	const buckets = new Map<string, OfflineTrack[]>();
-	for (const t of tracks || []) {
-		if (!t) continue;
+	for (const t of notPlayedSince(tracks, lastPlayed, notPlayedSinceMs, now)) {
 		const k = artistId(t) || "name:" + norm(artistName(t));
 		const b = buckets.get(k);
 		if (b) b.push(t);
@@ -292,18 +376,42 @@ export function mixtape(tracks: OfflineTrack[], opts: MixtapeOptions = {}): Offl
 	});
 	pools = shuffle(pools, seedFor(pools.length));
 
-	if (!avoidSameArtistInARow) return shuffle(pools.flatMap((p) => p.list), seedFor(pools.length + 1));
+	// Free order: one global shuffle, then (with a target) the prefix that fits.
+	if (!avoidSameArtistInARow) {
+		const all = shuffle(pools.flatMap((p) => p.list), seedFor(pools.length + 1));
+		if (target === Infinity) return all;
+		const out: OfflineTrack[] = [];
+		let sum = 0;
+		for (const t of all) {
+			if (sum >= target) break;
+			const d = dur(t);
+			if (sum + d <= target * 1.1) {
+				out.push(t);
+				sum += d;
+			}
+		}
+		return out;
+	}
 
+	// Interleaved: pick from the artist with the most tracks left (ties at
+	// random), never the artist just played unless no other artist can play.
 	const out: OfflineTrack[] = [];
 	let last = "";
-	while (pools.some((p) => p.list.length)) {
-		const candidates = pools.filter((p) => p.list.length && p.k !== last);
-		const source = candidates.length ? candidates : pools.filter((p) => p.list.length);
-		const max = Math.max(...source.map((p) => p.list.length));
-		const top = source.filter((p) => p.list.length === max);
+	let sum = 0;
+	const fits = (t: OfflineTrack) => sum + dur(t) <= target * 1.1;
+	const indexFitting = (p: { list: OfflineTrack[] }) => (target === Infinity ? (p.list.length ? 0 : -1) : p.list.findIndex(fits));
+	while (sum < target) {
+		const live = pools.map((p) => ({ p, i: indexFitting(p) })).filter((x) => x.i >= 0);
+		if (!live.length) break;
+		const others = live.filter((x) => x.p.k !== last);
+		const source = others.length ? others : live;
+		const max = Math.max(...source.map((x) => x.p.list.length));
+		const top = source.filter((x) => x.p.list.length === max);
 		const pick = top[Math.floor(rand() * top.length)];
-		out.push(pick.list.shift());
-		last = pick.k;
+		const [t] = pick.p.list.splice(pick.i, 1);
+		out.push(t);
+		sum += dur(t);
+		last = pick.p.k;
 	}
 	return out;
 }
