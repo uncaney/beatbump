@@ -544,11 +544,15 @@
 								--stroke="#fff"
 							/>
 						</button>
+						<!-- The global `button` rule forces `color:#0f0f0f !important`, so an
+						     Icon that relies on currentColor is drawn black on the dark
+						     backdrop (invisible). `--stroke` wins like the buttons above. -->
 						<button
 							type="button"
 							aria-label="Paroles"
 							title="Paroles"
 							class="no-style"
+							data-testid="fullscreen-lyrics"
 							style="position:static;background:none;border:none;color:#fff;padding:0.4em;cursor:pointer;"
 							on:click|stopPropagation={() => navigateAway("/lyrics")}
 						>
@@ -556,6 +560,7 @@
 								name="music"
 								size="1.6em"
 								color="#fff"
+								--stroke="#fff"
 							/>
 						</button>
 						<span
