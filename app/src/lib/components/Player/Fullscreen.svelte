@@ -971,6 +971,7 @@
 											header={{ title: "Dans ta bibliothèque", subheading: "Du même artiste, du même genre, chez toi" }}
 											type="trending"
 											isBrowseEndpoint={false}
+											itemWidth="160px"
 										/>
 									</section>
 								{/if}

@@ -21,6 +21,11 @@
 	// Optional explicit "see all" link (used by the personal rows on /home).
 	export let seeAllHref = "";
 	export let seeAllLabel = "See All";
+	// Optional card width (any CSS length, e.g. "160px"), for narrow hosts such
+	// as the 560px Related panel of the fullscreen player. The card is the
+	// thumbnail plus the item's 0.75em padding each side (CarouselItem), so the
+	// thumbnail is derived from it; empty = the responsive default.
+	export let itemWidth = "";
 
 	let moreOnLeft: boolean, moreOnRight: boolean;
 
@@ -193,6 +198,8 @@
 		on:scroll={onScroll}
 		bind:this={carousel}
 		use:observer={{ items }}
+		style:--thumbnail-size={itemWidth ? `calc(${itemWidth} - 1.5em)` : undefined}
+		style:--column-width={itemWidth || undefined}
 	>
 		{#each items as item, index}
 			{#if type === "trending"}
