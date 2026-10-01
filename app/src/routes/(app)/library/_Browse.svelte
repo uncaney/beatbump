@@ -323,7 +323,12 @@
 		gap: 0.75rem;
 		align-items: center;
 	}
+	// U11-6 (audit UX v11): the filter field measured 130x33 and the sort
+	// <select> 112x22 on mobile (no .select wrapper, so the global min-height
+	// never applied). Both get the 44px tap height; text size unchanged.
 	.filter {
+		box-sizing: border-box;
+		min-height: max(2.75rem, 44px);
 		background: rgba(255, 255, 255, 0.08);
 		border: 1px solid rgba(255, 255, 255, 0.15);
 		border-radius: 0.4rem;
@@ -336,6 +341,9 @@
 		align-items: center;
 		gap: 0.4rem;
 		white-space: nowrap;
+	}
+	.sort select {
+		min-height: max(2.75rem, 44px);
 	}
 	// BI4: the active filter chip, 44px tall so the remove button is a tap target.
 	.filter-chip {

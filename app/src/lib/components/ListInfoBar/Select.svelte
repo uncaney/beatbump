@@ -24,8 +24,12 @@
 	</select>
 </div>
 
-<style
-	src="./index.scss"
-	lang="scss"
->
+<style lang="scss">
+	@import "./index.scss";
+
+	/* U11-6 (audit UX v11): 44px tap height for the sort select (the global
+	   .select wrapper's 5ch min-height is ~33px at the 12px mobile root). */
+	.select {
+		min-height: max(2.75rem, 44px);
+	}
 </style>

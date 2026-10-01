@@ -343,6 +343,11 @@
 		display: none;
 	}
 
+	/* U11-6 (audit UX v11): the theme <select> measured 213x36 on mobile. */
+	.select select {
+		min-height: max(2.75rem, 44px);
+	}
+
 	/* Same button as Settings > Offline (OfflineSettings.svelte .btn). */
 	.btn {
 		all: unset;
@@ -350,8 +355,9 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-height: 2.75rem;
-		min-width: 2.75rem;
+		/* U11-6 (audit UX v11): 2.75rem alone is 33px at the 12px mobile root. */
+		min-height: max(2.75rem, 44px);
+		min-width: max(2.75rem, 44px);
 		padding: 0.5rem 1rem;
 		border-radius: 0.5rem;
 		font: inherit;

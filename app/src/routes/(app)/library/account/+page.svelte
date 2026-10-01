@@ -174,6 +174,9 @@
 	}
 	input {
 		flex: 1 1 12rem;
+		/* U11-6 (audit UX v11): 284x35 on mobile; same 44px floor as the pill. */
+		box-sizing: border-box;
+		min-height: max(2.75rem, 44px);
 		background: rgba(255, 255, 255, 0.08);
 		border: 1px solid rgba(255, 255, 255, 0.2);
 		border-radius: 0.4rem;

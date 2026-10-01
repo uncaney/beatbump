@@ -337,10 +337,13 @@
 			outline-offset: 2px;
 		}
 	}
+	// U11-6 (audit UX v11): the cover toggles the track list ("Déplier
+	// l'album") and measured 36x36 on narrow phones; 44px floor. The row is
+	// already >= 44px tall because of .info, so the card does not grow.
 	.cover {
 		flex: 0 0 auto;
-		width: 3.5rem;
-		height: 3.5rem;
+		width: max(3.5rem, 44px);
+		height: max(3.5rem, 44px);
 		padding: 0;
 		border: 0 !important;
 		border-radius: 0.5rem;
@@ -446,13 +449,13 @@
 		}
 	}
 	// Kebab: no disc, so the two round actions stay the card's only visible
-	// buttons; 44px tall tap zone, narrow width.
+	// buttons; 44px square tap zone (U11-6: it measured 32x44).
 	.menu-wrap {
 		position: relative;
 		display: flex;
 	}
 	.kebab {
-		min-width: max(2rem, 32px);
+		min-width: max(2.75rem, 44px);
 		min-height: max(2.75rem, 44px);
 		padding: 0;
 		display: grid;
@@ -537,8 +540,8 @@
 			padding: 0.5rem;
 		}
 		.cover {
-			width: 3rem;
-			height: 3rem;
+			width: max(3rem, 44px);
+			height: max(3rem, 44px);
 		}
 		.actions {
 			gap: 0.25rem;
