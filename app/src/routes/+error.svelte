@@ -55,13 +55,13 @@
 	<div class="actions">
 		<a
 			href="/home"
-			class="button home-link"
+			class="btn-primary home-link"
 		>
 			Accueil
 		</a>
 		<button
 			type="button"
-			class="outlined back-button btn-reset"
+			class="btn-secondary back-button"
 			on:click={back}
 		>
 			Retour
@@ -107,24 +107,12 @@
 		margin-top: 1.25rem;
 	}
 
-	/* Both actions are >= 44 px tall and keep the shared button look
-	   (white on dark for the link; outlined white for the back button). */
+	/* U11-2 (audit UX v11): both actions come from the button system
+	   (.btn-primary "Accueil", .btn-secondary "Retour": one pill shape, 44px
+	   floor, no local colours). Only the shared minimum width lives here.
+	   `.back-button` stays as the harness hook (buttons_readable probes it). */
 	.home-link,
 	.back-button {
-		min-height: 44px;
 		min-width: 8rem;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		text-decoration: none;
-		opacity: 1;
-	}
-	.home-link {
-		color: #0f0f0f !important;
-		background: hsl(0deg 0% 98%) !important;
-	}
-	.back-button {
-		color: #fff !important;
-		border-color: rgba(255, 255, 255, 0.6) !important;
 	}
 </style>

@@ -54,7 +54,6 @@ const LEGACY: Record<string, number> = {
 	"lib/components/PlaylistPopper/List.svelte": 1,
 	"lib/components/Search/Search.svelte": 1,
 	"routes/(app)/library/+page.svelte": 4,
-	"routes/(app)/library/account/+page.svelte": 2,
 	"routes/(app)/library/_components/Popup.svelte": 1,
 	"routes/(app)/library/downloads-offline/+page.svelte": 6,
 	"routes/(app)/library/for-you/+page.svelte": 0,
@@ -73,7 +72,6 @@ const LEGACY: Record<string, number> = {
  */
 const LEGACY_LINKS: Record<string, number> = {
 	"routes/(app)/settings/+page.svelte": 1,
-	"routes/+error.svelte": 1,
 };
 
 function svelteFiles(dir: string, out: string[] = []): string[] {

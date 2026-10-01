@@ -96,14 +96,18 @@
 				bind:value={name}
 				autocomplete="off"
 			/>
+			<!-- U11-2 (audit UX v11): the page's main action is the white
+			     .btn-primary pill, the secondary one the translucent pill; the
+			     local grey/green buttons looked disabled and sat outside the
+			     button system. -->
 			<button
-				class="btn primary"
+				class="btn-primary"
 				type="submit"
 				disabled={busy || !name.trim()}>{current ? "Switch profile" : "Sign in"}</button
 			>
 			{#if current}
 				<button
-					class="btn"
+					class="btn-secondary"
 					type="button"
 					on:click={doLogout}
 					disabled={busy}>Sign out</button
@@ -176,24 +180,6 @@
 		color: inherit;
 		padding: 0.5rem 0.7rem;
 		font-size: 1rem;
-	}
-	.btn {
-		background: rgba(255, 255, 255, 0.1);
-		border: 1px solid rgba(255, 255, 255, 0.2);
-		border-radius: 0.4rem;
-		color: inherit;
-		padding: 0.5rem 1rem;
-		cursor: pointer;
-	}
-	.btn.primary {
-		background: var(--accent, #1ed760);
-		color: #000;
-		border-color: transparent;
-		font-weight: 600;
-	}
-	.btn:disabled {
-		opacity: 0.5;
-		cursor: default;
 	}
 	.msg {
 		margin-top: 1rem;
