@@ -31,10 +31,16 @@
 	// play every title, not the preview.
 	$: localSongs = songs as typeof songs & {
 		total?: number;
-		seeAll?: { url?: string; title?: string; total?: number };
+		seeAll?: { url?: string; title?: string; total?: number; artistTotal?: number; pages?: string[] };
 	};
 	$: seeAllUrl = localSongs?.seeAll?.url ?? "";
-	$: songsTotal = Math.max(Number(localSongs?.total) || 0, songs?.items?.length ?? 0);
+	// I19: the label counts the real total (`artistTotal`); `total` is only
+	// what the first seeAll page holds (200).
+	$: songsTotal = Math.max(
+		Number(localSongs?.seeAll?.artistTotal) || 0,
+		Number(localSongs?.total) || 0,
+		songs?.items?.length ?? 0,
+	);
 	let allSongs: any[] | null = null;
 	let allSongsFor = "";
 	let loadingAll = false;
@@ -49,10 +55,30 @@
 		if (allSongs) return allSongs;
 		const url = seeAllUrl;
 		if (!url) return songs?.items ?? [];
-		const res = await APIClient.fetch(url);
-		if (!res.ok) throw new Error(`local songs ${res.status}`);
-		const r = await res.json();
-		const items = Array.isArray(r?.items) ? r.items : [];
+		// I19: the seeAll link is one page of `limit`; `pages` (offset URLs
+		// from the API) load the rest until `artistTotal`, so "Lire tout" /
+		// "Voir les N titres" really covers every title.
+		const see = localSongs?.seeAll;
+		const pages = Array.isArray(see?.pages) && see.pages.length ? see.pages : [url];
+		const want = Number(see?.artistTotal) || 0;
+		const items: any[] = [];
+		const seen = new Set<string>();
+		for (const pageUrl of pages) {
+			if (want && items.length >= want) break;
+			const res = await APIClient.fetch(pageUrl);
+			if (!res.ok) throw new Error(`local songs ${res.status}`);
+			const r = await res.json();
+			const got: any[] = Array.isArray(r?.items) ? r.items : [];
+			if (!got.length) break;
+			for (const it of got) {
+				const id = typeof it?.videoId === "string" ? it.videoId : "";
+				if (id) {
+					if (seen.has(id)) continue;
+					seen.add(id);
+				}
+				items.push(it);
+			}
+		}
 		if (url === seeAllUrl && items.length) allSongs = items;
 		return items.length ? items : songs?.items ?? [];
 	}
