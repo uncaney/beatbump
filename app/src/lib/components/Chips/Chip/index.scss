@@ -21,4 +21,13 @@
 		background-color: #fff;
 		color: #131313;
 	}
+
+	// Touch targets (audit 1.1 / 2.2): the home mood chips measured 30px tall on
+	// phones. On touch screens and narrow viewports grow them to a 44px pill via
+	// padding; the font, radius and colours stay the same.
+	@media (hover: none), (max-width: 720px) {
+		height: auto;
+		min-height: 44px;
+		padding: 0.6em 1.1em;
+	}
 }
