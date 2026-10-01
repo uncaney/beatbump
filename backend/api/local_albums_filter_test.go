@@ -90,9 +90,10 @@ func TestLocalAlbumsFilterNeverPlayed(t *testing.T) {
 	if got := albumTitles(resp); len(got) != 3 || got[0] != "alpha" || got[1] != "Mid" || got[2] != "Ancient" {
 		t.Fatalf("never-played: got %v", got)
 	}
-	// Zeta was rejected by its play row without Meili: 4 confirmations, not 5
-	if stub.trackCalls != 4 {
-		t.Fatalf("expected 4 tracks queries, got %d", stub.trackCalls)
+	// Zeta was rejected by its play row without Meili; the 4 survivors are
+	// confirmed by ONE batched tracks query (PF4-3), Old rejected by its lid
+	if stub.trackCalls != 1 || stub.batchCalls != 1 {
+		t.Fatalf("expected 1 batched tracks query, got %d (%d batched)", stub.trackCalls, stub.batchCalls)
 	}
 	// total = survivors of the pair filter (Old is only rejected by Meili: upper bound 4)
 	if resp["total"].(float64) != 4 {
@@ -162,6 +163,11 @@ func TestLocalAlbumsNeverPlayedPagingCostIsFlat(t *testing.T) {
 	if len(albumTitles(p1)) != 20 || al1 != 2 { // 300 docs = 2 scan pages of 200
 		t.Fatalf("page 1: %d items, %d album scans", len(albumTitles(p1)), al1)
 	}
+	// PF4-3: a batch of the 20 first candidates (2 rejects), then a batch
+	// of the 2 missing ones
+	if tr1 != 2 {
+		t.Fatalf("page 1 cost %d tracks queries, want 2", tr1)
+	}
 	next := int(p1["nextOffset"].(float64))
 	if next != 22 { // two rejects (5, 15) inside the first window
 		t.Fatalf("page 1 nextOffset = %d", next)
@@ -196,5 +202,70 @@ func TestLocalAlbumsNeverPlayedPagingCostIsFlat(t *testing.T) {
 	c, rec := ctxFor(http.MethodGet, "/api/v1/local/albums?filter=never-played&offset=2001", "", nil)
 	if err := LocalAlbumsHandler(c); err != nil || rec.Code != http.StatusBadRequest {
 		t.Fatalf("offset cap: err %v code %d", err, rec.Code)
+	}
+}
+
+// PF4-3: a 200-album page is confirmed in batches (one Meili query per
+// trackCount budget), not one query per album, with the same verdicts: a
+// lid-only play and a videoId-only play are rejected, an album without
+// any track is re-checked on its own and rejected, upper/lower case
+// differences between the album doc and its tracks do not matter.
+func TestLocalAlbumsNeverPlayedBatchedConfirmation(t *testing.T) {
+	useTestDB(t)
+	resetNeverPlayedMemo()
+	stub := &neverPlayedStub{}
+	for i := 0; i < 260; i++ {
+		lid := fmt.Sprintf("lidb%07d", i)
+		a := map[string]interface{}{"id": fmt.Sprintf("lb-b%03d", i), "album": fmt.Sprintf("Album %03d", i), "albumArtist": fmt.Sprintf("Artist %d", i%7), "coverLid": lid, "dateAdded": float64(1_700_000_000 - i), "trackCount": 12.0}
+		stub.albums = append(stub.albums, a)
+		if i == 30 {
+			continue // album doc without any track: never offered
+		}
+		for n := 0; n < 12; n++ {
+			tr := map[string]interface{}{"lid": fmt.Sprintf("lidb%04d%03d", i, n), "title": "t", "album": a["album"], "albumArtist": a["albumArtist"], "artist": a["albumArtist"], "track": float64(n + 1)}
+			if n == 0 {
+				tr["lid"] = lid
+			}
+			if i == 40 {
+				tr["album"] = strings.ToUpper(mstr(a, "album")) // case only differs
+			}
+			if i == 50 && n == 3 {
+				tr["videoId"] = "ytvideo0050"
+			}
+			stub.tracks = append(stub.tracks, tr)
+		}
+	}
+	srv := httptest.NewServer(stub.handler())
+	t.Cleanup(srv.Close)
+	t.Setenv("MEILI_URL", srv.URL)
+	seed := []db.PlayEvent{
+		{ProfileID: "p-test", Ref: "lidb0010005", Title: "t", Source: "local"}, // album 10, track 6, lid only
+		{ProfileID: "p-test", Ref: "ytvideo0050", Title: "t", Source: "youtube"},
+	}
+	if err := db.DB.Create(&seed).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	t0 := stub.trackCalls
+	resp := getJSON(t, LocalAlbumsHandler, "/api/v1/local/albums?filter=never-played&offset=0&limit=200")
+	got := albumTitles(resp)
+	if len(got) != 200 {
+		t.Fatalf("got %d albums", len(got))
+	}
+	for _, ti := range got {
+		if ti == "Album 010" || ti == "Album 030" || ti == "Album 050" {
+			t.Fatalf("%s offered as never played", ti)
+		}
+	}
+	if got[39] != "Album 040" && got[38] != "Album 040" {
+		t.Fatalf("Album 040 (case-only difference) missing: %v", got[35:42])
+	}
+	// 3 rejects -> 203 candidates examined
+	if next := int(resp["nextOffset"].(float64)); next != 203 {
+		t.Fatalf("nextOffset = %d, want 203", next)
+	}
+	// 200 albums x 12 tracks = 2400 < 4000 budget: one batch, then one for
+	// the 3 missing, plus the lone re-check of the trackless album 30
+	if n := stub.trackCalls - t0; n > 3 {
+		t.Fatalf("200-album page cost %d tracks queries, want <= 3", n)
 	}
 }
