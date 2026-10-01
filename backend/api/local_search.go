@@ -195,6 +195,11 @@ func mArtist(m map[string]interface{}) string {
 }
 
 // ---- item builders ----
+// localSongItem builds a song item for a track hit. The thumbnail follows the
+// album-cover rule (trackCoverLid, local_covers.go): the album's coverLid when
+// known, else the track's own lid. Batch callers should go through
+// localSongItemsWithCovers (one albums query per list); on its own this costs
+// at most one memoised document GET per distinct album.
 func localSongItem(h map[string]interface{}) IListItemRenderer {
 	lid := mstr(h, "lid")
 	artist := mArtist(h)
@@ -205,7 +210,7 @@ func localSongItem(h map[string]interface{}) IListItemRenderer {
 		VideoId:    &vid,
 		Type:       "song",
 		Index:      mint(h, "track"),
-		Thumbnails: []Thumbnail{{URL: coverURL(lid), Width: 226, Height: 226}},
+		Thumbnails: []Thumbnail{{URL: coverURL(trackCoverLid(h)), Width: 226, Height: 226}},
 	}
 	if dur := mint(h, "durationSec"); dur > 0 {
 		item.Length = fmt.Sprintf("%d:%02d", dur/60, dur%60)
@@ -256,12 +261,7 @@ func localShelf(query, filter string) *MusicShelf {
 			"q": query, "limit": 12,
 			"attributesToRetrieve": []string{"title", "artist", "albumArtist", "lid", "track", "durationSec", "album"},
 		})
-		for _, h := range hits {
-			if mstr(h, "lid") == "" {
-				continue
-			}
-			contents = append(contents, localSongItem(h))
-		}
+		contents = append(contents, localSongItemsWithCovers(hits)...)
 	case "albums":
 		hits := meiliSearchIndex("albums", map[string]interface{}{
 			"q": query, "limit": 12,
@@ -332,7 +332,7 @@ func lidItem(h map[string]interface{}) Item {
 	item := Item{
 		Title: mstr(h, "title"), VideoID: l,
 		Subtitle:   []Artist{{Text: artist, BrowseId: artistID(artist)}},
-		Thumbnails: []Thumbnail{{URL: coverURL(l)}},
+		Thumbnails: []Thumbnail{{URL: coverURL(trackCoverLid(h))}},
 		Length:     fmt.Sprintf("%d:%02d", dur/60, dur%60),
 	}
 	item.ArtistInfo.Artist = []Artist{{Text: artist, BrowseId: artistID(artist)}}
@@ -374,6 +374,10 @@ func radioPool(seed map[string]interface{}, seedLid string) []map[string]interfa
 			"attributesToRetrieve": attrs,
 		})...)
 	}
+	// Prime the album-cover memo for the whole pool in one query, so the
+	// per-item builders downstream (lidItem in localRadio, localSongItem in
+	// me/mix) never fall back to one document GET per album.
+	albumCovers(pool)
 	return pool
 }
 
@@ -404,13 +408,7 @@ func randomLibrarySample(n int) []IListItemRenderer {
 		"q": "", "offset": off, "limit": n, "sort": []string{"dateAdded:desc"},
 		"attributesToRetrieve": []string{"lid", "title", "artist", "albumArtist", "track", "durationSec", "album"},
 	})
-	out := make([]IListItemRenderer, 0, len(hits))
-	for _, h := range hits {
-		if mstr(h, "lid") != "" {
-			out = append(out, localSongItem(h))
-		}
-	}
-	return out
+	return localSongItemsWithCovers(hits)
 }
 
 // ---- resolve a local track to its YouTube videoId (for a RELEVANT radio) ----

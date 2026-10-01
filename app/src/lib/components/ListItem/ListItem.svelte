@@ -381,7 +381,8 @@
 
 	async function handleClick(event: MouseEvent) {
 		const target = event.target as HTMLElement;
-		if (target && target.nodeName === "A") return;
+		// The subtitle link's text is a span inside the <a>: look up, not at the target.
+		if (target && (target.nodeName === "A" || target.closest?.("a"))) return;
 
 		Logger.dev(item);
 		const queueIndex = binarySearchIndex<typeof $list.mix>(
@@ -531,13 +532,15 @@
 				{#if Array.isArray(item.subtitle)}
 					{#each item.subtitle as subtitle}
 						{#if subtitle?.browseId}
+							<!-- Hit area = the text span only (see .artists > a in index.scss):
+							     a tap on the wrapped subtitle line plays the row. -->
 							<a
 								class="artist secondary"
 								href={entityHref(subtitle.browseId, subtitle.pageType)}
-								on:click|preventDefault={() => {
+								on:click|preventDefault|stopPropagation={() => {
 									goto(entityHref(subtitle.browseId, subtitle.pageType));
 									fullscreenStore.set("closed");
-								}}>{subtitle.text}</a
+								}}><span>{subtitle.text}</span></a
 							>
 						{:else}
 							<span>{subtitle.text} </span>
