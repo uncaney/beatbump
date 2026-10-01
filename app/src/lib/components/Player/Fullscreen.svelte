@@ -696,7 +696,7 @@
 					<!-- Desktop (audit v4 3.7): title / artist / heart under the cover;
 					     before, the left panel showed the artwork alone and the track
 					     was only named in the mini bar. -->
-					<div class="now-playing-meta">
+					<div class="now-playing-meta text-shadow">
 						<div class="np-text">
 							<h2
 								class="np-title"
@@ -1776,6 +1776,16 @@
 		width: min(360px, 42vh);
 		max-width: calc(100% - 4em);
 		margin-top: 1.25rem;
+		// Readable on a light blurred cover (audit v6 TOP 5): dark band behind
+		// the text + .text-shadow on the block. border-box keeps the cover width.
+		box-sizing: border-box;
+		padding: 0.6em 0.8em;
+		border-radius: 0.75rem;
+		background: linear-gradient(
+			to bottom,
+			rgb(0 0 0 / 28%),
+			rgb(0 0 0 / 45%)
+		);
 	}
 	.np-text {
 		display: flex;
@@ -1802,7 +1812,7 @@
 		align-self: flex-start;
 		max-width: 100%;
 		font-size: 1rem;
-		color: hsla(0, 0%, 100%, 0.72);
+		color: hsla(0, 0%, 100%, 0.85);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
