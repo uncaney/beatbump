@@ -106,7 +106,10 @@ $focus-color: #1c1c1c;
 // of that tree are pulled by components). This file is the live one.
 // The button-system classes (.btn-primary / .btn-secondary / .btn-ghost, end
 // of this file) opt out on their own, so they need no `.btn-reset`.
-button:not(.icon-btn):not(.btn-reset):not(.btn-primary):not(.btn-secondary):not(.btn-ghost),
+// Audit UX v9: the opt-outs live in :where() so the selector keeps the ORIGINAL specificity
+// (0,1,1 like `button:not(.icon-btn)`); chaining :not(.x) raised it to (0,5,1) and the global
+// rule started beating .outlined, .line.active and the Offline page buttons (9 regressions).
+button:not(.icon-btn):where(:not(.btn-reset):not(.btn-primary):not(.btn-secondary):not(.btn-ghost)),
 .button {
 	@extend %button-base;
 }
