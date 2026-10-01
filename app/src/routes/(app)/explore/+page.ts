@@ -3,11 +3,12 @@ import {APIClient} from "$lib/api";
 export const prerender = false;
 export const load = async ({ fetch, url }) => {
 	const data = await APIClient.fetch(`/api/v1/explore`);
-	const response = await data.json();
-
-	if (!data.ok) {
-		throw error(500, data.statusText);
+	// Never surface the upstream statusText; "fr:" marks our own message for
+	// +error.svelte (audit v4 H10). Check the status before parsing the body.
+	if (!data?.ok) {
+		throw error(502, "fr:Explorer est indisponible pour le moment.");
 	}
+	const response = await data.json();
 	return {
 		response,
 		path: url.pathname,
