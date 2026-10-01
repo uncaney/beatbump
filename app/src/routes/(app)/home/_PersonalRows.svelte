@@ -15,6 +15,7 @@
 		ALBUM_ROW_MIN,
 		HOME_MORE_ROWS_KEY,
 		arrangeHomeRows,
+		artistName,
 		buildForYouRow,
 		buildRediscoverRow,
 		buildResumeRow,
@@ -24,8 +25,10 @@
 		readMoreRowsOpen,
 		sanitizeCard,
 		shouldShowWeekCard,
+		thumbnailUrl,
 		WEEK_CARD_DISMISS_KEY,
 	} from "$lib/homeRows";
+	import { clickHandler as carouselClick } from "$lib/components/Carousel/functions";
 	import { peekHomeCache, clearHomeCache, writeHomeCache } from "$lib/homeCache";
 	import { getMix, getRecent, getStatsSummary, getTopBy, isAnonymousProfile, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
 	import { settings } from "$lib/stores";
@@ -480,6 +483,22 @@
 		}
 	}
 
+	// Audit UX v11 U11-11: a one-card Reprendre row used to be a 400px-tall
+	// carousel with 60% of the width empty. With exactly one card it renders
+	// as a compact horizontal card (64px cover, title, artist, "Reprendre")
+	// that plays the card exactly like its carousel click would.
+	$: resumeCompact = rowItems.reprendre?.length === 1 ? rowItems.reprendre[0] : null;
+	let resumingCard = false;
+	async function playResumeCard() {
+		if (!resumeCompact || resumingCard) return;
+		resumingCard = true;
+		try {
+			await carouselClick({ item: resumeCompact, index: 0, isBrowseEndpoint: false, type: "trending", kind: "" });
+		} finally {
+			resumingCard = false;
+		}
+	}
+
 	// AP1 opacity cue per row key (true while the row shows its cached paint).
 	$: cacheRows = {
 		reprendre: resumeSource === "cache",
@@ -594,7 +613,59 @@
 				</button>
 			</div>
 		{/if}
-		{#if rowItems.reprendre?.length > 0}
+		{#if resumeCompact}
+			<div
+				class="row-fade"
+				class:is-cache={cacheRows.reprendre}
+				data-testid="resume-row-compact"
+			>
+				<!-- Same header block as the carousel rows (modules/_heading.scss). -->
+				<div class="header resp-content-width">
+					<p class="subheading">Là où tu t'es arrêté</p>
+					<span class="h2">Reprendre</span>
+				</div>
+				<article
+					class="resume-card"
+					data-testid="resume-card"
+				>
+					{#if thumbnailUrl(resumeCompact)}
+						<img
+							class="resume-card-cover"
+							src={thumbnailUrl(resumeCompact)}
+							width="64"
+							height="64"
+							loading="lazy"
+							decoding="async"
+							alt=""
+						/>
+					{:else}
+						<span
+							class="resume-card-cover placeholder"
+							aria-hidden="true"
+						/>
+					{/if}
+					<div class="resume-card-text">
+						<p
+							class="resume-card-title"
+							title={resumeCompact.title ?? ""}
+						>
+							{resumeCompact.title ?? ""}
+						</p>
+						{#if artistName(resumeCompact)}
+							<p class="resume-card-artist">{artistName(resumeCompact)}</p>
+						{/if}
+					</div>
+					<button
+						type="button"
+						class="btn-reset btn-primary resume-card-play"
+						data-testid="resume-card-play"
+						aria-label="Reprendre {resumeCompact.title ?? ''}"
+						disabled={resumingCard}
+						on:click={playResumeCard}>Reprendre</button
+					>
+				</article>
+			</div>
+		{:else if rowItems.reprendre?.length > 0}
 			<div
 				class="row-fade"
 				class:is-cache={cacheRows.reprendre}
@@ -800,5 +871,55 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		min-width: 0;
+	}
+	/* U11-11: compact one-card Reprendre. Same 1rem gutter as the row headers
+	   and the pills; the header above it reuses the global .header block. */
+	.resume-card {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin: 0 1rem 0.5em;
+		padding: 0.6rem 0.75rem;
+		border-radius: 0.9rem;
+		background: hsl(0deg 0% 100% / 6%);
+	}
+	.resume-card-cover {
+		flex: 0 0 auto;
+		width: 64px;
+		height: 64px;
+		border-radius: 0.5rem;
+		object-fit: cover;
+		background: #000;
+	}
+	.resume-card-cover.placeholder {
+		display: block;
+		background: hsl(0deg 0% 100% / 10%);
+	}
+	.resume-card-text {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+	.resume-card-title,
+	.resume-card-artist {
+		margin: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.resume-card-title {
+		font-weight: 600;
+	}
+	.resume-card-artist {
+		/* 12px floor at the 12px mobile root */
+		font-size: max(0.85rem, 12px);
+		opacity: 0.75;
+		margin-top: 0.15em;
+	}
+	.resume-card-play {
+		flex: 0 0 auto;
+		white-space: nowrap;
+	}
+	.resume-card-play:disabled {
+		cursor: progress;
 	}
 </style>
