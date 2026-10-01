@@ -69,6 +69,9 @@ export const FILES = [
 	"lib/stores/sleepTimer.ts",
 	// c40a: live resume (card, "Continuer ici" toasts, device name).
 	"lib/stores/nowPlayingSync.ts",
+	// 41A: Ton mois extras (série, grille, Ton année) and Partager ma semaine.
+	"routes/(app)/library/stats/_Streak.svelte",
+	"lib/meStats.ts",
 ] as const;
 
 /**

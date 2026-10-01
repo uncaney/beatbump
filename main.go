@@ -180,6 +180,8 @@ func newServer() *echo.Echo {
 	me.GET("/stats/recent", api.MeRecentHandler)
 	me.GET("/stats/top", api.MeTopHandler)
 	me.GET("/stats/summary", api.MeStatsSummaryHandler)
+	// 41A (B6-22): day streak + 90-day calendar (viewer-local days via ?tz=).
+	me.GET("/stats/streaks", api.MeStreaksHandler)
 	// BI3: RFC 4180 export of the profile history (last 10 000 plays).
 	me.GET("/stats/export.csv", api.MeStatsExportCSVHandler)
 	me.GET("/never-played", api.MeNeverPlayedHandler)
