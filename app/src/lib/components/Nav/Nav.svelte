@@ -219,7 +219,7 @@
     <button
         class="sr-only"
         on:click={() => {
-			hidden = !hidden;
+			hidden = true;
 		}}>Close Search Dialogue
     </button
     >
@@ -234,7 +234,8 @@
         <div
             use:clickOutside
             on:click_outside={() => {
-				hidden = !hidden;
+				// Close, never toggle: a click during the 200 ms fade-out re-opened the overlay.
+				hidden = true;
 			}}
             class="nav-search"
             in:fade|global={{ delay: 200, duration: 200, easing: circOut }}
@@ -251,7 +252,7 @@
 					if (preserve.includes("Query")) {
 						query = detail?.query;
 					}
-					hidden = !hidden;
+					hidden = true;
 				}}
             />
         </div>
