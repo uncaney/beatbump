@@ -99,8 +99,9 @@ func SearchEndpointHandler(c echo.Context) error {
 		}
 		return c.JSON(http.StatusOK, r)
 	} else {
-		// YouTube shelves first; the owned-library shelf goes LAST (append).
-		if ls := localShelf(queryUnescape); ls != nil {
+		// YouTube shelves first; the owned-library shelf goes LAST (append) and
+		// follows the filter (albums / artists hits, none for playlists).
+		if ls := localShelf(queryUnescape, filter); ls != nil {
 			regularResponse = append(regularResponse, *ls)
 		}
 		correction := extractCorrection(searchResponse)

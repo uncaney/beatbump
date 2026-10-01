@@ -237,29 +237,65 @@ func localAlbumItem(a map[string]interface{}) IListItemRenderer {
 }
 
 // ---- "Your Library" search shelf ----
-func localShelf(query string) *MusicShelf {
+// localShelf builds the owned-library shelf for a search. It follows the search
+// filter so the shelf never shows song hits under an Albums / Artists filter
+// (audit-features-v2 F1):
+//
+//	"" / all / songs      -> track hits (localSongItem, playable lids)
+//	albums                -> albums-index hits (localAlbumItem, lb- ids -> /release?id=lb-…)
+//	artists               -> artists-index hits (localArtistItem, la- ids -> /artist/la-…)
+//	anything else         -> no local shelf (playlists, videos: the library has none)
+func localShelf(query, filter string) *MusicShelf {
 	if query == "" {
 		return nil
 	}
-	hits := meiliSearchIndex("tracks", map[string]interface{}{
-		"q": query, "limit": 12,
-		"attributesToRetrieve": []string{"title", "artist", "albumArtist", "lid", "track", "durationSec", "album"},
-	})
-	if len(hits) == 0 {
+	var contents []IListItemRenderer
+	switch filter {
+	case "", "all", "songs":
+		hits := meiliSearchIndex("tracks", map[string]interface{}{
+			"q": query, "limit": 12,
+			"attributesToRetrieve": []string{"title", "artist", "albumArtist", "lid", "track", "durationSec", "album"},
+		})
+		for _, h := range hits {
+			if mstr(h, "lid") == "" {
+				continue
+			}
+			contents = append(contents, localSongItem(h))
+		}
+	case "albums":
+		hits := meiliSearchIndex("albums", map[string]interface{}{
+			"q": query, "limit": 12,
+			"attributesToRetrieve": []string{"id", "album", "albumArtist", "year", "coverLid"},
+		})
+		for _, a := range hits {
+			if !isLocalAlbum(mstr(a, "id")) {
+				continue
+			}
+			contents = append(contents, localAlbumItem(a))
+		}
+	case "artists":
+		hits := meiliSearchIndex("artists", map[string]interface{}{
+			"q": query, "limit": 12,
+			"attributesToRetrieve": []string{"id", "name"},
+		})
+		covers := artistCovers(hits)
+		for _, a := range hits {
+			id := mstr(a, "id")
+			if !isLocalArtist(id) {
+				continue
+			}
+			contents = append(contents, localArtistItem(a, covers[id]))
+		}
+	default:
+		return nil
+	}
+	if len(contents) == 0 {
 		return nil
 	}
 	shelf := &MusicShelf{}
 	shelf.Header.Title = "Your Library"
 	shelf.Local = true
-	for _, h := range hits {
-		if mstr(h, "lid") == "" {
-			continue
-		}
-		shelf.Contents = append(shelf.Contents, localSongItem(h))
-	}
-	if len(shelf.Contents) == 0 {
-		return nil
-	}
+	shelf.Contents = contents
 	return shelf
 }
 
