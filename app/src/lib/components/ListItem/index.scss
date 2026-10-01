@@ -21,6 +21,22 @@
 		content-visibility: auto;
 	}
 }
+/* /release on phones (audit v4 3.8): album tracks without a thumbnail render
+   the .index cell, so the flex row has THREE children (index, metadata,
+   length) and justify-content: space-between parks the content-sized
+   .metadata in the middle of the row: titles looked centred. Rows with a
+   thumbnail (queue, local albums) have no index on mobile, only two children,
+   and stay left-aligned; desktop (>= 720 px) is a grid. Let the metadata take
+   the free space for the release context only. */
+@media screen and (max-width: 719.98px) {
+	/* :global: index.scss is shared with LocalListItem, which never sets it. */
+	.m-item:global(.release-row) .metadata {
+		flex: 1 1 auto;
+		min-width: 0;
+		justify-content: flex-start;
+		text-align: left;
+	}
+}
 .isPlaying {
 	background: scale-color(#57575831, $lightness: 35%);
 }
