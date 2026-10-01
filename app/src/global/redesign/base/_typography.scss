@@ -67,8 +67,15 @@ a.no-style {
 	}
 }
 
-a:not(.no-style),
-.link:not(.no-style) {
+// U11-1 (audit UX v11): links styled as buttons (`<a class="btn-primary |
+// btn-secondary | btn-ghost">`, the Bienvenue pills, every EmptyState
+// "Explorer") are excluded. Without it `display: inline` (0,1,1) beat the
+// button system's `inline-flex` (0,1,0, modules/_button.scss) and the label
+// sat on the top edge of its 44px pill. The exclusion lives in :where() so
+// the rule keeps its original specificity (same lesson as the global button
+// rule). button-contract.test.ts guards this text.
+a:not(.no-style):where(:not(.btn-primary):not(.btn-secondary):not(.btn-ghost)),
+.link:not(.no-style):where(:not(.btn-primary):not(.btn-secondary):not(.btn-ghost)) {
 	$link-color: rgb(245, 245, 245);
 	color: rgb(245, 245, 245);
 
