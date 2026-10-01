@@ -32,7 +32,10 @@ export type Label =
 	| "Remove from Queue"
 	// Player ⋮ menu (lane c8b): sleep timer sheet + keyboard cheat sheet
 	| "Minuterie de sommeil"
-	| "Raccourcis clavier";
+	| "Raccourcis clavier"
+	// Queue actions on every track row (lane c9b, P1): French labels.
+	| "Lire ensuite"
+	| "Ajouter à la file";
 
 export type Dropdown = TypedDropdownItem<Label>[];
 const DROPDOWN_TEXTS: ReadonlyArray<Label> = [
@@ -64,6 +67,8 @@ const DROPDOWN_TEXTS: ReadonlyArray<Label> = [
 	"Lyrics",
 	"Minuterie de sommeil",
 	"Raccourcis clavier",
+	"Lire ensuite",
+	"Ajouter à la file",
 ];
 
 export type Icons =
@@ -232,6 +237,8 @@ export const DROPDOWN_ITEMS: Partial<{
 		text: "Raccourcis clavier",
 		action: () => { },
 	},
+	"Lire ensuite": { icon: "play-circle", text: "Lire ensuite", action: () => { } },
+	"Ajouter à la file": { icon: "queue", text: "Ajouter à la file", action: () => { } },
 };
 
 export function buildDropdown() {

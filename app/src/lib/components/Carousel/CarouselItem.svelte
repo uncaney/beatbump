@@ -34,12 +34,12 @@
 
 	const FILTER_ARTIST_ON_ARTIST_PAGE: ReadonlyArray<string> = [
 		"Favorite",
-		"Add to Queue",
+		"Ajouter à la file",
 		"View Artist",
 	] as const;
 	const FILTER_ALBUM_PLAYLIST_ITEMS: ReadonlyArray<string> = [
 		"Favorite",
-		"Play Next",
+		"Lire ensuite",
 		"View Artist",
 	] as const;
 
@@ -65,16 +65,8 @@
 				notify(`Error: ${e}`, "error");
 			}
 		},
-		addToQueue: (ctx: BuildMenuParams) => {
-			const { item } = ctx;
-			list.setTrackWillPlayNext(item, list.$.value.mix.length);
-			notify(`${item.title} has been added to your queue!`, "success");
-		},
-		playNext: (ctx: BuildMenuParams) => {
-			const { item } = ctx;
-			list.setTrackWillPlayNext(item, list.position);
-			notify(`${item.title} will play next!`, "success");
-		},
+		addToQueue: (ctx: BuildMenuParams) => addToQueueEnd(ctx.item),
+		playNext: (ctx: BuildMenuParams) => playNext(ctx.item),
 		startGroupSession: () => showGroupSessionCreator.set(true),
 		shareGroupSession: async (ctx: BuildMenuParams) => {
 			if (!browser) return;
@@ -148,12 +140,12 @@
 		buildDropdown()
 			.add("View Artist", MENU_HANDLERS.artist.bind(MENU_HANDLERS.artist, ctx))
 			.add(
-				"Add to Queue",
-				MENU_HANDLERS.addToQueue.bind(MENU_HANDLERS.addToQueue, ctx),
+				"Lire ensuite",
+				MENU_HANDLERS.playNext.bind(MENU_HANDLERS.playNext, ctx),
 			)
 			.add(
-				"Play Next",
-				MENU_HANDLERS.playNext.bind(MENU_HANDLERS.playNext, ctx),
+				"Ajouter à la file",
+				MENU_HANDLERS.addToQueue.bind(MENU_HANDLERS.addToQueue, ctx),
 			)
 			.add(
 				"Add to Playlist",
@@ -182,6 +174,7 @@
 	import { APIParams } from "$lib/constants";
 	import { createShare, type SharePageType } from "$lib/shared/createShare";
 	import list from "$lib/stores/list";
+	import { addToQueueEnd, playNext } from "$lib/queueActions";
 	import type { Item, Thumbnail } from "$lib/types";
 	import type { BuildMenuParams } from "$lib/types/common";
 	import type { IListItemRenderer } from "$lib/types/musicListItemRenderer";
@@ -250,11 +243,9 @@
 							text: "Shuffle",
 						},
 						{
-							action: () => {
-								list.setTrackWillPlayNext(item, $list.position);
-							},
-							icon: "queue",
-							text: "Play Next",
+							action: () => playNext(item),
+							icon: "play-circle",
+							text: "Lire ensuite",
 						},
 						{
 							action: () => {

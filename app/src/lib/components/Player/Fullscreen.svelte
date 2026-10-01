@@ -58,6 +58,23 @@
 	// F2: heart label (state is refreshed by Player.svelte on track change)
 	$: favLabel = $currentIsFavourite ? "Retirer des favoris" : "Ajouter aux favoris";
 
+	// P1 queue actions: "Vider la file" keeps the playing track only; a row
+	// swiped left (touch) or its "Retirer" button removes that row.
+	async function clearQueue() {
+		if (await SessionListService.clearQueue()) {
+			notify("File vidée, le morceau en cours est conservé", "success");
+			if ($groupSession.hasActiveSession)
+				groupSession.updateGuestTrackQueue($SessionListService);
+		}
+	}
+	function removeQueueRow(index: number) {
+		const title = $queue[index]?.title;
+		SessionListService.removeTrack(index);
+		notify(title ? `« ${title} » retiré de la file` : "Retiré de la file", "success");
+		if ($groupSession.hasActiveSession)
+			groupSession.updateGuestTrackQueue($SessionListService);
+	}
+
 	const {
 		paused,
 		currentTimeStore: currentTime,
@@ -797,11 +814,37 @@
 					{#if tab.id === "UpNext"}
 						{#if isActive}
 							<div
-								class="scroller"
+								class="scroller queue-scroller"
 								on:touchstart|stopPropagation={null}
 							>
+								<div class="queue-toolbar">
+									<span class="queue-count" aria-live="polite">
+										{$queue.length}
+										{$queue.length > 1 ? "morceaux" : "morceau"}
+									</span>
+									<button
+										type="button"
+										class="queue-clear"
+										data-testid="queue-clear"
+										aria-label="Vider la file d'attente (garder le morceau en cours)"
+										title="Vider la file d'attente (garder le morceau en cours)"
+										disabled={$queue.length <= 1}
+										on:click|stopPropagation={clearQueue}
+									>
+										<Icon
+											name="trash"
+											size="1em"
+											color="currentColor"
+										/>
+										<span>Vider la file</span>
+									</button>
+								</div>
 								<DraggableList
 									items={$queue}
+									swipeToRemove
+									lockedIndex={$queuePosition}
+									style="flex: 1 1 auto; min-height: 0; height: auto;"
+									on:remove={({ detail }) => removeQueueRow(detail.index)}
 									on:dragend={() => {
 										if ($groupSession.hasActiveSession)
 											groupSession.updateGuestTrackQueue($SessionListService);
@@ -951,6 +994,48 @@
 		height: inherit;
 		-webkit-overflow-scrolling: touch;
 		background: inherit;
+	}
+
+	// Up Next: toolbar above the list, the list takes the remaining height
+	// (DraggableList scrolls itself).
+	.queue-scroller {
+		display: flex;
+		flex-direction: column;
+		overflow-y: hidden;
+	}
+	.queue-toolbar {
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5em;
+		padding: 0.35em 0.75em;
+	}
+	.queue-count {
+		font-size: 0.8em;
+		color: hsla(0, 0%, 100%, 0.65);
+	}
+	.queue-clear {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4em;
+		min-height: 2.5em;
+		padding: 0.4em 0.9em;
+		border-radius: 999px;
+		border: 1px solid hsla(0, 0%, 100%, 0.25);
+		background: hsla(0, 0%, 100%, 0.08);
+		color: #fff;
+		font-size: 0.85em;
+		font-weight: 600;
+		cursor: pointer;
+		&:disabled {
+			opacity: 0.4;
+			cursor: default;
+		}
+		&:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: 2px;
+		}
 	}
 
 	.immersive-wrapper {

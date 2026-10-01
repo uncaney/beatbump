@@ -77,9 +77,17 @@ export interface ISessionListService {
 	} | null>;
 	lockedSet(_mix: ISessionListProvider): Promise<ISessionListProvider>;
 	removeTrack(index: number): void;
+	/** "Vider la file": keep only the current track */
+	clearQueue(): Promise<boolean>;
 	setMix(mix: Item[], type?: "auto" | "playlist" | "local"): void;
-	/** Sets the item passed to the function to play next */
-	setTrackWillPlayNext(item: Item, key: number): Promise<void>;
+	/** Inserts the item (or the tracks it expands to) at key + 1; true when inserted */
+	setTrackWillPlayNext(item: Item, key: number): Promise<boolean>;
+	/** "Lire ensuite": right after the current track */
+	playNext(item: Item): Promise<boolean>;
+	/** "Ajouter à la file": at the end of the queue */
+	addToQueueEnd(item: Item): Promise<boolean>;
+	/** Queue row "Lire ensuite": move the row right after the current track */
+	moveTrackNext(index: number): Promise<boolean>;
 	shuffle(index: number, preserveBeforeActive?: boolean): void;
 	shuffleRandom(items: Array<Item>): void;
 	toJSON(): string;
