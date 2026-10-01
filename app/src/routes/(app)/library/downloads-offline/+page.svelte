@@ -37,6 +37,7 @@
 		type ArtistGroup,
 	} from "$lib/offlineQueue";
 	import { currentTrack } from "$lib/stores/list";
+	import { markOfflineSuccess } from "$lib/stores/pwa";
 	import { notify } from "$lib/utils";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
@@ -247,6 +248,9 @@
 
 	// One toast for a pin batch (H5): "N épinglés · K refusés (quota) · F impossibles".
 	function pinSummary(total: number, pinnedCount: number, quotaCount: number, failedCount: number) {
+		// HL4: any successful pin (track or album) makes the profile eligible
+		// for the contextual install hint (InstallHint.svelte).
+		if (pinnedCount > 0) markOfflineSuccess();
 		if (total === 1) {
 			if (pinnedCount) return notify("Épinglé hors-ligne : jamais évincé", "success");
 			if (quotaCount) return notify(QUOTA_MSG, "error");

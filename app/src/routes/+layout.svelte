@@ -2,6 +2,7 @@
     import Nav from "$components/Nav/Nav.svelte";
     import Alert from "$lib/components/Alert/Alert.svelte";
     import Player from "$lib/components/Player/Player.svelte";
+    import InstallHint from "$lib/components/InstallHint/InstallHint.svelte";
     import Wrapper from "$lib/components/Wrapper/Wrapper.svelte";
     import {showAddToPlaylistPopper} from "$stores/stores";
 
@@ -378,6 +379,7 @@ left: 0; background: var(--base-bg); font-size: 1.1rem; display: flex; flex-dire
         <a href="/library/downloads-offline">Écouter ma musique hors-ligne</a>
     </div>
 {/if}
+<InstallHint />
 <Alert --alert-bottom={hasplayer ? "5.75em" : "0rem"} />
 <svelte:component this={$Fullscreen} state={isFullscreen ? "open" : "closed"} />
 <footer

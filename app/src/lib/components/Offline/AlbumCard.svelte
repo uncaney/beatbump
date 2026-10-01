@@ -13,6 +13,7 @@
 	import type { AlbumGroup } from "$lib/offlineQueue";
 	import { formatBytes } from "$lib/offlineQueue";
 	import { keepOffline } from "$lib/offlineBatch";
+	import { markOfflineSuccess } from "$lib/stores/pwa";
 	import { notify } from "$lib/utils";
 	import { createEventDispatcher, tick } from "svelte";
 	import OfflineTrackRow from "./OfflineTrackRow.svelte";
@@ -54,6 +55,7 @@
 		try {
 			const r = await keepOffline(missingTracks);
 			dispatch("complete", { album });
+			if (r.ready > 0) markOfflineSuccess();
 			if (r.cancelled) return;
 			if (r.refused) notify("Quota atteint, augmente-le dans Réglages", "error");
 			else if (r.failed && !r.ready) notify("Impossible de compléter l'album pour l'instant", "error");

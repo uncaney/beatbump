@@ -24,6 +24,56 @@ export const isInstalled = writable(false);
 /** True on iPhone / iPad (incl. iPadOS 13+ which reports itself as a Mac). */
 export const isIOS = writable(false);
 
+// HL4: contextual install hint. Eligible once the visit counter reaches 3
+// (bumped once per app load, see `recordVisit` below) OR the first
+// "Garder hors-ligne" batch succeeds this session (`markOfflineSuccess`,
+// called from the offline pages/components); InstallHint.svelte combines
+// this with `installPrompt` / `isIOS` / `isInstalled` and the 14-day snooze
+// before actually rendering.
+export const installHintEligible = writable(false);
+
+const VISITS_KEY = "ytm-visits";
+const INSTALL_HINT_SNOOZE_KEY = "ytm-install-hint-snooze";
+const INSTALL_HINT_SNOOZE_DAYS = 14;
+
+/** Bump the visit counter (localStorage, persists across sessions); returns the new count. Never throws. */
+function recordVisit(): number {
+	if (!browser) return 0;
+	try {
+		const n = (parseInt(localStorage.getItem(VISITS_KEY) || "0", 10) || 0) + 1;
+		localStorage.setItem(VISITS_KEY, String(n));
+		return n;
+	} catch {
+		return 0;
+	}
+}
+
+/** HL4: called after the first "Garder hors-ligne" batch succeeds (>= 1 track kept). */
+export function markOfflineSuccess(): void {
+	installHintEligible.set(true);
+}
+
+/** True while the 14-day "Plus tard" snooze (from `snoozeInstallHint`) is still running. */
+export function isInstallHintSnoozed(): boolean {
+	if (!browser) return true;
+	try {
+		const until = Number(localStorage.getItem(INSTALL_HINT_SNOOZE_KEY) || 0);
+		return Date.now() < until;
+	} catch {
+		return false;
+	}
+}
+
+/** "Plus tard": hide the install hint for `INSTALL_HINT_SNOOZE_DAYS` days. */
+export function snoozeInstallHint(): void {
+	if (!browser) return;
+	try {
+		localStorage.setItem(INSTALL_HINT_SNOOZE_KEY, String(Date.now() + INSTALL_HINT_SNOOZE_DAYS * 24 * 60 * 60 * 1000));
+	} catch {
+		/* no storage: the hint may show again next load, harmless */
+	}
+}
+
 const STANDALONE_MQ = "(display-mode: standalone)";
 
 function runningStandalone(): boolean {
@@ -47,6 +97,7 @@ export function initPwa(): void {
 	const ua = navigator.userAgent;
 	isIOS.set(/iPhone|iPad|iPod/.test(ua) || (ua.includes("Mac") && navigator.maxTouchPoints > 1));
 	isInstalled.set(runningStandalone());
+	if (recordVisit() >= 3) installHintEligible.set(true);
 
 	try {
 		const mq = window.matchMedia(STANDALONE_MQ);
