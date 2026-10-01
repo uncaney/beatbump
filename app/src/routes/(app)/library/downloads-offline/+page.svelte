@@ -507,6 +507,11 @@
 			<section>
 				{#each artists as artist (artist.key)}
 					{@const open = openArtists[artist.key] ?? artists.length <= 3}
+					{@const flat = artist.albums.flatMap((a) => a.tracks)}
+					{@const soloAlbum = artist.albums.length === 1 && !artist.albums[0].isSingles ? artist.albums[0].name : ""}
+					<!-- Audit v5 TOP 6b: one header per artist (count + play / shuffle),
+					     the tracks right under it; no album sub-card repeating the
+					     play / shuffle buttons and the "N pistes" meta. -->
 					<div
 						class="artist"
 						class:active={!!activeId && artist.tracks.some((t) => t.videoId === activeId)}
@@ -526,11 +531,16 @@
 								>
 								<span class="text">
 									<span class="name">{artist.name}</span>
-									<span class="sub">
-										{artist.tracks.length} {artist.tracks.length > 1 ? "pistes" : "piste"}
-										{#if artist.albums.length > 1}<span class="dot">·</span>{artist.albums.length} albums{/if}
-										{#if formatBytes(artist.bytes)}<span class="dot">·</span>{formatBytes(artist.bytes)}{/if}
-									</span>
+									<span class="sub"
+										>{[
+											soloAlbum,
+											`${artist.tracks.length} ${artist.tracks.length > 1 ? "pistes" : "piste"}`,
+											artist.albums.length > 1 ? `${artist.albums.length} albums` : "",
+											formatBytes(artist.bytes),
+										]
+											.filter(Boolean)
+											.join(" · ")}</span
+									>
 								</span>
 							</button>
 							<div class="artist-actions">
@@ -539,7 +549,7 @@
 									type="button"
 									title="Lire l'artiste"
 									aria-label="Lire l'artiste"
-									on:click={() => start(artist.albums.flatMap((a) => a.tracks), 0)}
+									on:click={() => start(flat, 0)}
 								>
 									<Icon
 										name="play"
@@ -564,17 +574,22 @@
 						{#if open}
 							<div class="artist-albums">
 								{#each artist.albums as album (album.key)}
-									<AlbumCard
-										{album}
-										{activeId}
-										{online}
-										showArtist={false}
-										bind:open={openAlbums["a:" + album.key]}
-										on:play={(e) => start(e.detail.tracks, e.detail.index, { shuffle: e.detail.shuffle })}
-										on:remove={(e) => remove(e.detail)}
-										on:pin={(e) => pin(e.detail)}
-						on:recache={(e) => recacheOne(e.detail)}
-									/>
+									{#if artist.albums.length > 1}
+										<p class="album-label">{album.name}</p>
+									{/if}
+									{#each album.tracks as t, i (t.videoId)}
+										<OfflineTrackRow
+											track={t}
+											number={album.isSingles ? undefined : i + 1}
+											showArtist={false}
+											active={t.videoId === activeId}
+											{online}
+											on:play={() => start(flat, flat.indexOf(t))}
+											on:remove={(e) => remove(e.detail)}
+											on:pin={(e) => pin(e.detail)}
+											on:recache={(e) => recacheOne(e.detail)}
+										/>
+									{/each}
 								{/each}
 							</div>
 						{/if}
@@ -926,6 +941,17 @@
 	.artist-albums {
 		padding-left: 0.5rem;
 		margin-top: 0.3rem;
+	}
+	// Album name between rows when an artist has several albums (plain text,
+	// no buttons, no count: the header already gives it).
+	.album-label {
+		margin: 0.5rem 0 0.15rem 0.5rem;
+		color: $muted;
+		font-size: 0.85rem;
+		font-weight: 600;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	@media (max-width: 640px) {
 		.head {
