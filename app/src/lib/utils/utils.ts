@@ -75,11 +75,13 @@ export const addToQueue = async ({
 	playlistId?: string;
 }): Promise<Song[] | void> => {
 	try {
+		// One "?" only: the query used to start with "??", so Echo saw the key
+		// "?playlistId" and get_queue answered 500 (album rows could not be queued).
 		const url = `/api/v1/get_queue.json?${
 			videoId
-				? `?videoIds=${videoId}`
+				? `videoIds=${encodeURIComponent(videoId)}`
 				: playlistId
-				? "?playlistId=" + playlistId
+				? "playlistId=" + encodeURIComponent(playlistId)
 				: ""
 		}`;
 		const data = (await APIClient.fetch(url, { headers: { accept: "application/json" } })

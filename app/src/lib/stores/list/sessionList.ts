@@ -1032,6 +1032,27 @@ export class ListService {
      */
     private async resolveQueueItems(item: Item): Promise<Item[]> {
         if (item.localUrl || isLocalTrackId(item.videoId)) return [{ ...item }];
+        // Album / single / playlist rows (search results, carousels) carry no videoId:
+        // expand them through the album or playlist page, which get_queue cannot do.
+        const pageType = String((item as any)?.endpoint?.pageType || "");
+        const browseId = String((item as any)?.endpoint?.browseId || (item as any)?.browseId || "");
+        if (!item.videoId && browseId) {
+            try {
+                if (/ALBUM|SINGLE|EP/.test(pageType) || /^(MPREb|lb-)/.test(browseId)) {
+                    const r = await fetch(`/api/v1/main.json?q=&endpoint=browse&browseId=${encodeURIComponent(browseId)}&pt=MUSIC_PAGE_TYPE_ALBUM`);
+                    const j = r.ok ? await r.json() : null;
+                    const tracks = (j?.items || j?.tracks || []).filter((t: any) => t?.videoId);
+                    if (tracks.length) return tracks as Item[];
+                } else if (/PLAYLIST/.test(pageType) || /^(VL|PL|OLAK|RDCLAK)/.test(browseId)) {
+                    const r = await fetch(`/api/v1/playlist.json?list=${encodeURIComponent(browseId)}`);
+                    const j = r.ok ? await r.json() : null;
+                    const tracks = (j?.tracks || j?.items || []).filter((t: any) => t?.videoId);
+                    if (tracks.length) return tracks as Item[];
+                }
+            } catch {
+                /* fall through */
+            }
+        }
         const fetched = await addToQueue(item);
         if (Array.isArray(fetched) && fetched.length) return fetched as Item[];
         if (item.videoId) return [item];
