@@ -123,12 +123,30 @@
 			<div class="resume-queue">
 				<button
 					type="button"
-					class="btn-reset"
+					class="btn-reset resume-remote"
 					data-testid="resume-remote"
 					disabled={restoringRemote}
 					on:click={resumeRemote}
 				>
-					Reprendre depuis {remote.deviceName} : {remoteTrack.title ?? "morceau"} à {clockLabel(remote.state.currentTime)}
+					<svg
+						class="rr-device"
+						viewBox="0 0 24 24"
+						width="18"
+						height="18"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<rect x="2" y="4" width="14" height="10" rx="1.5" />
+						<path d="M2 18h14" />
+						<rect x="17" y="9" width="5" height="11" rx="1" />
+					</svg>
+					<span class="rr-text"
+						>Reprendre depuis {remote.deviceName} : {remoteTrack.title ?? "morceau"} à {clockLabel(remote.state.currentTime)}</span
+					>
 				</button>
 			</div>
 		{/if}
@@ -222,5 +240,28 @@
 	.resume-queue button:disabled {
 		opacity: 0.6;
 		cursor: progress;
+	}
+	/* Audit v7 TOP 9: the remote-resume card is "another device", not the local
+	   queue. Set it apart from the white local pill: a secondary translucent
+	   card, left-aligned, led by a device glyph so it reads as a cross-device
+	   hand-off. Keeps [data-testid=resume-remote] and the full sentence text. */
+	.resume-queue button.resume-remote {
+		justify-content: flex-start;
+		gap: 0.5rem;
+		background: rgba(255, 255, 255, 0.08);
+		border: 1px solid rgba(255, 255, 255, 0.28);
+		border-radius: 0.9rem;
+		color: #fff;
+		font-weight: 500;
+	}
+	.resume-remote .rr-device {
+		flex: 0 0 auto;
+		opacity: 0.85;
+	}
+	.resume-remote .rr-text {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		min-width: 0;
 	}
 </style>
