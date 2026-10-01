@@ -7,6 +7,7 @@ import {
 	fitResumeState,
 	getDeviceId,
 	remoteResumeOffer,
+	stripDeviceUrls,
 } from "./nowPlayingSync";
 import { buildResumeState } from "./resumeState";
 
@@ -97,6 +98,37 @@ describe("remoteResumeOffer", () => {
 		expect(remoteResumeOffer(remote({ payload: "not json" }), "me", 0, null)).toBeNull();
 		expect(remoteResumeOffer(remote({ updatedAt: 0 }), "me", 0, null)).toBeNull();
 		expect(remoteResumeOffer(remote({ deviceId: "" }), "me", 0, null)).toBeNull();
+	});
+});
+
+describe("stripDeviceUrls", () => {
+	const withUrls = () => {
+		const s = stateOf(4, 1);
+		s.mix[0] = { ...s.mix[0], localUrl: "/aud/abc", IS_LOCAL: true };
+		s.mix[2] = { ...s.mix[2], _offlineUrl: "/vp?u=signed", localUrl: "/vp?u=signed" };
+		return s;
+	};
+	it("removes localUrl / _offlineUrl from every row and keeps the rest", () => {
+		const s = withUrls();
+		const out = stripDeviceUrls(s)!;
+		expect(out.mix.some((r) => "localUrl" in r || "_offlineUrl" in r)).toBe(false);
+		expect(out.mix[0]).toEqual({ ...s.mix[0], localUrl: undefined });
+		expect(out.mix[0].IS_LOCAL).toBe(true);
+		expect(out.mix.map((r) => r.videoId)).toEqual(s.mix.map((r) => r.videoId));
+		expect(out.position).toBe(1);
+		// the local state is untouched (the C1 copy keeps its URLs)
+		expect(s.mix[0].localUrl).toBe("/aud/abc");
+		expect(s.mix[2]._offlineUrl).toBe("/vp?u=signed");
+	});
+	it("returns the same object when nothing had to be removed", () => {
+		const s = stateOf(3, 0);
+		expect(stripDeviceUrls(s)).toBe(s);
+		expect(stripDeviceUrls(null)).toBeNull();
+	});
+	it("is applied by fitResumeState (the remote payload builder)", () => {
+		const out = fitResumeState(withUrls())!;
+		expect(out.mix.length).toBe(4);
+		expect(JSON.stringify(out)).not.toMatch(/localUrl|_offlineUrl/);
 	});
 });
 

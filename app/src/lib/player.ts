@@ -1042,7 +1042,14 @@ export const getSrc = async (
 			video: "",
 			duration: -1
 		}
-		return setTrack(formats, true, currentTrack);
+		// J1/J12: a restored queue (deferToPlay) loads the local source paused
+		// and only caches it at the first play, like the player.json path below.
+		const src = setTrack(formats, true, currentTrack, !!opts?.deferToPlay);
+		if (opts?.deferToPlay && videoId) {
+			const url = currentTrack.localUrl;
+			AudioPlayer.deferUntilPlay(videoId, () => autoCache(currentTrack, url));
+		}
+		return src;
 	}
 
 	// bypassCache (media-error retry, G2): the SW entry is the source that just

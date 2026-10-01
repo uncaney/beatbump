@@ -62,12 +62,37 @@ export function getDeviceId(storage: StorageLike | undefined, make: () => string
 	}
 }
 
+/** Row keys that only mean something on the device that wrote them (J1). */
+const DEVICE_ROW_KEYS = ["localUrl", "_offlineUrl"] as const;
+
 /**
- * The resume state, cut around the cursor until its JSON fits `maxBytes`
- * (the server refuses more). null when even the current track alone does
- * not fit or the queue is empty.
+ * J1: the queue sent to `me/nowplaying` must not carry this device's cache
+ * URLs (`localUrl` / `_offlineUrl`: `/aud/<id>`, `/localf?...`, a signed
+ * `/vp?u=`); the other device resolves each row by `videoId` (offlineFormats,
+ * then player.json). The local C1 state keeps them. Same object back when
+ * nothing had to be removed.
  */
-export function fitResumeState(state: ResumeState | null, maxBytes = NOWPLAYING_MAX_BYTES): ResumeState | null {
+export function stripDeviceUrls(state: ResumeState | null): ResumeState | null {
+	if (!state) return null;
+	let changed = false;
+	const mix = state.mix.map((row) => {
+		if (!row || typeof row !== "object" || !DEVICE_ROW_KEYS.some((k) => k in row)) return row;
+		changed = true;
+		const out = { ...row };
+		for (const k of DEVICE_ROW_KEYS) delete out[k];
+		return out;
+	});
+	return changed ? { ...state, mix } : state;
+}
+
+/**
+ * The resume state as sent to the server: device URLs removed (J1), then
+ * cut around the cursor until its JSON fits `maxBytes` (the server refuses
+ * more). null when even the current track alone does not fit or the queue
+ * is empty.
+ */
+export function fitResumeState(input: ResumeState | null, maxBytes = NOWPLAYING_MAX_BYTES): ResumeState | null {
+	const state = stripDeviceUrls(input);
 	if (!state || !state.mix.length) return null;
 	const size = (s: ResumeState) => new TextEncoder().encode(JSON.stringify(s)).length;
 	if (size(state) <= maxBytes) return state;
