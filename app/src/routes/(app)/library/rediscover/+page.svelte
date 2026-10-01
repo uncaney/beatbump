@@ -94,8 +94,8 @@
 				icon="refresh"
 				title="Rien à redécouvrir pour l'instant"
 				text={anonymous
-					? "Dis-moi ton prénom dans Compte pour retrouver tes écoutes : cette liste suit ton historique."
-					: "Il faut des morceaux écoutés au moins 3 fois il y a plus de deux mois, et pas depuis un mois."}
+					? "Cette liste suit ton historique d'écoute. Explore la bibliothèque pour commencer."
+					: "Il faut des morceaux écoutés au moins 3 fois il y a plus de deux mois, et pas depuis un mois. Explore la bibliothèque pour commencer."}
 				href="/library/albums"
 				cta="Explorer la bibliothèque"
 			/>
