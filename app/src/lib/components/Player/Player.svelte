@@ -460,10 +460,12 @@
 				aria-label="Paroles"
 				title="Paroles"
 				style="display:flex;align-items:center;color:#fff;"
-				on:click|stopPropagation={() => {
-					// The bar's own click toggles the fullscreen player: without this the lyrics
-					// page opened underneath the fullscreen overlay on phones.
+				on:click|preventDefault|stopPropagation={() => {
+					// The bar's own click toggles the fullscreen player (hence stopPropagation),
+					// but stopping propagation also hides the click from SvelteKit's router
+					// listener on document: navigate explicitly so the queue survives.
 					fullscreenStore.set("closed");
+					goto("/lyrics");
 				}}
 			>
 				<Icon
