@@ -879,7 +879,7 @@
 						pause={() => AudioPlayer.pause()}
 						nextBtn={() => {
 							if ($queue.length === 0) return;
-							SessionListService.next();
+							void AudioPlayer.skipNext("fullscreen");
 							// AudioPlayer.updateTime($durationStore);
 						}}
 						prevBtn={() => {

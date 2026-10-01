@@ -5,6 +5,7 @@
  * Pure helpers + the setting store (own localStorage key, no settings.ts change).
  */
 import { writable } from "svelte/store";
+import { mixQueryFor, type PlaybackContext } from "./playbackContext";
 
 export const CONTINUE_KEY = "continueAfterQueue";
 export const CONTINUATION_COUNT = 10;
@@ -72,6 +73,53 @@ export function relatedQuery(track: Row | null | undefined): string {
 	const artist =
 		track.artistInfo?.artist?.[0]?.text || (typeof track.artist === "string" ? track.artist : "") || "";
 	return "title=" + encodeURIComponent(title) + "&artist=" + encodeURIComponent(artist);
+}
+
+/** c40b: how many of the last queue rows the continuation asks the server to leave out. */
+export const CONTINUATION_EXCLUDE_MAX = 40;
+
+export interface ContinuationRequest {
+	/** GET this (same origin). */
+	url: string;
+	/** true: a fresh sample of the context's own mix, the context (and its label) is kept. */
+	keepContext: boolean;
+}
+
+/** The library ids (lids) of the last CONTINUATION_EXCLUDE_MAX queue rows, most recent first, unique. */
+export function continuationExclude(queue: ReadonlyArray<Row | undefined>, max = CONTINUATION_EXCLUDE_MAX): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (let i = queue.length - 1; i >= 0 && out.length < max; i--) {
+		const id = queue[i]?.videoId;
+		if (typeof id !== "string" || !LID_RE.test(id) || seen.has(id)) continue;
+		seen.add(id);
+		out.push(id);
+	}
+	return out;
+}
+
+/**
+ * c40b B6-10: what to ask when the local queue runs out.
+ *  - context decade / genre / year / crossover with a usable mix filter:
+ *    a fresh `local/mix` sample of the same filter (keepContext);
+ *  - otherwise (or with `forceRelated`, the mix gave nothing new):
+ *    `local/related` seeded by the last row.
+ * Both carry `personal=1` (the server leaves out the profile's twice-skipped
+ * refs and its plays of the last 3 h) and `exclude=` the queue's last lids.
+ * null when nothing can seed a continuation.
+ */
+export function nextContinuationRequest(
+	ctx: PlaybackContext | null | undefined,
+	queue: ReadonlyArray<Row | undefined>,
+	forceRelated = false,
+): ContinuationRequest | null {
+	const ex = continuationExclude(queue);
+	const tail = "personal=1" + (ex.length ? "&exclude=" + ex.join(",") : "");
+	const mix = forceRelated ? "" : mixQueryFor(ctx);
+	if (mix) return { url: `/api/v1/local/mix?${mix}&${tail}`, keepContext: true };
+	const qs = relatedQuery(queue[queue.length - 1]);
+	if (!qs) return null;
+	return { url: `/api/v1/local/related?${qs}&${tail}`, keepContext: false };
 }
 
 /** Stored value -> setting (default ON; only an explicit "false" turns it off). */

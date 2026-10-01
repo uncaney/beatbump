@@ -63,7 +63,7 @@ func TestRadioFromSeedTracksCapsPerAlbum(t *testing.T) {
 			"lid": fmt.Sprintf("%011x", i+1), "title": fmt.Sprintf("T%d", i), "artist": "Daft Punk", "albumArtist": "Daft Punk", "album": "Discovery", "track": float64(i), "durationSec": 200.0,
 		})
 	}
-	out := radioFromSeedTracks(tracks, 30, 2)
+	out := radioFromSeedTracks(tracks, 30, 2, nil)
 	if len(out) != 2 {
 		t.Fatalf("got %d items, want 2 (max per album)", len(out))
 	}

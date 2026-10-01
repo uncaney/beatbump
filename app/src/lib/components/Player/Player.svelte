@@ -141,7 +141,6 @@
 
 	import { buildDropdown } from "$lib/configs/dropdowns.config";
 	import type { Item } from "$lib/types";
-	import SessionListService from "$stores/list/sessionList";
 	import { SITE_ORIGIN_URL } from "$stores/url";
 	import PlayerButton from "./PlayerButton.svelte";
 	import { describeContext } from "$lib/stores/list/playbackContext";
@@ -249,7 +248,7 @@
 	}
 	function nextTrack() {
 		if (!$queue.length) return;
-		SessionListService.next();
+		void AudioPlayer.skipNext("keyboard");
 	}
 	function seekBy(delta: number) {
 		const duration = AudioPlayer.duration;
@@ -423,7 +422,7 @@
 				pause={() => AudioPlayer.pause()}
 				nextBtn={() => {
 					if ($queue.length === 0) return;
-					SessionListService.next(undefined, true);
+					void AudioPlayer.skipNext("player", true);
 					// AudioPlayer.updateTime($durationStore);
 				}}
 				prevBtn={prevTrack}
@@ -620,7 +619,7 @@
 						title="Morceau suivant"
 						on:click|capture|stopPropagation={() => {
 							if ($queue.length === 0) return;
-							SessionListService.next(undefined, true);
+							void AudioPlayer.skipNext("player", true);
 						}}
 					>
 						<Icon

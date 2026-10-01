@@ -174,6 +174,9 @@ func newServer() *echo.Echo {
 	me.DELETE("/playlists/:id", api.MeDeletePlaylistHandler)
 	me.DELETE("/playlists/:id/items", api.MeDeletePlaylistItemHandler)
 	me.POST("/history", api.MeRecordPlayHandler)
+	// c40b B6-10: early "next" presses (not plays); GET = counts per ref over ?days=30.
+	me.POST("/skips", api.MeRecordSkipHandler)
+	me.GET("/skips", api.MeSkipsHandler)
 	me.GET("/stats/recent", api.MeRecentHandler)
 	me.GET("/stats/top", api.MeTopHandler)
 	me.GET("/stats/summary", api.MeStatsSummaryHandler)

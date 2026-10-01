@@ -364,7 +364,22 @@ func LocalMixHandler(c echo.Context) error {
 		resp["reason"] = "too_small"
 		return c.JSON(http.StatusOK, resp)
 	}
-	resp["items"] = mixSample(filter, total, mixSize)
+	// c40b B6-10: exclude= / personal=1 (the queue continuation) leave refs
+	// out; the sample is drawn larger so the mix stays full.
+	ex := requestExclusions(c)
+	if len(ex) == 0 {
+		resp["items"] = mixSample(filter, total, mixSize)
+		return c.JSON(http.StatusOK, resp)
+	}
+	extra := len(ex)
+	if extra > mixSize {
+		extra = mixSize
+	}
+	items := itemsWithout(mixSample(filter, total, mixSize+extra), ex)
+	if len(items) > mixSize {
+		items = items[:mixSize]
+	}
+	resp["items"] = items
 	return c.JSON(http.StatusOK, resp)
 }
 

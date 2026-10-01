@@ -652,10 +652,16 @@ func MeMixHandler(c echo.Context) error {
 	} else {
 		c.Response().Header().Set("X-Ytm-Mix-Cache", "MISS")
 	}
+	// c40b B6-10: twice-skipped refs are neither seeds nor items; ex (all the
+	// profile exclusions, incl. what was played in the last 3 h: still a
+	// fine seed, not an item) keeps them out of the answer.
+	now := time.Now()
+	skipped := skippedRefs(pid, now)
+	ex := profileExclusions(pid, now)
 	seeds := []string{}
 	addSeed := func(refs []string) {
 		for _, r := range refs {
-			if isLid(r) {
+			if isLid(r) && !skipped[r] {
 				seeds = append(seeds, r)
 			}
 		}
@@ -714,14 +720,14 @@ func MeMixHandler(c echo.Context) error {
 		if h == nil {
 			continue
 		}
-		if !seen[lid] {
+		if !seen[lid] && !ex[lid] {
 			seen[lid] = true
 			items = append(items, localSongItem(h))
 		}
 		added := 0
 		for _, ph := range results[i].pool {
 			l := mstr(ph, "lid")
-			if l == "" || seen[l] {
+			if l == "" || seen[l] || ex[l] {
 				continue
 			}
 			seen[l] = true
@@ -732,7 +738,7 @@ func MeMixHandler(c echo.Context) error {
 		}
 	}
 	if len(items) == 0 {
-		items = randomLibrarySample(40) // cold start
+		items = itemsWithout(randomLibrarySample(40), ex) // cold start
 	}
 	if len(items) > 40 {
 		items = items[:40]

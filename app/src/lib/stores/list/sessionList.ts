@@ -28,7 +28,7 @@ import { derived, get } from "svelte/store";
 import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
 import type { ISessionListProvider } from "./types.list";
-import { applyMixOp, planInsert, planReorder, removalAutoplay, removeAt } from "./queueOps";
+import { applyMixOp, planInsert, planReorder, removalAutoplay, removeAt, spreadShuffle } from "./queueOps";
 import {
     continuedContext,
     describeContext,
@@ -36,7 +36,7 @@ import {
     type PlaybackContext,
     type PlaybackContextInput,
 } from "./playbackContext";
-import { continueAfterQueue, pickLocalContinuation, relatedQuery } from "./localContinuation";
+import { continueAfterQueue, nextContinuationRequest, pickLocalContinuation } from "./localContinuation";
 import { fetchNext } from "./utils.list";
 import { APIClient } from "$lib/api";
 import { SERVER_DOMAIN } from "../../../env";
@@ -672,35 +672,51 @@ export class ListService {
      * max 2 per album, through applyMixOp) and play the first one. Resolves
      * false (playback stops, as before) when the setting is off, offline, or
      * nothing new comes back.
+     * c40b B6-10: a queue from a decade / genre / year / crossover mix goes on
+     * with a fresh sample of the same mix (`local/mix`) and keeps its context
+     * label; related tracks are the fallback. Both requests leave out the
+     * queue's last rows, the profile's twice-skipped refs and its plays of
+     * the last 3 h (nextContinuationRequest).
      */
     private async continueLocalQueue(): Promise<boolean> {
         if (!get(continueAfterQueue)) return false;
         // I9: offline, the SW would answer from a stale `ytm-api` entry with
         // uncached library tracks that cannot play: the queue just ends.
         if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
-        const before = this._state.mix;
-        const qs = relatedQuery(before[before.length - 1]);
-        if (!qs) return false;
-        let candidates: unknown = [];
-        try {
-            const res = await fetch(`/api/v1/local/related?${qs}`, { credentials: "same-origin" });
-            if (!res.ok) return false;
-            const body = await res.json();
-            candidates = body?.items;
-        } catch {
-            return false;
-        }
-        const picked = pickLocalContinuation(this._state.mix, candidates).map(
-            (t) => ({ ...t, IS_LOCAL: true }) as unknown as Item,
-        );
-        if (!picked.length) return false;
+        const ctx = this._state.context ?? null;
+        const fetchPicked = async (forceRelated: boolean) => {
+            const req = nextContinuationRequest(ctx, this._state.mix, forceRelated);
+            if (!req) return null;
+            try {
+                const res = await fetch(req.url, { credentials: "same-origin" });
+                if (!res.ok) return { req, picked: [] as Item[] };
+                const body = await res.json();
+                const picked = pickLocalContinuation(this._state.mix, body?.items).map(
+                    (t) => ({ ...t, IS_LOCAL: true }) as unknown as Item,
+                );
+                return { req, picked };
+            } catch {
+                return { req, picked: [] as Item[] };
+            }
+        };
+        let got = await fetchPicked(false);
+        if (got && !got.picked.length && got.req.keepContext) got = await fetchPicked(true);
+        if (!got || !got.picked.length) return false;
+        const { req, picked } = got;
         await this.#sanitizeAndUpdate("APPLY", {
             mix: ["append", picked] satisfies MixListAppendOp,
         });
-        // I8: the appended rows are not part of the album / playlist the
-        // queue came from: the context becomes the extended queue.
-        this.setContext(continuedContext(this._state.context ?? null, this._state.mix));
-        notify("Suite : dans ta bibliothèque", "success");
+        if (req.keepContext && ctx) {
+            // Same mix: same label ("Décennie : Années 1990"), counter over the extended queue.
+            this.setContext(makeContext(ctx, this._state.mix));
+            const label = describeContext(this._state.context ?? null, this._state.mix, this._state.position)?.label ?? "";
+            notify(`Suite : ${label.split(" · ")[0] || "même mix"}`, "success");
+        } else {
+            // I8: the appended rows are not part of the album / playlist the
+            // queue came from: the context becomes the extended queue.
+            this.setContext(continuedContext(ctx, this._state.mix));
+            notify("Suite : dans ta bibliothèque", "success");
+        }
         let position = await this.updatePosition("next");
         if (position >= this._state.mix.length) position = this._state.position;
         const track = this._state.mix[position];
@@ -1322,14 +1338,20 @@ export class ListService {
                     .reduce((prev, cur) => (prev += cur), 0),
             );
         } else {
+            // c40b B6-10: no immediate repeat of the playing artist, nor of
+            // one artist twice in a row while another is left (spreadShuffle).
+            const current = this._$.value.mix[index];
             this._$.value.mix = [
                 ...this._$.value.mix.slice().slice(0, index),
-                this._$.value.mix[index],
-                ...seededShuffle(
-                    this._$.value.mix.slice().slice(index + 1),
-                    crypto
-                        .getRandomValues(new Uint8Array(8))
-                        .reduce((prev, cur) => (prev += cur), 0),
+                current,
+                ...spreadShuffle(
+                    seededShuffle(
+                        this._$.value.mix.slice().slice(index + 1),
+                        crypto
+                            .getRandomValues(new Uint8Array(8))
+                            .reduce((prev, cur) => (prev += cur), 0),
+                    ),
+                    current,
                 ),
             ];
         }

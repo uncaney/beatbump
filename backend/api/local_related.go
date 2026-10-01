@@ -21,6 +21,10 @@ import (
 // queue instead (localRelatedSeedHandler) - every track owned by that
 // album/artist, or every favourited song, extended with the regular radio
 // pool, capped at 30 tracks with at most 2 per album (radioFromSeedTracks).
+//
+// c40b B6-10: `exclude=<ref>,<ref>` (the queue the client just played) and
+// `personal=1` (the profile's twice-skipped refs, requestExclusions) are left
+// out of both answers. personal=1 is served uncached (perProfileRelated).
 func LocalRelatedHandler(c echo.Context) error {
 	if seed := strings.TrimSpace(c.QueryParam("seed")); seed != "" {
 		return localRelatedSeedHandler(c, seed)
@@ -40,7 +44,7 @@ func LocalRelatedHandler(c echo.Context) error {
 	if seed == nil {
 		return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "not_found", "items": []Item{}})
 	}
-	items := relatedByAlbum(seed, lid, radioPool(seed, lid), 20)
+	items := relatedByAlbum(seed, lid, withoutRefs(radioPool(seed, lid), requestExclusions(c)), 20)
 	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "seed": lid})
 }
 
@@ -164,7 +168,8 @@ func localRelatedSeedHandler(c echo.Context, seed string) error {
 	if len(core) == 0 {
 		return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "not_found", "items": []Item{}})
 	}
-	items := radioFromSeedTracks(core, 30, 2)
+	ex := requestExclusions(c)
+	items := radioFromSeedTracks(withoutRefs(core, ex), 30, 2, ex)
 	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "seed": seed, "name": name})
 }
 
@@ -193,11 +198,12 @@ func favoriteTracks(pid string) []map[string]interface{} {
 // deduped and capped at `maxPerAlbum` tracks per album (relatedByAlbum caps
 // at one card per album - too narrow for a from-scratch "Radio" queue, which
 // wants real tracks, not one per album).
-func radioFromSeedTracks(core []map[string]interface{}, limit, maxPerAlbum int) []Item {
+// Refs in `ex` (c40b) never enter the radio, the extension included.
+func radioFromSeedTracks(core []map[string]interface{}, limit, maxPerAlbum int, ex map[string]bool) []Item {
 	var ext []map[string]interface{}
 	if len(core) > 0 {
 		first := core[0]
-		ext = radioPool(first, mstr(first, "lid"))
+		ext = withoutRefs(radioPool(first, mstr(first, "lid")), ex)
 		rand.Shuffle(len(ext), func(i, j int) { ext[i], ext[j] = ext[j], ext[i] })
 	}
 	seenLid := map[string]bool{}

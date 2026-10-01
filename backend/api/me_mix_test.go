@@ -122,11 +122,13 @@ func getMix(t *testing.T, cookie string) (*httptest.ResponseRecorder, mixBody) {
 // played first, then its pool), exactly like the former sequential loop.
 func TestMixSeedsConcurrentOrderPreserved(t *testing.T) {
 	stub := newMixTestEnv(t, 15*time.Millisecond)
+	// c40b: played 4 h ago (a seed played in the last 3 h is no longer an item).
+	played := time.Now().Add(-4 * time.Hour)
 	for i := 0; i < 3; i++ {
-		db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: "aaaaaaaaaa1", Source: "local", PlayedAt: time.Now()})
+		db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: "aaaaaaaaaa1", Source: "local", PlayedAt: played})
 	}
 	for i := 0; i < 2; i++ {
-		db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: "bbbbbbbbbb2", Source: "local", PlayedAt: time.Now()})
+		db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: "bbbbbbbbbb2", Source: "local", PlayedAt: played})
 	}
 	rec, b := getMix(t, "")
 	if rec.Header().Get("X-Ytm-Mix-Cache") != "MISS" {
