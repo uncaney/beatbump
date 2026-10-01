@@ -990,6 +990,33 @@ export class ListService {
      * Returns false (nothing applied) when `mix` is not a permutation of the
      * current queue (a drag that straddled a queue change).
      */
+    /**
+     * I17: reorder the queue to follow `ids` (videoIds in their new order,
+     * e.g. a local playlist dragged while it plays), keeping the same row
+     * objects and the playing row. False (nothing changed) when the queue is
+     * not the same multiset of videoIds.
+     */
+    public reorderByVideoIds(ids: string[]): boolean {
+        const { mix } = this._$.value;
+        if (!Array.isArray(ids) || ids.length !== mix.length) return false;
+        const pool = new Map<string, Item[]>();
+        for (const row of mix) {
+            const id = row?.videoId;
+            if (!id) return false;
+            const rows = pool.get(id);
+            if (rows) rows.push(row);
+            else pool.set(id, [row]);
+        }
+        const next: Item[] = [];
+        for (const id of ids) {
+            const row = pool.get(id)?.shift();
+            if (!row) return false;
+            next.push(row);
+        }
+        if (next.every((row, i) => row === mix[i])) return true;
+        return this.reorder(next);
+    }
+
     public reorder(mix: Item[]): boolean {
         const { mix: current, position } = this._$.value;
         const plan = planReorder(current, position, mix);

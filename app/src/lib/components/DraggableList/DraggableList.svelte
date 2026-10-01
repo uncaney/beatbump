@@ -68,7 +68,10 @@
 			dragItems = items.slice();
 			dragRow = items[startIndex] ?? null;
 		}
-		dragCurrentTrack = (s.mix[s.position] as T) ?? null;
+		// I17: outside the queue (favorites, playlist page) the rows are not the
+		// queue: never move its cursor from a row index (the playlist page
+		// reorders the playing queue itself, by videoId).
+		dragCurrentTrack = queueDrag ? ((s.mix[s.position] as T) ?? null) : null;
 	};
 	/** Move one row (a single move, never a swap across several rows). */
 	const moveRow = (from: number, to: number) => {

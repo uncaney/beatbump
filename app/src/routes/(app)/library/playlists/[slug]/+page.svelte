@@ -177,6 +177,11 @@
 				drop(event, index);
 				await tick();
 				items = items; // the component moved the row in place: refresh the view
+				// I17: this playlist is the playing queue: keep the queue in the
+				// rows' order so a row click, the highlight and "next" match.
+				if ($isPagePlaying.has(playlistName)) {
+					list.reorderByVideoIds(items.map((it) => it.videoId));
+				}
 				await IDBService.sendMessage("update", "playlist", {
 					items: [...items],
 					id: playlistName,
@@ -198,13 +203,15 @@
 
 					await tick();
 
-					await getSrc($list.mix[detail.idx]?.videoId);
+					// I17: the clicked row's own track (by videoId), not mix[index].
+					await getSrc(items[detail.idx]?.videoId ?? $list.mix[detail.idx]?.videoId);
 				}}
 				on:setPageIsPlaying={async ({ detail }) => {
 					isPagePlaying.add(playlistName);
-					if ($list.mix.length) {
+					const id = typeof detail.index === "number" ? (items[detail.index]?.videoId ?? $list.mix[detail.index]?.videoId) : undefined;
+					if ($list.mix.length && id) {
 						await getSrc(
-							$list.mix[detail.index]?.videoId,
+							id,
 							undefined,
 							undefined,
 							true,
@@ -213,7 +220,7 @@
 				}}
 				on:click={async ({ detail }) => {
 					if (!$list.mix.length) return;
-					await getSrc($list.mix[detail.index]?.videoId);
+					await getSrc(items[detail.index]?.videoId ?? $list.mix[detail.index]?.videoId);
 				}}
 				slot="item"
 				{item}
