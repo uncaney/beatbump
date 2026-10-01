@@ -8,6 +8,8 @@ import {
 	deviceNameFromUA,
 	fitResumeState,
 	getDeviceId,
+	makeNowPlayingPusher,
+	type NowPlayingPusherDeps,
 	remoteResumeOffer,
 	restoreRemoteResume,
 	stripDeviceUrls,
@@ -248,6 +250,78 @@ describe("restoreRemoteResume", () => {
 		expect(await restoreRemoteResume(offer(), { ...d, storage: undefined })).toBe(false);
 		expect(d.calls).toEqual([]);
 		expect(d.notify).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("makeNowPlayingPusher", () => {
+	const mk = (over: Partial<NowPlayingPusherDeps> = {}) => {
+		const put = vi.fn(async () => 200);
+		let snap: ReturnType<NowPlayingPusherDeps["snapshot"]> = {
+			list: { mix: [track(0), track(1), { ...track(2), localUrl: "/aud/x" }], position: 0, currentMixType: "local" },
+			currentTime: 0,
+			duration: 200,
+		};
+		const push = makeNowPlayingPusher({
+			device: { deviceId: "me", deviceName: "Mac" },
+			snapshot: () => snap,
+			loggedIn: async () => true,
+			put,
+			...over,
+		});
+		return { push, put, set: (s: Partial<typeof snap>) => (snap = { ...snap, ...s }) };
+	};
+	it("two pushes without progress = one PUT", async () => {
+		const { push, put } = mk();
+		expect(await push()).toBe("sent");
+		expect(await push()).toBe("skipped");
+		expect(put).toHaveBeenCalledTimes(1);
+		const body = put.mock.calls[0][0];
+		expect(body.deviceId).toBe("me");
+		expect(body.position).toBe(0);
+		expect(JSON.stringify(body)).not.toMatch(/localUrl/);
+	});
+	it("pushes again only when the position moved more than 10 s", async () => {
+		const { push, put, set } = mk();
+		await push();
+		set({ currentTime: 10 });
+		expect(await push()).toBe("skipped");
+		set({ currentTime: 10.5 });
+		expect(await push()).toBe("sent");
+		expect(put).toHaveBeenCalledTimes(2);
+		expect(put.mock.calls[1][0].position).toBe(10.5);
+	});
+	it("pushes on a queue / cursor change at the same position", async () => {
+		const { push, put, set } = mk();
+		await push();
+		set({ list: { mix: [track(0), track(1)], position: 1, currentMixType: "local" } });
+		expect(await push()).toBe("sent");
+		expect(put).toHaveBeenCalledTimes(2);
+	});
+	it("retries at the next push after a failed PUT", async () => {
+		const put = vi.fn(async () => 0);
+		const { push } = mk({ put });
+		expect(await push()).toBe("skipped");
+		put.mockResolvedValue(200);
+		expect(await push()).toBe("sent");
+		expect(await push()).toBe("skipped");
+		expect(put).toHaveBeenCalledTimes(2);
+	});
+	it("sends nothing for an anonymous profile, offline or with an empty queue", async () => {
+		const anon = mk({ loggedIn: async () => false });
+		expect(await anon.push()).toBe("skipped");
+		expect(anon.put).not.toHaveBeenCalled();
+		const off = mk({ online: () => false });
+		expect(await off.push()).toBe("skipped");
+		expect(off.put).not.toHaveBeenCalled();
+		const empty = mk();
+		empty.set({ list: { mix: [], position: 0 } });
+		expect(await empty.push()).toBe("skipped");
+		expect(empty.put).not.toHaveBeenCalled();
+	});
+	it("uses keepalive for a hidden page", async () => {
+		const { push, put } = mk();
+		await push(true);
+		expect(put.mock.calls[0][1]).toBe(true);
 	});
 });
 

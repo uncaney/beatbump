@@ -17,6 +17,8 @@ import {
 	buildResumeState,
 	parseResumeState,
 	readResumeState,
+	resumeSignature,
+	shouldSaveResume,
 	writeResumeState,
 	type ResumeState,
 } from "./resumeState";
@@ -26,6 +28,8 @@ export const REMOTE_CONSUMED_KEY = "ytm-remote-consumed";
 export const NOWPLAYING_SYNC_MS = 15000;
 /** The server state must be this much newer than the local one to be offered. */
 export const REMOTE_NEWER_MS = 2 * 60 * 1000;
+/** J6: between two pushes of the same queue, the position must move more than this (s). */
+export const NOWPLAYING_MIN_TIME_DELTA = 10;
 /** Server limit on the payload (413 above); a long queue is cut to fit. */
 export const NOWPLAYING_MAX_BYTES = 64 * 1024;
 /** keepalive fetches (page hidden) are capped by browsers around 64 KB in total. */
@@ -174,6 +178,59 @@ export function remoteResumeOffer(
 	return state;
 }
 
+export interface NowPlayingBody {
+	deviceId: string;
+	deviceName: string;
+	position: number;
+	payload: ResumeState;
+}
+
+export interface NowPlayingPusherDeps {
+	device: { deviceId: string; deviceName: string };
+	/** The session list and player time, read at each push. */
+	snapshot: () => { list: Parameters<typeof buildResumeState>[0]; currentTime: number; duration: number };
+	loggedIn: () => Promise<boolean>;
+	/** The PUT; resolves the HTTP status (0 = network error). */
+	put: (body: NowPlayingBody, keepalive: boolean) => Promise<number>;
+	online?: () => boolean;
+}
+
+/**
+ * J6: the push used by startNowPlayingSync, as a pure factory. A PUT only
+ * goes out when the queue signature (rows, cursor, type, context:
+ * `resumeSignature`) or the position (more than NOWPLAYING_MIN_TIME_DELTA s)
+ * changed since the last PUT that succeeded; a paused or stalled player
+ * stops rewriting the same row every 15 s. A failed PUT keeps the last
+ * sent snapshot so the next tick retries. One push in flight at a time.
+ */
+export function makeNowPlayingPusher(deps: NowPlayingPusherDeps): (hidden?: boolean) => Promise<"sent" | "skipped"> {
+	let inflight = false;
+	let last: { sig: string; t: number } | null = null;
+	return async (hidden = false) => {
+		if (inflight) return "skipped";
+		if (deps.online && !deps.online()) return "skipped";
+		inflight = true;
+		try {
+			const { list, currentTime, duration } = deps.snapshot();
+			const sig = resumeSignature(list);
+			if (!shouldSaveResume(last, sig, currentTime, NOWPLAYING_MIN_TIME_DELTA)) return "skipped";
+			if (!(await deps.loggedIn())) return "skipped";
+			const state = fitResumeState(buildResumeState(list, currentTime, duration));
+			if (!state) return "skipped";
+			const body: NowPlayingBody = { ...deps.device, position: state.currentTime, payload: state };
+			const keepalive = hidden && JSON.stringify(body).length <= KEEPALIVE_MAX_BYTES;
+			const status = await deps.put(body, keepalive);
+			if (status < 200 || status >= 300) return "skipped";
+			last = { sig, t: state.currentTime };
+			return "sent";
+		} catch {
+			return "skipped"; // best-effort, nothing queued
+		} finally {
+			inflight = false;
+		}
+	};
+}
+
 /** "m:ss" for the card. */
 export function clockLabel(s: number): string {
 	const t = Math.max(0, Math.floor(isFinite(s) ? s : 0));
@@ -231,26 +288,19 @@ export function startNowPlayingSync(): () => void {
 			}
 			return named;
 		};
-		const { deviceId, deviceName } = localDevice();
-		let inflight = false;
+		const pusher = makeNowPlayingPusher({
+			device: localDevice(),
+			snapshot: () => ({
+				list: SessionListService.value,
+				currentTime: AudioPlayer.currentTime,
+				duration: AudioPlayer.duration,
+			}),
+			loggedIn,
+			put: (body, keepalive) => me.putNowPlaying(body, keepalive),
+			online: () => typeof navigator === "undefined" || navigator.onLine !== false,
+		});
 		const push = async (hidden = false) => {
-			if (stopped || inflight) return;
-			if (typeof navigator !== "undefined" && navigator.onLine === false) return;
-			inflight = true;
-			try {
-				if (!(await loggedIn())) return;
-				const state = fitResumeState(
-					buildResumeState(SessionListService.value, AudioPlayer.currentTime, AudioPlayer.duration),
-				);
-				if (!state) return;
-				const body = { deviceId, deviceName, position: state.currentTime, payload: state };
-				const keepalive = hidden && JSON.stringify(body).length <= KEEPALIVE_MAX_BYTES;
-				await me.putNowPlaying(body, keepalive);
-			} catch {
-				/* best-effort, nothing queued */
-			} finally {
-				inflight = false;
-			}
+			if (!stopped) await pusher(hidden);
 		};
 		let playing = false;
 		let first = true;
