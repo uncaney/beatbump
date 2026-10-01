@@ -683,7 +683,9 @@ export class ListService {
         if (!qs) return false;
         let candidates: unknown = [];
         try {
-            const res = await fetch(`/api/v1/local/related?${qs}`, { credentials: "same-origin" });
+            // c40b B6-10: personal=1 = the server leaves out this profile's
+            // twice-skipped refs (served uncached, see api/rescache.go).
+            const res = await fetch(`/api/v1/local/related?${qs}&personal=1`, { credentials: "same-origin" });
             if (!res.ok) return false;
             const body = await res.json();
             candidates = body?.items;

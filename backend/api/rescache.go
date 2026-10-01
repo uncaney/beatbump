@@ -217,10 +217,11 @@ func cacheResponseUnlessWith(rc *responseCache, ttl time.Duration, skip func(ech
 }
 
 // perProfileRelated reports whether a local/related request depends on the
-// caller's profile (favorites seed) and so must never be served from the
-// shared cache.
+// caller's profile (favorites seed, or c40b personal=1: the profile's skip /
+// recent-play exclusions) and so must never be served from the shared cache.
+// exclude= needs no bypass: it is part of the query, hence of the cache key.
 func perProfileRelated(c echo.Context) bool {
-	return c.QueryParam("seed") == "favorites"
+	return c.QueryParam("seed") == "favorites" || personalRequest(c)
 }
 
 // LocalRelatedCached is the registered handler for GET /api/v1/local/related.
