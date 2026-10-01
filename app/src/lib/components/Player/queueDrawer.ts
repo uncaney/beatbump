@@ -30,3 +30,23 @@ export function queueDrawerInert(s: QueueDrawerState): boolean {
 	if (s.mobile) return !(s.sheetOpen || s.sliding);
 	return !s.panelOpen;
 }
+
+/**
+ * L9-9: does this engine implement `inert`? (Safari < 15.5, Chrome < 102,
+ * Firefox < 112 and old Android WebViews do not.) `proto` is injectable for
+ * the tests; without a DOM (SSR) the answer is true, so nothing changes there.
+ */
+export function supportsInert(proto: object | undefined = typeof HTMLElement === "undefined" ? undefined : HTMLElement.prototype): boolean {
+	if (!proto) return true;
+	return "inert" in proto;
+}
+
+/**
+ * L9-9: without `inert`, aria-hidden alone leaves the closed drawer's rows
+ * in the Tab order: hide the body (visibility: hidden drops focusability).
+ * Only while it is inert, i.e. closed: an open (or dragged) drawer stays
+ * visible, hoverable and clickable.
+ */
+export function queueDrawerHiddenFallback(inert: boolean, hasInert: boolean): boolean {
+	return inert && !hasInert;
+}

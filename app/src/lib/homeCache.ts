@@ -149,3 +149,48 @@ export function clearHomeCache(storage: StorageLike | undefined): void {
 export function emptyHomeCacheRows(): HomeCacheRows {
 	return emptyRows();
 }
+
+/**
+ * L9-8: the six row loads of /home each finished with a full snapshot write
+ * (50-100 KB of JSON.stringify + setItem on the main thread, five of them
+ * overwritten at once). The component now `schedule()`s the write; it runs
+ * once, `delayMs` after the last request, or right away on `flush()` (page
+ * hidden, component destroyed). Pure (timers injectable) for the tests.
+ */
+export const HOME_CACHE_PERSIST_DELAY_MS = 600;
+
+export interface PersistScheduler {
+	/** (Re)arm the trailing write. */
+	schedule(): void;
+	/** Run a pending write now; no-op when none is pending. */
+	flush(): void;
+	/** Drop a pending write. */
+	cancel(): void;
+}
+
+export function createPersistScheduler(
+	write: () => void,
+	delayMs: number = HOME_CACHE_PERSIST_DELAY_MS,
+	timers: { set: typeof setTimeout; clear: typeof clearTimeout } = { set: setTimeout, clear: clearTimeout },
+): PersistScheduler {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const run = () => {
+		timer = undefined;
+		write();
+	};
+	return {
+		schedule() {
+			if (timer !== undefined) timers.clear(timer);
+			timer = timers.set(run, delayMs);
+		},
+		flush() {
+			if (timer === undefined) return;
+			timers.clear(timer);
+			run();
+		},
+		cancel() {
+			if (timer !== undefined) timers.clear(timer);
+			timer = undefined;
+		},
+	};
+}

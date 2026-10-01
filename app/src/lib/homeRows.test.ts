@@ -216,6 +216,17 @@ describe("ST1 week card", () => {
 		expect(shouldShowWeekCard(monday, null)).toBe(true);
 		expect(shouldShowWeekCard(monday, undefined)).toBe(true);
 	});
+	it("hides the card when the week's listening rounds to 0 minutes (L8-19)", () => {
+		const monday = new Date(2026, 0, 5);
+		expect(shouldShowWeekCard(monday, null, 0)).toBe(false);
+		expect(shouldShowWeekCard(monday, null, 0.4)).toBe(false);
+		expect(shouldShowWeekCard(monday, null, NaN)).toBe(false);
+		expect(shouldShowWeekCard(monday, null, 0.6)).toBe(true);
+		expect(shouldShowWeekCard(monday, null, 125)).toBe(true);
+		// minutes never override the weekday or the dismissal
+		expect(shouldShowWeekCard(new Date(2026, 0, 6), null, 125)).toBe(false);
+		expect(shouldShowWeekCard(monday, isoWeekKey(monday), 125)).toBe(false);
+	});
 });
 
 describe("Redécouvrir row (c29b D3)", () => {

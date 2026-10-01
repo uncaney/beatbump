@@ -21,12 +21,14 @@ type neverPlayedStub struct {
 	albums     []map[string]interface{} // already in dateAdded:desc order
 	tracks     []map[string]interface{}
 	trackCalls int
+	albumCalls int
 }
 
 func (s *neverPlayedStub) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/indexes/albums/search":
+			s.albumCalls++
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
 			off := 0

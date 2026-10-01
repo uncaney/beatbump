@@ -29,7 +29,7 @@
 		WEEK_CARD_DISMISS_KEY,
 	} from "$lib/homeRows";
 	import { clickHandler as carouselClick } from "$lib/components/Carousel/functions";
-	import { peekHomeCache, clearHomeCache, writeHomeCache } from "$lib/homeCache";
+	import { peekHomeCache, clearHomeCache, createPersistScheduler, writeHomeCache } from "$lib/homeCache";
 	import { getMix, getRecent, getStatsSummary, getTopBy, isAnonymousProfile, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
 	import { settings } from "$lib/stores";
 	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
@@ -80,6 +80,7 @@
 			if (!shouldShowWeekCard(new Date(), dismissed)) return;
 			const [summary, top] = await Promise.all([getStatsSummary(7), getTopBy("artists", 7, 1)]);
 			if (!summary || !(summary.plays > 0)) return;
+			if (!shouldShowWeekCard(new Date(), dismissed, summary.minutes)) return;
 			weekCard = {
 				minutes: Math.round(summary.minutes),
 				topArtist: top?.rows?.[0]?.title ?? "",
@@ -139,6 +140,10 @@
 			/* best-effort: offline whoami, private mode, quota, ... */
 		}
 	}
+
+	// L9-8: every row load asks for a snapshot; one debounced write serves
+	// them all (flushed when the page is hidden or the home unmounts).
+	const homeCachePersist = createPersistScheduler(() => void persistHomeCache());
 
 	/**
 	 * AP1 / AP4: paint the 6 rows instantly from the cache (any profile's: the
@@ -212,6 +217,7 @@
 
 	/** L13/L14-style: a login/logout (this tab or another) invalidates the cache and this profile's rows. */
 	function onProfileChanged() {
+		homeCachePersist.cancel(); // never write the previous profile's rows after the purge
 		clearHomeCache(storageOrUndefined());
 		resume = [];
 		forYou = [];
@@ -322,7 +328,7 @@
 		}
 		resume = buildResumeRow(lastTrack, recent, 10).map(sanitizeCard).map(stripTrailingSeparator);
 		resumeSource = resume.length > 0 ? "live" : "empty";
-		void persistHomeCache();
+		homeCachePersist.schedule();
 	}
 
 	async function loadForYou() {
@@ -335,7 +341,7 @@
 			forYou = [];
 		}
 		forYouSource = forYou.length > 0 ? "live" : "empty";
-		void persistHomeCache();
+		homeCachePersist.schedule();
 	}
 
 	async function loadAcquired() {
@@ -348,7 +354,7 @@
 			acquired = [];
 		}
 		acquiredSource = acquired.length > 0 ? "live" : "empty";
-		void persistHomeCache();
+		homeCachePersist.schedule();
 	}
 
 	const NEVER_PLAYED_MAX = 10;
@@ -370,7 +376,7 @@
 			neverPlayed = [];
 		}
 		neverPlayedSource = neverPlayed.length > 0 ? "live" : "empty";
-		void persistHomeCache();
+		homeCachePersist.schedule();
 	}
 
 	const REDISCOVER_MAX = 12;
@@ -392,7 +398,7 @@
 			rediscover = [];
 		}
 		rediscoverSource = rediscover.length > 0 ? "live" : "empty";
-		void persistHomeCache();
+		homeCachePersist.schedule();
 	}
 
 	const NEW_IN_LIBRARY_MAX = 12;
@@ -409,7 +415,7 @@
 			newInLibrary = [];
 		}
 		newInLibrarySource = newInLibrary.length > 0 ? "live" : "empty";
-		void persistHomeCache();
+		homeCachePersist.schedule();
 	}
 
 	// ---- c30a F1 + F2: one card once, at most 4 personal rows above YouTube ----
@@ -530,8 +536,14 @@
 			const channel = new BroadcastChannel(PROFILE_CHANNEL_NAME);
 			unwireProfile = wireProfileChannel(channel, onProfileChanged);
 		}
+		const onHidden = () => {
+			if (document.visibilityState === "hidden") homeCachePersist.flush();
+		};
+		document.addEventListener("visibilitychange", onHidden);
 		return () => {
 			unwireProfile?.();
+			document.removeEventListener("visibilitychange", onHidden);
+			homeCachePersist.flush();
 		};
 	});
 </script>
@@ -816,9 +828,10 @@
 	.week-card-stats {
 		margin: 0;
 		opacity: 0.85;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		/* L8-19: the top artist is never cut with an ellipsis: the line
+		   wraps (two lines on a phone), a very long name breaks anywhere. */
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
 	.week-card-link {
 		flex: 0 0 auto;

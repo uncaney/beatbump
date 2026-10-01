@@ -66,6 +66,16 @@ func cacheControlMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 func newServer() *echo.Echo {
 	e := echo.New()
 	api.SetVersion(version)
+	// L9-4: c.RealIP() (the client-log rate limit key) only believes
+	// X-Forwarded-For when the direct peer is a proxy of ours (loopback or a
+	// private docker network, i.e. Traefik coolify-proxy); a client reaching
+	// the backend directly is keyed on its own address whatever it sends.
+	// X-Real-IP is ignored.
+	e.IPExtractor = echo.ExtractIPFromXFFHeader(
+		echo.TrustLoopback(true),
+		echo.TrustLinkLocal(false),
+		echo.TrustPrivateNet(true),
+	)
 
 	e.Use(middleware.CORS())
 	e.Use(middleware.Logger())

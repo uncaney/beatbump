@@ -28,6 +28,14 @@
 	let busyKey = "";
 	/** Key of the last card whose mix came back too small ("too_small"). */
 	let tooSmallKey = "";
+	let tooSmallTimer: ReturnType<typeof setTimeout> | undefined;
+	/**
+	 * L9-7: artist cards whose radio (local/related?seed=artist:) came back
+	 * empty or failed: they read "Radio indisponible" and are disabled (not
+	 * "Pas assez d'albums", which is about decade / genre mixes) until the
+	 * network comes back (window "online") or the page is reopened.
+	 */
+	let unavailable = new Set<string>();
 
 	$: decades = cards.filter((c) => c.kind === "decade");
 	$: genres = cards.filter((c) => c.kind === "genre");
@@ -51,6 +59,25 @@
 		loading = false;
 	});
 
+	onMount(() => {
+		const onOnline = () => (unavailable = new Set());
+		window.addEventListener("online", onOnline);
+		return () => {
+			window.removeEventListener("online", onOnline);
+			clearTimeout(tooSmallTimer);
+		};
+	});
+
+	function markUnavailable(card: MixCard) {
+		if (card.kind === "artist") {
+			unavailable = new Set(unavailable).add(card.key);
+			return;
+		}
+		tooSmallKey = card.key;
+		clearTimeout(tooSmallTimer);
+		tooSmallTimer = setTimeout(() => (tooSmallKey = ""), 4000);
+	}
+
 	/** The tracks a card plays / keeps: [] when the slice is too small. */
 	async function loadCard(card: MixCard): Promise<any[]> {
 		const res = await APIClient.fetch(mixCardUrl(card));
@@ -66,7 +93,7 @@
 		try {
 			const items = await loadCard(card);
 			if (!items.length) {
-				tooSmallKey = card.key;
+				markUnavailable(card);
 				return;
 			}
 			await playTracks(items, {
@@ -74,6 +101,7 @@
 			});
 		} catch (err) {
 			console.error("mix play failed", err);
+			if (card.kind === "artist") markUnavailable(card);
 		} finally {
 			busyKey = "";
 		}
@@ -130,12 +158,19 @@
 									class="btn-reset mix-card"
 									data-testid="mix-card"
 									data-mix={card.key}
-									disabled={busyKey === card.key}
+									data-unavailable={unavailable.has(card.key) || undefined}
+									disabled={busyKey === card.key || unavailable.has(card.key)}
 									aria-label={card.kind === "artist" ? `Lancer la radio ${card.title}` : `Lire le mix ${card.title}`}
 									on:click={() => playMix(card)}
 								>
 									<span class="mix-title">{card.title}</span>
-									<span class="mix-sub">{tooSmallKey === card.key ? "Pas assez d'albums" : card.subtitle}</span>
+									<span class="mix-sub"
+										>{unavailable.has(card.key)
+											? "Radio indisponible"
+											: tooSmallKey === card.key
+												? "Pas assez d'albums"
+												: card.subtitle}</span
+									>
 								</button>
 								<div class="mix-keep">
 									<KeepOfflineButton

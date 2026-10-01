@@ -11,24 +11,26 @@ package api
 import (
 	"beatbump-server/backend/_youtube"
 	"beatbump-server/backend/_youtube/api"
+	"container/list"
 	"encoding/json"
 	"fmt"
 	"html"
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
 const (
-	ogSiteName      = "music.ekaii.fr"
-	ogFallbackDesc  = "Écoute sur music.ekaii.fr"
-	ogCacheTTL      = 10 * time.Minute
-	ogUAClassParam  = "_ogua" // cache-key component: the UA class, never the full UA
-	ogUAClassRobots = "robot"
+	ogSiteName     = "music.ekaii.fr"
+	ogFallbackDesc = "Écoute sur music.ekaii.fr"
+	ogCacheTTL     = 10 * time.Minute
 )
 
 // ogResolveTimeout bounds every metadata lookup (Meili or YouTube).
@@ -108,9 +110,17 @@ func ogResolveTrack(id string) *ogMeta {
 	return &ogMeta{Title: pr.VideoDetails.Title, Description: ogByline(pr.VideoDetails.Author, ""), Image: img}
 }
 
+// localAlbumIDRe is the shape of a local album browseId: the canonical
+// lb-<12 hex> id, optionally followed by "." + base64url hint
+// (localAlbumRef). L9-5: anything else never reaches Meili's document path.
+var localAlbumIDRe = regexp.MustCompile(`^lb-[0-9a-f]{12}(\.[A-Za-z0-9_-]+)?$`)
+
 func ogResolveAlbum(id string) *ogMeta {
 	var page map[string]interface{}
 	if isLocalAlbum(id) {
+		if !localAlbumIDRe.MatchString(id) {
+			return nil
+		}
 		p, ok := buildLocalAlbum(id)
 		if !ok {
 			return nil
@@ -189,14 +199,50 @@ func ogByline(artist, extra string) string {
 	return strings.Join(parts, " · ")
 }
 
-// ogResolve runs fn under ogResolveTimeout; a panic, a timeout or an unknown id
-// yields nil (the caller then renders the plain fallback card).
+// L9-1: at most ogMaxLookups metadata lookups run at once (a robot UA is
+// only a string: anyone can ask for cards of random ids). A lookup that
+// finds the semaphore full is not attempted (fallback card, not cached).
+// The resolvers take no context (InnerTube player has a 90 s budget), so a
+// lookup past ogResolveTimeout is abandoned: it gives its slot back at once
+// and runs to completion in the background, counted in ogAbandoned; while
+// ogMaxAbandoned of those are still running, no new lookup starts either,
+// so the upstream calls in flight stay bounded (4 + 8).
+const (
+	ogMaxLookups   = 4
+	ogMaxAbandoned = 8
+)
+
+var (
+	ogSem       = make(chan struct{}, ogMaxLookups)
+	ogAbandoned atomic.Int32
+)
+
+// ogResolve runs fn under ogResolveTimeout; a panic, a timeout, a full
+// semaphore or an unknown id yields nil (the caller then renders the plain
+// fallback card).
 func ogResolve(fn func(string) *ogMeta, id string) *ogMeta {
+	if ogAbandoned.Load() >= ogMaxAbandoned {
+		return nil
+	}
+	select {
+	case ogSem <- struct{}{}:
+	default:
+		return nil
+	}
+	var once sync.Once
+	release := func() { once.Do(func() { <-ogSem }) }
+	// state: 0 running, 1 finished in time, 2 abandoned (the side that loses
+	// the compare-and-swap knows the other one already moved on).
+	var state atomic.Int32
 	ch := make(chan *ogMeta, 1)
 	go func() {
 		defer func() {
 			if recover() != nil {
 				ch <- nil
+			}
+			release()
+			if !state.CompareAndSwap(0, 1) {
+				ogAbandoned.Add(-1)
 			}
 		}()
 		ch <- fn(id)
@@ -205,7 +251,18 @@ func ogResolve(fn func(string) *ogMeta, id string) *ogMeta {
 	case m := <-ch:
 		return m
 	case <-time.After(ogResolveTimeout):
-		return nil
+		// Count first, then mark: the goroutine decrements only once marked.
+		ogAbandoned.Add(1)
+		if !state.CompareAndSwap(0, 2) {
+			ogAbandoned.Add(-1)
+		}
+		release()
+		select {
+		case m := <-ch: // finished in the meantime
+			return m
+		default:
+			return nil
+		}
 	}
 }
 
@@ -223,7 +280,7 @@ func ogAbs(origin, u string) string {
 	return origin + u
 }
 
-// ogCanonical is the SPA URL of the shared item (canonical query, no _ogua).
+// ogCanonical is the SPA URL of the shared item (canonical query).
 func ogCanonical(kind, id, playlistID string) string {
 	switch kind {
 	case "track":
@@ -268,8 +325,11 @@ func ogPage(m ogMeta, kind, pageURL string) string {
 	return b.String()
 }
 
-// ogPreviewHandler renders the card for the request's preview path.
-func ogPreviewHandler(c echo.Context) error {
+// ogCard renders the card for the request's preview path. fallback is true
+// when no metadata was found (unknown id, upstream error or timeout, full
+// semaphore): that card is served but never cached (L9-1), so a hiccup does
+// not pin "music.ekaii.fr" on a shared link for ogCacheTTL.
+func ogCard(c echo.Context) (body []byte, fallback bool) {
 	req := c.Request()
 	kind, playlistID := ogKind(req.URL.Path)
 	q := req.URL.Query()
@@ -290,6 +350,7 @@ func ogPreviewHandler(c echo.Context) error {
 		m = ogResolve(ogResolvePlaylistFn, playlistID)
 	}
 	if m == nil {
+		fallback = true
 		m = &ogMeta{Title: ogSiteName, Description: ogFallbackDesc}
 	}
 	origin := c.Scheme() + "://" + req.Host
@@ -298,18 +359,125 @@ func ogPreviewHandler(c echo.Context) error {
 	}
 	m.Image = ogAbs(origin, m.Image)
 	pageURL := origin + ogCanonical(kind, id, playlistID)
-	c.Response().Header().Set("Cache-Control", "public, max-age=600")
-	c.Response().Header().Set("Vary", "User-Agent")
-	return c.HTMLBlob(http.StatusOK, []byte(ogPage(*m, kind, pageURL)))
+	return []byte(ogPage(*m, kind, pageURL)), fallback
+}
+
+// L9-1: the robot cards live in their own bounded cache, never in the API
+// response LRU (apiResponseCache): random ids from a fake robot UA could
+// otherwise evict every hot home / search / next answer in 500 requests.
+const ogCacheMaxEntries = 200
+
+var ogCardCache = newOGCache(ogCacheMaxEntries)
+
+type ogCacheEntry struct {
+	key     string
+	body    []byte
+	expires time.Time
+	elem    *list.Element
+}
+
+type ogCache struct {
+	mu      sync.Mutex
+	entries map[string]*ogCacheEntry
+	lru     *list.List // front = most recently used
+	max     int
+}
+
+func newOGCache(max int) *ogCache {
+	return &ogCache{entries: map[string]*ogCacheEntry{}, lru: list.New(), max: max}
+}
+
+func (oc *ogCache) get(key string) ([]byte, bool) {
+	oc.mu.Lock()
+	defer oc.mu.Unlock()
+	e, ok := oc.entries[key]
+	if !ok {
+		return nil, false
+	}
+	if time.Now().After(e.expires) {
+		oc.lru.Remove(e.elem)
+		delete(oc.entries, key)
+		return nil, false
+	}
+	oc.lru.MoveToFront(e.elem)
+	return e.body, true
+}
+
+func (oc *ogCache) set(key string, body []byte, ttl time.Duration) {
+	oc.mu.Lock()
+	defer oc.mu.Unlock()
+	if e, ok := oc.entries[key]; ok {
+		e.body, e.expires = body, time.Now().Add(ttl)
+		oc.lru.MoveToFront(e.elem)
+		return
+	}
+	e := &ogCacheEntry{key: key, body: body, expires: time.Now().Add(ttl)}
+	e.elem = oc.lru.PushFront(e)
+	oc.entries[key] = e
+	for oc.lru.Len() > oc.max {
+		last := oc.lru.Back()
+		oc.lru.Remove(last)
+		delete(oc.entries, last.Value.(*ogCacheEntry).key)
+	}
+}
+
+func (oc *ogCache) len() int {
+	oc.mu.Lock()
+	defer oc.mu.Unlock()
+	return len(oc.entries)
+}
+
+// ogCacheKey: origin (the card embeds absolute URLs) + path + sorted query.
+func ogCacheKey(c echo.Context) string {
+	req := c.Request()
+	q := req.URL.Query()
+	keys := make([]string, 0, len(q))
+	for k := range q {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(c.Scheme() + "://" + req.Host + req.URL.Path)
+	for _, k := range keys {
+		vals := append([]string(nil), q[k]...)
+		sort.Strings(vals)
+		b.WriteString("\x00" + k + "=" + strings.Join(vals, ","))
+	}
+	return b.String()
+}
+
+// ogServe answers a robot GET or HEAD from the card cache (HEAD included,
+// L9-1: a HEAD no longer re-runs the resolver; net/http drops the body).
+func ogServe(c echo.Context) error {
+	key := ogCacheKey(c)
+	h := c.Response().Header()
+	// L9-6: a stored card answers the same Cache-Control / Vary as the MISS
+	// that produced it (only real cards are stored).
+	h.Set("Vary", "User-Agent")
+	if body, ok := ogCardCache.get(key); ok {
+		h.Set("X-Ytm-Cache", "HIT")
+		h.Set("Cache-Control", "public, max-age=600")
+		return c.HTMLBlob(http.StatusOK, body)
+	}
+	body, fallback := ogCard(c)
+	if !fallback && responseCacheEnabled() {
+		ogCardCache.set(key, body, ogCacheTTL)
+	}
+	h.Set("X-Ytm-Cache", "MISS")
+	if fallback {
+		h.Set("Cache-Control", "no-cache")
+	} else {
+		h.Set("Cache-Control", "public, max-age=600")
+	}
+	return c.HTMLBlob(http.StatusOK, body)
 }
 
 // OGPreview is the middleware registered before the SPA shell handlers: a
 // GET/HEAD of a preview path by a link-preview robot gets the Open Graph card
-// (response-cached ogCacheTTL, keyed by path + query + UA class); everything
-// else falls through untouched.
+// (ogCardCache, ogCacheTTL, keyed by origin + path + query; the fallback card
+// is never stored); everything else falls through untouched.
 func OGPreview() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		cached := CacheResponse(ogCacheTTL, ogPreviewHandler)
 		return func(c echo.Context) error {
 			req := c.Request()
 			if req.Method != http.MethodGet && req.Method != http.MethodHead {
@@ -318,14 +486,7 @@ func OGPreview() echo.MiddlewareFunc {
 			if kind, _ := ogKind(req.URL.Path); kind == "" || !IsPreviewRobot(req.UserAgent()) {
 				return next(c)
 			}
-			if req.Method == http.MethodHead {
-				return ogPreviewHandler(c)
-			}
-			// The cache key is path + sorted query: add the UA class to it.
-			q := req.URL.Query()
-			q.Set(ogUAClassParam, ogUAClassRobots)
-			req.URL.RawQuery = q.Encode()
-			return cached(c)
+			return ogServe(c)
 		}
 	}
 }
