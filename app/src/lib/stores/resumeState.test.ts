@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
 	RESUME_KEY,
 	RESUME_MAX_ITEMS,
+	REMEMBER_MIGRATED_KEY,
 	buildResumeState,
+	migrateRememberLastTrack,
 	parseResumeState,
 	readResumeState,
 	resumeSeekTime,
@@ -120,5 +122,29 @@ describe("read / write", () => {
 		};
 		expect(readResumeState(bad)).toBeNull();
 		expect(writeResumeState(bad, buildResumeState({ mix: [track(1)], position: 0 }, 0, 0))).toBe(false);
+	});
+});
+
+describe("migrateRememberLastTrack (I1)", () => {
+	it("turns a stored false into true once, then keeps later choices", () => {
+		const s = memory();
+		const settings = { playback: { "Remember Last Track": false } as Record<string, unknown> };
+		expect(migrateRememberLastTrack(settings, s)).toBe(true);
+		expect(settings.playback["Remember Last Track"]).toBe(true);
+		expect(s.getItem(REMEMBER_MIGRATED_KEY)).toBe("1");
+		settings.playback["Remember Last Track"] = false; // explicit choice after migration
+		expect(migrateRememberLastTrack(settings, s)).toBe(false);
+		expect(settings.playback["Remember Last Track"]).toBe(false);
+	});
+	it("sets the flag without change when already true (fresh install)", () => {
+		const s = memory();
+		const settings = { playback: { "Remember Last Track": true } as Record<string, unknown> };
+		expect(migrateRememberLastTrack(settings, s)).toBe(false);
+		expect(s.getItem(REMEMBER_MIGRATED_KEY)).toBe("1");
+	});
+	it("is a no-op without storage", () => {
+		const settings = { playback: { "Remember Last Track": false } as Record<string, unknown> };
+		expect(migrateRememberLastTrack(settings, undefined)).toBe(false);
+		expect(settings.playback["Remember Last Track"]).toBe(false);
 	});
 });

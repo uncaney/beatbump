@@ -195,6 +195,34 @@ export function writeResumeState(storage: StorageLike | undefined, state: Resume
 	}
 }
 
+/**
+ * I1: "Remember Last Track" used to default to `false` with its switch
+ * hidden, so a stored `false` was never a choice. Once per device (flag
+ * REMEMBER_MIGRATED_KEY), a stored `false` becomes `true`; after the flag
+ * is set, any later explicit choice is kept. Returns true when `settings`
+ * was changed (the caller persists it).
+ */
+export const REMEMBER_MIGRATED_KEY = "ytm-remember-migrated";
+export function migrateRememberLastTrack(
+	settings: { playback?: Record<string, unknown> } | null | undefined,
+	storage: StorageLike | undefined,
+): boolean {
+	if (!storage) return false;
+	try {
+		if (storage.getItem(REMEMBER_MIGRATED_KEY) === "1") return false;
+		let changed = false;
+		const pb = settings?.playback;
+		if (pb && typeof pb === "object" && pb["Remember Last Track"] !== true) {
+			pb["Remember Last Track"] = true;
+			changed = true;
+		}
+		storage.setItem(REMEMBER_MIGRATED_KEY, "1");
+		return changed;
+	} catch {
+		return false;
+	}
+}
+
 /* ---------------------------- runtime (browser) --------------------------- */
 
 const browserStorage = (): StorageLike | undefined => {

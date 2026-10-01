@@ -3,6 +3,7 @@ import type { NestedKeyOf } from "$lib/types/utilities";
 import { WritableStore } from "$lib/utils";
 import { writable, type Writable } from "svelte/store";
 import { ENV_DONATION_URL } from "../../env";
+import { migrateRememberLastTrack } from "./resumeState";
 
 export type Theme = "Dark" | "Dim" | "Midnight" | "YTM";
 export type StreamType = "HTTP" | "HLS";
@@ -164,6 +165,14 @@ function _settings() {
 		if (!stored.offline || typeof stored.offline !== "object") stored.offline = { ...DEFAULT_OFFLINE_SETTINGS };
 		else if (typeof stored.offline.autoCache === "undefined") stored.offline.autoCache = DEFAULT_OFFLINE_SETTINGS.autoCache;
 		list = stored as UserSettings;
+	}
+	// I1: one-time backfill of the new "Remember Last Track" default.
+	if (migrateRememberLastTrack(list, localStorage)) {
+		try {
+			localStorage.setItem("settings", JSON.stringify(list));
+		} catch {
+			/* quota / private mode */
+		}
 	}
 
 	const store = new WritableStore<UserSettings>(list);
