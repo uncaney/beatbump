@@ -284,6 +284,10 @@
 		box-sizing: border-box;
 		flex: 0 0 auto;
 		min-height: 2.75rem;
+		/* Phones: 2.75rem is 33px with the 12px root size (audit v5 TOP 5). */
+		@media screen and (max-width: 719px) {
+			min-height: max(2.75rem, 44px);
+		}
 		padding: 0.5em 1em;
 		border-radius: 999rem;
 		background: rgba(255, 255, 255, 0.1);

@@ -359,7 +359,7 @@
 			}
 
 			// One flex-wrap row for Play Radio / Shuffle / Follow, all 40px high
-			// (36px on phones) and starting at the same gutter (audit v3 1.6:
+			// (44px on phones) and starting at the same gutter (audit v3 1.6:
 			// Follow used to sit on its own line, 28px left of the grid, 30px high).
 			.btn-wrpr {
 				display: flex;
@@ -382,8 +382,10 @@
 					box-sizing: border-box;
 					min-height: 40px;
 					margin: 0;
+					// Phones: 44px floor (audit v5 TOP 5: 36px was below the touch
+					// minimum); max() keeps any larger rem-based size.
 					@media only screen and (max-width: 719px) {
-						min-height: 36px;
+						min-height: max(2.75rem, 44px);
 					}
 				}
 			}

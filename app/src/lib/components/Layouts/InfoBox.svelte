@@ -240,4 +240,13 @@
 		letter-spacing: -0.01em;
 		max-width: 40ch;
 	}
+	/* Play Album / Album Radio were 32px tall from rem (audit v5 TOP 5):
+	   40px on desktop, 44px floor on phones. */
+	.button-group :global(.button) {
+		box-sizing: border-box;
+		min-height: 40px;
+		@media only screen and (max-width: 719px) {
+			min-height: max(2.75rem, 44px);
+		}
+	}
 </style>
