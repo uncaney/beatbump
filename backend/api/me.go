@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"beatbump-server/backend/db"
@@ -154,6 +155,7 @@ func MeAddFavoriteHandler(c echo.Context) error {
 	raw, _ := json.Marshal(m)
 	fav := db.Favorite{ProfileID: pid, Kind: kind, Ref: ref, Title: title, Artist: artist, Thumbnail: thumb, Data: string(raw), CreatedAt: time.Now()}
 	db.DB.Where("profile_id = ? AND kind = ? AND ref = ?", pid, kind, ref).Assign(fav).FirstOrCreate(&fav)
+	invalidateMixCache(pid)
 	return c.JSON(http.StatusOK, map[string]interface{}{"ok": true, "ref": ref, "kind": kind})
 }
 
@@ -168,6 +170,7 @@ func MeDeleteFavoriteHandler(c echo.Context) error {
 		q = q.Where("kind = ?", kind)
 	}
 	q.Delete(&db.Favorite{})
+	invalidateMixCache(pid)
 	return c.JSON(http.StatusOK, map[string]interface{}{"ok": true})
 }
 
@@ -348,6 +351,7 @@ func MeRecordPlayHandler(c echo.Context) error {
 	raw, _ := json.Marshal(m)
 	ev := db.PlayEvent{ProfileID: pid, Ref: ref, Title: title, Artist: artist, ArtistID: artistID, Album: itemAlbum(string(raw)), Source: source, Data: string(raw), PlayedAt: playedAt}
 	db.DB.Create(&ev)
+	invalidateMixCache(pid)
 	return c.JSON(http.StatusOK, map[string]interface{}{"ok": true})
 }
 
@@ -512,11 +516,71 @@ func meRecentEvents(c echo.Context, pid string, n int) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "playedAt": playedAt, "events": true})
 }
 
+// ---- me/mix per-profile cache (K4) ----
+// me/mix costs up to 25 Meili calls and is requested on every home load. The
+// answer only changes when the profile plays or (un)favourites something, so
+// it is kept 60 s per profile id and dropped by MeRecordPlayHandler and the
+// favourite handlers. Header X-Ytm-Mix-Cache: HIT|MISS|BYPASS (YTM_API_CACHE=0).
+const (
+	mixCacheTTL         = 60 * time.Second
+	mixCacheMaxProfiles = 2000 // hard bound on memory: beyond it the map is flushed
+)
+
+type mixCacheEntry struct {
+	body    []byte
+	expires time.Time
+}
+
+var (
+	mixCacheMu  sync.Mutex
+	mixCache    = map[string]mixCacheEntry{}
+	mixCacheNow = time.Now
+)
+
+func mixCacheGet(pid string) ([]byte, bool) {
+	mixCacheMu.Lock()
+	defer mixCacheMu.Unlock()
+	e, ok := mixCache[pid]
+	if !ok {
+		return nil, false
+	}
+	if mixCacheNow().After(e.expires) {
+		delete(mixCache, pid)
+		return nil, false
+	}
+	return e.body, true
+}
+
+func mixCacheSet(pid string, body []byte) {
+	mixCacheMu.Lock()
+	defer mixCacheMu.Unlock()
+	if len(mixCache) >= mixCacheMaxProfiles {
+		mixCache = map[string]mixCacheEntry{}
+	}
+	mixCache[pid] = mixCacheEntry{body: body, expires: mixCacheNow().Add(mixCacheTTL)}
+}
+
+// invalidateMixCache drops the cached mix of a profile (new play, favourite
+// added or removed: the seeds changed).
+func invalidateMixCache(pid string) {
+	mixCacheMu.Lock()
+	delete(mixCache, pid)
+	mixCacheMu.Unlock()
+}
+
 // MeMixHandler — "Made for you": a personalized library mix seeded by the
 // profile's most-played + favorited local tracks, expanded via radioPool. Cold
 // start (no history) falls back to a random library sample.
 func MeMixHandler(c echo.Context) error {
 	pid := profileID(c)
+	if !responseCacheEnabled() {
+		c.Response().Header().Set("X-Ytm-Mix-Cache", "BYPASS")
+	} else if body, ok := mixCacheGet(pid); ok {
+		c.Response().Header().Set("X-Ytm-Mix-Cache", "HIT")
+		return c.JSONBlob(http.StatusOK, body)
+	} else {
+		c.Response().Header().Set("X-Ytm-Mix-Cache", "MISS")
+	}
 	seeds := []string{}
 	addSeed := func(refs []string) {
 		for _, r := range refs {
@@ -549,12 +613,33 @@ func MeMixHandler(c echo.Context) error {
 			uniqSeeds = append(uniqSeeds, s)
 		}
 	}
+	nSeeds := len(uniqSeeds)
+	if len(uniqSeeds) > 5 {
+		uniqSeeds = uniqSeeds[:5]
+	}
+	// K4: each seed needs 2-4 Meili round trips (lookup + radio pool); run the
+	// seeds concurrently and merge them in seed order (same result as before).
+	type seedResult struct {
+		hit  map[string]interface{}
+		pool []map[string]interface{}
+	}
+	results := make([]seedResult, len(uniqSeeds))
+	var wg sync.WaitGroup
+	for i, lid := range uniqSeeds {
+		wg.Add(1)
+		go func(i int, lid string) {
+			defer wg.Done()
+			h := meiliByLid(lid)
+			if h == nil {
+				return
+			}
+			results[i] = seedResult{hit: h, pool: radioPool(h, lid)}
+		}(i, lid)
+	}
+	wg.Wait()
 	seen = map[string]bool{}
 	for i, lid := range uniqSeeds {
-		if i >= 5 {
-			break
-		}
-		h := meiliByLid(lid)
+		h := results[i].hit
 		if h == nil {
 			continue
 		}
@@ -562,9 +647,8 @@ func MeMixHandler(c echo.Context) error {
 			seen[lid] = true
 			items = append(items, localSongItem(h))
 		}
-		pool := radioPool(h, lid)
 		added := 0
-		for _, ph := range pool {
+		for _, ph := range results[i].pool {
 			l := mstr(ph, "lid")
 			if l == "" || seen[l] {
 				continue
@@ -582,7 +666,15 @@ func MeMixHandler(c echo.Context) error {
 	if len(items) > 40 {
 		items = items[:40]
 	}
-	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "seeds": len(uniqSeeds)})
+	body, err := json.Marshal(map[string]interface{}{"items": items, "seeds": nSeeds})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "encode"})
+	}
+	// An empty mix (Meili down / empty library) is not worth remembering.
+	if responseCacheEnabled() && len(items) > 0 {
+		mixCacheSet(pid, body)
+	}
+	return c.JSONBlob(http.StatusOK, body)
 }
 
 func MeDeletePlaylistItemHandler(c echo.Context) error {

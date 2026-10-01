@@ -412,14 +412,29 @@ func randomLibrarySample(n int) []IListItemRenderer {
 	if windows < 1 {
 		windows = 1
 	}
+	// K4: the windows are independent Meili queries; fetch them concurrently
+	// (10 sequential round trips cost ~100 ms on every home load) and merge
+	// them in window order so the result is the same as the sequential loop.
+	pages := make([][]map[string]interface{}, windows)
+	var wg sync.WaitGroup
+	for w := 0; w < windows; w++ {
+		off := rand.Intn(40000)
+		wg.Add(1)
+		go func(i, off int) {
+			defer wg.Done()
+			pages[i] = meiliSearchIndex("tracks", map[string]interface{}{
+				"q": "", "offset": off, "limit": perWindow, "sort": []string{"dateAdded:desc"},
+				"attributesToRetrieve": []string{"lid", "title", "artist", "albumArtist", "track", "durationSec", "album"},
+			})
+		}(w, off)
+	}
+	wg.Wait()
 	seen := map[string]bool{}
 	var hits []map[string]interface{}
-	for w := 0; w < windows && len(hits) < n; w++ {
-		off := rand.Intn(40000)
-		page := meiliSearchIndex("tracks", map[string]interface{}{
-			"q": "", "offset": off, "limit": perWindow, "sort": []string{"dateAdded:desc"},
-			"attributesToRetrieve": []string{"lid", "title", "artist", "albumArtist", "track", "durationSec", "album"},
-		})
+	for _, page := range pages {
+		if len(hits) >= n {
+			break
+		}
 		for _, h := range page {
 			lid := mstr(h, "lid")
 			if lid == "" || seen[lid] {
