@@ -159,6 +159,49 @@ export function buildForYouRow(items: unknown, max: number): RowItem[] {
 	return diversify(capItems(items.filter(hasCoverAndArtist), max * 4), max, 1, 2).map(sanitizeCard);
 }
 
+/** Lower-cased identity of an album / artist reference (browseId, else its text or name). */
+function rowKey(v: any): string {
+	return (typeof v === "string" ? v : v?.browseId || v?.text || v?.name || "").toString().toLowerCase();
+}
+
+/** Lower-cased artist identity of a card, as `diversify` caps it ("" when unknown). */
+export function artistKey(it: RowItem): string {
+	return (
+		rowKey(it?.artistInfo?.artist?.[0]) ||
+		rowKey(it?.artist) ||
+		rowKey(it?.subtitle?.find?.((s: any) => /ARTIST/.test(s?.pageType || ""))?.text)
+	);
+}
+
+/**
+ * UX4 (cycle 35), the list-page sibling of `diversify`: reorder, never drop.
+ * Same artist identity as `diversify` (falling back to the first subtitle
+ * text), and no more than `maxRun` consecutive items of one artist whenever
+ * another artist is still left: each pick is the earliest remaining item that
+ * does not extend a full run. When only one artist remains the tail keeps its
+ * order. Items without an artist never form a run. Items are not mutated.
+ */
+export function spreadArtists<T extends RowItem>(items: T[], maxRun = 1): T[] {
+	if (!Array.isArray(items)) return [];
+	const keyOf = (it: T) => artistKey(it) || rowKey(Array.isArray(it?.subtitle) ? it.subtitle[0] : undefined);
+	const rest = items.map((it) => ({ it, k: keyOf(it) }));
+	const out: T[] = [];
+	let last = "";
+	let run = 0;
+	while (rest.length) {
+		let i = run >= maxRun && last ? rest.findIndex((r) => r.k !== last) : 0;
+		if (i < 0) i = 0;
+		const [pick] = rest.splice(i, 1);
+		if (pick.k && pick.k === last) run++;
+		else {
+			last = pick.k;
+			run = pick.k ? 1 : 0;
+		}
+		out.push(pick.it);
+	}
+	return out;
+}
+
 /**
  * Keep a row varied: at most `perAlbum` items of the same album, `perArtist` of the same
  * artist, and never the same cover twice (audit UX v4 TOP 5: tracks of one album share a
@@ -171,12 +214,12 @@ export function diversify(items: RowItem[], max: number, perAlbum = 2, perArtist
 	const covers = new Set<string>();
 	const out: RowItem[] = [];
 	const skipped: RowItem[] = [];
-	const key = (v: any) => (typeof v === "string" ? v : v?.browseId || v?.text || v?.name || "").toString().toLowerCase();
+	const key = rowKey;
 	const coverKey = (it: RowItem) => thumbnailUrl(it).replace(/=w\d+-h\d+.*$/, "").toLowerCase();
 	for (const it of items) {
 		if (out.length >= max) break;
 		const al = key(it.album) || key(it.albumName);
-		const ar = key(it.artistInfo?.artist?.[0]) || key(it.artist) || key(it.subtitle?.find?.((s: any) => /ARTIST/.test(s?.pageType || ""))?.text);
+		const ar = artistKey(it);
 		const cv = coverKey(it);
 		if (cv && covers.has(cv)) continue;
 		if ((al && (albums.get(al) || 0) >= perAlbum) || (ar && (artists.get(ar) || 0) >= perArtist)) {
