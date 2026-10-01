@@ -97,6 +97,11 @@
 		hasEverBeenOpen || (!hasEverBeenOpen && state === "open");
 	$: loading = $playerLoading;
 	$: data = $currentTrack;
+	// Mobile "Suivant : <title> · <artist>" under the controls (audit v4 3.7):
+	// the next queue entry, the one whose artwork onMount already prefetches.
+	$: nextUp = $queue[$queuePosition + 1];
+	$: nextUpArtist =
+		nextUp?.artistInfo?.artist?.at(0)?.text ?? nextUp?.subtitle?.at(0)?.text ?? "";
 
 	// Direct mobile actions (avoid the popper, which conflicts with the swipe gesture)
 	async function mobileDownload() {
@@ -771,6 +776,15 @@
 						}}
 						prevBtn={() => SessionListService.previous()}
 					/>
+					{#if nextUp?.title}
+						<p
+							class="next-up"
+							data-testid="fullscreen-next-up"
+						>
+							<span class="next-up-label">Suivant :</span>
+							{nextUp.title}{nextUpArtist ? ` · ${nextUpArtist}` : ""}
+						</p>
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -1049,6 +1063,24 @@
 
 	.controls {
 		gap: 1em;
+	}
+	// Fills part of the ~125px band between the controls and the closed sheet
+	// on 844px phones; a 50vh cover would not grow there (the square art is
+	// already capped by the 92vw width at 390px), only push the controls down.
+	.next-up {
+		margin: 0.5em auto 0;
+		max-width: 85vw;
+		font-size: 0.875rem;
+		line-height: 1.3;
+		color: hsla(0, 0%, 100%, 0.7);
+		text-align: center;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.next-up-label {
+		font-weight: 600;
+		color: hsla(0, 0%, 100%, 0.85);
 	}
 
 	.text-shadow {
