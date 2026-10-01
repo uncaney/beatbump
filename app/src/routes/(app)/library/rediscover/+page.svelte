@@ -6,6 +6,7 @@
 	// first card of the row. Profile-bound: anonymous profiles have no
 	// history and are invited to say their name; offline, the history is
 	// unreachable (MeOffline, like /library/recent).
+	import EmptyState from "$components/EmptyState/EmptyState.svelte";
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
@@ -86,16 +87,19 @@
 	{:else if offline}
 		<MeOffline text="Ton historique reviendra avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
 	{:else if items.length === 0}
-		<p
-			class="state"
-			data-testid="rediscover-empty"
-		>
-			{#if anonymous}
-				Dis-moi ton prénom (<a href="/library/account">Compte</a>) pour retrouver tes écoutes : cette liste suit ton historique.
-			{:else}
-				Rien à redécouvrir pour l'instant : il faut des morceaux écoutés au moins 3 fois il y a plus de deux mois, et pas depuis un mois.
-			{/if}
-		</p>
+		<!-- UX3: one action out of the empty list (anonymous or new profile). -->
+		<div data-testid="rediscover-empty">
+			<EmptyState
+				testid="empty-state"
+				icon="refresh"
+				title="Rien à redécouvrir pour l'instant"
+				text={anonymous
+					? "Dis-moi ton prénom dans Compte pour retrouver tes écoutes : cette liste suit ton historique."
+					: "Il faut des morceaux écoutés au moins 3 fois il y a plus de deux mois, et pas depuis un mois."}
+				href="/library/albums"
+				cta="Explorer la bibliothèque"
+			/>
+		</div>
 	{:else}
 		<div class="grid">
 			{#each items as item (item.videoId || item.title)}

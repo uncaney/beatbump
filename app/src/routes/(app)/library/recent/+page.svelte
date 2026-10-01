@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from "$components/EmptyState/EmptyState.svelte";
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
@@ -99,7 +100,15 @@
 		{:else if offline}
 			<MeOffline text="Ton historique reviendra avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
 		{:else if recent.length === 0}
-			<p class="state">Rien d'écouté pour l'instant.</p>
+			<!-- UX3: an empty history (anonymous or new profile) gets one way out. -->
+			<EmptyState
+				testid="empty-state"
+				icon="clock"
+				title="Rien d'écouté pour l'instant"
+				text="Lance un album : tes écoutes s'afficheront ici, jour par jour."
+				href="/library/albums"
+				cta="Explorer la bibliothèque"
+			/>
 		{:else if days && days.length > 0}
 			{#each days as g (g.key)}
 				<section

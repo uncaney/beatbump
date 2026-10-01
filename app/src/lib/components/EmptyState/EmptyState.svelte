@@ -10,11 +10,14 @@
 	export let href = "/home";
 	export let cta = "Explorer";
 	export let icon: Icons | undefined = undefined;
+	/** data-testid of the block (UX3: "empty-state" on the library history pages). */
+	export let testid: string | undefined = undefined;
 </script>
 
 <div
 	class="empty-state"
 	role="status"
+	data-testid={testid}
 >
 	{#if icon}
 		<span
