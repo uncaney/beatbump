@@ -651,6 +651,9 @@ func HandleSongTask(track *db.SongTask) {
 
 func finalizeTask(track *db.SongTask, relativePath, playlistName, fullDownloadPath string) {
 	db.MarkSongTaskCompleted(int(track.GroupTaskID), track.VideoID, relativePath)
+	// The track just landed in the library: forget the memoised owned=false
+	// verdict so the next play does not re-enqueue its album (L22).
+	api.InvalidateOwnedVerdict(track.VideoID)
 
 	// Check if all songs in the group are completed
 	completed, err := db.CheckGroupCompletion(int(track.GroupTaskID))

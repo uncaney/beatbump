@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -290,15 +291,21 @@ func autoCacheSeen(key string) bool {
 // every replay. The verdict is memoised per videoId for ownedVerdictTTL.
 const ownedVerdictTTL = time.Hour
 
+// ownedVerdictMaxEntries: above this many memoised videoIds, an insert purges
+// the expired entries (L22: the map was never purged, one entry per played
+// or looked-ahead videoId until restart).
+const ownedVerdictMaxEntries = 5000
+
 type ownedVerdict struct {
 	owned bool
 	at    time.Time
 }
 
 var (
-	ownedVerdicts sync.Map         // videoId -> ownedVerdict
-	ownsTrackFn   = meiliOwnsTrack // seam for tests
-	ownedNow      = time.Now       // seam for tests
+	ownedVerdicts     sync.Map         // videoId -> ownedVerdict
+	ownedVerdictCount atomic.Int64     // live entries of ownedVerdicts (best effort)
+	ownsTrackFn       = meiliOwnsTrack // seam for tests
+	ownedNow          = time.Now       // seam for tests
 )
 
 // cachedOwnsTrack is meiliOwnsTrack memoised per videoId for one hour.
@@ -313,8 +320,39 @@ func cachedOwnsTrack(videoId, title, artist string) bool {
 		}
 	}
 	owned := ownsTrackFn(videoId, title, artist)
-	ownedVerdicts.Store(videoId, ownedVerdict{owned: owned, at: now})
+	if _, replaced := ownedVerdicts.Swap(videoId, ownedVerdict{owned: owned, at: now}); !replaced {
+		if ownedVerdictCount.Add(1) > ownedVerdictMaxEntries {
+			purgeOwnedVerdicts(now)
+		}
+	}
 	return owned
+}
+
+// purgeOwnedVerdicts deletes the entries expired at now and recounts.
+func purgeOwnedVerdicts(now time.Time) {
+	var live int64
+	ownedVerdicts.Range(func(k, v interface{}) bool {
+		if e, ok := v.(ownedVerdict); !ok || now.Sub(e.at) >= ownedVerdictTTL {
+			ownedVerdicts.Delete(k)
+		} else {
+			live++
+		}
+		return true
+	})
+	ownedVerdictCount.Store(live)
+}
+
+// InvalidateOwnedVerdict forgets the memoised verdict of videoId so the next
+// play asks Meili again (L22: an acquisition completed at t+2 min left
+// owned=false for the rest of the hour, so every replay re-resolved and
+// re-enqueued the album). Called by the in-process downloader when a track
+// lands in the library (downloader.finalizeTask). Yubal runs as a separate
+// service with no completion callback into this server: tracks it acquires
+// keep the TTL.
+func InvalidateOwnedVerdict(videoId string) {
+	if _, loaded := ownedVerdicts.LoadAndDelete(videoId); loaded {
+		ownedVerdictCount.Add(-1)
+	}
 }
 
 // meiliOwnsVideo reports whether a YT videoId is already in the owned library
