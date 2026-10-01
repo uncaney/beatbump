@@ -4,9 +4,38 @@
 	import Header from "$lib/components/Layouts/Header.svelte";
 
 
+	import Icon from "$components/Icon/Icon.svelte";
+
 	export let data;
 	const { carousels, page: path } = data;
 	$: browser && console.log(data);
+
+	// Moods & genres grid (desktop): flags the wrapper when the row can still
+	// scroll right, which drives the right-edge fade + the arrow button (audit
+	// 1.2 / TOP 10 #9). Mobile stacks the grid vertically, nothing to flag.
+	function moodsEdge(node: HTMLElement) {
+		const parent = node.parentElement;
+		const update = () => {
+			const canScroll = node.scrollWidth - node.clientWidth > 2;
+			const atEnd = node.scrollLeft + node.clientWidth >= node.scrollWidth - 2;
+			parent?.classList.toggle("moods-scrollable", canScroll);
+			parent?.classList.toggle("moods-at-end", !canScroll || atEnd);
+		};
+		node.addEventListener("scroll", update, { passive: true });
+		window.addEventListener("resize", update);
+		const raf = requestAnimationFrame(update);
+		return {
+			destroy() {
+				cancelAnimationFrame(raf);
+				node.removeEventListener("scroll", update);
+				window.removeEventListener("resize", update);
+			},
+		};
+	}
+	function scrollMoods(e: MouseEvent) {
+		const box = (e.currentTarget as HTMLElement).parentElement?.querySelector<HTMLElement>(".box");
+		box?.scrollBy({ left: box.clientWidth * 0.8, behavior: "smooth" });
+	}
 </script>
 
 <Header
@@ -26,14 +55,17 @@
 			/>
 		{:else if carousel.categories}
 			<div class="breakout">
-				<div class="header">
+				<div class="header resp-content-width">
 					<span class="h2">{carousel.header.title}</span>
 					<a
 						class="link"
 						href="/explore"><small>See All</small></a
 					>
 				</div>
-				<div class="box">
+				<div
+					class="box resp-content-width"
+					use:moodsEdge
+				>
 					<div class="scroll">
 						{#each carousel.categories as item}
 							<a
@@ -44,6 +76,17 @@
 						{/each}
 					</div>
 				</div>
+				<button
+					class="scroll-btn"
+					aria-label="Faire défiler"
+					title="Faire défiler"
+					on:click={scrollMoods}
+				>
+					<Icon
+						name="chevron-right"
+						size="1.5em"
+					/>
+				</button>
 			</div>
 		{/if}
 	{/each}
@@ -71,10 +114,13 @@
 		border-radius: 0.8rem;
 		-webkit-overflow-scrolling: touch;
 		position: relative;
-		margin-bottom: 2rem;
+		// Same section rhythm as the Home / trending carousels (Carousel
+		// .section: 2.4em under 720px, 1em above): removes the 100px dead band
+		// before "Moods & genres" (audit 1.2).
+		margin-bottom: 2.4em;
 
-		@media screen and (min-width: 960px) {
-			margin-bottom: 3rem;
+		@media screen and (min-width: 720px) {
+			margin-bottom: 1em;
 		}
 	}
 
@@ -85,6 +131,23 @@
 		padding: 0.8rem;
 		contain: content;
 		flex-direction: column;
+		// Desktop: the grid is a horizontally scrolling column-flow; a
+		// right-edge fade says "more to the right" until the end is reached.
+		@media screen and (min-width: 720px) {
+			scrollbar-width: none;
+			&::-webkit-scrollbar {
+				display: none;
+			}
+			:global(.moods-scrollable:not(.moods-at-end)) > & {
+				-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 6rem), transparent);
+				mask-image: linear-gradient(to right, #000 calc(100% - 6rem), transparent);
+			}
+		}
+		// Mobile: no horizontal clipping, 2 full-width columns, vertical flow.
+		@media screen and (max-width: 719px) {
+			overflow: visible;
+			padding: 0;
+		}
 	}
 
 	.scroll {
@@ -94,6 +157,47 @@
 		justify-content: space-around;
 		//
 		max-height: calc(100vh - 1px - calc(100vh - 23em));
+
+		@media screen and (max-width: 719px) {
+			display: grid;
+			grid-template-columns: 1fr 1fr;
+			gap: 0.6rem;
+			max-height: none;
+		}
+	}
+
+	// Same round arrow as the carousels (Carousel/index.scss .right), shown on
+	// desktop only while the row can still scroll.
+	.scroll-btn {
+		display: none;
+		position: absolute;
+		right: 0;
+		top: 50%;
+		transform: translate(1.75em, -50%);
+		z-index: 1;
+		width: 3rem;
+		height: 3rem;
+		padding: 0;
+		border-radius: 50%;
+		cursor: pointer;
+		align-items: center;
+		justify-content: center;
+		color: rgb(3, 3, 3);
+		background-color: hsla(0, 0%, 95%, 0.715);
+		border: rgba(0, 0, 0, 0.171) 0.33px solid;
+		box-shadow: 0 0 8px -4px hsl(0deg 0% 0% / 20%), inset 0 0 8px -4px hsl(0deg 0% 0% / 20%);
+		transition: background-color 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
+		&:hover {
+			background-color: rgb(233, 233, 233);
+		}
+		@media screen and (min-width: 720px) and (max-width: 1000px) {
+			transform: translate(0, -50%);
+		}
+	}
+	@media screen and (min-width: 720px) {
+		:global(.breakout.moods-scrollable:not(.moods-at-end)) > .scroll-btn {
+			display: inline-flex;
+		}
 	}
 
 	.item-box {
@@ -111,5 +215,12 @@
 		align-items: center;
 		height: 3.25em;
 		padding: 0 0 0 0.8rem;
+
+		@media screen and (max-width: 719px) {
+			width: auto;
+			min-width: 0;
+			height: auto;
+			min-height: 44px;
+		}
 	}
 </style>

@@ -69,8 +69,17 @@ hr {
 	position: relative;
 	isolation: isolate;
 	touch-action: none;
+	display: grid;
+	place-items: center;
+	box-sizing: border-box;
 
 	padding: 0.8rem;
+	// Kebab measured 37x37 on phones (audit 2.2): 44x44 minimum on touch /
+	// narrow screens, icon size unchanged.
+	@media screen and (max-width: 959px), (hover: none) {
+		min-width: 44px;
+		min-height: 44px;
+	}
 	@media screen and (min-width: 960px) {
 		padding: 0.5rem;
 	}

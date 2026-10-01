@@ -40,7 +40,7 @@
 	}
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active="account" />
 	<h1>Account</h1>
 
@@ -92,7 +92,11 @@
 	main {
 		min-height: 100%;
 		padding-bottom: 5rem;
-		max-width: 40rem;
+		/* Mobile gutter comes from the shared .resp-content-width (16px); on
+		   larger screens keep the narrow readable column it always had. */
+		@media screen and (min-width: 640px) {
+			max-width: 40rem !important;
+		}
 	}
 	.who {
 		margin: 0.5rem 0 1rem;

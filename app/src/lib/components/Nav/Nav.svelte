@@ -350,9 +350,19 @@
             margin-left: 0.8em;
         }
 
+        // 44x44 touch target around the 30px logo (audit 2.2: "logo" 30x30);
+        // the image keeps its size, the padding is the hit area.
+        > a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 44px;
+            min-height: 44px;
+        }
+
         &-back {
             visibility: visible !important;
-            display: block !important;
+            display: inline-flex !important;
 
             @media screen and (max-width: 640px) {
                 visibility: none !important;

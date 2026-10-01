@@ -64,7 +64,7 @@
 	];
 </script>
 
-<main>
+<main class="resp-content-width">
 	<h1>Your Favorites</h1>
 	<section>
 		<div class="filter">

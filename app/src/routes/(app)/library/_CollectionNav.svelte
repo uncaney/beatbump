@@ -50,4 +50,14 @@
 		opacity: 1;
 		background: rgba(255, 255, 255, 0.16);
 	}
+	/* Touch: chips were 24px high (audit 2.2). 44px tall pills on phones /
+	   touch screens, same label size. */
+	@media screen and (max-width: 719px), (hover: none) {
+		a {
+			display: inline-flex;
+			align-items: center;
+			min-height: 44px;
+			padding: 0.35rem 0.9rem;
+		}
+	}
 </style>
