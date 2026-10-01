@@ -2,13 +2,18 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	DEVICE_ID_KEY,
 	REMOTE_CONSUMED_KEY,
+	REMOTE_LIVE_NEWER_MS,
 	REMOTE_NEWER_MS,
+	REMOTE_REFRESH_THROTTLE_MS,
 	clockLabel,
 	consumedMarker,
 	deviceNameFromUA,
 	fitResumeState,
 	getDeviceId,
 	makeNowPlayingPusher,
+	makeRemoteRefresher,
+	shouldOfferRemote,
+	wireForegroundRefresh,
 	type NowPlayingBody,
 	type NowPlayingPusherDeps,
 	remoteResumeOffer,
@@ -98,8 +103,9 @@ describe("remoteResumeOffer", () => {
 	it("ignores this device's own state", () => {
 		expect(remoteResumeOffer(remote({ deviceId: "me" }), "me", 0, null)).toBeNull();
 	});
-	it("needs more than 2 minutes over the local state", () => {
-		expect(remoteResumeOffer(remote(), "me", now - REMOTE_NEWER_MS, null)).toBeNull();
+	it("needs more than 10 s over the local state", () => {
+		expect(remoteResumeOffer(remote(), "me", now - REMOTE_LIVE_NEWER_MS, null)).toBeNull();
+		expect(remoteResumeOffer(remote(), "me", now - REMOTE_LIVE_NEWER_MS - 1, null)).not.toBeNull();
 		expect(remoteResumeOffer(remote(), "me", now + 5000, null)).toBeNull();
 	});
 	it("is silent while this device listens (live savedAt = now)", () => {
@@ -177,6 +183,85 @@ describe("fitResumeState", () => {
 	it("null for an empty or impossible state", () => {
 		expect(fitResumeState(null)).toBeNull();
 		expect(fitResumeState(stateOf(3, 0, 2000), 100)).toBeNull();
+	});
+});
+
+describe("shouldOfferRemote (40A)", () => {
+	const now = 50_000_000;
+	const remote = (over: Record<string, unknown> = {}) => ({
+		deviceId: "other",
+		deviceName: "iPhone",
+		position: 42,
+		payload: {},
+		updatedAt: now,
+		...over,
+	});
+	const local = (over: Partial<Parameters<typeof shouldOfferRemote>[0]> = {}) => ({ deviceId: "me", savedAt: 0, ...over });
+	it("offers another device's position newer by more than 10 s", () => {
+		expect(shouldOfferRemote(local({ savedAt: now - 10_001 }), remote(), now)).toBe(true);
+		expect(shouldOfferRemote(local({ savedAt: now - 10_000 }), remote(), now)).toBe(false);
+		expect(shouldOfferRemote(local({ savedAt: null }), remote(), now)).toBe(true);
+	});
+	it("never offers this device's own row, an older row or a broken one", () => {
+		expect(shouldOfferRemote(local(), remote({ deviceId: "me" }), now)).toBe(false);
+		expect(shouldOfferRemote(local({ savedAt: now + 60_000 }), remote(), now)).toBe(false);
+		expect(shouldOfferRemote(local(), remote({ updatedAt: 0 }), now)).toBe(false);
+		expect(shouldOfferRemote(local(), remote({ deviceId: "" }), now)).toBe(false);
+		expect(shouldOfferRemote(local(), null, now)).toBe(false);
+	});
+	it("while this device plays, the local state is now", () => {
+		const r = remote({ updatedAt: now - 5_000 });
+		expect(shouldOfferRemote(local({ savedAt: now - 60_000 }), r, now)).toBe(true);
+		expect(shouldOfferRemote(local({ savedAt: now - 60_000, playing: true }), r, now)).toBe(false);
+		expect(shouldOfferRemote(local({ playing: true }), remote({ updatedAt: now + 11_000 }), now)).toBe(true);
+	});
+	it("keeps the J3 consumed rule", () => {
+		expect(shouldOfferRemote(local({ consumed: consumedMarker("other", now - 15_000) }), remote(), now)).toBe(false);
+		expect(shouldOfferRemote(local({ consumed: consumedMarker("other", now - REMOTE_NEWER_MS) }), remote(), now)).toBe(true);
+	});
+});
+
+describe("makeRemoteRefresher (40A)", () => {
+	it("runs at most once per 20 s, force skips the throttle", async () => {
+		let t = 1_000_000;
+		const load = vi.fn(async () => {});
+		const refresh = makeRemoteRefresher({ load, now: () => t });
+		expect(await refresh()).toBe(true);
+		t += REMOTE_REFRESH_THROTTLE_MS - 1;
+		expect(await refresh()).toBe(false);
+		expect(await refresh(true)).toBe(true);
+		t += REMOTE_REFRESH_THROTTLE_MS;
+		expect(await refresh()).toBe(true);
+		expect(load).toHaveBeenCalledTimes(3);
+	});
+	it("one run at a time and a failing load is swallowed", async () => {
+		let release: () => void = () => {};
+		const load = vi.fn(() => new Promise<void>((r) => (release = r)));
+		const refresh = makeRemoteRefresher({ load, throttleMs: 0 });
+		const first = refresh();
+		expect(await refresh(true)).toBe(false);
+		release();
+		expect(await first).toBe(true);
+		const failing = makeRemoteRefresher({ load: () => Promise.reject(new Error("x")) });
+		expect(await failing()).toBe(true);
+	});
+	it("wireForegroundRefresh: visible, focus and pageshow refresh; hidden does not", () => {
+		const win = new EventTarget() as unknown as Window;
+		const doc = Object.assign(new EventTarget(), { visibilityState: "hidden" }) as unknown as Document & {
+			visibilityState: string;
+		};
+		const refresh = vi.fn();
+		const unwire = wireForegroundRefresh(refresh, { win, doc });
+		doc.dispatchEvent(new Event("visibilitychange"));
+		expect(refresh).not.toHaveBeenCalled();
+		(doc as { visibilityState: string }).visibilityState = "visible";
+		doc.dispatchEvent(new Event("visibilitychange"));
+		win.dispatchEvent(new Event("focus"));
+		win.dispatchEvent(new Event("pageshow"));
+		expect(refresh).toHaveBeenCalledTimes(3);
+		unwire();
+		win.dispatchEvent(new Event("focus"));
+		expect(refresh).toHaveBeenCalledTimes(3);
 	});
 });
 

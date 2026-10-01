@@ -359,7 +359,8 @@ export async function putNowPlaying(
 /** The profile's last resume state from any device; null when none (404) or on error. */
 export async function getNowPlaying(): Promise<NowPlayingRow | null> {
 	try {
-		const r = await APIClient.fetch(`/api/v1/me/nowplaying`);
+		// 40A: re-read on every foreground refresh, never from the HTTP cache.
+		const r = await APIClient.fetch(`/api/v1/me/nowplaying`, { cache: "no-store" });
 		if (!r?.ok) return null;
 		const j = await r.json();
 		return j && typeof j === "object" && j.payload ? (j as NowPlayingRow) : null;

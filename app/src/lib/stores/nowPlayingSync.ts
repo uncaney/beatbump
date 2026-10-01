@@ -26,8 +26,15 @@ import {
 export const DEVICE_ID_KEY = "ytm-device-id";
 export const REMOTE_CONSUMED_KEY = "ytm-remote-consumed";
 export const NOWPLAYING_SYNC_MS = 15000;
-/** The server state must be this much newer than the local one to be offered. */
+/**
+ * J3: once device X's offer was taken here, X's next pushes stay hidden until
+ * they are this much newer than the consumed one.
+ */
 export const REMOTE_NEWER_MS = 2 * 60 * 1000;
+/** 40A: the server state must be this much newer than the local one to be offered. */
+export const REMOTE_LIVE_NEWER_MS = 10 * 1000;
+/** 40A: foreground / channel refreshes of the offer, at most once per this. */
+export const REMOTE_REFRESH_THROTTLE_MS = 20 * 1000;
 /** J6: between two pushes of the same queue, the position must move more than this (s). */
 export const NOWPLAYING_MIN_TIME_DELTA = 10;
 /** Server limit on the payload (413 above); a long queue is cut to fit. */
@@ -165,31 +172,56 @@ function parseConsumed(raw: string | null | undefined): { deviceId: string | nul
 	return { deviceId: i > 0 ? raw.slice(0, i) : null, at };
 }
 
+/** What this device knows about its own resume state, for `shouldOfferRemote`. */
+export interface LocalResumeView {
+	deviceId: string;
+	/** The live local C1 `savedAt` (null / 0 when nothing is saved). */
+	savedAt: number | null | undefined;
+	/** The `ytm-remote-consumed` marker (J3). */
+	consumed?: string | null;
+	/** Something plays here right now: the local state is "now". */
+	playing?: boolean;
+}
+
 /**
- * The card rule: offer the server state when it comes from ANOTHER device,
- * is more than REMOTE_NEWER_MS newer than the LIVE local `resumeState.savedAt`
- * (0 when there is none; with I7 it only moves when playback moves, so a
- * device that is listening never sees the card), carries a playable queue
- * and was not consumed on this device: after a click on device X's offer,
- * X's next pushes are ignored until they are REMOTE_NEWER_MS past the
- * consumed one (J3). Returns the parsed state (position applied), else null.
+ * 40A, the card rule (pure): offer the server state when it comes from
+ * ANOTHER device, is more than REMOTE_LIVE_NEWER_MS newer than the local
+ * resume state (its `savedAt`, or `now` while this device plays: with I7 the
+ * local state only moves when playback moves, so a device that is listening
+ * never sees the card) and was not consumed on this device: after a click on
+ * device X's offer, X's next pushes are ignored until they are REMOTE_NEWER_MS
+ * past the consumed one (J3). The payload is checked by `remoteResumeOffer`.
+ */
+export function shouldOfferRemote(
+	local: LocalResumeView,
+	remote: RemoteNowPlaying | null | undefined,
+	now: number,
+): boolean {
+	if (!remote || typeof remote !== "object") return false;
+	if (!remote.deviceId || remote.deviceId === local.deviceId) return false;
+	const at = Number(remote.updatedAt);
+	if (!isFinite(at) || at <= 0) return false;
+	const c = parseConsumed(local.consumed);
+	if (c) {
+		if (c.deviceId === null ? c.at === at : c.deviceId === remote.deviceId && at - c.at < REMOTE_NEWER_MS) return false;
+	}
+	const saved = typeof local.savedAt === "number" && isFinite(local.savedAt) ? local.savedAt : 0;
+	const localAt = local.playing ? Math.max(saved, now) : saved;
+	return at - localAt > REMOTE_LIVE_NEWER_MS;
+}
+
+/**
+ * The offer itself: `shouldOfferRemote` plus a playable queue. Returns the
+ * parsed state (server position applied), else null.
  */
 export function remoteResumeOffer(
 	remote: RemoteNowPlaying | null | undefined,
 	localDeviceId: string,
 	localSavedAt: number | null | undefined,
 	consumed: string | null | undefined,
+	now: number = Date.now(),
 ): ResumeState | null {
-	if (!remote || typeof remote !== "object") return null;
-	if (!remote.deviceId || remote.deviceId === localDeviceId) return null;
-	const at = Number(remote.updatedAt);
-	if (!isFinite(at) || at <= 0) return null;
-	const c = parseConsumed(consumed);
-	if (c) {
-		if (c.deviceId === null ? c.at === at : c.deviceId === remote.deviceId && at - c.at < REMOTE_NEWER_MS) return null;
-	}
-	const local = typeof localSavedAt === "number" && isFinite(localSavedAt) ? localSavedAt : 0;
-	if (at - local <= REMOTE_NEWER_MS) return null;
+	if (!remote || !shouldOfferRemote({ deviceId: localDeviceId, savedAt: localSavedAt, consumed }, remote, now)) return null;
 	let state: ResumeState | null;
 	try {
 		state = parseResumeState(typeof remote.payload === "string" ? remote.payload : JSON.stringify(remote.payload));
@@ -200,6 +232,59 @@ export function remoteResumeOffer(
 	const pos = Number(remote.position);
 	if (isFinite(pos) && pos >= 0) state.currentTime = pos;
 	return state;
+}
+
+/**
+ * 40A: the foreground refresh of the offer (visibilitychange visible, focus,
+ * pageshow, the `ytm-profile` channel), throttled to one run per
+ * REMOTE_REFRESH_THROTTLE_MS; `force` (a profile change) skips the throttle.
+ * One run at a time. Resolves whether `load` ran.
+ */
+export function makeRemoteRefresher(deps: {
+	load: () => Promise<unknown>;
+	now?: () => number;
+	throttleMs?: number;
+}): (force?: boolean) => Promise<boolean> {
+	const now = deps.now ?? Date.now;
+	const gap = deps.throttleMs ?? REMOTE_REFRESH_THROTTLE_MS;
+	let last = -Infinity;
+	let running = false;
+	return async (force = false) => {
+		if (running) return false;
+		const t = now();
+		if (!force && t - last < gap) return false;
+		last = t;
+		running = true;
+		try {
+			await deps.load();
+		} catch {
+			/* best-effort */
+		} finally {
+			running = false;
+		}
+		return true;
+	};
+}
+
+/**
+ * Wire `refresh` to the foreground events; returns the cleanup. Only the
+ * visible side of `visibilitychange` counts.
+ */
+export function wireForegroundRefresh(refresh: () => void, target: { win: Window; doc: Document } | null = null): () => void {
+	const win = target?.win ?? (typeof window === "undefined" ? undefined : window);
+	const doc = target?.doc ?? (typeof document === "undefined" ? undefined : document);
+	if (!win || !doc) return () => {};
+	const onVisible = () => {
+		if (doc.visibilityState === "visible") refresh();
+	};
+	doc.addEventListener("visibilitychange", onVisible);
+	win.addEventListener("focus", refresh);
+	win.addEventListener("pageshow", refresh);
+	return () => {
+		doc.removeEventListener("visibilitychange", onVisible);
+		win.removeEventListener("focus", refresh);
+		win.removeEventListener("pageshow", refresh);
+	};
 }
 
 export interface NowPlayingBody {

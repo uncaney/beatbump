@@ -37,7 +37,14 @@
 	import { getMix, getRecent, getStatsSummary, getTopBy, isAnonymousProfile, whoami, PROFILE_CHANNEL_NAME } from "$lib/me";
 	import { settings } from "$lib/stores";
 	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
-	import { clockLabel, fetchRemoteResume, restoreRemoteResume, wireProfileChannel } from "$lib/stores/nowPlayingSync";
+	import {
+		clockLabel,
+		fetchRemoteResume,
+		makeRemoteRefresher,
+		restoreRemoteResume,
+		wireForegroundRefresh,
+		wireProfileChannel,
+	} from "$lib/stores/nowPlayingSync";
 	import { AudioPlayer } from "$lib/player";
 	import list from "$lib/stores/list";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
@@ -280,6 +287,8 @@
 		newInLibrarySource = "empty";
 		neverPlayedSource = "empty";
 		weekCard = null;
+		remote = null;
+		void refreshRemote(true);
 		void loadResume();
 		void loadForYou();
 		void loadAcquired();
@@ -343,8 +352,13 @@
 	async function loadRemote() {
 		// K12: fetchRemoteResume short-circuits for an anonymous profile (memoised
 		// whoami, no me/nowplaying GET); nothing to offer then.
-		remote = await fetchRemoteResume();
+		const next = await fetchRemoteResume();
+		if (!restoringRemote) remote = next; // never swap the offer under a click
 	}
+	// 40A: the offer is re-read when the app comes back to the foreground
+	// (another device may have played meanwhile), at most once per 20 s,
+	// without a reload; a profile change forces it.
+	const refreshRemote = makeRemoteRefresher({ load: loadRemote });
 
 	// Audit v7 TOP 10 (finishing lot): a restored queue loses the year run of a
 	// card subtitle but keeps the trailing " • " separator, so the resume cards
@@ -573,7 +587,7 @@
 		moreOpen = readMoreRowsOpen(storageOrUndefined());
 		paintFromCache();
 		void loadResume();
-		void loadRemote();
+		void refreshRemote(true);
 		void loadForYou();
 		void loadAcquired();
 		void loadNeverPlayed();
@@ -590,8 +604,10 @@
 			if (document.visibilityState === "hidden") homeCachePersist.flush();
 		};
 		document.addEventListener("visibilitychange", onHidden);
+		const unwireForeground = wireForegroundRefresh(() => void refreshRemote());
 		return () => {
 			unwireProfile?.();
+			unwireForeground();
 			document.removeEventListener("visibilitychange", onHidden);
 			homeCachePersist.flush();
 		};
