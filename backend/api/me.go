@@ -333,11 +333,13 @@ func MeRecordPlayHandler(c echo.Context) error {
 	if isLid(ref) {
 		source = "local"
 	}
-	// O9: a play replayed from the client outbox carries its own playedAt.
+	// O9: a play replayed from the client outbox carries its own playedAt
+	// (and, I11, the client clock at send time: "clientSentAt").
 	now := time.Now()
 	_, clientStamped := m["playedAt"]
-	playedAt := clientPlayedAt(m["playedAt"], now)
+	playedAt := stampPlayedAt(m["playedAt"], m["clientSentAt"], now)
 	delete(m, "playedAt")
+	delete(m, "clientSentAt")
 	// I10: an outbox replay (several tabs, or a lost response then a retry)
 	// sends the same (ref, playedAt) again: idempotent within playDedupeWindow.
 	if clientStamped && playAlreadyRecorded(pid, ref, playedAt) {
@@ -368,25 +370,59 @@ const maxClientPlayAge = 7 * 24 * time.Hour
 // number or numeric string, or an RFC 3339 string) when it lies within the
 // last 7 days and not in the future; otherwise the server time `now`.
 func clientPlayedAt(v interface{}, now time.Time) time.Time {
-	var t time.Time
-	switch x := v.(type) {
-	case float64:
-		t = time.UnixMilli(int64(x))
-	case string:
-		if ms, err := strconv.ParseInt(x, 10, 64); err == nil {
-			t = time.UnixMilli(ms)
-		} else if p, err := time.Parse(time.RFC3339, x); err == nil {
-			t = p
-		} else {
-			return now
-		}
-	default:
-		return now
-	}
-	if t.After(now) || now.Sub(t) > maxClientPlayAge {
+	t, ok := parseClientTime(v)
+	if !ok || t.After(now) || now.Sub(t) > maxClientPlayAge {
 		return now
 	}
 	return t
+}
+
+// parseClientTime reads epoch milliseconds (JSON number or numeric string)
+// or an RFC 3339 string.
+func parseClientTime(v interface{}) (time.Time, bool) {
+	switch x := v.(type) {
+	case float64:
+		return time.UnixMilli(int64(x)), true
+	case string:
+		if ms, err := strconv.ParseInt(x, 10, 64); err == nil {
+			return time.UnixMilli(ms), true
+		}
+		if p, err := time.Parse(time.RFC3339, x); err == nil {
+			return p, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// maxClockSkew: a client clock further than this from the server clock is
+// not trusted as is (I11).
+const maxClockSkew = 5 * time.Minute
+
+// stampPlayedAt decides when a posted play happened (I11).
+//   - Outbox replay (clientSentAt = the client clock when it sent the
+//     replay): the gap to the server clock is the client skew. Beyond
+//     maxClockSkew the playedAt is moved onto the server clock (shifted by
+//     the skew), then clientPlayedAt applies (older than 7 days or in the
+//     future: server time).
+//   - Direct POST (no clientSentAt): the play is happening now. A client
+//     playedAt more than maxClockSkew away from the server clock is a wrong
+//     clock (or an old client replaying without the marker): server time.
+func stampPlayedAt(playedAt, clientSentAt interface{}, now time.Time) time.Time {
+	t, ok := parseClientTime(playedAt)
+	if !ok {
+		return now
+	}
+	if sent, ok := parseClientTime(clientSentAt); ok {
+		skew := now.Sub(sent)
+		if skew > maxClockSkew || skew < -maxClockSkew {
+			t = t.Add(skew)
+		}
+		return clientPlayedAt(float64(t.UnixMilli()), now)
+	}
+	if d := now.Sub(t); d > maxClockSkew || d < -maxClockSkew {
+		return now
+	}
+	return clientPlayedAt(float64(t.UnixMilli()), now)
 }
 
 func clampLimit(c echo.Context, def, max int) int {
