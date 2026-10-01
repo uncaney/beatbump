@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
+	import PlayAllBar from "$components/PlayAllBar/PlayAllBar.svelte";
 	import { getFavorites, getFollows } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
 	import { IDBService } from "$lib/workers/db/service";
@@ -98,6 +99,7 @@
 					Hors connexion : copie locale des favoris de cet appareil. Le reste de tes sauvegardes revient avec le réseau.
 				</p>
 			{/if}
+			<PlayAllBar tracks={items} />
 			<div class="grid">
 				{#each items as item (item.videoId || item.endpoint?.browseId || item.browseId || item.title)}
 					<div class="cell"><Listing data={item} /></div>

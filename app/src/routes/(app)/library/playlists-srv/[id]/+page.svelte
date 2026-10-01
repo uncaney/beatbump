@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from "$app/stores";
 	import Listing from "$components/Item/Listing.svelte";
+	import PlayAllBar from "$components/PlayAllBar/PlayAllBar.svelte";
 	import { getPlaylist, deletePlaylist } from "$lib/me";
 	import { goto } from "$app/navigation";
 	import { onMount } from "svelte";
@@ -47,6 +48,7 @@
 		{#if tracks.length === 0}
 			<p class="state">No tracks in this playlist.</p>
 		{:else}
+			<PlayAllBar {tracks} />
 			<section>
 				{#each tracks as item (item.videoId || item.title)}
 					<Listing data={item} />
