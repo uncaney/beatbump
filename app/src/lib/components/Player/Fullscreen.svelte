@@ -939,7 +939,6 @@
 									<ListItem
 										let:index
 										let:item
-										draggable
 										{item}
 										idx={index}
 										slot="item"
