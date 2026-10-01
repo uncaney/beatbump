@@ -34,6 +34,15 @@
 			? "Répéter la liste"
 			: "Répéter";
 	$: playLabel = loading ? "Chargement" : isPaused ? "Lecture" : "Pause";
+	$: repeatOn = repeatIcon === "repeat-1" || repeatAlpha > 0.5;
+
+	// Audit UX v11 U11-9: inactive shuffle / repeat at 50% white read as
+	// disabled. "Off" = muted but clearly enabled (72% white, aria-pressed
+	// false); "on" = the green state colour (#1ed760, the playing-row / "Prêt
+	// hors-ligne" token: a state, never a button fill) plus a dot under the
+	// glyph (.is-on::after), so the state does not rely on colour alone.
+	const ON_STROKE = "#1ed760";
+	const OFF_STROKE = "hsla(0, 0%, 100%, 0.72)";
 
 	function handleShuffle() {
 		if (isShuffled === true && original.length !== 0) {
@@ -106,6 +115,7 @@
 		<button
 			type="button"
 			class="player-btn"
+			class:is-on={isShuffled}
 			aria-label="Aléatoire"
 			title="Aléatoire"
 			aria-pressed={isShuffled}
@@ -113,9 +123,7 @@
 		>
 			<Icon
 				color="white"
-				style="stroke-width:2; stroke: {isShuffled
-					? '#fff'
-					: 'hsla(0, 0%, 100%, 0.5)'};"
+				style="stroke-width:2; stroke: {isShuffled ? ON_STROKE : OFF_STROKE};"
 				name="shuffle"
 				fill={"none"}
 				size={"1em"}
@@ -198,14 +206,15 @@
 		<button
 			type="button"
 			class="player-btn"
+			class:is-on={repeatOn}
 			aria-label={repeatLabel}
 			title={repeatLabel}
-			aria-pressed={repeatIcon === "repeat-1" || repeatAlpha > 0.5}
+			aria-pressed={repeatOn}
 			on:click|stopPropagation|capture={handleRepeat}
 		>
 			<Icon
 				color="white"
-				style="stroke-width:2; stroke: hsl(0deg 0% 100% / {repeatAlpha})"
+				style="stroke-width:2; stroke: {repeatOn ? ON_STROKE : OFF_STROKE};"
 				name={repeatIcon}
 				fill={"none"}
 				size={"1em"}
@@ -287,6 +296,19 @@
 		&:focus-visible {
 			outline: 2px solid #fff;
 			outline-offset: 2px;
+		}
+		// U11-9: "on" dot under the shuffle / repeat glyph (state colour).
+		&.is-on::after {
+			content: "";
+			position: absolute;
+			left: 50%;
+			bottom: 0.3em;
+			width: 4px;
+			height: 4px;
+			border-radius: 50%;
+			background: #1ed760;
+			transform: translateX(-50%);
+			pointer-events: none;
 		}
 	}
 	.player-title {

@@ -127,7 +127,7 @@
 		leaving = true;
 		if (leavingTimer) clearTimeout(leavingTimer);
 		sheetOpen = false;
-		if ($isMobileMQ) motion.set(-28, { duration: 0 });
+		if ($isMobileMQ) motion.set(SHEET_CLOSED_Y, { duration: 0 });
 		fullscreenStore.set("closed");
 		await tick();
 		try {
@@ -197,7 +197,12 @@
 	$: tabs = hasRelated ? [upNextTab, relatedTab] : [upNextTab];
 	$: if (!hasRelated && active === "Related") active = "UpNext";
 
-	const motion = tweened(-33, {
+	// Mobile queue sheet geometry. The sheet's top sits at `windowHeight - 65`
+	// and the tween offsets it: closed = SHEET_CLOSED_Y (65 - 13 = 52px
+	// visible, exactly the 48px handle bar; audit UX v11 U11-9 measured
+	// ~100px of dead band under the old 10px label at -28), open = heightCalc.
+	const SHEET_CLOSED_Y = 13;
+	const motion = tweened(SHEET_CLOSED_Y, {
 		duration: 180,
 		easing: cubicOut,
 	});
@@ -220,7 +225,7 @@
 
 	function toggleSheet() {
 		if (sheetOpen) {
-			motion.set(-28, { duration: 240 });
+			motion.set(SHEET_CLOSED_Y, { duration: 240 });
 		} else {
 			motion.set(heightCalc, { duration: 240 });
 		}
@@ -298,7 +303,7 @@
 		if (kind === Kind.Queue) {
 			queueOpen = !queueOpen;
 			sheetOpen = false;
-			motion.set(-28, {
+			motion.set(SHEET_CLOSED_Y, {
 				// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 				duration: Math.min(distance / Math.abs(detail.velocityY!), 720),
 			});
@@ -346,7 +351,7 @@
 
 	$: if ($navigating !== null) {
 		fullscreenStore.set("closed");
-		$motion = 0;
+		$motion = SHEET_CLOSED_Y;
 		$queueTween = 0;
 		sheetOpen = false;
 
@@ -943,6 +948,9 @@
 				title={sheetOpen ? "Masquer la file d'attente" : "Afficher la file d'attente"}
 			>
 				<hr class="horizontal" />
+				<!-- U11-9: label only. The count lives once, in the open drawer's
+				     toolbar ([data-testid=queue-count], aria-live); "File · n/N"
+				     above the controls already says where we are. -->
 				<span class="handle-label" aria-hidden="true">
 					<Icon
 						name="chevron-right"
@@ -951,11 +959,6 @@
 						style="transform: rotate({sheetOpen ? 90 : -90}deg); transition: transform 200ms;"
 					/>
 					<span>File d'attente</span>
-					{#if $queue.length}
-						<span class="handle-count"
-							>· {formatCountFr($queue.length, "morceau", "morceaux")}</span
-						>
-					{/if}
 				</span>
 			</div>
 			</div>
@@ -975,19 +978,21 @@
 								on:touchstart|stopPropagation={null}
 							>
 								<!-- Header of the open list. Phones (audit v4 3.7): the closed
-								     sheet shows only the handle + "File d'attente · N morceaux";
-								     "Vider la file" lives here, inside the open drawer, so a thumb
-								     dragging the handle can no longer land on it. The count is
-								     already in the handle there. -->
+								     sheet shows only the handle + "File d'attente"; "Vider la
+								     file" lives here, inside the open drawer, so a thumb dragging
+								     the handle can no longer land on it. The single aria-live
+								     count (U11-9) sits here on both layouts. -->
 								<div
 									class="queue-toolbar"
 									class:mobile-toolbar={$isMobileMQ}
 								>
-									{#if !$isMobileMQ}
-										<span class="queue-count" aria-live="polite">
-											{formatCountFr($queue.length, "morceau", "morceaux")}
-										</span>
-									{/if}
+									<span
+										class="queue-count"
+										data-testid="queue-count"
+										aria-live="polite"
+									>
+										{formatCountFr($queue.length, "morceau", "morceaux")}
+									</span>
 										<button
 											type="button"
 											class="queue-clear btn-reset"
@@ -1143,14 +1148,22 @@
 
 	.controls {
 		gap: 1em;
+		// U11-9: the closed sheet band shrank from 93px to 52px (SHEET_CLOSED_Y);
+		// the ~40px freed go to the title / controls block (the square cover is
+		// already width-capped at 92vw on phones, it cannot grow in height).
+		@media screen and (max-width: 719px) {
+			gap: 1.25em;
+			padding-top: 0.5vh;
+		}
 	}
-	// Fills part of the ~125px band between the controls and the closed sheet
-	// on 844px phones; a 50vh cover would not grow there (the square art is
+	// Fills part of the band between the controls and the closed sheet on
+	// 844px phones; a 50vh cover would not grow there (the square art is
 	// already capped by the 92vw width at 390px), only push the controls down.
 	.next-up {
 		margin: 0.5em auto 0;
 		max-width: 85vw;
-		font-size: 0.875rem;
+		// 12px floor at the 12px mobile root
+		font-size: max(0.875rem, 12px);
 		line-height: 1.3;
 		color: hsla(0, 0%, 100%, 0.7);
 		text-align: center;
@@ -1316,8 +1329,12 @@
 		}
 	}
 	.queue-toolbar.mobile-toolbar {
-		justify-content: flex-end;
+		// U11-9: the single count on the left, "Vider la file" on the right.
+		justify-content: space-between;
 		padding-block: 0.5em;
+		.queue-count {
+			font-size: max(0.8em, 12px);
+		}
 	}
 	// Closed sheet on phones (audit v3 3.6): only the handle row shows above
 	// the fold. The tab bar ("UP NEXT / RELATED", rendered by Tabs as a sibling
@@ -1328,12 +1345,6 @@
 			visibility: hidden;
 		}
 	}
-	.handle-count {
-		font-weight: 500;
-		color: hsla(0, 0%, 100%, 0.65);
-		white-space: nowrap;
-	}
-
 	.immersive-wrapper {
 		position: fixed;
 		inset: 0;
@@ -1893,7 +1904,8 @@
 		// artwork take the height; the sheet handle sits at windowHeight-65.
 		@media screen and (max-width: 719px) {
 			max-height: none;
-			margin-bottom: 1.5vh;
+			// U11-9: a little of the reclaimed band goes between cover and title.
+			margin-bottom: 2.5vh;
 		}
 
 		@media screen and (min-width: 1800px) {
@@ -1987,19 +1999,23 @@
 		}
 	}
 
-	// Explicit, labelled queue sheet handle (mobile): grip bar + "File d'attente"
+	// Explicit, labelled queue sheet handle (mobile): grip bar + "File d'attente".
+	// U11-9: a 48px tappable bar (>= 44px, 3.6em was 43px at the 12px root)
+	// that fills the whole closed band (52px, see SHEET_CLOSED_Y).
 	.handle.horizontal {
 		grid-template-rows: auto auto;
 		justify-items: center;
-		row-gap: 0.15em;
-		padding-block: 0.5em 0.4em;
+		align-content: center;
+		row-gap: 0.1em;
+		padding-block: 0.3em 0.3em;
 		height: auto;
-		min-height: 3.6em;
+		min-height: max(3.75em, 48px);
+		box-sizing: border-box;
 
 		// the grip bar (::before, 0.45em) is centered inside this box
 		hr.horizontal {
-			height: 1.2em;
-			margin: 0 0 0.2em;
+			height: 1em;
+			margin: 0 0 0.1em;
 			padding: 0;
 		}
 
@@ -2013,7 +2029,8 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.35em;
-		font-size: 0.85em;
+		// 12px floor (U11-9: 0.85em = 10.2px at the 12px mobile root)
+		font-size: max(0.95em, 12px);
 		font-weight: 600;
 		letter-spacing: 0.01em;
 		color: hsla(0, 0%, 100%, 0.85);
