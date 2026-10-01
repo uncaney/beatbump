@@ -119,3 +119,40 @@ func TestLocalSongsQueryPagination(t *testing.T) {
 		t.Fatalf("offset=%d limit=%d items=%d, want 12/12/8", body.Offset, body.Limit, len(body.Items))
 	}
 }
+
+// EQ4: local/albums and local/artists also page past the search shelf's
+// 12-result cap with q + offset + limit (the "Plus de résultats" button on
+// /search/<q>?filter=albums|artists).
+func TestLocalAlbumsAndArtistsQueryPagination(t *testing.T) {
+	stub := newShelfStub(t)
+	stub.hits["albums"] = make([]map[string]interface{}, 0, 20)
+	stub.hits["artists"] = make([]map[string]interface{}, 0, 20)
+	for i := 0; i < 20; i++ {
+		stub.hits["albums"] = append(stub.hits["albums"], map[string]interface{}{
+			"id": fmt.Sprintf("lb-%011x", i+1), "album": "Album", "albumArtist": "A", "year": "2020", "coverLid": "", "trackCount": 10.0,
+		})
+		stub.hits["artists"] = append(stub.hits["artists"], map[string]interface{}{
+			"id": fmt.Sprintf("la-%011x", i+1), "name": "Artist", "albumCount": 1.0, "trackCount": 10.0,
+		})
+	}
+	for name, h := range map[string]echo.HandlerFunc{
+		"albums":  LocalAlbumsHandler,
+		"artists": LocalArtistsHandler,
+	} {
+		c, rec := ctxFor(http.MethodGet, "/api/v1/local/"+name+"?q=a&offset=12&limit=12", "", nil)
+		if err := h(c); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var body struct {
+			Items  []map[string]interface{} `json:"items"`
+			Offset int                      `json:"offset"`
+			Limit  int                      `json:"limit"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if body.Offset != 12 || body.Limit != 12 || len(body.Items) != 8 {
+			t.Fatalf("%s: offset=%d limit=%d items=%d, want 12/12/8", name, body.Offset, body.Limit, len(body.Items))
+		}
+	}
+}
