@@ -59,7 +59,8 @@
 		// from the API) load the rest until `artistTotal`, so "Lire tout" /
 		// "Voir les N titres" really covers every title.
 		const see = localSongs?.seeAll;
-		const pages = Array.isArray(see?.pages) && see.pages.length ? see.pages : [url];
+		const seePages = see?.pages;
+		const pages: string[] = Array.isArray(seePages) && seePages.length ? seePages : [url];
 		const want = Number(see?.artistTotal) || 0;
 		const items: any[] = [];
 		const seen = new Set<string>();
