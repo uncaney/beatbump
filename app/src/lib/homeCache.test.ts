@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { HOME_CACHE_KEY, HOME_CACHE_ROW_KEYS, HOME_CACHE_VERSION, clearHomeCache, emptyHomeCacheRows, peekHomeCache, readHomeCache, slimCard, writeHomeCache } from "./homeCache";
+import { describe, expect, it, vi } from "vitest";
+import { HOME_CACHE_KEY, HOME_CACHE_ROW_KEYS, HOME_CACHE_VERSION, clearHomeCache, createPersistScheduler, emptyHomeCacheRows, peekHomeCache, readHomeCache, slimCard, writeHomeCache } from "./homeCache";
 
 const card = (id: string, extra: Record<string, any> = {}): Record<string, any> => ({
 	videoId: id,
@@ -149,5 +149,47 @@ describe("clearHomeCache", () => {
 describe("emptyHomeCacheRows", () => {
 	it("gives an empty row set", () => {
 		expect(emptyHomeCacheRows()).toEqual({ reprendre: [], pourToi: [], recemmentAcquis: [], redecouvrir: [], nouveautes: [], jamaisEcoute: [] });
+	});
+});
+
+describe("L9-8 debounced home cache writes", () => {
+	it("six row loads in a burst cost one write", () => {
+		vi.useFakeTimers();
+		try {
+			const write = vi.fn();
+			const p = createPersistScheduler(write, 600);
+			for (let i = 0; i < 6; i++) {
+				p.schedule();
+				vi.advanceTimersByTime(100);
+			}
+			expect(write).not.toHaveBeenCalled();
+			vi.advanceTimersByTime(600);
+			expect(write).toHaveBeenCalledTimes(1);
+			vi.advanceTimersByTime(5000);
+			expect(write).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+	it("flush writes a pending snapshot at once, and only once", () => {
+		vi.useFakeTimers();
+		try {
+			const write = vi.fn();
+			const p = createPersistScheduler(write, 600);
+			p.flush();
+			expect(write).not.toHaveBeenCalled(); // nothing pending
+			p.schedule();
+			p.flush();
+			expect(write).toHaveBeenCalledTimes(1);
+			vi.advanceTimersByTime(1000);
+			expect(write).toHaveBeenCalledTimes(1);
+			p.schedule();
+			p.cancel();
+			vi.advanceTimersByTime(1000);
+			p.flush();
+			expect(write).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
