@@ -15,7 +15,16 @@
 	import AlbumCard from "$components/Offline/AlbumCard.svelte";
 	import OfflineTrackRow from "$components/Offline/OfflineTrackRow.svelte";
 	import MixtapeSheet from "$components/Offline/MixtapeSheet.svelte";
-	import { getOfflineTracks, listCachedAudio, removeOffline, reconcileOfflineList, pinOffline } from "$lib/offline";
+	import {
+		cacheTrackOffline,
+		downloadForOffline,
+		getOfflineTracks,
+		isStableAudioUrl,
+		listCachedAudio,
+		removeOffline,
+		reconcileOfflineList,
+		pinOffline,
+	} from "$lib/offline";
 	import {
 		formatBytes,
 		groupByAlbum,
@@ -171,15 +180,62 @@
 		refresh();
 	}
 
-	// Pin: a track (toggle) or an album ({ tracks, pinned }); pinned entries are never evicted.
+	// Download a not-yet-cached track (stable /localf or /aud URL straight to the
+	// SW, otherwise through the API URL resolution), then pin it. Runs in the
+	// background: the toast announces "en cours de téléchargement" at once and
+	// the list refreshes when the download lands.
+	async function downloadThenPin(t: any): Promise<boolean> {
+		const r = isStableAudioUrl(t?._offlineUrl) ? await cacheTrackOffline(t, t._offlineUrl) : await downloadForOffline(t);
+		if (!r.ok) return false;
+		const p = await pinOffline(t, true);
+		return p.ok;
+	}
+
+	// Pin: a track (toggle) or an album ({ tracks, pinned }); pinned entries are
+	// never evicted. A track not cached yet is downloaded first, then pinned (G6);
+	// the toast is honest about partial results ("3 épinglés sur 5").
 	async function pin(d: any) {
 		const items: any[] = Array.isArray(d?.tracks) ? d.tracks : [d];
-		const pinned = Array.isArray(d?.tracks) ? !!d.pinned : !d?._pinned;
+		const album = Array.isArray(d?.tracks);
+		const pinned = album ? !!d.pinned : !d?._pinned;
 		let ok = 0;
-		for (const t of items) if (await pinOffline(t, pinned)) ok++;
+		let failed = 0;
+		const toDownload: any[] = [];
+		for (const t of items) {
+			const r = await pinOffline(t, pinned);
+			if (r.ok) ok++;
+			else if (pinned && r.reason === "not_cached") toDownload.push(t);
+			else failed++;
+		}
 		await refresh();
-		if (!ok) notify("Ce morceau n'est pas encore dans le cache", "error");
-		else notify(pinned ? (ok > 1 ? `${ok} morceaux épinglés hors-ligne` : "Épinglé hors-ligne : jamais évincé") : (ok > 1 ? `${ok} morceaux désépinglés` : "Désépinglé"), "success");
+		const total = items.length;
+		if (!pinned) {
+			if (!ok) notify("Impossible de désépingler ce morceau", "error");
+			else notify(ok > 1 ? (ok < total ? `${ok} désépinglés sur ${total}` : `${ok} morceaux désépinglés`) : "Désépinglé", "success");
+			return;
+		}
+		if (toDownload.length) {
+			// Background download + pin; one refresh and one toast at the end.
+			void (async () => {
+				let done = 0;
+				for (const t of toDownload) if (await downloadThenPin(t)) done++;
+				await refresh();
+				if (done === toDownload.length) notify(done > 1 ? `${done} morceaux téléchargés et épinglés` : "Téléchargé et épinglé hors-ligne", "success");
+				else notify(`${done} téléchargés et épinglés sur ${toDownload.length} ; télécharge d'abord les autres morceaux`, "error");
+			})();
+		}
+		if (ok === total) {
+			notify(ok > 1 ? `${ok} morceaux épinglés hors-ligne` : "Épinglé hors-ligne : jamais évincé", "success");
+			return;
+		}
+		if (!ok && !toDownload.length) {
+			notify(total > 1 ? "Aucun morceau épinglé : télécharge-les d'abord" : "Télécharge d'abord ce morceau", "error");
+			return;
+		}
+		const parts = [`${ok} ${ok > 1 ? "épinglés" : "épinglé"} sur ${total}`];
+		if (toDownload.length) parts.push(`${toDownload.length} en cours de téléchargement`);
+		if (failed) parts.push(`${failed} ${failed > 1 ? "impossibles" : "impossible"} à épingler`);
+		notify(parts.join(", "), ok ? "success" : "error");
 	}
 </script>
 

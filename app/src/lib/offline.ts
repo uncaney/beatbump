@@ -244,21 +244,23 @@ export function listCachedAudio() {
 }
 /**
  * Pin (or unpin) a cached track: the service worker stamps X-YTM-Pinned on the
- * entry and never evicts it; the local list mirrors the flag (`_pinned`).
+ * entry (and its meta index) and never evicts it; the local list mirrors the
+ * flag (`_pinned`). `reason` when not ok: "not_cached" (download it first),
+ * "no_sw" (no service worker / no answer), "error".
  */
-export async function pinOffline(item: { videoId?: string }, pinned: boolean): Promise<boolean> {
+export type PinResult = { ok: boolean; reason?: "not_cached" | "no_sw" | "error" | string };
+export async function pinOffline(item: { videoId?: string }, pinned: boolean): Promise<PinResult> {
 	const videoId = item && item.videoId ? String(item.videoId) : "";
-	if (!videoId) return false;
-	const r = await swRequest<{ type: "audio-pinned"; ok: boolean }>({ type: "pin-audio", videoId, pinned }, "audio-pinned");
-	const ok = !!(r && r.ok);
-	if (ok) {
-		try {
-			write(read().map((t) => (t.videoId === videoId ? { ...t, _pinned: pinned } : t)));
-		} catch {
-			/* list write best effort */
-		}
+	if (!videoId) return { ok: false, reason: "error" };
+	const r = await swRequest<{ type: "audio-pinned"; ok: boolean; reason?: string }>({ type: "pin-audio", videoId, pinned }, "audio-pinned");
+	if (!r) return { ok: false, reason: "no_sw" };
+	if (!r.ok) return { ok: false, reason: r.reason || "error" };
+	try {
+		write(read().map((t) => (t.videoId === videoId ? { ...t, _pinned: pinned } : t)));
+	} catch {
+		/* list write best effort */
 	}
-	return ok;
+	return { ok: true };
 }
 export function setAudioQuota(bytes: number) {
 	return swRequest<{ type: "audio-quota"; quota: number }>({ type: "set-audio-quota", bytes }, "audio-quota");

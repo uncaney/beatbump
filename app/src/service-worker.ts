@@ -27,6 +27,13 @@
 //   SW  -> page { type: "audio-quota",     quota }
 //   page -> SW  { type: "get-audio-quota" }
 //   SW  -> page { type: "audio-quota",     quota }
+//   page -> SW  { type: "pin-audio",       videoId, pinned }
+//   SW  -> page { type: "audio-pinned",    videoId, pinned, ok, reason? }
+//                 reason "not_cached" = nothing to pin yet (download it first)
+//
+// A pin lives in two places so it survives a re-cache under another URL (G6):
+// the X-YTM-Pinned header of the audio entry AND `pinned` in the meta index;
+// cacheAudio carries it from the previous entry of the same videoId.
 import { build, files, version } from "$service-worker";
 
 const SHELL = `ytm-shell-${version}`;
@@ -78,7 +85,7 @@ const isAudio = (u: URL) =>
 // Meta index: videoId -> {url, bytes, at, lastAccess}
 // ---------------------------------------------------------------------------
 
-type Meta = { url: string; bytes: number; at: number; lastAccess: number };
+type Meta = { url: string; bytes: number; at: number; lastAccess: number; pinned?: boolean };
 
 function metaKey(videoId: string): string {
 	return META_PREFIX + encodeURIComponent(videoId);
@@ -391,7 +398,8 @@ async function listEntries(c: Cache): Promise<Entry[]> {
 			at: sameEntry && meta!.at ? meta!.at : at,
 			lastAccess: sameEntry && meta!.lastAccess ? meta!.lastAccess : at,
 			contentType: r.headers.get("Content-Type") || (r.type === "opaque" ? "opaque" : ""),
-			pinned: r.headers.get(H_PINNED) === "1",
+			// Header first; the meta index is the backup copy of the flag (G6).
+			pinned: r.headers.get(H_PINNED) === "1" || (sameEntry && meta!.pinned === true),
 		});
 	}
 	return out;
@@ -533,10 +541,25 @@ async function cacheAudio(rawUrl: string, videoId: string): Promise<CacheResult>
 	// One entry per videoId: drop the previous URL of this track (if any), then
 	// re-insert this URL. QuotaExceededError → evict the least recently used
 	// entries and retry once; still failing → reason "quota".
+	// The pin of the previous entry (header or meta) is carried over (G6): a
+	// rotated /vp URL, recacheEvicted() or a re-download must not unpin a track.
+	let pinned = false;
 	if (videoId) {
 		const old = await getMeta(videoId);
-		if (old && old.url !== abs) await c.delete(old.url);
+		if (old) {
+			pinned = old.pinned === true;
+			try {
+				const oldResp = await c.match(old.url);
+				if (oldResp && oldResp.headers.get(H_PINNED) === "1") pinned = true;
+			} catch {
+				/* unreadable old entry: the meta flag is all we have */
+			}
+			if (old.url !== abs) await c.delete(old.url);
+		}
 	}
+	const prevSameUrl = await c.match(abs);
+	if (prevSameUrl && prevSameUrl.headers.get(H_PINNED) === "1") pinned = true;
+	if (pinned) headers.set(H_PINNED, "1");
 	await c.delete(abs);
 	const put = () => c.put(abs, new Response(buf, { status: 200, headers }));
 	try {
@@ -551,7 +574,7 @@ async function cacheAudio(rawUrl: string, videoId: string): Promise<CacheResult>
 			return { ok: false, bytes: 0, reason: "quota" + (freed ? "" : " (nothing evictable)") };
 		}
 	}
-	if (videoId) await setMeta(videoId, { url: abs, bytes: buf.byteLength, at: now, lastAccess: now });
+	if (videoId) await setMeta(videoId, { url: abs, bytes: buf.byteLength, at: now, lastAccess: now, pinned });
 	await enforceQuota(c, abs);
 	return { ok: true, bytes: buf.byteLength, cachedUrl: abs };
 }
@@ -644,8 +667,10 @@ self.addEventListener("message", (event) => {
 		if (nowPlaying.videoId) touch(nowPlaying.videoId, null);
 		return;
 	}
-	// page -> SW { type: "pin-audio", videoId, pinned }  ->  { type: "audio-pinned", videoId, pinned, ok }
-	// Re-puts the cached response with the X-YTM-Pinned header; pinned entries are never evicted.
+	// page -> SW { type: "pin-audio", videoId, pinned }  ->  { type: "audio-pinned", videoId, pinned, ok, reason? }
+	// Re-puts the cached response with the X-YTM-Pinned header and mirrors the
+	// flag in the meta index; pinned entries are never evicted.
+	// ok:false reasons: "not_cached" (download it first), "error".
 	if (data.type === "pin-audio" && typeof data.videoId === "string") {
 		const videoId = data.videoId as string;
 		const pinned = !!data.pinned;
@@ -654,14 +679,16 @@ self.addEventListener("message", (event) => {
 				const c = await caches.open(AUDIO_CACHE);
 				const e = (await listEntries(c)).find((x) => x.videoId === videoId);
 				const r = e ? await c.match(e.url) : undefined;
-				if (!e || !r) return reply(ev, { type: "audio-pinned", videoId, pinned, ok: false });
+				if (!e || !r) return reply(ev, { type: "audio-pinned", videoId, pinned, ok: false, reason: "not_cached" });
 				const headers = new Headers(r.headers);
 				if (pinned) headers.set(H_PINNED, "1");
 				else headers.delete(H_PINNED);
 				const body = await r.arrayBuffer();
 				await c.put(e.url, new Response(body, { status: r.status, statusText: r.statusText, headers }));
+				const meta = await getMeta(videoId);
+				if (meta && meta.url === e.url) await setMeta(videoId, { ...meta, pinned });
 				return reply(ev, { type: "audio-pinned", videoId, pinned, ok: true });
-			})().catch(() => reply(ev, { type: "audio-pinned", videoId, pinned, ok: false })),
+			})().catch(() => reply(ev, { type: "audio-pinned", videoId, pinned, ok: false, reason: "error" })),
 		);
 		return;
 	}
