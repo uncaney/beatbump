@@ -143,7 +143,62 @@
 		}
 	}
 
+	// c41b B6-19 "Doublons possibles": albums present in several copies
+	// (lidarr + soulseek), GET local/duplicates paged by DUP_PAGE. Read only:
+	// each copy links to its album page, nothing is deleted from here.
+	interface DupAlbum {
+		id: string;
+		title: string;
+		artist: string;
+		year: string;
+		trackCount: number;
+		source: string;
+		quality?: number;
+		bitrateHint?: string;
+	}
+	interface DupGroup {
+		key: string;
+		albums: DupAlbum[];
+		suggested: string;
+	}
+	const DUP_PAGE = 10;
+	let dupGroups: DupGroup[] = [];
+	let dupTotal = 0;
+	let dupState: "loading" | "ok" | "error" = "loading";
+	let dupBusy = false;
+
+	async function loadDuplicates(offset = 0) {
+		if (dupBusy) return;
+		dupBusy = true;
+		try {
+			const res = await APIClient.fetch(`/api/v1/local/duplicates?limit=${DUP_PAGE}&offset=${offset}`);
+			if (!res.ok) throw new Error(String(res.status));
+			const j = await res.json();
+			const page: DupGroup[] = Array.isArray(j?.groups) ? j.groups : [];
+			dupGroups = offset === 0 ? page : [...dupGroups, ...page];
+			dupTotal = typeof j?.total === "number" ? j.total : dupGroups.length;
+			dupState = "ok";
+		} catch {
+			if (offset === 0) dupState = "error";
+		} finally {
+			dupBusy = false;
+		}
+	}
+
+	const sourceLabel = (s: string) =>
+		s === "ytm" || s === "ytmusic" ? "YouTube" : s === "lidarr" || s === "soulseek" ? s : s || "source inconnue";
+	const dupMeta = (a: DupAlbum) =>
+		[
+			a.year && a.year !== "0001" ? a.year : "",
+			`${fmtInt(a.trackCount)} ${a.trackCount > 1 ? "titres" : "titre"}`,
+			sourceLabel(a.source),
+			a.bitrateHint === "lossless" ? "sans perte" : a.bitrateHint === "lossy" ? "compressé" : "",
+		]
+			.filter(Boolean)
+			.join(" · ");
+
 	onMount(async () => {
+		void loadDuplicates();
 		await Promise.all([loadStats(), loadServedVersion(), probeServiceWorker(), probeStorage()]);
 		probing = false;
 	});
@@ -311,6 +366,77 @@
 				{/if}
 			{/if}
 		</section>
+		<section
+			aria-labelledby="about-duplicates-title"
+			data-testid="about-duplicates"
+			data-state={dupState}
+		>
+			<h2 id="about-duplicates-title">Doublons possibles</h2>
+			{#if dupState === "loading"}
+				<p class="state">Recherche des doublons…</p>
+			{:else if dupState === "error"}
+				<p class="state">Impossible de lire les doublons.</p>
+			{:else if dupTotal === 0}
+				<p
+					class="state"
+					data-testid="about-duplicates-empty"
+				>
+					Aucun album en double.
+				</p>
+			{:else}
+				<p
+					class="hint"
+					data-testid="about-duplicates-total"
+					data-total={dupTotal}
+				>
+					{fmtInt(dupTotal)}
+					{dupTotal > 1 ? "albums présents" : "album présent"} en plusieurs exemplaires (même artiste, même titre). Rien n'est
+					supprimé ici : la copie conseillée a le plus de titres, puis la meilleure qualité. Les mix n'en jouent qu'une.
+				</p>
+				<ul class="dups">
+					{#each dupGroups as g (g.key)}
+						<li
+							class="dup"
+							data-testid="about-duplicates-group"
+							data-key={g.key}
+						>
+							<p class="dup-head">
+								<strong>{g.albums[0]?.artist ?? ""}</strong>
+								<span>{g.albums[0]?.title ?? ""}</span>
+								<span class="muted">· {g.albums.length} exemplaires</span>
+							</p>
+							<ul class="copies">
+								{#each g.albums as a (a.id)}
+									<li data-suggested={a.id === g.suggested ? "true" : "false"}>
+										<a
+											href={`/release?id=${encodeURIComponent(a.id)}`}
+											data-testid="about-duplicates-copy">{a.title}</a
+										>
+										<span class="muted">{dupMeta(a)}</span>
+										{#if a.id === g.suggested}
+											<span
+												class="badge"
+												data-testid="about-duplicates-suggested">conseillé</span
+											>
+										{/if}
+									</li>
+								{/each}
+							</ul>
+						</li>
+					{/each}
+				</ul>
+				{#if dupGroups.length < dupTotal}
+					<button
+						type="button"
+						class="btn-secondary"
+						data-testid="about-duplicates-more"
+						disabled={dupBusy}
+						on:click={() => loadDuplicates(dupGroups.length)}
+						>{dupBusy ? "Chargement…" : `Afficher plus (${fmtInt(dupTotal - dupGroups.length)})`}</button
+					>
+				{/if}
+			{/if}
+		</section>
 	</main>
 {/if}
 
@@ -395,6 +521,48 @@
 	button.btn-secondary {
 		text-decoration: none;
 		margin-top: 0.5rem;
+	}
+	.dups,
+	.copies {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+	}
+	.dup {
+		padding: 0.6rem 0;
+		border-top: 1px solid rgba(218, 218, 218, 0.08);
+	}
+	.dup-head {
+		margin: 0 0 0.3rem;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0 0.4rem;
+		overflow-wrap: anywhere;
+	}
+	.copies li {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0 0.5rem;
+		min-height: 44px;
+		padding-left: 0.75rem;
+		overflow-wrap: anywhere;
+	}
+	.copies a {
+		color: inherit;
+		text-decoration: underline;
+		display: inline-flex;
+		align-items: center;
+		min-height: 44px;
+	}
+	.copies .muted {
+		font-size: var(--text-secondary-size);
+	}
+	.badge {
+		font-size: var(--text-secondary-size);
+		padding: 0.05rem 0.45rem;
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.12);
 	}
 	.diag {
 		margin: 0.75rem 0 0;
