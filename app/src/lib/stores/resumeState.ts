@@ -100,6 +100,22 @@ export function slimQueueItem(item: unknown): Row | null {
 	return out;
 }
 
+/**
+ * PF3-12: the `lastTrack` entry (+layout, Remember Last Track) used to be the
+ * whole current track (loggingContext, menus, every thumbnail size: several
+ * KB per track change). It is the slim queue row with one thumbnail, the
+ * first one, which is the one the home cards read (CarouselItem upsizes it).
+ */
+export function slimLastTrack(item: unknown): Row | null {
+	const out = slimQueueItem(item);
+	if (!out) return null;
+	const first = Array.isArray((item as Row).thumbnails)
+		? (item as Row).thumbnails.find((t: any) => t && typeof t.url === "string")
+		: undefined;
+	if (first) out.thumbnails = [{ url: first.url, width: first.width, height: first.height }];
+	return out;
+}
+
 const finite = (n: unknown, fallback = 0) => (typeof n === "number" && isFinite(n) ? n : fallback);
 const asType = (t: unknown): ResumeMixType => (t === "auto" || t === "playlist" || t === "local" ? t : null);
 

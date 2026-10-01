@@ -627,6 +627,21 @@ const isCover = (u: URL) => u.origin === location.origin && u.pathname === "/cov
 const COVER_TOUCH_THROTTLE_MS = 10 * 60 * 1000;
 const coverLastHit = new Map<string, number>();
 
+// PF3-11: trimCoverCache enumerates the whole cache (keys() + sort); it ran
+// after every put (15-22 per cold home). Now on the first put of each SW
+// lifetime (Android restarts the SW often, so an in-memory counter alone
+// would let the cache grow) and then every COVER_TRIM_EVERY puts; COVER_MAX
+// may be exceeded by at most COVER_TRIM_EVERY - 1 entries in between.
+const COVER_TRIM_EVERY = 25;
+let coverPuts = 0;
+export function coverTrimDue(putsSoFar: number, every = COVER_TRIM_EVERY): boolean {
+	return putsSoFar === 1 || (putsSoFar > 1 && putsSoFar % every === 0);
+}
+function shouldTrimCovers(): boolean {
+	coverPuts++;
+	return coverTrimDue(coverPuts);
+}
+
 async function trimCoverCache(c: Cache): Promise<void> {
 	try {
 		const keys = await c.keys();
@@ -712,7 +727,7 @@ async function coverFetch(req: Request): Promise<Response> {
 		coverLastHit.set(req.url, Date.now());
 		const copy = res.clone();
 		c.put(req.url, copy)
-			.then(() => trimCoverCache(c!))
+			.then(() => (shouldTrimCovers() ? trimCoverCache(c!) : undefined))
 			.catch(() => {});
 	}
 	return res;

@@ -118,3 +118,11 @@ describe("PF3-1: cover 404 memory", () => {
 		expect(m.has("/cover?lid=d", 3)).toBe(true);
 	});
 });
+
+describe("PF3-11: cover cache trim cadence", () => {
+	it("trims on the first put of a SW lifetime, then every 25", async () => {
+		const { coverTrimDue } = await import("./service-worker");
+		const due = Array.from({ length: 80 }, (_, i) => i + 1).filter((n) => coverTrimDue(n));
+		expect(due).toEqual([1, 25, 50, 75]);
+	});
+});

@@ -119,7 +119,6 @@
 
 	let loading = false;
 	let hasData = false;
-	$: console.log(data, carousels);
 	homeChipContext.set({ params: data.params ?? "" });
 </script>
 

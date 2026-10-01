@@ -22,7 +22,7 @@
     import {syncTabs} from "$lib/tabSync.js";
     import {Logger, notify} from "$lib/utils";
     import {SessionListService} from "$stores/list/sessionList";
-    import {restoreResumeState, resumeShortcutClaimed, startResumePersistence} from "$lib/stores/resumeState";
+    import {restoreResumeState, resumeShortcutClaimed, slimLastTrack, startResumePersistence} from "$lib/stores/resumeState";
     import {startNowPlayingSync} from "$lib/stores/nowPlayingSync";
     import {initClientLog} from "$lib/clientLog";
     import {onDestroy, onMount} from "svelte";
@@ -167,7 +167,9 @@
         $settings["playback"]["Remember Last Track"] === true &&
         $currentTrack
     ) {
-        localStorage.setItem("lastTrack", JSON.stringify($currentTrack));
+        // PF3-12: slim row (one thumbnail, no tracking blobs).
+        const slim = slimLastTrack($currentTrack);
+        if (slim) localStorage.setItem("lastTrack", JSON.stringify(slim));
     }
 
     $: if ($fullscreenStore && browser) {
