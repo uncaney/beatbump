@@ -51,7 +51,7 @@
 
 	// "Reprendre" (audit v3 3.3): with an empty box the overlay also lists the
 	// last RESUME_MAX played local tracks (lastTrack + me/stats/recent, the
-	// offline cache as fallback), as playable rows under the recent searches.
+	// offline cache as fallback), as playable rows above the recent searches.
 	// Loaded 150 ms after mount; typing before that cancels the load.
 	const RESUME_MAX = 5;
 	const RESUME_DEBOUNCE_MS = 150;
@@ -79,10 +79,7 @@
 
 	onMount(() => {
 		if (browser) {
-			const stored = localStorage.getItem("recentSearches");
-			if (stored) {
-				recentSearches = JSON.parse(stored);
-			}
+			recentSearches = readRecentSearches();
 			showRecentSearches = true;
 			scheduleResume();
 		}
@@ -213,14 +210,70 @@
 		);
 	}
 
+	// Recent searches (audit v4 3.3): last RECENT_MAX submitted queries under
+	// localStorage `ytm-recent-searches`, shown under "Reprendre" while the box
+	// is empty; click = run the search again, a button clears the list. The
+	// pre-v4 `recentSearches` key is migrated once, then dropped.
+	const RECENT_KEY = "ytm-recent-searches";
+	const RECENT_LEGACY_KEY = "recentSearches";
+	const RECENT_MAX = 5;
+
+	function cleanRecent(v: unknown): string[] {
+		if (!Array.isArray(v)) return [];
+		const out: string[] = [];
+		for (const q of v) {
+			if (typeof q !== "string") continue;
+			const t = q.trim();
+			if (t && !out.includes(t)) out.push(t);
+			if (out.length >= RECENT_MAX) break;
+		}
+		return out;
+	}
+
+	function readRecentSearches(): string[] {
+		try {
+			const stored = localStorage.getItem(RECENT_KEY);
+			if (stored !== null) return cleanRecent(JSON.parse(stored));
+			const legacy = localStorage.getItem(RECENT_LEGACY_KEY);
+			if (legacy === null) return [];
+			const migrated = cleanRecent(JSON.parse(legacy));
+			localStorage.setItem(RECENT_KEY, JSON.stringify(migrated));
+			localStorage.removeItem(RECENT_LEGACY_KEY);
+			return migrated;
+		} catch {
+			return [];
+		}
+	}
+
+	function writeRecentSearches() {
+		try {
+			localStorage.setItem(RECENT_KEY, JSON.stringify(recentSearches));
+		} catch {
+			/* private mode / quota: the list just lives for this overlay */
+		}
+	}
+
 	function addToRecentSearches(searchQuery: string) {
 		if (!browser) return;
+		const q = searchQuery.trim();
+		if (!q) return;
+		recentSearches = [q, ...recentSearches.filter((s) => s !== q)].slice(
+			0,
+			RECENT_MAX,
+		);
+		writeRecentSearches();
+	}
 
-		recentSearches = [
-			searchQuery,
-			...recentSearches.filter((s) => s !== searchQuery),
-		].slice(0, 5);
-		localStorage.setItem("recentSearches", JSON.stringify(recentSearches));
+	function clearRecentSearches() {
+		recentSearches = [];
+		writeRecentSearches();
+		// Nothing left to show on a fresh profile: bring the Tendances in.
+		if (resumeRows.length === 0) void loadTrending();
+	}
+
+	function runRecentSearch(q: string) {
+		query = q;
+		handleSubmit();
 	}
 
 	async function handleSubmit() {
@@ -510,31 +563,6 @@
 			bind:this={listbox}
 			class="suggestions"
 		>
-			{#if showRecentSearches && recentSearches.length > 0}
-				<li class="recent-searches-header group-header">Recent Searches</li>
-				{#each recentSearches as recentQuery}
-					<li
-						tabindex="0"
-						on:click={() => {
-							query = recentQuery;
-							handleSubmit();
-						}}
-						on:keydown={(e) => {
-							if (e.key === " ") {
-								query = recentQuery;
-								handleSubmit();
-							}
-						}}
-					>
-						<Icon
-							name="history"
-							size="1rem"
-							style="color: var(--text-secondary);"
-						/>
-						{recentQuery}
-					</li>
-				{/each}
-			{/if}
 			{#if localBlock.length > 0}
 				<!-- One markup for both local blocks: "Reprendre" (empty box, last
 				     played local tracks) and "Dans ta bibliothèque" (typed query). -->
@@ -575,6 +603,44 @@
 							{/if}
 						</span>
 						<span class="local-badge">{showRecentSearches ? "reprendre" : "bibliothèque"}</span>
+					</li>
+				{/each}
+			{/if}
+			{#if showRecentSearches && recentSearches.length > 0}
+				<li
+					class="recent-searches-header group-header recent-header"
+					data-testid="recent-searches-header"
+				>
+					<span>Recherches récentes</span>
+					<button
+						type="button"
+						class="recent-clear"
+						data-testid="recent-searches-clear"
+						aria-label="Effacer les recherches récentes"
+						on:click|stopPropagation={clearRecentSearches}>Effacer</button
+					>
+				</li>
+				{#each recentSearches as recentQuery (recentQuery)}
+					<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+					<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+					<li
+						tabindex="0"
+						data-testid="recent-search"
+						on:click={() => runRecentSearch(recentQuery)}
+						on:keydown={(e) => {
+							if (e.key === "Enter" || e.key === " ") {
+								e.preventDefault();
+								e.stopPropagation();
+								runRecentSearch(recentQuery);
+							}
+						}}
+					>
+						<Icon
+							name="clock"
+							size="1rem"
+							style="color: var(--text-secondary);"
+						/>
+						<span class="recent-text">{recentQuery}</span>
 					</li>
 				{/each}
 			{/if}
@@ -785,6 +851,36 @@
 			&:hover {
 				background: rgb(255 255 255 / 10%);
 			}
+		}
+
+		li.recent-header {
+			justify-content: space-between;
+			padding-block: 0.25em;
+		}
+
+		.recent-clear {
+			font: inherit;
+			font-size: 0.9em;
+			color: var(--text-secondary);
+			background: none;
+			border: 1px solid hsl(0deg 0% 66.7% / 35%);
+			border-radius: 999px;
+			padding: 0.35em 0.9em;
+			min-height: 2.25rem;
+			cursor: pointer;
+
+			&:hover,
+			&:focus-visible {
+				color: inherit;
+				border-color: hsl(0deg 0% 66.7% / 70%);
+			}
+		}
+
+		.recent-text {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
 		}
 
 		li.group-header {
