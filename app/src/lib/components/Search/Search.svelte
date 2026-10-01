@@ -36,6 +36,11 @@
 	let localTimer: ReturnType<typeof setTimeout> | null = null;
 	let localAbort: AbortController | null = null;
 	let localSeq = 0;
+	// YouTube suggestions get the same guard (audit v3 G12): a slow "da"
+	// response must not overwrite the "daft" one that arrived first, nor
+	// reopen the list after the box was emptied / submitted / closed.
+	let ytAbort: AbortController | null = null;
+	let ytSeq = 0;
 
 	$: localRows = [
 		...localSongs.slice(0, LOCAL_SONGS_MAX),
@@ -111,7 +116,7 @@
 				recent = [];
 			}
 		}
-		resumeRows = buildResumeRow(last, recent, [], RESUME_MAX * 4)
+		resumeRows = buildResumeRow(last, recent, RESUME_MAX * 4)
 			.filter((it) => isLocalTrackId(it?.videoId))
 			.slice(0, RESUME_MAX) as Item[];
 	}
@@ -151,6 +156,16 @@
 			localAbort = null;
 		}
 		localSeq++;
+		cancelYt();
+	}
+
+	/** Drops the in-flight YouTube suggestions request, if any. */
+	function cancelYt() {
+		if (ytAbort) {
+			ytAbort.abort();
+			ytAbort = null;
+		}
+		ytSeq++;
 	}
 
 	/** Debounced (150 ms) local lookup; a newer keystroke cancels the older one. */
@@ -318,16 +333,32 @@
 		return false;
 	}
 	const typeahead = debounce(async () => {
+		cancelYt();
 		if (!query) {
 			results = [];
 			showRecentSearches = true;
 			return;
 		}
 		showRecentSearches = false;
-		const response = await APIClient.fetch(
-			`/api/v1/get_search_suggestions.json?q=` + encodeURIComponent(query),
-		);
-		results = await response.json();
+		const controller = new AbortController();
+		ytAbort = controller;
+		const seq = ytSeq;
+		try {
+			const response = await APIClient.fetch(
+				`/api/v1/get_search_suggestions.json?q=` + encodeURIComponent(query),
+				{ signal: controller.signal },
+			);
+			const data = await response.json();
+			// A newer keystroke (or a submit / close) superseded this lookup.
+			if (seq !== ytSeq) return;
+			results = Array.isArray(data) ? data : [];
+		} catch (e) {
+			if ((e as Error)?.name === "AbortError") return;
+			if (seq !== ytSeq) return;
+			results = [];
+		} finally {
+			if (ytAbort === controller) ytAbort = null;
+		}
 	}, 250);
 </script>
 
