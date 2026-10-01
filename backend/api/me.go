@@ -316,6 +316,11 @@ func MeRecordPlayHandler(c echo.Context) error {
 	if ref == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no ref"})
 	}
+	// S1/S2: e2e harness plays (Playwright HeadlessChrome / X-Ytm-Harness: 1)
+	// never enter the history unless YTM_STATS_INCLUDE_HARNESS=1.
+	if harnessRequest(c.Request()) {
+		return c.JSON(http.StatusOK, map[string]interface{}{"ignored": true})
+	}
 	artistID := ""
 	if ai, ok := m["artistInfo"].(map[string]interface{}); ok {
 		if arr, ok := ai["artist"].([]interface{}); ok && len(arr) > 0 {
@@ -329,7 +334,7 @@ func MeRecordPlayHandler(c echo.Context) error {
 		source = "local"
 	}
 	raw, _ := json.Marshal(m)
-	ev := db.PlayEvent{ProfileID: pid, Ref: ref, Title: title, Artist: artist, ArtistID: artistID, Source: source, Data: string(raw), PlayedAt: time.Now()}
+	ev := db.PlayEvent{ProfileID: pid, Ref: ref, Title: title, Artist: artist, ArtistID: artistID, Album: itemAlbum(string(raw)), Source: source, Data: string(raw), PlayedAt: time.Now()}
 	db.DB.Create(&ev)
 	return c.JSON(http.StatusOK, map[string]interface{}{"ok": true})
 }
@@ -371,31 +376,6 @@ func MeRecentHandler(c echo.Context) error {
 		Where("profile_id = ?", pid).
 		Group("ref").Order("played_at desc").Limit(n).Scan(&rows)
 	return c.JSON(http.StatusOK, map[string]interface{}{"items": rehydrate(rows)})
-}
-
-// most played, count per ref desc
-func MeTopHandler(c echo.Context) error {
-	pid := profileID(c)
-	n := clampLimit(c, 50, 200)
-	var rows []struct {
-		Ref   string
-		Data  string
-		Cnt   int
-		Title string
-	}
-	db.DB.Model(&db.PlayEvent{}).
-		Select("ref, max(data) as data, count(*) as cnt, max(title) as title").
-		Where("profile_id = ?", pid).
-		Group("ref").Order("cnt desc").Limit(n).Scan(&rows)
-	items := make([]json.RawMessage, 0, len(rows))
-	counts := make([]map[string]interface{}, 0, len(rows))
-	for _, r := range rows {
-		if r.Data != "" {
-			items = append(items, json.RawMessage(r.Data))
-		}
-		counts = append(counts, map[string]interface{}{"ref": r.Ref, "title": r.Title, "count": r.Cnt})
-	}
-	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "counts": counts})
 }
 
 // MeMixHandler — "Made for you": a personalized library mix seeded by the

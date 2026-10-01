@@ -125,6 +125,7 @@ func newServer() *echo.Echo {
 	me.POST("/history", api.MeRecordPlayHandler)
 	me.GET("/stats/recent", api.MeRecentHandler)
 	me.GET("/stats/top", api.MeTopHandler)
+	me.GET("/stats/summary", api.MeStatsSummaryHandler)
 	me.POST("/acquire", api.MeAcquireHandler)
 	me.GET("/acquire", api.MeAcquireStatusHandler)
 	me.GET("/mix", api.MeMixHandler)
