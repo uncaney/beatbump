@@ -1,6 +1,17 @@
 <script lang="ts">
 	// Tab bar linking the self-hosted collection browse pages + the IDB library.
+	import { onMount } from "svelte";
+
 	export let active = "";
+	let nav: HTMLElement;
+	// Phones: the bar scrolls horizontally (one row), so bring the active tab
+	// into view on load when it sits past the right edge.
+	onMount(() => {
+		const el = nav?.querySelector<HTMLElement>("a.active");
+		if (!el || !nav || nav.scrollWidth <= nav.clientWidth) return;
+		const left = el.getBoundingClientRect().left - nav.getBoundingClientRect().left + nav.scrollLeft;
+		if (left + el.offsetWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, left - 16);
+	});
 	const tabs = [
 		{ key: "for-you", label: "For You", href: "/library/for-you" },
 		{ key: "playlists", label: "Playlists", href: "/library" },
@@ -17,7 +28,10 @@
 	];
 </script>
 
-<nav class="collnav">
+<nav
+	class="collnav"
+	bind:this={nav}
+>
 	{#each tabs as t}
 		<a
 			href={t.href}
@@ -59,6 +73,25 @@
 			align-items: center;
 			min-height: 44px;
 			padding: 0.35rem 0.9rem;
+		}
+	}
+	/* Phones (audit v4 3.4): one horizontally scrolling row (~52px) instead of
+	   three wrapped rows (141px) before the page title. A chip cut at the right
+	   edge is the scroll affordance; no scrollbar. */
+	@media screen and (max-width: 719px) {
+		.collnav {
+			flex-wrap: nowrap;
+			overflow-x: auto;
+			overscroll-behavior-x: contain;
+			scrollbar-width: none;
+			-webkit-overflow-scrolling: touch;
+		}
+		.collnav::-webkit-scrollbar {
+			display: none;
+		}
+		a {
+			flex: 0 0 auto;
+			white-space: nowrap;
 		}
 	}
 </style>

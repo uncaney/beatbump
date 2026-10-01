@@ -286,10 +286,10 @@
 	<header class="head">
 		<div class="titles">
 			<h1>Hors-ligne</h1>
-			<p class="stats">
-				{#if tracks.length === 0}
-					Aucun morceau en cache
-				{:else}
+			<!-- No counter on an empty cache (audit v4 3.6): the EmptyState below
+			     already says it, "Aucun morceau en cache" was the same message twice. -->
+			{#if tracks.length > 0}
+				<p class="stats">
 					{tracks.length} {tracks.length > 1 ? "morceaux" : "morceau"}
 					{#if size}<span class="dot">·</span>{size}{/if}
 					{#if albums.length}<span class="dot">·</span>{albums.length} {albums.length > 1 ? "albums" : "album"}{/if}
@@ -299,13 +299,14 @@
 					{#if evictedCount}<span class="dot">·</span><span class="evicted"
 							>{evictedCount} à retélécharger</span
 						>{/if}
-				{/if}
-			</p>
+				</p>
+			{/if}
 		</div>
-		<span
-			class="status"
-			class:off={!online}>{online ? "● En ligne" : "● Hors-ligne"}</span
-		>
+		<!-- Only the offline state is worth a badge (audit v4 3.6): "● En ligne"
+		     was a 10.8px green line under the counter with nothing to act on. -->
+		{#if !online}
+			<span class="status off">● Hors-ligne</span>
+		{/if}
 	</header>
 	{#if tracks.length === 0}
 		<!-- Empty state with one action (audit 2.4): the explanation lives here
