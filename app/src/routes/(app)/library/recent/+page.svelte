@@ -5,6 +5,7 @@
 	import { APIClient } from "$lib/api";
 	import { getTop } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
+	import { formatCountFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 	import { groupByDay, RECENT_EVENTS_URL, type DayGroup } from "./_byDay";
@@ -89,16 +90,16 @@
 
 <main>
 	<CollectionNav active="recent" />
-	<h1>Listening</h1>
+	<h1>Écoutes</h1>
 
 	<section>
-		<h2>Recently played</h2>
+		<h2>Écoutés récemment</h2>
 		{#if loading}
-			<p class="state">Loading…</p>
+			<p class="state">Chargement…</p>
 		{:else if offline}
 			<MeOffline text="Ton historique reviendra avec le réseau ; tes morceaux en cache restent dans Hors-ligne." />
 		{:else if recent.length === 0}
-			<p class="state">Nothing played yet.</p>
+			<p class="state">Rien d'écouté pour l'instant.</p>
 		{:else if days && days.length > 0}
 			{#each days as g (g.key)}
 				<section
@@ -108,7 +109,7 @@
 				>
 					<div class="day-head">
 						<h3>{g.label}</h3>
-						<span class="day-count">{g.items.length} titre{g.items.length > 1 ? "s" : ""}</span>
+						<span class="day-count">{formatCountFr(g.items.length, "titre")}</span>
 						<button
 							type="button"
 							class="replay btn-reset btn-secondary"
@@ -135,7 +136,7 @@
 
 	{#if showTop}
 		<section>
-			<h2>Most played</h2>
+			<h2>Les plus écoutés</h2>
 			<div class="grid">
 				{#each top as item (item.videoId || item.title)}
 					<div class="cell"><Listing data={item} /></div>

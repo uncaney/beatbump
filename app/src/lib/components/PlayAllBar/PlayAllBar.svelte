@@ -2,7 +2,7 @@
 	context="module"
 	lang="ts"
 >
-	// X1 "Lecture en un geste": "Lire tout" / "Aléatoire" over any list of
+	// X1 "Lecture en un geste": "Tout lire" / "Aléatoire" over any list of
 	// track rows (Favoris, playlist serveur, artiste local, journée d'écoute).
 	// The queue is the rows as they are, next/previous stay inside the list.
 	// I20: a list of library rows only is a "local" mix (C4 library
@@ -67,6 +67,7 @@
 	import Icon from "$components/Icon/Icon.svelte";
 	import { playAllContextFor } from "$lib/stores/list/playbackContext";
 	import { APIClient } from "$lib/api";
+	import { formatCountFr } from "$lib/utils/formatFr";
 
 	/** Rows to play (non-playable rows are ignored). */
 	export let tracks: any[] = [];
@@ -108,7 +109,7 @@
 
 	$: playable = playableTracks(tracks);
 	$: count = typeof total === "number" && total > 0 ? total : playable.length;
-	$: label = `${count} titre${count > 1 ? "s" : ""}`;
+	$: label = formatCountFr(count, "titre");
 	$: radioSeed = radioSeedFor($page.url.pathname);
 
 	async function start(shuffle: boolean) {
@@ -168,7 +169,7 @@
 				name="play"
 				size="1.1em"
 			/>
-			<span>Lire tout</span>
+			<span>Tout lire</span>
 		</button>
 		<button
 			type="button"
@@ -215,7 +216,7 @@
 		margin: 0.5rem 0 1rem;
 	}
 	// Shape, colours, 44px floor and plain case come from the button system
-	// (global/redesign/modules/_button.scss: .btn-primary "Lire tout",
+	// (global/redesign/modules/_button.scss: .btn-primary "Tout lire",
 	// .btn-secondary "Aléatoire"); only the busy state lives here.
 	.pab-btn:disabled {
 		cursor: progress;

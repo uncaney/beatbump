@@ -27,10 +27,10 @@
 		{ label: formatBytesFr(1 * GB), bytes: 1 * GB },
 		{ label: formatBytesFr(2 * GB), bytes: 2 * GB },
 		{ label: formatBytesFr(5 * GB), bytes: 5 * GB },
-		{ label: "Unlimited", bytes: 0 },
+		{ label: "Illimité", bytes: 0 },
 	];
 	const SW_UNAVAILABLE =
-		"Offline cache unavailable: the service worker did not answer (first visit, private window, or reload needed).";
+		"Cache hors-ligne indisponible : le service worker n'a pas répondu (première visite, fenêtre privée ou rechargement nécessaire).";
 
 	let loading = true;
 	let error = "";
@@ -100,7 +100,7 @@
 				quotaValue = quota > 0 ? quota : 0;
 			}
 		} catch (e) {
-			error = `Could not read the offline cache: ${(e as Error)?.message ?? e}`;
+			error = `Impossible de lire le cache hors-ligne : ${(e as Error)?.message ?? e}`;
 		} finally {
 			loading = false;
 		}
@@ -129,11 +129,11 @@
 				error = SW_UNAVAILABLE;
 			} else {
 				quota = typeof r.quota === "number" ? r.quota : Number(quotaValue);
-				message = `Offline quota set to ${fmtQuota(quota)}.`;
+				message = `Limite hors-ligne réglée sur ${fmtQuota(quota)}.`;
 				await refresh();
 			}
 		} catch (e) {
-			error = `Could not change the quota: ${(e as Error)?.message ?? e}`;
+			error = `Impossible de changer la limite : ${(e as Error)?.message ?? e}`;
 		} finally {
 			busy = "";
 		}
@@ -172,10 +172,10 @@
 			await reconcileOfflineList().catch(() => null);
 			await refresh();
 			message = failed
-				? `Offline cache cleared, ${failed} entr${failed === 1 ? "y" : "ies"} could not be removed.`
-				: "Offline cache cleared.";
+				? `Cache hors-ligne vidé, ${formatCountFr(failed, "entrée")} impossible${failed > 1 ? "s" : ""} à retirer.`
+				: "Cache hors-ligne vidé.";
 		} catch (e) {
-			error = `Could not clear the offline cache: ${(e as Error)?.message ?? e}`;
+			error = `Impossible de vider le cache hors-ligne : ${(e as Error)?.message ?? e}`;
 		} finally {
 			busy = "";
 			confirmClear = false;
@@ -195,10 +195,10 @@
 				error = SW_UNAVAILABLE;
 			} else {
 				await refresh();
-				message = `Offline list re-synced: ${formatCountFr(l.length, "morceau", "morceaux")} listed.`;
+				message = `Liste hors-ligne resynchronisée : ${formatCountFr(l.length, "morceau", "morceaux")}.`;
 			}
 		} catch (e) {
-			error = `Could not re-sync the offline list: ${(e as Error)?.message ?? e}`;
+			error = `Impossible de resynchroniser la liste hors-ligne : ${(e as Error)?.message ?? e}`;
 		} finally {
 			busy = "";
 		}
@@ -216,7 +216,7 @@
 >
 	<span
 		class="h5"
-		id="offline-heading">Offline</span
+		id="offline-heading">Hors-ligne</span
 	>
 
 	<div class="setting">
@@ -224,10 +224,10 @@
 			for="offline-autocache"
 			id="offline-autocache-label"
 		>
-			Save every played track for offline
+			Garder hors-ligne chaque morceau écouté
 			<span id="offline-autocache-desc"
-				>Tracks you play are kept on this device so they play without a
-				connection, within the quota below.</span
+				>Les morceaux que tu écoutes restent sur cet appareil et se jouent sans
+				connexion, dans la limite ci-dessous.</span
 			>
 		</label>
 		<span class="switch-wrap">
@@ -251,15 +251,15 @@
 	<div class="setting">
 		<!-- svelte-ignore a11y-label-has-associated-control -->
 		<label id="offline-cache-label">
-			Cached audio
+			Audio en cache
 			<span
 				id="offline-cache-status"
 				aria-live="polite"
 			>
 				{#if loading}
-					Loading…
+					Chargement…
 				{:else if error && !entries.length}
-					Unknown
+					Inconnu
 				{:else}
 					<!-- Audit v8 TOP 9: same words and units as the Hors-ligne page
 					     ("4 morceaux · 40 Mo"): morceau / Mo / Go / sur. -->
@@ -272,8 +272,8 @@
 		<span
 			id="offline-resync-desc"
 			class="sr-only"
-			>Rebuilds the offline track list from what is really cached on this
-			device.</span
+			>Reconstruit la liste hors-ligne à partir de ce qui est vraiment en cache
+			sur cet appareil.</span
 		>
 		<!-- Disabled while the status shows "0 tracks": there is nothing to
 		     re-sync (audit v3 TOP 10 #10); the title says why. -->
@@ -288,7 +288,7 @@
 				: "Reconstruit la liste hors-ligne à partir du cache de cet appareil"}
 			on:click={doResync}
 		>
-			{busy === "resync" ? "Re-syncing…" : "Re-sync list"}
+			{busy === "resync" ? "Resynchronisation…" : "Resynchroniser la liste"}
 		</button>
 	</div>
 
@@ -319,9 +319,9 @@
 
 	<div class="setting">
 		<label for="offline-quota">
-			Offline storage limit
+			Limite du stockage hors-ligne
 			<span id="offline-quota-desc"
-				>Oldest tracks are removed first once the limit is reached.</span
+				>Une fois la limite atteinte, les morceaux les plus anciens partent en premier.</span
 			>
 		</label>
 		<div class="select">
@@ -334,7 +334,7 @@
 				on:change={onQuotaChange}
 			>
 				{#if customQuota}
-					<option value={quota}>Custom ({fmtBytes(quota)})</option>
+					<option value={quota}>Personnalisée ({fmtBytes(quota)})</option>
 				{/if}
 				{#each QUOTA_OPTIONS as opt}
 					<option value={opt.bytes}>{opt.label}</option>
@@ -348,10 +348,10 @@
 			for="offline-clear"
 			id="offline-clear-label"
 		>
-			Clear offline cache
+			Vider le cache hors-ligne
 			<span id="offline-clear-desc"
-				>Removes every cached track from this device. Your playlists and
-				favorites are kept.</span
+				>Retire de cet appareil tous les morceaux en cache. Tes playlists et
+				tes favoris sont conservés.</span
 			>
 		</label>
 		{#if !confirmClear}
@@ -364,7 +364,7 @@
 				bind:this={clearButton}
 				on:click={askClear}
 			>
-				Clear offline cache
+				Vider le cache hors-ligne
 			</button>
 		{:else}
 			<div
@@ -373,9 +373,9 @@
 				aria-labelledby="offline-clear-confirm-text"
 			>
 				<span id="offline-clear-confirm-text"
-					>Delete {formatCountFr(cachedTracks, "cached morceau", "cached morceaux")} ({fmtBytes(
+					>Supprimer {formatCountFr(cachedTracks, "morceau", "morceaux")} en cache ({fmtBytes(
 						total,
-					)})? This cannot be undone.</span
+					)}) ? C'est définitif.</span
 				>
 				<div class="confirm-actions">
 					<button
@@ -386,7 +386,7 @@
 						bind:this={confirmButton}
 						on:click={doClear}
 					>
-						{busy === "clear" ? "Clearing…" : "Yes, delete"}
+						{busy === "clear" ? "Suppression…" : "Oui, supprimer"}
 					</button>
 					<button
 						type="button"
@@ -395,7 +395,7 @@
 						disabled={!!busy}
 						on:click={cancelClear}
 					>
-						Cancel
+						Annuler
 					</button>
 				</div>
 			</div>
@@ -414,7 +414,7 @@
 				id="offline-retry"
 				class="btn-reset btn"
 				disabled={loading || !!busy}
-				on:click={refresh}>Retry</button
+				on:click={refresh}>Réessayer</button
 			>
 		</p>
 	{/if}
