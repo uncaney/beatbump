@@ -407,6 +407,17 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		this._volumeStore.set(value);
 	}
 
+	/**
+	 * Transient volume (sleep-timer fade): drives the media element only, so
+	 * neither the volume store nor `localStorage.volume` records the fade (a
+	 * tab closed mid-fade used to reopen near silent, G11). `setVolume()`
+	 * restores the persisted level afterwards.
+	 */
+	public fadeTo(value: number) {
+		if (!this.player) return;
+		this.player.volume = Math.min(1, Math.max(0, value));
+	}
+
 	public dispose() {
 		const keys = objectKeys(this.audioNodeListeners);
 		for (const key of keys) {
