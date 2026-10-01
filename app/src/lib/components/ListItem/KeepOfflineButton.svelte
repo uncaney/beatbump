@@ -5,7 +5,11 @@
 	// I12: the batch runs in the module store `keepJobs` (keyed by source):
 	// leaving the page does not cancel it, only "Annuler" does, and the
 	// button shows the running batch again when the page is reopened.
+	// UX2 (cycle 35): `compact` renders a 44px corner .icon-btn (download
+	// pictogram, "9/14" while running, green when ready) for dense grids such
+	// as the Mixes cards; same testid / data-state / data-ready / data-total.
 	import { page } from "$app/stores";
+	import Icon from "$components/Icon/Icon.svelte";
 	import { getOfflineTracks } from "$lib/offline";
 	import { cancelKeepJob, findKeepJob, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepProgress } from "$lib/offlineBatch";
 	import { notify } from "$lib/utils";
@@ -17,6 +21,8 @@
 	export let sourceKey: string | null = null;
 	/** data-testid of the button (HL6: "mix-keep" on a mix card). */
 	export let testid = "keep-offline";
+	/** UX2: icon-only variant (aria-label "Garder hors-ligne", status in the title). */
+	export let compact = false;
 
 	// $page (not `location`): a same-route navigation (release?id=A → B) reuses this component.
 	$: key = sourceKey || ($page?.url ? $page.url.pathname + $page.url.search : "");
@@ -65,6 +71,49 @@
 	}
 </script>
 
+{#if compact}
+	<span class="keep-offline compact">
+		<button
+			type="button"
+			class="keep-icon icon-btn"
+			data-testid={testid}
+			data-state={state}
+			data-ready={progress ? progress.ready : 0}
+			data-total={progress ? progress.total : 0}
+			aria-label="Garder hors-ligne"
+			title={label}
+			disabled={running}
+			on:click|stopPropagation={start}
+		>
+			{#if running && progress && progress.total}
+				<span
+					class="keep-count"
+					aria-live="polite">{progress.ready}/{progress.total}</span
+				>
+			{:else}
+				<Icon
+					name="download"
+					size="1.25em"
+				/>
+			{/if}
+		</button>
+		{#if running}
+			<button
+				type="button"
+				class="keep-icon icon-btn"
+				data-testid="keep-offline-cancel"
+				aria-label="Annuler"
+				title="Annuler"
+				on:click|stopPropagation={cancel}
+			>
+				<Icon
+					name="x"
+					size="1.1em"
+				/>
+			</button>
+		{/if}
+	</span>
+{:else}
 <span class="keep-offline">
 	<button
 		type="button"
@@ -87,6 +136,7 @@
 		>
 	{/if}
 </span>
+{/if}
 
 <style lang="scss">
 	.keep-offline {
@@ -107,5 +157,28 @@
 			// Green is the state colour: "Prêt hors-ligne", border only.
 			border-color: rgba(120, 220, 150, 0.6);
 		}
+	}
+	.compact {
+		gap: 0;
+		flex-wrap: nowrap;
+	}
+	// Round, translucent so it reads over a card; 44px from .icon-btn.
+	.keep-icon {
+		border-radius: 50%;
+		background-color: hsl(0deg 0% 0% / 35%);
+		&:hover {
+			background-color: hsl(0deg 0% 0% / 55%);
+		}
+		&:disabled {
+			cursor: progress;
+		}
+		&[data-state="ready"] {
+			color: rgb(120, 220, 150);
+		}
+	}
+	.keep-count {
+		font-size: 0.75rem;
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
 	}
 </style>
