@@ -267,6 +267,8 @@
 	// minimum, transparent background with a 1px rgba(255,255,255,.35) border
 	// (the global %button-base paints a solid white pill, which made the
 	// unpinned pin look "active"). Pinned = green border + icon.
+	// The minima carry a px floor (audit v4 TOP 3): the mobile root font is
+	// 12px, so 2.75rem alone collapsed to 33x27.
 	.pin,
 	.rm,
 	.recache,
@@ -274,10 +276,10 @@
 	.confirm-no {
 		flex: 0 0 auto;
 		box-sizing: border-box;
-		min-width: 2.75rem; // 44px
-		min-height: 2.25rem; // 36px
-		width: 2.75rem;
-		height: 2.25rem;
+		min-width: max(2.75rem, 44px);
+		min-height: max(2.25rem, 36px);
+		width: auto;
+		height: auto;
 		padding: 0;
 		margin: 0;
 		display: grid;
@@ -328,7 +330,7 @@
 	.confirm-yes,
 	.confirm-no {
 		width: auto;
-		min-width: 2.75rem;
+		min-width: max(2.75rem, 44px);
 		padding: 0 0.6rem;
 		font-size: 0.85rem;
 		font-weight: 600;

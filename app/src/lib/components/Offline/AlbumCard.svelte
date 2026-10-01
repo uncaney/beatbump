@@ -218,7 +218,7 @@
 	.info {
 		flex: 1 1 auto;
 		min-width: 0;
-		min-height: 2.75rem;
+		min-height: max(2.75rem, 44px);
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
@@ -285,8 +285,12 @@
 		gap: 0.3rem;
 	}
 	.btn {
-		width: 2.75rem; // 44px touch target
-		height: 2.75rem;
+		// 44px touch target with a px floor: the mobile root font is 12px, so
+		// 2.75rem alone collapsed to 33px (audit v4 TOP 3).
+		min-width: max(2.75rem, 44px);
+		min-height: max(2.75rem, 44px);
+		width: auto;
+		height: auto;
 		padding: 0;
 		border-radius: 999px;
 		display: grid;
