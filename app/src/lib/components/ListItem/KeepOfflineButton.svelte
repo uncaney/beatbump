@@ -66,7 +66,7 @@
 <span class="keep-offline">
 	<button
 		type="button"
-		class="keep-btn"
+		class="keep-btn btn-reset"
 		data-testid="keep-offline"
 		data-state={state}
 		data-ready={progress ? progress.ready : 0}
@@ -79,7 +79,7 @@
 	{#if running}
 		<button
 			type="button"
-			class="keep-btn cancel"
+			class="keep-btn cancel btn-reset"
 			data-testid="keep-offline-cancel"
 			on:click|stopPropagation={cancel}>Annuler</button
 		>
@@ -97,9 +97,12 @@
 		background: rgba(255, 255, 255, 0.1);
 		border: 1px solid rgba(255, 255, 255, 0.2);
 		border-radius: 2rem;
+		// btn-reset: own colour, no title-casing, 44px touch target even with
+		// the 12px mobile root (2.75rem = 33px there, so the px floor wins).
 		color: inherit;
+		text-transform: none;
 		padding: 0.45rem 1rem;
-		min-height: 44px;
+		min-height: max(2.75rem, 44px);
 		cursor: pointer;
 		font: inherit;
 		&:disabled {

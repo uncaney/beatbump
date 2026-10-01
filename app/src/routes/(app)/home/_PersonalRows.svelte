@@ -123,6 +123,7 @@
 			<div class="resume-queue">
 				<button
 					type="button"
+					class="btn-reset"
 					data-testid="resume-remote"
 					disabled={restoringRemote}
 					on:click={resumeRemote}
@@ -135,6 +136,7 @@
 			<div class="resume-queue">
 				<button
 					type="button"
+					class="btn-reset"
 					data-testid="resume-queue"
 					disabled={resuming}
 					on:click={resumeQueue}
@@ -195,13 +197,27 @@
 	.resume-queue {
 		padding: 0.5em 0 0;
 	}
+	/* btn-reset: the pill keeps its own white colour (it was black-on-dark under
+	   the global button rule), plain case, and a 44px touch target on phones. */
 	.resume-queue button {
 		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		display: inline-flex;
+		align-items: center;
+		min-height: max(2.75rem, 44px);
 		padding: 0.55em 1.1em;
 		border-radius: 999px;
+		border: 1px solid #fff;
+		background: #fff;
+		color: #0f0f0f;
+		font-weight: 600;
+		text-transform: none;
 		cursor: pointer;
+	}
+	.resume-queue button:disabled {
+		opacity: 0.6;
+		cursor: progress;
 	}
 </style>

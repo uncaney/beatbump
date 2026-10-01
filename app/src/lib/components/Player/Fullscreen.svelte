@@ -707,7 +707,7 @@
 							{#if data?.artistInfo?.artist?.at(0)?.text}
 								<button
 									type="button"
-									class="np-artist"
+									class="np-artist btn-reset"
 									title="Voir l'artiste"
 									on:click|stopPropagation={mobileViewArtist}
 									>{data.artistInfo.artist.at(0)?.text}</button

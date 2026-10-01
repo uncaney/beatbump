@@ -125,7 +125,7 @@
 	>
 		<button
 			type="button"
-			class="pab-btn primary"
+			class="pab-btn primary btn-reset"
 			data-testid="play-all"
 			disabled={busy}
 			on:click={() => start(false)}
@@ -138,7 +138,7 @@
 		</button>
 		<button
 			type="button"
-			class="pab-btn"
+			class="pab-btn btn-reset"
 			data-testid="play-shuffle"
 			disabled={busy}
 			on:click={() => start(true)}
@@ -169,12 +169,15 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.4rem;
-		min-height: 2.5rem;
+		// btn-reset: keep own colour/weight, no title-casing, and a 44px touch
+		// target on phones (2.75rem = 33px at the 12px mobile root, px floor wins).
+		min-height: max(2.75rem, 44px);
 		padding: 0.45rem 1rem;
 		border-radius: 2rem;
 		border: 1px solid rgba(255, 255, 255, 0.25);
 		background: rgba(255, 255, 255, 0.08);
 		color: inherit;
+		text-transform: none;
 		font-weight: 600;
 		cursor: pointer;
 	}

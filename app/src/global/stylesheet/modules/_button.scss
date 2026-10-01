@@ -81,7 +81,15 @@ $focus-color: #1c1c1c;
 	}
 }
 
-button:not(.icon-btn),
+// `button:not(.icon-btn)` forces `color: #0f0f0f !important`, title-case
+// (`text-transform: capitalize`) and a fixed em padding/height on EVERY plain
+// button in the app. Cycle 18+ components (KeepOfflineButton, PlayAllBar, the
+// home "Reprendre la file" pill, the fullscreen artist button) carry their own
+// colour, casing and 44px touch size, which this rule overrode (audit v7 3.0).
+// `.btn-reset` is the documented opt-out: a button carrying it keeps its own
+// styles. It never disables `.icon-btn` handling. Apply it sparingly, only to
+// components that fully style themselves.
+button:not(.icon-btn):not(.btn-reset),
 .button {
 	@extend %button-base;
 }
