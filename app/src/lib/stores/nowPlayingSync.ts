@@ -12,7 +12,14 @@
  * The top half is pure (unit-tested); the runtime half loads the player,
  * the session list and the API client lazily.
  */
-import { RESUME_KEY, buildResumeState, parseResumeState, writeResumeState, type ResumeState } from "./resumeState";
+import {
+	RESUME_KEY,
+	buildResumeState,
+	parseResumeState,
+	readResumeState,
+	writeResumeState,
+	type ResumeState,
+} from "./resumeState";
 
 export const DEVICE_ID_KEY = "ytm-device-id";
 export const REMOTE_CONSUMED_KEY = "ytm-remote-consumed";
@@ -116,11 +123,28 @@ export interface RemoteNowPlaying {
 	updatedAt: number;
 }
 
+/** J3: the `ytm-remote-consumed` value, per device: "<deviceId>|<updatedAt>". */
+export function consumedMarker(deviceId: string, updatedAt: number): string {
+	return `${deviceId}|${updatedAt}`;
+}
+
+/** Parse a consumed marker; a legacy value is the bare updatedAt (no device). */
+function parseConsumed(raw: string | null | undefined): { deviceId: string | null; at: number } | null {
+	if (!raw) return null;
+	const i = raw.lastIndexOf("|");
+	const at = Number(i >= 0 ? raw.slice(i + 1) : raw);
+	if (!isFinite(at) || at <= 0) return null;
+	return { deviceId: i > 0 ? raw.slice(0, i) : null, at };
+}
+
 /**
  * The card rule: offer the server state when it comes from ANOTHER device,
- * is more than REMOTE_NEWER_MS newer than the local `resumeState.savedAt`
- * (0 when there is none), carries a playable queue and was not already
- * consumed on this device. Returns the parsed state (position applied), else null.
+ * is more than REMOTE_NEWER_MS newer than the LIVE local `resumeState.savedAt`
+ * (0 when there is none; with I7 it only moves when playback moves, so a
+ * device that is listening never sees the card), carries a playable queue
+ * and was not consumed on this device: after a click on device X's offer,
+ * X's next pushes are ignored until they are REMOTE_NEWER_MS past the
+ * consumed one (J3). Returns the parsed state (position applied), else null.
  */
 export function remoteResumeOffer(
 	remote: RemoteNowPlaying | null | undefined,
@@ -132,7 +156,10 @@ export function remoteResumeOffer(
 	if (!remote.deviceId || remote.deviceId === localDeviceId) return null;
 	const at = Number(remote.updatedAt);
 	if (!isFinite(at) || at <= 0) return null;
-	if (consumed && consumed === String(at)) return null;
+	const c = parseConsumed(consumed);
+	if (c) {
+		if (c.deviceId === null ? c.at === at : c.deviceId === remote.deviceId && at - c.at < REMOTE_NEWER_MS) return null;
+	}
 	const local = typeof localSavedAt === "number" && isFinite(localSavedAt) ? localSavedAt : 0;
 	if (at - local <= REMOTE_NEWER_MS) return null;
 	let state: ResumeState | null;
@@ -171,22 +198,9 @@ export function localDevice(): { deviceId: string; deviceName: string } {
 	};
 }
 
-// The local resumeState.savedAt as it was when the app started, before the
-// C1 persistence (which rewrites savedAt every 5 s, even paused) bumps it.
-let startupSavedAt: number | null | undefined;
-function snapshotStartupSavedAt() {
-	if (startupSavedAt !== undefined) return;
-	try {
-		const raw = browserStorage()?.getItem("resumeState");
-		startupSavedAt = parseResumeState(raw)?.savedAt ?? null;
-	} catch {
-		startupSavedAt = null;
-	}
-}
-/** The local C1 savedAt at startup (null when there was no saved state). */
-export function localStartupSavedAt(): number | null {
-	snapshotStartupSavedAt();
-	return startupSavedAt ?? null;
+/** J3: the local C1 savedAt as it is NOW (null when nothing is saved). */
+export function localSavedAt(): number | null {
+	return readResumeState(browserStorage())?.savedAt ?? null;
 }
 
 const loadRuntime = () =>
@@ -201,7 +215,6 @@ const loadRuntime = () =>
  */
 export function startNowPlayingSync(): () => void {
 	if (typeof window === "undefined") return () => {};
-	snapshotStartupSavedAt();
 	let stopped = false;
 	const cleanups: Array<() => void> = [];
 	void loadRuntime().then(async ({ SessionListService, AudioPlayer, me }) => {
@@ -275,7 +288,12 @@ export function startNowPlayingSync(): () => void {
  * The remote state to offer on the home page, or null (see remoteResumeOffer).
  * Only online; never throws.
  */
-export async function fetchRemoteResume(): Promise<{ state: ResumeState; deviceName: string; updatedAt: number } | null> {
+export async function fetchRemoteResume(): Promise<{
+	state: ResumeState;
+	deviceId: string;
+	deviceName: string;
+	updatedAt: number;
+} | null> {
 	if (typeof window === "undefined") return null;
 	if (typeof navigator !== "undefined" && navigator.onLine === false) return null;
 	try {
@@ -287,9 +305,14 @@ export async function fetchRemoteResume(): Promise<{ state: ResumeState; deviceN
 		} catch {
 			consumed = null;
 		}
-		const state = remoteResumeOffer(row, localDevice().deviceId, localStartupSavedAt(), consumed);
+		const state = remoteResumeOffer(row, localDevice().deviceId, localSavedAt(), consumed);
 		if (!state || !row) return null;
-		return { state, deviceName: row.deviceName || "Appareil", updatedAt: Number(row.updatedAt) };
+		return {
+			state,
+			deviceId: String(row.deviceId),
+			deviceName: row.deviceName || "Appareil",
+			updatedAt: Number(row.updatedAt),
+		};
 	} catch {
 		return null;
 	}
@@ -324,7 +347,7 @@ const runtimeRestoreDeps = async (): Promise<RestoreRemoteDeps> => {
  * stays for a retry).
  */
 export async function restoreRemoteResume(
-	offer: { state: ResumeState; updatedAt: number; deviceName?: string },
+	offer: { state: ResumeState; deviceId: string; updatedAt: number; deviceName?: string },
 	deps?: RestoreRemoteDeps,
 ): Promise<boolean> {
 	const d = deps ?? (await runtimeRestoreDeps());
@@ -357,7 +380,7 @@ export async function restoreRemoteResume(
 	}
 	if (!ok) return fail();
 	try {
-		storage?.setItem(REMOTE_CONSUMED_KEY, String(offer.updatedAt));
+		storage?.setItem(REMOTE_CONSUMED_KEY, consumedMarker(offer.deviceId, offer.updatedAt));
 	} catch {
 		/* best-effort */
 	}

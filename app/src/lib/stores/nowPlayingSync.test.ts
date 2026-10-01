@@ -4,6 +4,7 @@ import {
 	REMOTE_CONSUMED_KEY,
 	REMOTE_NEWER_MS,
 	clockLabel,
+	consumedMarker,
 	deviceNameFromUA,
 	fitResumeState,
 	getDeviceId,
@@ -96,9 +97,24 @@ describe("remoteResumeOffer", () => {
 		expect(remoteResumeOffer(remote(), "me", now - REMOTE_NEWER_MS, null)).toBeNull();
 		expect(remoteResumeOffer(remote(), "me", now + 5000, null)).toBeNull();
 	});
-	it("is not offered again once consumed", () => {
+	it("is silent while this device listens (live savedAt = now)", () => {
+		expect(remoteResumeOffer(remote(), "me", now, null)).toBeNull();
+	});
+	it("is not offered again once consumed (per device, for 2 minutes)", () => {
+		expect(remoteResumeOffer(remote(), "me", 0, consumedMarker("other", now))).toBeNull();
+		// the same device pushed again 15 s later: still consumed
+		expect(remoteResumeOffer(remote({ updatedAt: now + 15_000 }), "me", 0, consumedMarker("other", now))).toBeNull();
+		// 2 minutes past the consumed push: offered again
+		expect(
+			remoteResumeOffer(remote({ updatedAt: now + REMOTE_NEWER_MS }), "me", 0, consumedMarker("other", now)),
+		).not.toBeNull();
+		// another device is not affected by that consumption
+		expect(remoteResumeOffer(remote(), "me", 0, consumedMarker("third", now))).not.toBeNull();
+	});
+	it("honours a legacy consumed marker (bare updatedAt)", () => {
 		expect(remoteResumeOffer(remote(), "me", 0, String(now))).toBeNull();
 		expect(remoteResumeOffer(remote(), "me", 0, String(now - 1))).not.toBeNull();
+		expect(remoteResumeOffer(remote(), "me", 0, "garbage")).not.toBeNull();
 	});
 	it("rejects missing / corrupt rows", () => {
 		expect(remoteResumeOffer(null, "me", 0, null)).toBeNull();
@@ -160,7 +176,7 @@ describe("fitResumeState", () => {
 });
 
 describe("restoreRemoteResume", () => {
-	const offer = () => ({ state: stateOf(3, 1), updatedAt: 777, deviceName: "iPhone" });
+	const offer = () => ({ state: stateOf(3, 1), deviceId: "other", updatedAt: 777, deviceName: "iPhone" });
 	const makeDeps = (over: Partial<RestoreRemoteDeps> = {}) => {
 		const storage = memStorage();
 		const calls: string[] = [];
@@ -193,7 +209,7 @@ describe("restoreRemoteResume", () => {
 		expect(saved.savedAt).toBe(5000);
 		expect(saved.position).toBe(1);
 		expect(saved.mix[1].title).toBe("T1");
-		expect(d.storage.m.get(REMOTE_CONSUMED_KEY)).toBe("777");
+		expect(d.storage.m.get(REMOTE_CONSUMED_KEY)).toBe("other|777");
 		expect(d.notify).not.toHaveBeenCalled();
 	});
 	it("restores once with no restoration in flight", async () => {

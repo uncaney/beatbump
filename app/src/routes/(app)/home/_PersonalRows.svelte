@@ -11,6 +11,7 @@
 	import { settings } from "$lib/stores";
 	import { readResumeState, resumePlayback, type ResumeState } from "$lib/stores/resumeState";
 	import { clockLabel, fetchRemoteResume, restoreRemoteResume } from "$lib/stores/nowPlayingSync";
+	import { AudioPlayer } from "$lib/player";
 	import { get } from "svelte/store";
 
 	const MAX = 20;
@@ -35,8 +36,10 @@
 	}
 
 	// C2: the profile's state from ANOTHER device, newer than ours by > 2 min.
+	// J3: hidden while something plays here (this device is the live one).
 	let remote: Awaited<ReturnType<typeof fetchRemoteResume>> = null;
 	$: remoteTrack = remote ? remote.state.mix[remote.state.position] : null;
+	const paused = AudioPlayer.paused;
 	let restoringRemote = false;
 	async function resumeRemote() {
 		if (!remote || restoringRemote) return;
@@ -116,7 +119,7 @@
 		class="home-row"
 		data-row="reprendre"
 	>
-		{#if remote && remoteTrack}
+		{#if remote && remoteTrack && $paused}
 			<div class="resume-queue">
 				<button
 					type="button"
