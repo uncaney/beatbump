@@ -7,17 +7,15 @@
 
     import {Popper} from "$lib/components/Popper";
 
-	import PlaylistPopper from "$lib/components/PlaylistPopper";
 	import "@fontsource-variable/commissioner";
 
     import {browser, dev} from "$app/environment";
     import {afterNavigate} from "$app/navigation";
     import {page} from "$app/stores";
-    import GroupSessionCreator from "$lib/components/GroupSessionCreator";
-    import Fullscreen from "$lib/components/Player/Fullscreen.svelte";
     import {fullscreenStore} from "$lib/components/Player/channel";
+    import {lazyComponent} from "$lib/lazyComponent";
     import {AudioPlayer} from "$lib/player";
-    import {groupSession, settings} from "$lib/stores";
+    import {groupSession, settings, showGroupSessionCreator} from "$lib/stores";
     import {initPwa} from "$lib/stores/pwa";
     import {currentTrack, queue} from "$lib/stores/list";
     import {syncTabs} from "$lib/tabSync.js";
@@ -50,6 +48,17 @@
 
     $: ({key} = $layoutData);
     let main: HTMLElement;
+
+    // K7 (audit perf v2): the fullscreen player, the group-session creator and
+    // the add-to-playlist popper only serve on demand; their chunks (and what
+    // only they import: DraggableList, CreatePlaylist, Description…) leave the
+    // layout node and are fetched on the first open, then stay mounted.
+    const Fullscreen = lazyComponent(() => import("$lib/components/Player/Fullscreen.svelte"));
+    const GroupSessionCreator = lazyComponent(() => import("$lib/components/GroupSessionCreator/GroupSessionCreator.svelte"));
+    const PlaylistPopper = lazyComponent(() => import("$lib/components/PlaylistPopper/PlaylistPopper.svelte"));
+    $: if (browser && $fullscreenStore === "open") void Fullscreen.load().catch((e) => Logger.err(e));
+    $: if (browser && $showGroupSessionCreator) void GroupSessionCreator.load().catch((e) => Logger.err(e));
+    $: if (browser && $showAddToPlaylistPopper?.state) void PlaylistPopper.load().catch((e) => Logger.err(e));
 
     let isFullscreen = false;
 
@@ -270,12 +279,13 @@ left: 0; background: var(--base-bg); font-size: 1.1rem; display: flex; flex-dire
         <slot/>
     </Wrapper>
 </div>
-<PlaylistPopper
+<svelte:component
+    this={$PlaylistPopper}
     on:close={() => {
 		showAddToPlaylistPopper.set({ state: false, item: {} });
 	}}
 />
-<GroupSessionCreator />
+<svelte:component this={$GroupSessionCreator} />
 {#if !online && !$page.url.pathname.startsWith("/library/downloads-offline")}
     <div class="offline-banner" role="status" aria-live="polite">
         <span class="offline-dot" aria-hidden="true"></span>
@@ -284,7 +294,7 @@ left: 0; background: var(--base-bg); font-size: 1.1rem; display: flex; flex-dire
     </div>
 {/if}
 <Alert --alert-bottom={hasplayer ? "5.75em" : "0rem"} />
-<Fullscreen state={isFullscreen ? "open" : "closed"} />
+<svelte:component this={$Fullscreen} state={isFullscreen ? "open" : "closed"} />
 <footer
     class="footer-container"
     class:show-player={hasplayer}
