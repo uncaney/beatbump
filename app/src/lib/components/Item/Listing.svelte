@@ -54,6 +54,10 @@
 	import { showDownloadSongPopper } from "$lib/stores";
 
 	export let data: Item;
+	// Row index in a long list (_Browse passes it): the first 12 covers load
+	// eagerly with a high fetch priority, the rest lazily (audit v4 TOP 6: the
+	// first rows of /library/albums on mobile rendered with naturalWidth 0).
+	export let index: number | undefined = undefined;
 
 	const dispatch = createEventDispatcher();
 
@@ -306,6 +310,9 @@
 	// Cover placeholder (initials on a deterministic hue) once the <img> errors;
 	// the tile overlays the 5rem box, so the row does not move.
 	let imgBroken = false;
+	$: eager = index !== undefined && index < 12;
+	let imgLoading: "eager" | "lazy" | undefined;
+	$: imgLoading = index === undefined ? undefined : eager ? "eager" : "lazy";
 	$: coverName = coverLabel(data);
 	$: coverInitials = initials(coverName);
 	$: coverHue = hueFor(coverName);
@@ -387,9 +394,11 @@
 						width={srcImg.width}
 						height={srcImg.height}
 						src={srcImg.url}
+						loading={imgLoading}
+						fetchpriority={eager ? "high" : undefined}
 						on:error={() => (imgBroken = true)}
 					/>
-					{#if imgBroken && coverInitials}
+					{#if (imgBroken || !srcImg.url) && coverInitials}
 						<span
 							class="cover-initials"
 							aria-hidden="true"
