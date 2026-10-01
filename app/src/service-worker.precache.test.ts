@@ -71,8 +71,11 @@ describe("PF3-7: staticPrecacheList", () => {
 			"/assets/favicon-32x32.png",
 			"/assets/mstile-150x150.png",
 			"/android/android-launchericon-512-512.png",
+			"/android/android-launchericon-192-192.png",
+			"/android/android-launchericon-144-144.png",
 			"/android/android-launchericon-48-48.png",
 			"/maskable-icon-512x512.png",
+			"/maskable-icon-192x192.png",
 			"/maskable.svg",
 		];
 		expect(staticPrecacheList(files)).toEqual([
@@ -82,16 +85,41 @@ describe("PF3-7: staticPrecacheList", () => {
 			"/assets/favicon-16x16.png",
 			"/assets/favicon-32x32.png",
 			"/android/android-launchericon-512-512.png",
-			"/android/android-launchericon-48-48.png",
+			"/android/android-launchericon-192-192.png",
 			"/maskable-icon-512x512.png",
+			"/maskable-icon-192x192.png",
 		]);
 	});
-	it("covers every icon the shipped manifest lists", async () => {
+	it("PF4-6: covers the 192 and 512 icons of the shipped manifest, not the smaller ones", async () => {
 		const { staticPrecacheList } = await import("./service-worker");
 		const fs = await import("node:fs");
 		const manifest = JSON.parse(fs.readFileSync(new URL("../static/manifest.json", import.meta.url), "utf8"));
 		const icons: string[] = manifest.icons.map((i: { src: string }) => "/" + i.src.replace(/^\//, ""));
-		expect(staticPrecacheList(icons)).toEqual(icons);
+		const big = icons.filter((i) => /(?:192|512)\D/.test(i.replace(/^.*\//, "")));
+		expect(big.length).toBe(4); // launcher + maskable, 192 and 512
+		expect(staticPrecacheList(icons)).toEqual(big);
+	});
+});
+
+describe("PF4-6: static files carried over and revalidated on deploy", () => {
+	it("carries the install's non-hashed paths the old cache has, once, unless already cached", async () => {
+		const { carryOverStaticPaths } = await import("./service-worker");
+		const wanted = ["/", "/manifest.json", "/favicon.ico", "/logo.svg", "/manifest.json"];
+		const oldPaths = ["/", "/manifest.json", "/logo.svg", "/_app/immutable/chunks/scheduler.8818e2a0.js", "/robots.txt"];
+		expect(carryOverStaticPaths(oldPaths, wanted, new Set(["/logo.svg"]))).toEqual(["/", "/manifest.json"]);
+	});
+	it("never takes a hashed asset or a file outside the install list", async () => {
+		const { carryOverStaticPaths } = await import("./service-worker");
+		const p = "/_app/immutable/chunks/scheduler.8818e2a0.js";
+		expect(carryOverStaticPaths([p, "/robots.txt"], [p, "/manifest.json"], new Set())).toEqual([]);
+		expect(carryOverStaticPaths([], ["/"], new Set())).toEqual([]);
+	});
+	it("revalidates with the ETag, else Last-Modified, else not at all", async () => {
+		const { conditionalHeaders } = await import("./service-worker");
+		const h = (o: Record<string, string>) => ({ get: (n: string) => o[n.toLowerCase()] ?? null });
+		expect(conditionalHeaders(h({ etag: 'W/"abc"', "last-modified": "Thu, 01 Oct 2026 18:18:06 GMT" }))).toEqual({ "If-None-Match": 'W/"abc"' });
+		expect(conditionalHeaders(h({ "last-modified": "Thu, 01 Oct 2026 18:18:06 GMT" }))).toEqual({ "If-Modified-Since": "Thu, 01 Oct 2026 18:18:06 GMT" });
+		expect(conditionalHeaders(h({}))).toBeNull();
 	});
 });
 
