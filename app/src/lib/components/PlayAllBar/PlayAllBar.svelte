@@ -4,13 +4,16 @@
 >
 	// X1 "Lecture en un geste": "Lire tout" / "Aléatoire" over any list of
 	// track rows (Favoris, playlist serveur, artiste local, journée d'écoute).
-	// The queue is a "local" mix of the rows as they are (setMix(items,
-	// "local"), the same path as the favourites and IDB playlist pages): no
-	// continuation fetch, next/previous stay inside the list. Rows without a
-	// videoId (albums, artists, playlists) are skipped.
+	// The queue is the rows as they are, next/previous stay inside the list.
+	// I20: a list of library rows only is a "local" mix (C4 library
+	// continuation at its end); any YouTube row keeps it a YouTube
+	// ("playlist") mix, rows untouched (no IS_LOCAL), so its end continues
+	// with the YouTube radio. Rows without a videoId (albums, artists,
+	// playlists) are skipped.
 
 	/* eslint-disable @typescript-eslint/no-explicit-any */
 	import type { PlaybackContextInput } from "$lib/stores/list/playbackContext";
+	import { playAllMixType } from "$lib/stores/list/queueOps";
 
 	export function playableTracks(items: any[] | null | undefined): any[] {
 		if (!Array.isArray(items)) return [];
@@ -47,12 +50,12 @@
 		let list = playableTracks(items);
 		if (!list.length) return 0;
 		if (opts.shuffle) list = shuffled(list);
-		list = list.map((it) => ({ ...it, IS_LOCAL: true }));
+		const type = playAllMixType(list);
 		const [{ default: SessionListService }, { getSrc }] = await Promise.all([
 			import("$lib/stores/list"),
 			import("$lib/player"),
 		]);
-		await SessionListService.setMix(list, "local", opts.context ?? null);
+		await SessionListService.setMix(list, type, opts.context ?? null, { fresh: true });
 		await SessionListService.updatePosition(0);
 		await getSrc(list[0].videoId, list[0].playlistId, undefined, true);
 		return list.length;

@@ -191,3 +191,22 @@ export function planDragCommit<T extends Row>(base: T[], reordered: T[], moved: 
 	const rebased = moved ? rebaseMove(fresh, base, reordered, moved) : null;
 	return rebased ? { kind: "apply", mix: rebased, rebased: true } : { kind: "abort" };
 }
+
+/**
+ * I20: an owned-library row (served by /localf: a `localUrl` or an 11-hex
+ * lid, the backend `isLid()` rule), as opposed to a YouTube track.
+ */
+export function isLibraryRow(row: { videoId?: unknown; localUrl?: unknown } | null | undefined): boolean {
+	if (!row) return false;
+	if (typeof row.localUrl === "string" && row.localUrl) return true;
+	return typeof row.videoId === "string" && /^[0-9a-f]{11}$/.test(row.videoId);
+}
+
+/**
+ * I20: the mix type of a "Lire tout" queue. "local" (C4 library continuation
+ * at the end) only when every row is a library row; any YouTube row makes it
+ * a "playlist" queue, so its end continues with the YouTube radio.
+ */
+export function playAllMixType(rows: ReadonlyArray<{ videoId?: unknown; localUrl?: unknown } | null | undefined>): "local" | "playlist" {
+	return rows.length > 0 && rows.every((r) => isLibraryRow(r)) ? "local" : "playlist";
+}

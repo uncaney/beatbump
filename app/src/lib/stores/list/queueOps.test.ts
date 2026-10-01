@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMixOp, planDragCommit, planInsert, planReorder, rebaseMove, removeAt } from "./queueOps";
+import { applyMixOp, planDragCommit, planInsert, planReorder, rebaseMove, removeAt, isLibraryRow, playAllMixType } from "./queueOps";
 
 const row = (videoId: string) => ({ videoId, title: "T " + videoId });
 const ids = (list: { videoId?: string }[]) => list.map((r) => r.videoId);
@@ -206,5 +206,23 @@ describe("planDragCommit / rebaseMove (H4, queue changed during a drag)", () => 
 		expect(planDragCommit(base, [b, c, a], b, [a, b, c, d]).kind).toBe("abort");
 		expect(planDragCommit(base, [c, b, a], c, [a, b, c, d]).kind).toBe("abort");
 		expect(planDragCommit(base, [c, a, b], null, [a, b, c, d]).kind).toBe("abort");
+	});
+});
+
+describe("I20: playAllMixType / isLibraryRow", () => {
+	const yt = { videoId: "dQw4w9WgXcQ" };
+	const lib = { videoId: "0123456789a" };
+	const cached = { videoId: "dQw4w9WgXcQ", localUrl: "/localf?lid=1" };
+	it("tells library rows from YouTube rows", () => {
+		expect(isLibraryRow(lib)).toBe(true);
+		expect(isLibraryRow(cached)).toBe(true);
+		expect(isLibraryRow(yt)).toBe(false);
+		expect(isLibraryRow(null)).toBe(false);
+	});
+	it("local only when every row is a library row", () => {
+		expect(playAllMixType([lib, cached])).toBe("local");
+		expect(playAllMixType([lib, yt])).toBe("playlist");
+		expect(playAllMixType([yt])).toBe("playlist");
+		expect(playAllMixType([])).toBe("playlist");
 	});
 });
