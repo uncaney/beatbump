@@ -3,15 +3,55 @@
 // No Svelte or store import so the page logic is unit-testable.
 
 export interface MixCard {
-	/** "decade:1990" | "genre:Rock" (the data-mix attribute of the card). */
+	/** "decade:1990" | "genre:Rock" | "artist:la-…" (the data-mix attribute of the card). */
 	key: string;
-	kind: "decade" | "genre";
-	/** "Années 1990" | "Rock" */
+	kind: "decade" | "genre" | "artist";
+	/** "Années 1990" | "Rock" | "Daft Punk" */
 	title: string;
-	/** "52 albums" | "1 234 titres · 20 albums" (genre albums since L8-6) */
+	/** "52 albums" | "1 234 titres · 20 albums" (genre albums since L8-6) | "12 écoutes" */
 	subtitle: string;
-	/** Query string of GET /api/v1/local/mix (without the "?"). */
+	/** Query string of GET /api/v1/local/mix (without the "?"); for an artist card, of GET /api/v1/local/related. */
 	query: string;
+}
+
+/** The API path a card's tracks come from (D7: artist cards play the EQ1 seeded radio). */
+export function mixCardUrl(card: Pick<MixCard, "kind" | "query">): string {
+	return card.kind === "artist" ? `/api/v1/local/related?${card.query}` : `/api/v1/local/mix?${card.query}`;
+}
+
+export function playsLabel(n: number): string {
+	return `${nf(n)} écoute${n > 1 ? "s" : ""}`;
+}
+
+/**
+ * D7 "Tes artistes": one card per top artist of the profile
+ * (GET me/stats/top?by=artists rows) that is a LOCAL artist (artistId
+ * "la-…": the seed local/related?seed=artist:<id> resolves). Rows without
+ * a local id, blank names and duplicate ids are dropped; at most `max`.
+ */
+export function artistCardsFrom(resp: unknown, max = 10): MixCard[] {
+	if (!resp || typeof resp !== "object") return [];
+	const rows = (resp as { rows?: unknown }).rows;
+	if (!Array.isArray(rows)) return [];
+	const seen = new Set<string>();
+	const out: MixCard[] = [];
+	for (const r of rows) {
+		const id = (r as { artistId?: unknown })?.artistId;
+		const name = (r as { title?: unknown })?.title;
+		if (typeof id !== "string" || !id.startsWith("la-") || seen.has(id)) continue;
+		if (typeof name !== "string" || name.trim() === "") continue;
+		seen.add(id);
+		const count = Number((r as { count?: unknown })?.count);
+		out.push({
+			key: `artist:${id}`,
+			kind: "artist",
+			title: name.trim(),
+			subtitle: count > 0 ? playsLabel(count) : "Radio depuis tes écoutes",
+			query: `seed=${encodeURIComponent(`artist:${id}`)}`,
+		});
+		if (out.length >= max) break;
+	}
+	return out;
 }
 
 export function decadeLabel(decade: number): string {

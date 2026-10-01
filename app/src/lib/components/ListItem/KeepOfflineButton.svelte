@@ -15,6 +15,8 @@
 	export let load: (() => Promise<any[]>) | null = null;
 	/** Identity of the source (defaults to the page URL: one source button per page). */
 	export let sourceKey: string | null = null;
+	/** data-testid of the button (HL6: "mix-keep" on a mix card). */
+	export let testid = "keep-offline";
 
 	// $page (not `location`): a same-route navigation (release?id=A → B) reuses this component.
 	$: key = sourceKey || ($page?.url ? $page.url.pathname + $page.url.search : "");
@@ -67,7 +69,7 @@
 	<button
 		type="button"
 		class="keep-btn btn-reset btn-secondary"
-		data-testid="keep-offline"
+		data-testid={testid}
 		data-state={state}
 		data-ready={progress ? progress.ready : 0}
 		data-total={progress ? progress.total : 0}
