@@ -6,6 +6,7 @@ package api
 // existing card component handles playback, the 3-dot menu and navigation unchanged.
 
 import (
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -283,7 +284,14 @@ func localAlbumsFiltered(c echo.Context, filter string, off, lim int, sortBy str
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": "offset too large"})
 		}
 		pid := profileID(c)
-		if profileAnonymous(pid) {
+		anon, err := profileAnonymousErr(pid)
+		if err != nil {
+			// L11-7: a database error is not "anonymous": the named user would be
+			// asked for a name they already gave.
+			log.Printf("never-played profile %q: %v", pid, err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal", "reason": "profile lookup failed"})
+		}
+		if anon {
 			// U12-12: no name, no history to tell "never played" apart; nextOffset
 			// stays a number (the client stops: no items, offset >= total).
 			return c.JSON(http.StatusOK, map[string]interface{}{

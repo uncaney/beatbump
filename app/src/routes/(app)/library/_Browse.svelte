@@ -326,6 +326,14 @@
 				href="/library/account"
 				cta="Dis-moi ton prénom"
 			/>
+			<!-- L11-8: the filter chip is hidden for a guest: keep a way back to the whole list. -->
+			<p class="anon-back">
+				<a
+					class="btn-reset btn-secondary"
+					data-testid="never-played-all-albums"
+					href="/library/albums">Voir tous les albums</a
+				>
+			</p>
 		</div>
 	{:else if items.length === 0}
 		<p class="state">{q || filter ? "Aucun résultat" : "Rien ici pour l’instant"}</p>
@@ -390,6 +398,11 @@
 		min-height: max(2.75rem, 44px);
 	}
 	// BI4: the active filter chip, 44px tall so the remove button is a tap target.
+	.anon-back {
+		display: flex;
+		justify-content: center;
+		margin: 0.25rem 0 1rem;
+	}
 	.filter-chip {
 		display: inline-flex;
 		align-items: center;
