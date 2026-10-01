@@ -213,15 +213,12 @@
 						}}
 					/>
 				{/if}
-				{#if isLocalArtist}
-					<p
-						class="local-note"
-						data-testid="local-artist-note"
-					>
-						Artiste de ta bibliothèque : pas de radio ni de suivi, lecture
-						avec « Tout lire » ci-dessous.
-					</p>
-				{:else}
+				<!-- Local artists (library): the YouTube-only buttons (Play Radio /
+				     Shuffle / Follow) stay hidden; their actions live in the PlayAllBar
+				     under the header (Lire tout / Aléatoire / Radio, EQ1). The old
+				     "pas de radio ni de suivi" sentence contradicted that Radio button
+				     (audit UX v11, U11-4) and is gone. -->
+				{#if !isLocalArtist}
 				<div class="btn-wrpr">
 					{#if header?.buttons?.radio !== null}
 						<Button
@@ -370,14 +367,6 @@
 			height: 5rem;
 			font-size: 1.85rem;
 		}
-	}
-
-	.local-note {
-		margin: 0;
-		font-size: max(0.8125rem, 12px);
-		line-height: 1.35;
-		color: hsla(0, 0%, 100%, 0.7);
-		max-width: 48ch;
 	}
 
 	.gradient {

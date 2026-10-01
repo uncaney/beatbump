@@ -182,7 +182,8 @@
 				class="btn pin"
 				class:on={allPinned}
 				aria-pressed={allPinned}
-				aria-label={allPinned ? "Désépingler l'album" : "Épingler l'album hors-ligne"}
+				aria-label={allPinned ? "Ne plus garder l'album hors-ligne" : "Garder l'album hors-ligne"}
+				title={allPinned ? "Ne plus garder hors-ligne (l'album pourra être effacé)" : "Garder hors-ligne (jamais effacé)"}
 				on:click={() => dispatch("pin", { tracks: album.tracks, pinned: !allPinned })}>
 				<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill={allPinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="2"><path d="M16 3l5 5-4 1-5 5 1 5-3 3-4-6-4 4-1-1 4-4-6-4 3-3 5 1 5-5z"/></svg>
 			</button>
@@ -337,10 +338,13 @@
 			outline-offset: 2px;
 		}
 	}
+	// U11-6 (audit UX v11): the cover toggles the track list ("Déplier
+	// l'album") and measured 36x36 on narrow phones; 44px floor. The row is
+	// already >= 44px tall because of .info, so the card does not grow.
 	.cover {
 		flex: 0 0 auto;
-		width: 3.5rem;
-		height: 3.5rem;
+		width: max(3.5rem, 44px);
+		height: max(3.5rem, 44px);
 		padding: 0;
 		border: 0 !important;
 		border-radius: 0.5rem;
@@ -410,7 +414,7 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		font-weight: 400;
 		color: $muted;
 	}
@@ -446,13 +450,13 @@
 		}
 	}
 	// Kebab: no disc, so the two round actions stay the card's only visible
-	// buttons; 44px tall tap zone, narrow width.
+	// buttons; 44px square tap zone (U11-6: it measured 32x44).
 	.menu-wrap {
 		position: relative;
 		display: flex;
 	}
 	.kebab {
-		min-width: max(2rem, 32px);
+		min-width: max(2.75rem, 44px);
 		min-height: max(2.75rem, 44px);
 		padding: 0;
 		display: grid;
@@ -521,11 +525,11 @@
 		padding: 0 0.6rem 0.5rem;
 	}
 	.ready {
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		color: $muted;
 	}
 	.complete {
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		// L8-7: the scoped rule beats .btn-secondary's floor; 2rem was 24px on
 		// mobile. Keep the small type, give the pill the 44px tap height.
 		min-height: max(2.75rem, 44px);
@@ -537,8 +541,8 @@
 			padding: 0.5rem;
 		}
 		.cover {
-			width: 3rem;
-			height: 3rem;
+			width: max(3rem, 44px);
+			height: max(3rem, 44px);
 		}
 		.actions {
 			gap: 0.25rem;

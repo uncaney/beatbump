@@ -571,7 +571,7 @@
 
 	.album,
 	.artist-stats {
-		font-size: 0.9em;
+		font-size: var(--text-secondary-size);
 		font-weight: 400;
 		align-items: center;
 
@@ -637,7 +637,7 @@
 	}
 
 	.text-artist {
-		font-size: 0.925em;
+		font-size: var(--text-secondary-size);
 		margin-top: 0;
 
 		@include mixins.trim(2);

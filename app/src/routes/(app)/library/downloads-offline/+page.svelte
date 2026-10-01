@@ -424,8 +424,9 @@
 					bind:this={mixtapeBtn}
 					on:click={openMixtape}
 				>
+					<!-- U11-7: not the Radio icon (one icon per concept). -->
 					<Icon
-						name="radio"
+						name="music"
 						size="1em"
 					/>
 					Mixtape
@@ -659,7 +660,7 @@
 	.stats {
 		margin: 0;
 		color: #bbb;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 	}
 	.pending,
 	.evicted {
@@ -673,7 +674,7 @@
 	}
 	.status {
 		color: $accent;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 		white-space: nowrap;
 		margin-top: 0.4rem;
 	}
@@ -682,7 +683,7 @@
 	}
 	.note {
 		color: #999;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 		margin: 0.5rem 0 1rem;
 	}
 	.dot {
@@ -701,7 +702,7 @@
 	}
 	.ready {
 		margin: 0 0 1rem;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		color: $muted;
 		&.none {
 			color: $warn;
@@ -888,7 +889,7 @@
 		}
 		.sub {
 			color: $muted;
-			font-size: 0.85rem;
+			font-size: var(--text-secondary-size);
 			white-space: nowrap;
 			flex: 0 0 auto;
 		}
@@ -953,7 +954,7 @@
 	.album-label {
 		margin: 0.5rem 0 0.15rem 0.5rem;
 		color: $muted;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		font-weight: 600;
 		overflow: hidden;
 		text-overflow: ellipsis;

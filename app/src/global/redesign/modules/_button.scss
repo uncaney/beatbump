@@ -248,6 +248,9 @@ button.danger {
 	line-height: 1.2;
 	text-transform: none;
 	white-space: nowrap;
+	// `<a class="btn-*">` is no longer covered by the link rule (U11-1): no
+	// underline from the UA stylesheet either.
+	text-decoration: none;
 	cursor: pointer;
 	-webkit-user-select: none;
 	user-select: none;

@@ -1192,8 +1192,7 @@
 	.next-up {
 		margin: 0.5em auto 0;
 		max-width: 85vw;
-		// 12px floor at the 12px mobile root
-		font-size: max(0.875rem, 12px);
+		font-size: var(--text-secondary-size);
 		line-height: 1.3;
 		color: hsla(0, 0%, 100%, 0.7);
 		text-align: center;
@@ -1295,7 +1294,7 @@
 		max-width: 100%;
 	}
 	.queue-count {
-		font-size: 0.8em;
+		font-size: var(--text-secondary-size);
 		color: hsla(0, 0%, 100%, 0.65);
 	}
 	// The `!important`s beat the global `button:not(.icon-btn)` rule
@@ -2059,8 +2058,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.35em;
-		// 12px floor (U11-9: 0.85em = 10.2px at the 12px mobile root)
-		font-size: max(0.95em, 12px);
+		font-size: var(--text-secondary-size);
 		font-weight: 600;
 		letter-spacing: 0.01em;
 		color: hsla(0, 0%, 100%, 0.85);

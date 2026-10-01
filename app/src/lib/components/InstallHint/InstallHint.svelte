@@ -133,8 +133,8 @@
 		background: rgba(20, 20, 24, 0.97);
 		border-top: 1px solid rgba(255, 255, 255, 0.12);
 		color: #eee;
-		// 12px floor at the 12px mobile root (audit v11: 10.2px before).
-		font-size: max(0.85rem, 12px);
+		// 12px floor at the 12px mobile root (audit v11: 10.2px before), shared token (c32a).
+		font-size: var(--text-secondary-size);
 		line-height: 1.3;
 		box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
 		&.docked-top {

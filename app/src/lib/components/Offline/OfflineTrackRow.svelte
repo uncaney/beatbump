@@ -121,8 +121,8 @@
 		class="btn pin"
 		class:on={!!track._pinned}
 		aria-pressed={!!track._pinned}
-		aria-label={track._pinned ? "Désépingler" : "Épingler hors-ligne"}
-		title={track._pinned ? "Désépingler (peut être évincé)" : "Épingler hors-ligne (jamais évincé)"}
+		aria-label={track._pinned ? "Ne plus garder hors-ligne" : "Garder hors-ligne"}
+		title={track._pinned ? "Ne plus garder hors-ligne (pourra être effacé)" : "Garder hors-ligne (jamais effacé)"}
 		on:click|stopPropagation={() => dispatch("pin", track)}>
 		<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill={track._pinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="2"><path d="M16 3l5 5-4 1-5 5 1 5-3 3-4-6-4 4-1-1 4-4-6-4 3-3 5 1 5-5z"/></svg>
 	</button>
@@ -247,7 +247,7 @@
 		opacity: 0.75;
 	}
 	.sub {
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		color: $muted;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -326,7 +326,7 @@
 		border-radius: 0.5rem;
 		background: rgb(220 53 69 / 12%);
 		border: 1px solid rgb(220 53 69 / 45%);
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		line-height: 1.3;
 	}
 	.confirm-text {
@@ -337,7 +337,7 @@
 		width: auto;
 		min-width: max(2.75rem, 44px);
 		padding: 0 0.6rem;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		font-weight: 600;
 	}
 	.confirm-yes,

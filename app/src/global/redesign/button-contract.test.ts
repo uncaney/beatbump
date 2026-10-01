@@ -12,6 +12,13 @@
  * test was written. The count is a ratchet: it may only go down (fix a
  * button, lower the number), never up, and a file that is not listed must
  * have zero. A new component with a bare `<button>` fails here.
+ *
+ * U11-1 (audit UX v11): `<a>` tags that look like buttons (a class token
+ * `btn`, `btn-*`, `button`, `button-*` or `cta`) are scanned the same way
+ * with their own ratchet (LEGACY_LINKS): a link that is dressed as a button
+ * must carry a system class, otherwise it gets a one-off look and the link
+ * rule's `display: inline` (base/_typography.scss) instead of the pill. The
+ * last test pins that rule's exclusion of the system classes.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -47,7 +54,6 @@ const LEGACY: Record<string, number> = {
 	"lib/components/PlaylistPopper/List.svelte": 1,
 	"lib/components/Search/Search.svelte": 1,
 	"routes/(app)/library/+page.svelte": 4,
-	"routes/(app)/library/account/+page.svelte": 2,
 	"routes/(app)/library/_components/Popup.svelte": 1,
 	"routes/(app)/library/downloads-offline/+page.svelte": 6,
 	"routes/(app)/library/for-you/+page.svelte": 0,
@@ -58,6 +64,14 @@ const LEGACY: Record<string, number> = {
 	"routes/(app)/lyrics/+page.svelte": 4,
 	"routes/(app)/trending/+page.svelte": 1,
 	"routes/(app)/[watchOrListen=share]/+page.svelte": 1,
+};
+
+/**
+ * Button-like `<a>` budget of the files that predate the contract (same
+ * ratchet as LEGACY). Keys are POSIX paths relative to `src/`.
+ */
+const LEGACY_LINKS: Record<string, number> = {
+	"routes/(app)/settings/+page.svelte": 1,
 };
 
 function svelteFiles(dir: string, out: string[] = []): string[] {
@@ -80,6 +94,27 @@ export function buttonOpenTags(source: string): string[] {
 	return out;
 }
 
+/** The attribute text of every `<a ...>` opening tag in `source`. */
+export function linkOpenTags(source: string): string[] {
+	const out: string[] = [];
+	const re = /<a\b([^>]*)>/gs;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(source))) out.push(m[1]);
+	return out;
+}
+
+/** Class tokens of an attribute text (static `class="..."` / `class='...'` / `class={...}`). */
+function classTokens(attrs: string): string[] {
+	const cls = /\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/s.exec(attrs);
+	if (!cls) return [];
+	return (cls[1] ?? cls[2] ?? cls[3] ?? "").split(/[^\w-]+/).filter(Boolean);
+}
+
+/** Whether an `<a>` is dressed as a button: a `btn`, `btn-*`, `button`, `button-*` or `cta` class token. */
+export function isButtonLikeLink(attrs: string): boolean {
+	return classTokens(attrs).some((t) => /^(btn|button)(-[\w-]+)?$|^cta$/.test(t));
+}
+
 /**
  * Whether a button's attribute text satisfies the contract: a recognised
  * token inside `class="..."` / `class={...}` / `class='...'`, or a
@@ -100,6 +135,19 @@ function scan(): Map<string, number> {
 	for (const file of svelteFiles(SRC)) {
 		const rel = relative(SRC, file).split(sep).join("/");
 		const bad = buttonOpenTags(readFileSync(file, "utf8")).filter((a) => !hasRecognisedClass(a)).length;
+		if (bad > 0) counts.set(rel, bad);
+	}
+	return counts;
+}
+
+/** Button-like `<a>` without a system class, per file (relative POSIX path -> count). */
+function scanLinks(): Map<string, number> {
+	const counts = new Map<string, number>();
+	for (const file of svelteFiles(SRC)) {
+		const rel = relative(SRC, file).split(sep).join("/");
+		const bad = linkOpenTags(readFileSync(file, "utf8")).filter(
+			(a) => isButtonLikeLink(a) && !hasRecognisedClass(a),
+		).length;
 		if (bad > 0) counts.set(rel, bad);
 	}
 	return counts;
@@ -138,5 +186,53 @@ describe("button contract (QR3): every <button> carries a system class or .btn-r
 			if (n < budget) stale.push(`${file}: now ${n}, budget ${budget} -> lower it in LEGACY`);
 		}
 		expect(stale, stale.join("\n")).toEqual([]);
+	});
+});
+
+describe("button contract (U11-1): a link dressed as a button carries a system class", () => {
+	it("recognises button-like links", () => {
+		expect(isButtonLikeLink(' href="/home" class="button home-link"')).toBe(true);
+		expect(isButtonLikeLink(' class="btn" href="/about"')).toBe(true);
+		expect(isButtonLikeLink(' class="cta btn-reset"')).toBe(true);
+		expect(isButtonLikeLink(' class="btn-secondary export" href="/x"')).toBe(true);
+		expect(isButtonLikeLink(' class="player-btn no-style" href="/lyrics"')).toBe(false);
+		expect(isButtonLikeLink(' class="stats-card" href="/library/stats"')).toBe(false);
+		expect(isButtonLikeLink(' href="/home"')).toBe(false);
+		expect(linkOpenTags('<a\n\thref="/x"\n\tclass="btn-primary"\n>a</a><a href="/y">b</a>')).toEqual([
+			'\n\thref="/x"\n\tclass="btn-primary"\n',
+			' href="/y"',
+		]);
+	});
+
+	it("no new button-like <a> without a system class (legacy files only within their budget)", () => {
+		const counts = scanLinks();
+		const offenders: string[] = [];
+		for (const [file, n] of counts) {
+			const budget = LEGACY_LINKS[file] ?? 0;
+			if (n > budget) offenders.push(`${file}: ${n} button-like <a> without a system class (budget ${budget})`);
+		}
+		expect(offenders, offenders.join("\n")).toEqual([]);
+	});
+
+	it("the link budget only ratchets down", () => {
+		const counts = scanLinks();
+		const stale: string[] = [];
+		for (const [file, budget] of Object.entries(LEGACY_LINKS)) {
+			const n = counts.get(file) ?? 0;
+			if (n < budget) stale.push(`${file}: now ${n}, budget ${budget} -> lower it in LEGACY_LINKS`);
+		}
+		expect(stale, stale.join("\n")).toEqual([]);
+	});
+
+	it("the global link rule keeps excluding the button-system classes (base/_typography.scss)", () => {
+		// No compilation: the rule text itself is the contract. `a:not(.no-style)`
+		// must always be followed by the :where() exclusion, otherwise its
+		// `display: inline` beats `.btn-*`'s `inline-flex` and the labels sit
+		// on the top edge of their pills again (audit UX v11, U11-1).
+		const scss = readFileSync(join(SRC, "global/redesign/base/_typography.scss"), "utf8");
+		const EXCLUSION = ":where(:not(.btn-primary):not(.btn-secondary):not(.btn-ghost))";
+		const selectors = scss.match(/(?:^|[,\s])(?:a|\.link):not\(\.no-style\)[^,{]*/gm) ?? [];
+		expect(selectors.length).toBeGreaterThanOrEqual(2);
+		for (const sel of selectors) expect(sel, sel).toContain(EXCLUSION);
 	});
 });
