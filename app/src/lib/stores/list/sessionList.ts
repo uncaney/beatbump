@@ -1041,7 +1041,9 @@ export class ListService {
                 if (/ALBUM|SINGLE|EP/.test(pageType) || /^(MPREb|lb-)/.test(browseId)) {
                     const r = await fetch(`/api/v1/main.json?q=&endpoint=browse&browseId=${encodeURIComponent(browseId)}&pt=MUSIC_PAGE_TYPE_ALBUM`);
                     const j = r.ok ? await r.json() : null;
-                    const tracks = (j?.items || j?.tracks || []).filter((t: any) => t?.videoId);
+                    // The album page answers { items: { items: [...tracks], releaseInfo } }.
+                    const raw = j?.items?.items || (Array.isArray(j?.items) ? j.items : null) || j?.tracks || [];
+                    const tracks = (Array.isArray(raw) ? raw : []).filter((t: any) => t?.videoId);
                     if (tracks.length) return tracks as Item[];
                 } else if (/PLAYLIST/.test(pageType) || /^(VL|PL|OLAK|RDCLAK)/.test(browseId)) {
                     const r = await fetch(`/api/v1/playlist.json?list=${encodeURIComponent(browseId)}`);
