@@ -28,6 +28,7 @@ import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
 import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from "./utils/mediaRetry";
 import { setWorkerInterval } from "./utils/workerTimeout";
+import { MEDIA_SEEK_OFFSET_S, mediaArtwork, positionState, seekTarget } from "./stores/list/mediaSession";
 
 let userSettings: UserSettings | undefined = undefined;
 
@@ -49,13 +50,26 @@ interface AudioPlayerEvents {
 	"update:stream_type": { type: "HLS" | "HTTP" };
 }
 
-const setPosition = (currentTime: number, duration: number) => {
-	if ("mediaSession" in navigator) {
-		console.log({ currentTime, duration });
-		navigator.mediaSession.setPositionState({
-			duration: duration,
-			position: currentTime,
-		});
+// C3: never throws (setPositionState rejects an unknown duration or a
+// position past it), carries the playback rate.
+const setPosition = (currentTime: number, duration: number, playbackRate = 1) => {
+	if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+	if (typeof navigator.mediaSession.setPositionState !== "function") return;
+	const state = positionState(currentTime, duration, playbackRate);
+	if (!state) return;
+	try {
+		navigator.mediaSession.setPositionState(state);
+	} catch {
+		/* unsupported value: the lock screen keeps its last position */
+	}
+};
+
+/** setActionHandler throws for actions a browser does not support. */
+const setMediaAction = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
+	try {
+		navigator.mediaSession.setActionHandler(action, handler);
+	} catch {
+		/* action not supported here */
 	}
 };
 
@@ -72,25 +86,14 @@ function metaDataHandler({
 		const position = sessionList.position;
 		const currentTrack = sessionList.mix[position];
 
-		// Copy before reversing: `thumbnails` is the queue item's own array, and
-		// `reverse()` in place flipped the row thumbnails on every track start (F14/G14).
-		const artwork = Array.isArray(currentTrack?.thumbnails) ? [...currentTrack.thumbnails] : [];
-
-		console.debug({ currentTrack, position, mix: sessionList.mix });
-
 		if (!currentTrack) return console.debug("no current track");
+		// C3: local tracks show the library cover (`/cover?lid=`, 512 px) on the
+		// lock screen; thumbnails are copied, never reversed in place (F14/G14).
 		navigator.mediaSession.metadata = new MediaMetadata({
 			title: currentTrack?.title,
 			artist: currentTrack?.artistInfo?.artist?.[0]?.text || "",
 			album: currentTrack?.album?.title ?? undefined,
-			artwork: artwork
-				.reverse()
-				.filter((t) => t && typeof t.url === "string")
-				.map(({ url, width, height }) => ({
-					src: url,
-					sizes: `${width}x${height}`,
-					type: "image/jpeg",
-				})),
+			artwork: mediaArtwork(currentTrack, typeof location !== "undefined" ? location.origin : ""),
 		});
 		navigator.mediaSession.setActionHandler("play", () => {
 			AudioPlayer.play();
@@ -117,6 +120,13 @@ function metaDataHandler({
 		);
 		navigator.mediaSession.setActionHandler("nexttrack", () =>
 			SessionListService.next(),
+		);
+		// C3: headset / lock screen ±10 s.
+		setMediaAction("seekbackward", (details) =>
+			AudioPlayer.seekBy(-(details?.seekOffset || MEDIA_SEEK_OFFSET_S)),
+		);
+		setMediaAction("seekforward", (details) =>
+			AudioPlayer.seekBy(details?.seekOffset || MEDIA_SEEK_OFFSET_S),
 		);
 		setPosition(currentTime, duration);
 	}
@@ -505,6 +515,23 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		this._progress.set(this.player.currentTime, { duration: 10 });
 	}
 
+	/** C3: relative seek (lock screen / headset ±10 s), kept inside the track. */
+	public seekBy(delta: number) {
+		if (!this.player) return;
+		const duration = this.duration > 0 ? this.duration : this.player.duration;
+		const target = seekTarget(this.currentTime || this.player.currentTime || 0, delta, duration);
+		this.seek(target);
+		this._currentTimeStore.set(target);
+		this.updatePositionState();
+	}
+
+	/** C3: refresh the lock-screen position (seeked / ratechange / durationchange). */
+	private updatePositionState() {
+		if (!this.player) return;
+		const duration = this.duration > 0 ? this.duration : this.player.duration;
+		setPosition(this.player.currentTime, duration, this.player.playbackRate);
+	}
+
 	public setNextTrackPrefetchedUrl(trackUrl: string) {
 		this.nextSrc.url = trackUrl;
 		this.nextSrc.stale = false;
@@ -744,12 +771,15 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 			if (this.videoPlayer && this._mode.value === "video") {
 				this.videoPlayer.currentTime = this.player.currentTime;
 			}
+			this.updatePositionState();
 		});
 
+		this.onEvent("ratechange", () => this.updatePositionState());
 
 		this.onEvent("durationchange", () => {
 			const d = this.player.duration;
 			if (isFinite(d) && d > 0) this._durationStore.set(d);
+			this.updatePositionState();
 		});
 
 		this.onEvent("timeupdate", async () => {
