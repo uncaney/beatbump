@@ -69,7 +69,8 @@ const defaultDeps: KeepDeps = {
 
 /**
  * Keep `tracks` offline: pin the cached ones, download the others
- * (KEEP_CONCURRENCY in parallel) then pin them. Never throws.
+ * (KEEP_CONCURRENCY in parallel), each pinned right after its own download
+ * (I15; one re-download when the SW evicted it before the pin). Never throws.
  * `ready` = pinned, `refused` = refused by the quota (or not attempted once
  * the quota refused), `failed` = download / pin impossible. Abort via
  * `signal`: running downloads finish, nothing new starts, `cancelled: true`.
@@ -126,7 +127,20 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 				break;
 			}
 			pinnedBytes += est; // reserve while the download runs
-			const r = await deps.download(t).catch(() => ({ ok: false, reason: "error" }) as OfflineResult);
+			const dl = () => deps.download(t).catch(() => ({ ok: false, reason: "error" }) as OfflineResult);
+			const pinIt = () => deps.pin(t).catch(() => ({ ok: false, reason: "error" }) as PinResult);
+			let r = await dl();
+			// I15: each track is pinned as soon as ITS download lands (never
+			// after the batch), so a batch cut midway keeps what it finished.
+			let pr: PinResult | null = r.ok ? await pinIt() : null;
+			let retried = false;
+			if (pr && !pr.ok && pr.reason === "not_cached" && !aborted()) {
+				retried = true;
+				// Evicted between its write and its pin (the other worker's
+				// write ran the SW LRU): download it again once, pin at once.
+				r = await dl();
+				pr = r.ok ? await pinIt() : null;
+			}
 			if (!r.ok) {
 				pinnedBytes -= est;
 				if (/quota/.test(r.reason || "")) {
@@ -136,13 +150,14 @@ export async function keepOffline(tracks: any[], opts: KeepOptions = {}, deps: K
 				emit();
 				continue;
 			}
-			const pr = await deps.pin(t).catch(() => ({ ok: false, reason: "error" }) as PinResult);
+			if (!pr) continue;
 			if (pr.ok) {
 				p.ready++;
 				pinnedBytes += (Number(r.bytes) || est) - est;
 			} else {
 				pinnedBytes -= est;
-				if (pr.reason === "quota") {
+				// Still evicted after a second download: the cache cannot hold it.
+				if (pr.reason === "quota" || (retried && pr.reason === "not_cached")) {
 					quotaStop = true;
 					p.refused++;
 				} else p.failed++;

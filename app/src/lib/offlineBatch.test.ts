@@ -242,3 +242,66 @@ describe("menu Garder hors-ligne (I13)", () => {
 		expect(keepAliases(tr("solo", { endpoint: { browseId: "MPREb_disc" } }))).toEqual(["solo"]);
 	});
 });
+
+describe("keepOffline pins per track (I15)", () => {
+	it("a batch cut midway keeps the tracks it finished pinned", async () => {
+		const pinned: string[] = [];
+		const cached = new Set<string>();
+		const ctrl = new AbortController();
+		const deps: KeepDeps = {
+			pin: async (t) => {
+				if (!cached.has(t.videoId)) return { ok: false, reason: "not_cached" };
+				pinned.push(t.videoId);
+				return { ok: true };
+			},
+			download: async (t) => {
+				await new Promise((r) => setTimeout(r, t.videoId === "a" ? 1 : 20));
+				cached.add(t.videoId);
+				return { ok: true, bytes: MB };
+			},
+			cacheInfo: async () => null,
+		};
+		const p = keepOffline([tr("a"), tr("b"), tr("c"), tr("d")], {
+			signal: ctrl.signal,
+			onProgress: (pr) => {
+				if (pr.ready === 1) ctrl.abort(); // network cut / Annuler after the first one
+			},
+		}, deps);
+		const r = await p;
+		expect(r.cancelled).toBe(true);
+		expect(pinned[0]).toBe("a"); // pinned before the rest of the batch finished
+		expect(pinned).not.toContain("d");
+	});
+	it("re-downloads once a track evicted between its write and its pin", async () => {
+		const cached = new Set<string>();
+		const downloads: string[] = [];
+		let evictOnce = true;
+		const deps: KeepDeps = {
+			pin: async (t) => {
+				if (t.videoId === "a" && evictOnce && downloads.includes("a")) {
+					evictOnce = false;
+					cached.delete("a"); // B's write ran the LRU
+				}
+				return cached.has(t.videoId) ? { ok: true } : { ok: false, reason: "not_cached" };
+			},
+			download: async (t) => {
+				downloads.push(t.videoId);
+				cached.add(t.videoId);
+				return { ok: true, bytes: MB };
+			},
+			cacheInfo: async () => null,
+		};
+		const r = await keepOffline([tr("a"), tr("b")], {}, deps);
+		expect(r).toMatchObject({ ready: 2, failed: 0, refused: 0 });
+		expect(downloads.filter((x) => x === "a")).toHaveLength(2);
+	});
+	it("evicted twice: refused (cache too small), not failed", async () => {
+		const deps: KeepDeps = {
+			pin: async () => ({ ok: false, reason: "not_cached" }),
+			download: async () => ({ ok: true, bytes: MB }),
+			cacheInfo: async () => null,
+		};
+		const r = await keepOffline([tr("a")], {}, deps);
+		expect(r).toMatchObject({ ready: 0, failed: 0, refused: 1 });
+	});
+});
