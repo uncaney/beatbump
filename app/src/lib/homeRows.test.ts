@@ -7,6 +7,8 @@ import {
 	buildForYouRow,
 	buildResumeRow,
 	diversify,
+	spreadArtists,
+	artistKey,
 	capItems,
 	OFFLINE_TRACKS_KEY,
 	readCachedTracks,
@@ -187,6 +189,36 @@ describe("diversify (audit UX v4 TOP 5)", () => {
 		];
 		expect(diversify(items, 3, 1, 2).map((i) => i.videoId)).toEqual(["a1", "a2", "a3"]);
 		expect(diversify(items, 2, 1, 2).map((i) => i.videoId)).toEqual(["a1", "a2"]);
+	});
+});
+
+describe("spreadArtists (UX4 Pour toi)", () => {
+	const t = (id: string, artist: string) => ({ videoId: id, title: id, artistInfo: { artist: [{ browseId: artist }] } });
+	const ids = (l: any[]) => l.map((i) => i.videoId);
+	it("interleaves runs of one artist and keeps every item", () => {
+		const items = [t("k1", "killers"), t("k2", "killers"), t("k3", "killers"), t("k4", "killers"), t("s1", "soad"), t("s2", "soad"), t("s3", "soad"), t("s4", "soad"), t("m1", "muse")];
+		const out = spreadArtists(items);
+		expect(out).toHaveLength(items.length);
+		expect(new Set(ids(out))).toEqual(new Set(ids(items)));
+		expect(ids(out).slice(0, 4)).toEqual(["k1", "s1", "k2", "s2"]);
+		for (let i = 1; i < out.length; i++) expect(artistKey(out[i])).not.toBe(artistKey(out[i - 1]));
+	});
+	it("allows runs up to maxRun and leaves a single-artist tail in order", () => {
+		const items = [t("a1", "a"), t("a2", "a"), t("a3", "a"), t("b1", "b"), t("a4", "a"), t("a5", "a")];
+		expect(ids(spreadArtists(items, 3))).toEqual(["a1", "a2", "a3", "b1", "a4", "a5"]);
+		expect(ids(spreadArtists(items, 1))).toEqual(["a1", "b1", "a2", "a3", "a4", "a5"]);
+	});
+	it("falls back to the first subtitle text and never runs on unknown artists", () => {
+		const s = (id: string, text?: string) => ({ videoId: id, subtitle: text ? [{ text }] : [] });
+		expect(ids(spreadArtists([s("x1", "X"), s("x2", "X"), s("y1", "Y")]))).toEqual(["x1", "y1", "x2"]);
+		expect(ids(spreadArtists([s("u1"), s("u2"), s("u3")]))).toEqual(["u1", "u2", "u3"]);
+		expect(spreadArtists(null as any)).toEqual([]);
+	});
+	it("does not mutate the input", () => {
+		const items = [t("a1", "a"), t("a2", "a"), t("b1", "b")];
+		const copy = JSON.stringify(items);
+		spreadArtists(items);
+		expect(JSON.stringify(items)).toBe(copy);
 	});
 });
 

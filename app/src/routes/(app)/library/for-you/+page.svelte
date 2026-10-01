@@ -1,6 +1,8 @@
 <script lang="ts">
 	import Listing from "$components/Item/Listing.svelte";
 	import MeOffline from "$components/Offline/MeOffline.svelte";
+	import PlayAllBar from "$components/PlayAllBar/PlayAllBar.svelte";
+	import { spreadArtists } from "$lib/homeRows";
 	import { getMix } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
 	import { onMount } from "svelte";
@@ -27,7 +29,10 @@
 			items = [];
 			seeds = 0;
 		} else if (!err) {
-			items = Array.isArray(r?.items) ? r.items : [];
+			// UX4: the server mix came in artist runs (4 Killers then 4 System of
+			// a Down); interleave so no artist plays twice in a row while another
+			// is left (homeRows.spreadArtists, same artist identity as diversify).
+			items = spreadArtists(Array.isArray(r?.items) ? r.items : []);
 			seeds = r?.seeds || 0;
 		}
 		loading = false;
@@ -42,7 +47,7 @@
 	});
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active="for-you" />
 	<header class="head">
 		<div>
@@ -72,6 +77,11 @@
 	{:else if items.length === 0}
 		<p class="state">Écoute quelques morceaux et ta sélection apparaîtra ici.</p>
 	{:else}
+		<!-- UX4: "Tout lire" / "Aléatoire" over the selection, in its order. -->
+		<PlayAllBar
+			tracks={items}
+			context={{ kind: "queue", title: "Pour toi", href: "/library/for-you" }}
+		/>
 		<div class="grid">
 			{#each items as item (item.videoId || item.title)}
 				<div class="cell"><Listing data={item} /></div>
@@ -91,6 +101,10 @@
 		justify-content: space-between;
 		gap: 1rem;
 		margin-bottom: 1rem;
+		// UX1: the title block shrinks so "Rafraîchir" stays inside the gutter.
+		> div {
+			min-width: 0;
+		}
 	}
 	.sub {
 		color: #999;

@@ -13,6 +13,10 @@
 	// HL6: every card carries "Garder hors-ligne" [mix-keep] (KeepOfflineButton
 	// with a loader: the same endpoint as the tap, so the 40 sampled tracks /
 	// the artist radio are downloaded and pinned as a travel pack).
+	// UX2 (cycle 35): that action is a 44px corner icon (compact
+	// KeepOfflineButton) instead of a full-width pill under every card, which
+	// doubled the grid height; titles clamp to two lines with a tooltip and
+	// every card of a grid has the same height.
 	import { APIClient } from "$lib/api";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
 	import KeepOfflineButton from "$lib/components/ListItem/KeepOfflineButton.svelte";
@@ -108,7 +112,7 @@
 	}
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active="mixes" />
 	<header class="head">
 		<h1>Mixes</h1>
@@ -145,8 +149,8 @@
 					{/if}
 					<div class="grid">
 						{#each sec.list as card (card.key)}
-							<!-- The tile: the card itself (tap = play) and, under it, the
-							     HL6 keep button; two buttons side by side, never nested. -->
+							<!-- The tile: the card itself (tap = play) and, in its top-right
+							     corner, the HL6 keep icon; two sibling buttons, never nested. -->
 							<div
 								class="mix-tile"
 								class:is-decade={card.kind === "decade"}
@@ -161,6 +165,7 @@
 									data-unavailable={unavailable.has(card.key) || undefined}
 									disabled={busyKey === card.key || unavailable.has(card.key)}
 									aria-label={card.kind === "artist" ? `Lancer la radio ${card.title}` : `Lire le mix ${card.title}`}
+									title={card.title}
 									on:click={() => playMix(card)}
 								>
 									<span class="mix-title">{card.title}</span>
@@ -178,6 +183,7 @@
 										load={() => loadCard(card)}
 										sourceKey={`mix:${card.key}`}
 										testid="mix-keep"
+										compact
 									/>
 								</div>
 							</div>
@@ -224,9 +230,11 @@
 		font-size: 1.1em;
 		margin: 0 0 0.6rem;
 	}
+	// UX2: every row of a grid as tall as its tallest card (consistent height).
 	.grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(min(10rem, 100%), 1fr));
+		grid-auto-rows: 1fr;
 		gap: 0.6rem;
 	}
 	.group-sub {
@@ -234,22 +242,22 @@
 		color: #999;
 		font-size: 0.9rem;
 	}
-	/* Tile = card (play) + keep row; the coloured edge is the card kind. */
+	/* Tile = card (play) + corner keep icon; the coloured edge is the card kind. */
 	.mix-tile {
+		position: relative;
 		display: flex;
-		flex-direction: column;
-		gap: 0.35rem;
 		min-width: 0;
 	}
-	/* Tap target: 44px floor on phones (root 12px), cards grow with content. */
+	/* Tap target: 44px floor on phones (root 12px). Title on top (clear of
+	   the corner icon), count at the bottom. */
 	.mix-card {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
-		justify-content: flex-end;
-		gap: 0.2rem;
+		justify-content: space-between;
+		gap: 0.3rem;
 		width: 100%;
-		min-height: max(5.5rem, 44px);
+		min-height: max(7rem, 84px);
 		padding: 0.8rem 0.9rem;
 		border-radius: 0.8rem;
 		text-align: left;
@@ -272,25 +280,27 @@
 		cursor: progress;
 		opacity: 0.7;
 	}
-	/* HL6: the keep button under the card, full tile width, 44px tall. */
+	/* HL6 / UX2: the keep icon (44px .icon-btn) in the card's top-right corner. */
 	.mix-keep {
+		position: absolute;
+		top: 0.2rem;
+		right: 0.2rem;
 		display: flex;
-		:global(.keep-offline) {
-			width: 100%;
-		}
-		:global(.keep-btn) {
-			flex: 1 1 auto;
-			min-height: max(2.75rem, 44px);
-			font-size: 0.9em;
-		}
 	}
+	/* Two lines, then an ellipsis; the full name is the card's title tooltip.
+	   Right padding keeps the text clear of the corner icon. */
 	.mix-title {
 		font-weight: 600;
 		font-size: 1.05em;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		line-height: 1.25;
 		max-width: 100%;
+		padding-right: max(2.75rem, 40px);
+		overflow: hidden;
+		overflow-wrap: anywhere;
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
 	}
 	.mix-sub {
 		color: #aaa;

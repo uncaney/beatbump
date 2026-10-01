@@ -50,7 +50,7 @@
 	}
 </script>
 
-<main>
+<main class="resp-content-width">
 	<CollectionNav active="genres" />
 	<header class="head">
 		<h1>Genres</h1>
@@ -129,21 +129,33 @@
 		border-radius: 0.4rem;
 		color: inherit;
 		padding: 0.4rem 0.6rem;
+		max-width: 100%;
 	}
 	.chips {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
 	}
+	// UX1: a long genre name must not push its row past the 16 px gutter
+	// (no horizontal scroll at 390 px): the row and its chip shrink, the
+	// name ellipsizes.
 	.chip-row {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.3rem;
+		max-width: 100%;
+		min-width: 0;
 	}
 	.chip {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
+		min-width: 0;
+		.name {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
 		padding: 0.4rem 0.8rem;
 		border-radius: 1rem;
 		background: rgba(255, 255, 255, 0.07);
