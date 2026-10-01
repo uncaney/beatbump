@@ -35,6 +35,7 @@
 	import { resolveArtistId, entityHref } from "$lib/local";
 	import { saveFavourite, removeFavourite } from "$lib/favourites";
 	import { downloadToDevice } from "$lib/offline";
+	import { keepItemOffline } from "$lib/offlineBatch";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { mobileLongPress } from "$lib/actions/longtouch";
 	import type { Dropdown } from "$lib/configs/dropdowns.config";
@@ -138,6 +139,15 @@
 					await removeFavourite(data);
 					dispatch("update");
 				}
+			},
+		},
+		{
+			// O8: dropdowns.config "Garder hors-ligne" (download then pin).
+			text: "Garder hors-ligne",
+			icon: "download",
+			action: () => {
+				if (!browser) return;
+				void keepItemOffline(data);
 			},
 		},
 		{

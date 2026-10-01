@@ -25,7 +25,9 @@ export type Label =
 	| "Play Album"
 	| "Download"
 	| "Download to device"
-	| "Download offline"
+	// O8 (lane c18b): the former dead "Download offline" entry, now wired
+	// (ListItem / Listing / CarouselItem -> $lib/offlineBatch keepItemOffline).
+	| "Garder hors-ligne"
 	| "Lyrics"
 	| "Invite Group Session"
 	| "Album Radio"
@@ -63,7 +65,7 @@ const DROPDOWN_TEXTS: ReadonlyArray<Label> = [
 	"Album Radio",
 	"Download",
 	"Download to device",
-	"Download offline",
+	"Garder hors-ligne",
 	"Lyrics",
 	"Minuterie de sommeil",
 	"Raccourcis clavier",
@@ -199,8 +201,9 @@ export const DROPDOWN_ITEMS: Partial<{
 		icon: "download",
 		action: () => { },
 	},
-	"Download offline": {
-		text: "Download offline",
+	// O8: download the track (or the album's tracks) then pin it.
+	"Garder hors-ligne": {
+		text: "Garder hors-ligne",
 		icon: "download",
 		action: () => { },
 	},

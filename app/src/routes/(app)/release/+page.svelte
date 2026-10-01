@@ -2,6 +2,7 @@
 	import { page } from "$app/stores";
 	import Header from "$lib/components/Layouts/Header.svelte";
 	import InfoBox from "$lib/components/Layouts/InfoBox.svelte";
+	import KeepOfflineButton from "$lib/components/ListItem/KeepOfflineButton.svelte";
 	import ListItem, {
 		listItemPageContext,
 	} from "$lib/components/ListItem/ListItem.svelte";
@@ -92,6 +93,10 @@
 		type="release"
 		on:shuffle={playShuffle}
 	/>
+	{#if !notFound && items.length}
+		<!-- O8: download the missing tracks then pin the whole album. -->
+		<div class="keep-row"><KeepOfflineButton tracks={items} /></div>
+	{/if}
 	{#if notFound}
 		<p class="release-missing">Cet album n'est plus dans la bibliothèque.</p>
 	{/if}
@@ -103,3 +108,9 @@
 		/>
 	{/each}
 </main>
+
+<style>
+	.keep-row {
+		margin: 0 0 0.75rem;
+	}
+</style>

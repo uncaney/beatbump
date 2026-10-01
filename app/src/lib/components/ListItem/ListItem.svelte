@@ -249,6 +249,9 @@
 				const r = await downloadToDevice(item);
 				notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
 			})
+			.add("Garder hors-ligne", () => {
+				void keepItemOffline(item);
+			})
 			.add("Favorite", () => {
 				saveFavourite(item);
 			})
@@ -320,6 +323,7 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId, entityHref } from "$lib/local";
 	import { downloadToDevice } from "$lib/offline";
+	import { keepItemOffline } from "$lib/offlineBatch";
 	import { addToQueueEnd, playNext } from "$lib/queueActions";
 	import { buildDropdown } from "$lib/configs/dropdowns.config";
 	import { APIParams, FINITE_LIST_PARAMS } from "$lib/constants";

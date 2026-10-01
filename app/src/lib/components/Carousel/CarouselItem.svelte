@@ -131,6 +131,9 @@
 				notify("Failed to share: " + error, "error");
 			}
 		},
+		keepOffline: (ctx: BuildMenuParams) => {
+			void keepItemOffline(ctx.item);
+		},
 		download: (ctx: BuildMenuParams) => {
 			const { item } = ctx;
 			showDownloadSongPopper.set({ state: true, item });
@@ -151,6 +154,10 @@
 				"Add to Playlist",
 				MENU_HANDLERS.addToPlaylist.bind(MENU_HANDLERS.addToPlaylist, ctx),
 			)
+			.add(
+				"Garder hors-ligne",
+				MENU_HANDLERS.keepOffline.bind(MENU_HANDLERS.keepOffline, ctx),
+			)
 			.add("Favorite", MENU_HANDLERS.favorite.bind(MENU_HANDLERS.favorite, ctx))
 			.add(
 				"Start Group Session",
@@ -168,6 +175,7 @@
 	import Loading from "$components/Loading/Loading.svelte";
 	// import { groupSession } from "$lib/stores";
 	import { saveFavourite } from "$lib/favourites";
+	import { keepItemOffline } from "$lib/offlineBatch";
 
 	import { browser } from "$app/environment";
 	import { buildDropdown, type Dropdown } from "$lib/configs/dropdowns.config";

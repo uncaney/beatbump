@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from "$app/stores";
 	import Listing from "$components/Item/Listing.svelte";
+	import KeepOfflineButton from "$lib/components/ListItem/KeepOfflineButton.svelte";
 	import { getPlaylist, deletePlaylist } from "$lib/me";
 	import { goto } from "$app/navigation";
 	import { onMount } from "svelte";
@@ -39,10 +40,15 @@
 				<h1>{pl.name}</h1>
 				<span class="sub">{tracks.length} tracks</span>
 			</div>
-			<button
-				class="btn"
-				on:click={remove}>Delete</button
-			>
+			<div class="actions">
+				{#if tracks.length}
+					<KeepOfflineButton {tracks} />
+				{/if}
+				<button
+					class="btn"
+					on:click={remove}>Delete</button
+				>
+			</div>
 		</header>
 		{#if tracks.length === 0}
 			<p class="state">No tracks in this playlist.</p>
@@ -67,6 +73,12 @@
 		justify-content: space-between;
 		gap: 1rem;
 		margin-bottom: 1rem;
+	}
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		align-items: center;
 	}
 	.sub {
 		color: #999;
