@@ -15,6 +15,8 @@ import {
 	restoreRemoteResume,
 	stripDeviceUrls,
 	type RestoreRemoteDeps,
+	type ProfileChannelLike,
+	wireProfileChannel,
 } from "./nowPlayingSync";
 import { RESUME_KEY, buildResumeState } from "./resumeState";
 
@@ -329,5 +331,33 @@ describe("clockLabel", () => {
 		expect(clockLabel(750)).toBe("12:30");
 		expect(clockLabel(5.9)).toBe("0:05");
 		expect(clockLabel(NaN)).toBe("0:00");
+	});
+});
+
+describe("wireProfileChannel (L14, audit v7)", () => {
+	const fakeChannel = (): ProfileChannelLike & { close: ReturnType<typeof vi.fn> } => ({
+		onmessage: null,
+		close: vi.fn(),
+	});
+
+	it("fires onProfileChanged for any message on the channel", () => {
+		const channel = fakeChannel();
+		const onProfileChanged = vi.fn();
+		wireProfileChannel(channel, onProfileChanged);
+		expect(channel.onmessage).toBeTypeOf("function");
+		channel.onmessage?.({ data: { at: 123 } } as unknown as MessageEvent);
+		expect(onProfileChanged).toHaveBeenCalledTimes(1);
+		// A second, unrelated message still resets it (payload is never inspected).
+		channel.onmessage?.({ data: "anything" } as unknown as MessageEvent);
+		expect(onProfileChanged).toHaveBeenCalledTimes(2);
+	});
+
+	it("the returned cleanup detaches the handler and closes the channel", () => {
+		const channel = fakeChannel();
+		const onProfileChanged = vi.fn();
+		const cleanup = wireProfileChannel(channel, onProfileChanged);
+		cleanup();
+		expect(channel.onmessage).toBeNull();
+		expect(channel.close).toHaveBeenCalledTimes(1);
 	});
 });
