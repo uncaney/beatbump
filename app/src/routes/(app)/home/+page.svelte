@@ -9,6 +9,7 @@
 	import PersonalRows from "./_PersonalRows.svelte";
 	import FirstRun from "./_FirstRun.svelte";
 	import WeekendCard from "./_WeekendCard.svelte";
+	import FirstPackCard from "./_FirstPackCard.svelte";
 	import { homeChipContext } from "$lib/contexts";
 	import type { PageData } from "./$types";
     import {APIClient} from "$lib/api";
@@ -189,6 +190,8 @@
 		}}
 	/>
 	<FirstRun />
+	<!-- c48c B8-2: day one, "Emporte 1 h de musique" (profile without history). -->
+	<FirstPackCard />
 	<WeekendCard />
 	<PersonalRows />
 	{#if !homeReady}
