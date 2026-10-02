@@ -10,10 +10,15 @@
 	// FIRST_PACK_KEY): the card is shown once, never again. Self-contained:
 	// mounted by one line in +page.svelte. window.__ytmFirstPack carries the
 	// plan for the harness (first_pack_card).
+	// U13-4: never on the first screen of the session. The card waits for the
+	// first sound (AudioPlayer.paused true -> false once, the InstallHint
+	// gate's `heardFirstSound`): on day one the Bienvenue block has stepped
+	// aside by then, and the first screen carries one call to action less.
 	import { onMount } from "svelte";
 	import { get } from "svelte/store";
 	import { goto } from "$app/navigation";
 	import { APIClient } from "$lib/api";
+	import { heardFirstSound } from "$lib/components/InstallHint/gate";
 	import { isDataSaver } from "$lib/dataSaver";
 	import { FIRST_PACK_HREF, FIRST_PACK_JOB_KEY, FIRST_PACK_KEY, firstPackSizeText, firstPackSources, hasFirstPackMaterial, planFirstPack, shouldShowFirstPackCard, sizeFirstPack, type FirstPackEstimate } from "$lib/firstPack";
 	import { getRecent } from "$lib/me";
@@ -21,9 +26,20 @@
 	import { defaultKeepDeps, keepDepsWithAbort, keepJobs, keepSummary, startKeepJob, type KeepResult } from "$lib/offlineBatch";
 	import { averageBytesPerSecond, estimatePackBytes, guardPackSpace, lastPackOf, originRoom, writeLastPack, type PackPlan } from "$lib/offlinePack";
 	import { durationOf } from "$lib/offlineQueue";
+	import { AudioPlayer } from "$lib/player";
 	import { notify } from "$lib/utils";
 
-	let show = false;
+	// The profile-side conditions (no history, service worker active, no memo).
+	let eligible = false;
+	// A sound was heard this session (never reset).
+	let heardSound = false;
+	$: show = eligible && heardSound;
+	// U13-2 x U13-4: the size is announced when the card actually shows (after the first sound), once.
+	let announced = false;
+	$: if (show && !announced) {
+		announced = true;
+		void announce();
+	}
 	let busy = false;
 	let alive = true;
 	// U13-2 (audit UX v13): the plan is computed as soon as the card shows, so
@@ -64,6 +80,13 @@
 
 	onMount(() => {
 		let alive = true;
+		// U13-4: the first sound of the session (a track already playing when
+		// the home mounts counts: the store's first emission is "not paused").
+		let prevPaused = true;
+		const unsubPaused = AudioPlayer.paused.subscribe((paused) => {
+			if (heardFirstSound(prevPaused, paused)) heardSound = true;
+			prevPaused = paused;
+		});
 		void (async () => {
 			let stored: string | null = null;
 			try {
@@ -84,17 +107,19 @@
 			}
 			if (recentCount === null || recentCount > 0) return;
 			const sw = await swActive();
-			if (alive) show = shouldShowFirstPackCard({ stored, recentCount, swActive: sw });
-			if (alive && show) void announce();
+			// The sound gate is applied reactively (`show`): the profile-side
+			// answer is computed once, with the gate held open here.
+			if (alive) eligible = shouldShowFirstPackCard({ stored, recentCount, swActive: sw, heardSound: true });
 		})();
 		return () => {
 			alive = false;
+			unsubPaused();
 		};
 	});
 
 	function dismiss() {
 		remember();
-		show = false;
+		eligible = false;
 	}
 
 	type FirstPackWindow = Window & { __ytmFirstPack?: Record<string, unknown> };
@@ -201,7 +226,7 @@
 				},
 			});
 			remember();
-			show = false;
+			eligible = false;
 			await goto(FIRST_PACK_HREF);
 		} catch (e) {
 			notify(`Impossible de préparer le pack : ${(e as Error)?.message ?? e}`, "error");

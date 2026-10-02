@@ -28,6 +28,12 @@ import {
 	ARRIVED_MONTH_MIN_ALBUMS,
 	HOME_ROW_PRIORITY,
 	HOME_ROW_ORDER,
+	TODAY_ROW,
+	TODAY_ALBUM_KEY,
+	TODAY_ARTIST_KEY,
+	buildTodayGroup,
+	todaySubheading,
+	withoutCurrentTrack,
 	monthNameFr,
 	arrivedMonthTitle,
 	arrivedMonthFrom,
@@ -513,5 +519,73 @@ describe("Arrivé en <mois> (c44a B7-2)", () => {
 		]);
 		expect(keys(capped.visible)).toEqual(["reprendre", "pour-toi", "nouveautes-artistes", "jamais-ecoute"]);
 		expect(keys(capped.more)).toEqual([ARRIVED_MONTH_ROW]);
+	});
+});
+
+describe("Aujourd'hui (U13-4): one header for the album and the artist of the day", () => {
+	const album = { album: { browseId: "lb-1", title: "Discovery" }, date: "2026-10-02" };
+	const artist = { artist: { browseId: "la-1", title: "Daft Punk" }, name: "Daft Punk", scope: "library", reason: "" };
+
+	it("groups the two cards when both rows won a place, in one row of two tiles", () => {
+		const g = buildTodayGroup(album, artist, new Set([TODAY_ALBUM_KEY, TODAY_ARTIST_KEY, "reprendre"]));
+		expect(g).toEqual({ album, artist, count: 2 });
+	});
+
+	it("keeps a lone card (the other not loaded, or dropped by arrangeHomeRows)", () => {
+		expect(buildTodayGroup(album, null, [TODAY_ALBUM_KEY, TODAY_ARTIST_KEY])).toEqual({ album, artist: null, count: 1 });
+		expect(buildTodayGroup(album, artist, [TODAY_ARTIST_KEY])).toEqual({ album: null, artist, count: 1 });
+		expect(buildTodayGroup(undefined, artist, [TODAY_ARTIST_KEY])).toEqual({ album: null, artist, count: 1 });
+	});
+
+	it("is null with nothing to show, so the section is not painted", () => {
+		expect(buildTodayGroup(null, null, [TODAY_ALBUM_KEY, TODAY_ARTIST_KEY])).toBeNull();
+		expect(buildTodayGroup(album, artist, [])).toBeNull();
+	});
+
+	it("follows the keys arrangeHomeRows uses for the two bonus rows", () => {
+		expect(HOME_ROW_PRIORITY).toContain(TODAY_ALBUM_KEY);
+		expect(HOME_ROW_PRIORITY).toContain(TODAY_ARTIST_KEY);
+		expect(TODAY_ROW).not.toBe(TODAY_ALBUM_KEY);
+	});
+
+	it("writes ONE subtitle with one 'demain' for the two tiles, by the artist's scope", () => {
+		const both = todaySubheading({ album, artist }, artist);
+		expect(both).toMatch(/les mêmes pour tout le monde/);
+		expect(both).toMatch(/demain d'autres$/);
+		expect(both.match(/demain/g)?.length).toBe(1);
+		expect(todaySubheading({ album, artist }, { scope: "profile", reason: "" })).toMatch(/jamais écouté · demain d'autres$/);
+		expect(todaySubheading({ album, artist }, { scope: "profile", reason: "all_played" })).toMatch(/à retrouver · demain d'autres$/);
+		expect(todaySubheading({ album, artist: null })).toMatch(/^Un album .* le même pour tout le monde · demain un autre$/);
+		expect(todaySubheading({ album: null, artist }, artist)).toMatch(/^Un artiste .* le même pour tout le monde · demain un autre$/);
+		expect(todaySubheading({ album: null, artist }, { scope: "profile", reason: "" })).toMatch(/jamais écouté · demain un autre$/);
+	});
+});
+
+describe("withoutCurrentTrack (U13-5): Reprendre never proposes the playing track", () => {
+	const row = [song("v1", "Face to Face"), song("v2"), song("v3")];
+
+	it("drops the card of the current queue item while playback runs", () => {
+		expect(withoutCurrentTrack(row, { videoId: "v1" }, false).map(rowItemRef)).toEqual(["v2", "v3"]);
+		expect(withoutCurrentTrack(row, { videoId: "v2" }, false).map(rowItemRef)).toEqual(["v1", "v3"]);
+	});
+
+	it("keeps it while paused (same rule as the saved-queue pill), and with no current track", () => {
+		expect(withoutCurrentTrack(row, { videoId: "v1" }, true)).toBe(row);
+		expect(withoutCurrentTrack(row, null, false)).toBe(row);
+		expect(withoutCurrentTrack(row, undefined, false)).toBe(row);
+		expect(withoutCurrentTrack(row, {}, false)).toBe(row);
+	});
+
+	it("keeps the very array when nothing matches, empties a one-card row (then hidden by arrangeHomeRows)", () => {
+		expect(withoutCurrentTrack(row, { videoId: "zz" }, false)).toBe(row);
+		expect(withoutCurrentTrack([song("v1")], { videoId: "v1" }, false)).toEqual([]);
+		expect(withoutCurrentTrack(null, { videoId: "v1" }, false)).toEqual([]);
+		const out = arrangeHomeRows([{ key: "reprendre", items: withoutCurrentTrack([song("v1")], { videoId: "v1" }, false) }]);
+		expect(out.visible).toEqual([]);
+	});
+
+	it("matches a browse ref too (a local album card is not restarted either)", () => {
+		const albumsRow = [{ title: "A", browseId: "lb-1", thumbnails: [] }, song("v9")];
+		expect(withoutCurrentTrack(albumsRow, { browseId: "lb-1" }, false).map(rowItemRef)).toEqual(["v9"]);
 	});
 });

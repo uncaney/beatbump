@@ -364,7 +364,9 @@ func TestLocalArtistPageAliasesAndGroupSeeAll(t *testing.T) {
 		t.Fatalf("no aliases block: %v", resp["aliases"])
 	}
 	others, _ := block["others"].([]map[string]interface{})
-	if block["primary"] != artistID("Ed Sheeran") || len(others) != 3 || others[0]["name"] != "Ed Sheeran" || others[0]["href"] != "/artist/"+artistID("Ed Sheeran") {
+	// U13-3: "Ed Shéeran" is a spelling of the "Ed Sheeran" chip (one chip,
+	// the primary's); the group itself still counts 4 and the union plays it.
+	if block["primary"] != artistID("Ed Sheeran") || len(others) != 2 || others[0]["name"] != "Ed Sheeran" || others[0]["href"] != "/artist/"+artistID("Ed Sheeran") || block["size"] != 4 {
 		t.Fatalf("aliases block: %v", block)
 	}
 	seeAll, _ := resp["seeAll"].(map[string]interface{})
@@ -382,5 +384,61 @@ func TestLocalArtistPageAliasesAndGroupSeeAll(t *testing.T) {
 	seeAll, _ = resp["seeAll"].(map[string]interface{})
 	if seeAll == nil || strings.Contains(mstr(seeAll, "url"), "group=1") || seeAll["artistTotal"] != 2 {
 		t.Errorf("plain seeAll: %v", seeAll)
+	}
+}
+
+// U13-3: the "ft." / "feat." / "featuring" spellings of one credit make ONE
+// "Aussi sous" chip; the group and the songs union keep every spelling.
+func TestArtistAliasPeersDedupeFeatSpellings(t *testing.T) {
+	startAliasStub(t, &aliasStub{artists: []map[string]interface{}{
+		aliasArtistDoc("The Chainsmokers", 12, 120),
+		aliasArtistDoc("The Chainsmokers ft. Halsey", 2, 2),
+		aliasArtistDoc("The Chainsmokers feat. Halsey", 1, 1),
+		aliasArtistDoc("The Chainsmokers (featuring Halsey)", 1, 1),
+		aliasArtistDoc("The Chainsmokers ft. Daya", 1, 1),
+		// A collaboration is its own artist (matchNorm keeps "& Coldplay"): a
+		// separate group, never a chip of The Chainsmokers.
+		aliasArtistDoc("The Chainsmokers & Coldplay", 1, 1),
+		aliasArtistDoc("The Chainsmokers and Coldplay", 1, 1),
+	}})
+	artistAliasGroups()
+	g, ok := artistAliasGroupOf(artistID("The Chainsmokers"))
+	if !ok || g.Size != 5 || len(g.Aliases) != 4 {
+		t.Fatalf("group keeps every spelling: ok=%v %+v", ok, g)
+	}
+	names := func(ps []aliasArtist) string {
+		out := []string{}
+		for _, p := range ps {
+			out = append(out, p.Name)
+		}
+		return strings.Join(out, "|")
+	}
+	// The primary page: one chip per credit, the spelling with most albums first.
+	if got := names(artistAliasPeers(artistID("The Chainsmokers"))); got != "The Chainsmokers ft. Halsey|The Chainsmokers ft. Daya" {
+		t.Errorf("primary peers: %s", got)
+	}
+	// An alias page: the primary first, never a spelling of its own credit.
+	if got := names(artistAliasPeers(artistID("The Chainsmokers feat. Halsey"))); got != "The Chainsmokers|The Chainsmokers ft. Daya" {
+		t.Errorf("alias peers: %s", got)
+	}
+	// The songs union still covers every spelling.
+	if n := len(artistAliasNames("The Chainsmokers")); n != 5 {
+		t.Errorf("union names: want 5, got %d", n)
+	}
+	// The collaboration's own group: "&" and "and" are one chip.
+	if got := names(artistAliasPeers(artistID("The Chainsmokers & Coldplay"))); got != "" {
+		t.Errorf("'&' / 'and' spellings are one credit, no chip: %q", got)
+	}
+	for _, c := range []struct{ a, b string; same bool }{
+		{"The Chainsmokers ft. Halsey", "The Chainsmokers feat. Halsey", true},
+		{"The Chainsmokers ft. Halsey", "The Chainsmokers (featuring Halsey)", true},
+		{"The Chainsmokers ft. Halsey", "The Chainsmokers ft. Daya", false},
+		{"Ed Shéeran", "ed sheeran", true},
+		{"Simon & Garfunkel", "Simon and Garfunkel", true},
+		{"Ed Sheeran", "Ed Sheeran feat. Khalid", false},
+	} {
+		if (aliasDisplayKey(c.a) == aliasDisplayKey(c.b)) != c.same {
+			t.Errorf("aliasDisplayKey(%q) vs (%q): same=%v, want %v", c.a, c.b, !c.same, c.same)
+		}
 	}
 }

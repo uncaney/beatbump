@@ -30,6 +30,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -323,14 +324,55 @@ func artistAliasGroupOf(id string) (aliasGroup, bool) {
 	return groups[i], true
 }
 
+// aliasFeatWordRe is the credit word of a "feat." tail, whatever its spelling.
+var aliasFeatWordRe = regexp.MustCompile(`\b(?:feat|ft|featuring)\b\.?`)
+
+// aliasDisplayKey is the key two credits are the SAME chip under (U13-3):
+// unlike aliasKey it keeps the credited guests, but reads "ft." / "feat." /
+// "featuring" (dotted or not, bracketed or not) as one word, folds case,
+// accents, "&" / "and", punctuation and spacing. "The Chainsmokers ft.
+// Halsey" and "The Chainsmokers (feat. Halsey)" are one chip; "... ft.
+// Daya" is another.
+func aliasDisplayKey(name string) string {
+	s := matchAccents.Replace(strings.ToLower(name))
+	s = aliasFeatWordRe.ReplaceAllString(s, " feat ")
+	s = strings.ReplaceAll(s, "&", " and ")
+	s = strings.ReplaceAll(s, "'", "")
+	s = matchNonAlnum.ReplaceAllString(s, " ")
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// dedupeAliasPeers keeps one credit per aliasDisplayKey, the first one in
+// the input (the peers come primary first, then aliasBetter order: most
+// albums wins). The dropped spellings still count in the group (Size) and
+// in the songs union (artistAliasNames): only the chips row is deduped.
+func dedupeAliasPeers(peers []aliasArtist) []aliasArtist {
+	seen := make(map[string]bool, len(peers))
+	out := make([]aliasArtist, 0, len(peers))
+	for _, p := range peers {
+		k := aliasDisplayKey(p.Name)
+		if k == "" {
+			k = strings.ToLower(p.Name)
+		}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, p)
+	}
+	return out
+}
+
 // artistAliasPeers lists the OTHER credits of an artist's group (the chips
-// of its page), nil when it has none.
+// of its page), nil when it has none. U13-3: the "ft." / "feat." /
+// "featuring" spellings of one credit make one chip (dedupeAliasPeers); the
+// page's own spelling is never a chip either way.
 func artistAliasPeers(id string) []aliasArtist {
 	g, ok := artistAliasGroupOf(id)
 	if !ok {
 		return nil
 	}
-	peers := make([]aliasArtist, 0, len(g.Aliases))
+	peers := make([]aliasArtist, 0, len(g.Aliases)+1)
 	if g.ID != id {
 		peers = append(peers, aliasArtist{ID: g.ID, Name: g.Name, AlbumCount: g.AlbumCount, TrackCount: g.TrackCount})
 	}
@@ -339,7 +381,30 @@ func artistAliasPeers(id string) []aliasArtist {
 			peers = append(peers, a)
 		}
 	}
-	return peers
+	own := ""
+	if g.ID == id {
+		own = aliasDisplayKey(g.Name)
+	} else {
+		for _, a := range g.Aliases {
+			if a.ID == id {
+				own = aliasDisplayKey(a.Name)
+				break
+			}
+		}
+	}
+	peers = dedupeAliasPeers(peers)
+	if own == "" {
+		return peers
+	}
+	// A spelling of the page's own credit ("... feat. Halsey" on the "... ft.
+	// Halsey" page) is not "another name" either.
+	kept := peers[:0]
+	for _, p := range peers {
+		if aliasDisplayKey(p.Name) != own {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }
 
 // artistAliasNames lists every credit name of the group an artist NAME
