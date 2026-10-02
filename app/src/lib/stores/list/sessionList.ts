@@ -1613,5 +1613,5 @@ export { currentTrack, queue, queuePosition, related };
 // (sleepTimer, resumeState, nowPlayingSync), so a top-level `list.subscribe` in player.ts ran
 // before `list` was initialised (TDZ "Cannot access before initialization", chain 45).
 if (typeof globalThis.self !== "undefined" && globalThis.self.name !== "IDB") {
-	list.subscribe((state) => sleepQueueChanged(state));
+	SessionListService.subscribe((state) => sleepQueueChanged(state));
 }
