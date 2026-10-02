@@ -18,6 +18,37 @@ export function installHintGate(s: InstallHintGateInput): boolean {
 	return INSTALL_HINT_PATHS.some((base) => p === base || p.startsWith(base + "/"));
 }
 
+// ---- U14-3: what the bar can offer ----
+// `beforeinstallprompt` is a Chromium courtesy: Vanadium / GrapheneOS, Firefox,
+// a Chrome that already saw the prompt refused once, and every Playwright
+// context never fire it. The bar used to exist only with the event (or on
+// iOS): on those Android phones nothing ever proposed the install. Now the
+// manual steps are offered instead (menu then "Installer l'application").
+export type InstallOfferInput = {
+	isIOS: boolean;
+	isAndroid: boolean;
+	/** The captured `beforeinstallprompt` event is at hand (one-tap install). */
+	hasPrompt: boolean;
+};
+export type InstallOffer = "ios" | "prompt" | "android-manual" | null;
+
+/**
+ * The install affordance for this browser: the captured prompt when there is
+ * one (one tap), the Share steps on iOS, the menu steps on an Android without
+ * the event; null elsewhere (desktop browsers without the event: no bar).
+ */
+export function installOffer(s: InstallOfferInput): InstallOffer {
+	if (s.hasPrompt) return "prompt";
+	if (s.isIOS) return "ios";
+	if (s.isAndroid) return "android-manual";
+	return null;
+}
+
+/** U14-3: the Android UA test shared by the bar and /bienvenue (iOS is decided first by the caller). */
+export function isAndroidUA(ua: string | null | undefined): boolean {
+	return /Android/i.test(String(ua ?? ""));
+}
+
 /** The first sound of the session: the paused flag goes true -> false (a restored, paused track never counts). */
 export function heardFirstSound(prevPaused: boolean, paused: boolean): boolean {
 	return prevPaused && !paused;

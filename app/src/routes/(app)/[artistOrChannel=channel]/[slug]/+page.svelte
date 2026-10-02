@@ -282,7 +282,9 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.5rem;
-		margin: 0 0 1rem;
+		// U14-9: `margin: 0 0 1rem` zeroed the auto side margins of
+		// .resp-content-width, so the row started at x = 0 on phones.
+		margin: 0 auto 1rem;
 	}
 	.aliases-label {
 		color: #999;
