@@ -12,6 +12,8 @@ import { formatDuration } from "$lib/utils/releaseMeta";
 
 /** Size guess for a track never downloaded (a ~3-4 min Opus / AAC stream). */
 export const PACK_EST_BYTES = 4 * 1024 * 1024;
+/** The keep job of THE pack (the Espace card's, the home "Emporte 1 h" card's): one at a time, found again by any page. */
+export const PACK_JOB_KEY = "pack:offline";
 export const PACK_SIZES_MB = [100, 250, 500] as const;
 /** B6-16 "pack trajet": durations offered next to the sizes (seconds). */
 export const PACK_DURATIONS_SEC = [1800, 3600, 7200, 14400] as const;

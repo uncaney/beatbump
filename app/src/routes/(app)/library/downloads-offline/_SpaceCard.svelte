@@ -347,7 +347,21 @@
 		packEstBytes = 0;
 		packResult = "";
 		packGuard = null;
+		refreshNothing = "";
 		error = "";
+	}
+	// U13-18 (audit UX v13): "Rien à rafraîchir" / "Rien à préparer" answered
+	// in the progress box with an empty bar, like a stuck job. A status that
+	// no job produced (packProgress null) is a plain line, no <progress>, and
+	// goes at the next gesture (the selector).
+	$: packHasBar = packState === "planning" || packState === "running" || !!packProgress;
+	function dismissStatusLine() {
+		if (packState === "done" && !packProgress) {
+			packState = "";
+			packResult = "";
+			refreshNothing = "";
+			exposePack();
+		}
 	}
 	type PackSources = { favorites: any[]; recent: any[]; plays: Array<{ videoId?: string; playedAt?: number }>; mix: any[]; cached: Set<string>; sizes: Map<string, number> };
 	/** The three sources of a pack plus the cache (fresh SW listing, local sizes). */
@@ -503,6 +517,8 @@
 	let refreshPreview: RefreshPreview | null = null;
 	/** The refresh plan is being computed (the "Rafraîchir" button says so, not "Préparer un pack"). */
 	let refreshPlanning = false;
+	/** U13-18: why the last refresh had nothing to do ("" = it had): the button's title while it stays disabled. */
+	let refreshNothing = "";
 	let refreshButton: HTMLButtonElement | null = null;
 	let refreshConfirmButton: HTMLButtonElement | null = null;
 	function exposeRefresh(p: Pick<RefreshPreview, "prev" | "listened" | "plan">, extra: Record<string, unknown> = {}) {
@@ -531,8 +547,11 @@
 			const protect = [get(currentTrack)?.videoId, readLastTrack(storage() ?? undefined)?.videoId];
 			const plan = planPackRefresh(prev, listened, { favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes }, protect);
 			if (!plan.drop.length || !plan.add.count) {
+				// U13-18: no job ran: a plain status line (no bar), the button
+				// stays disabled with the reason until the next gesture.
 				packState = "done";
 				packResult = packRefreshSummary(plan);
+				refreshNothing = plan.drop.length ? "Pas de nouveau titre pour remplacer les titres écoutés" : "Aucun titre écouté depuis le pack";
 				exposeRefresh({ prev, listened, plan }, { applied: false });
 				exposePack();
 				return;
@@ -710,6 +729,7 @@
 					disabled={packRunning || !!busy || !!freePlan}
 					bind:value={choice}
 					bind:this={sizeSelect}
+					on:change={dismissStatusLine}
 				>
 					<optgroup label="Taille">
 						{#each PACK_SIZES_MB as mb}
@@ -775,8 +795,8 @@
 						data-testid="pack-refresh"
 						data-pack-count={lastPack.items.length}
 						aria-describedby="offline-space-desc"
-						disabled={loading || !!busy || packRunning || !!freePlan || !!refreshPreview}
-						title="Montre d'abord les titres du pack déjà écoutés qui seraient remplacés par de nouveaux, même durée d'écoute ; les épinglés hors du pack ne bougent pas"
+						disabled={loading || !!busy || packRunning || !!freePlan || !!refreshPreview || !!refreshNothing}
+						title={refreshNothing || "Montre d'abord les titres du pack déjà écoutés qui seraient remplacés par de nouveaux, même durée d'écoute ; les épinglés hors du pack ne bougent pas"}
 						bind:this={refreshButton}
 						on:click={refreshPack}
 					>
@@ -899,8 +919,10 @@
 		{#if packState}
 			<div
 				class="panel pack-progress"
+				class:pack-status={!packHasBar}
 				data-testid="pack-progress"
 				data-state={packState}
+				data-bar={packHasBar ? "1" : "0"}
 				data-ready={packProgress?.ready ?? 0}
 				data-total={packProgress?.total ?? packPlan?.count ?? 0}
 				data-bytes={shownDoneBytes}
@@ -910,11 +932,14 @@
 				role="status"
 				aria-live="polite"
 			>
-				<progress
-					max={Math.max(1, packProgress?.total ?? packPlan?.count ?? 1)}
-					value={packProgress?.ready ?? 0}
-					aria-label="Progression du pack"
-				/>
+				{#if packHasBar}
+					<!-- Planning: no value = indeterminate, not a bar stuck at 0. -->
+					<progress
+						max={Math.max(1, packProgress?.total ?? packPlan?.count ?? 1)}
+						value={packState === "planning" ? undefined : (packProgress?.ready ?? 0)}
+						aria-label="Progression du pack"
+					/>
+				{/if}
 				<span id="offline-pack-text">{packText}</span>
 				{#if packState === "too-big" && packGuard}
 					<!-- B7-8: nothing was downloaded; the head that fits is one tap away. -->
@@ -1096,6 +1121,13 @@
 		width: 100%;
 		height: 0.5rem;
 		accent-color: $accent;
+	}
+	// U13-18: a status no job produced is one line, not a boxed progress panel.
+	.pack-progress.pack-status {
+		background: none;
+		border: 0;
+		padding: 0.25rem 0;
+		color: rgba(255, 255, 255, 0.85);
 	}
 	.space-result {
 		margin: 0.5rem 0 0;

@@ -44,6 +44,7 @@
 	import { formatCountFr } from "$lib/utils/formatFr";
 	import { onMount } from "svelte";
 	import { keepJobs, keepSummary, startKeepJob } from "$lib/offlineBatch";
+	import { PACK_JOB_KEY } from "$lib/offlinePack";
 	import { failedDownloads, failedLine, failedSnapshot } from "$lib/offlineFailed";
 	import CollectionNav from "../_CollectionNav.svelte";
 	import SpaceCard from "./_SpaceCard.svelte";
@@ -265,6 +266,12 @@
 	const RETRY_KEY = "retry:failed";
 	$: failedCount = $failedDownloads.length;
 	$: retryJob = $keepJobs.get(RETRY_KEY);
+	// U13-8 (audit UX v13): while THE pack job runs (started here by the Espace
+	// card or on the home by "Emporte 1 h"), an empty cache is not "Aucun
+	// morceau hors-ligne" + Explorer under the progress box: it is the pack
+	// arriving, said as such, with nothing to explore yet.
+	$: packJob = $keepJobs.get(PACK_JOB_KEY);
+	$: packLine = packJob ? (packJob.progress?.total ? `Pack en cours : ${packJob.progress.ready}/${packJob.progress.total} titres` : "Pack en cours…") : "";
 	$: retryText = retryJob
 		? `Nouvel essai : ${retryJob.progress?.ready ?? 0}/${retryJob.progress?.total ?? failedCount} prêts`
 		: failedLine(failedCount);
@@ -439,7 +446,16 @@
 			</button>
 		</p>
 	{/if}
-	{#if tracks.length === 0}
+	{#if tracks.length === 0 && packJob}
+		<!-- U13-8: the pack is arriving; no "Explorer" (nothing to explore yet). -->
+		<EmptyState
+			icon="download"
+			title={packLine}
+			text="Les morceaux apparaissent ici au fur et à mesure du téléchargement."
+			cta=""
+			testid="empty-pack-running"
+		/>
+	{:else if tracks.length === 0}
 		<!-- Empty state with one action (audit 2.4): the explanation lives here
 		     instead of the .note above so it is not said twice on an empty page. -->
 		<EmptyState
