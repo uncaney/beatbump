@@ -535,6 +535,16 @@
 			...extra,
 		};
 	}
+	// B9-6 (L14-11): the listened set and the plan are recomputed from fresh
+	// sources both when the preview opens and when it is confirmed, so a track
+	// played between the two moments is reflected (currentTrack is protected).
+	async function computeRefreshPlan(prev: NonNullable<typeof lastPack>) {
+		const src = await packSources();
+		const listened = listenedPackIds(prev, { plays: src.plays });
+		const protect = [get(currentTrack)?.videoId, readLastTrack(storage() ?? undefined)?.videoId];
+		const plan = planPackRefresh(prev, listened, { favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes }, protect);
+		return { src, listened, plan };
+	}
 	async function refreshPack() {
 		if (packRunning || busy || loading || !lastPack || refreshPreview) return;
 		const prev = lastPack;
@@ -542,10 +552,7 @@
 		refreshPlanning = true;
 		resetPackRun();
 		try {
-			const src = await packSources();
-			const listened = listenedPackIds(prev, { plays: src.plays });
-			const protect = [get(currentTrack)?.videoId, readLastTrack(storage() ?? undefined)?.videoId];
-			const plan = planPackRefresh(prev, listened, { favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes }, protect);
+			const { src, listened, plan } = await computeRefreshPlan(prev);
 			if (!plan.drop.length || !plan.add.count) {
 				// U13-18: no job ran: a plain status line (no bar), the button
 				// stays disabled with the reason until the next gesture.
@@ -580,10 +587,21 @@
 	}
 	async function confirmRefresh() {
 		if (!refreshPreview || packRunning || busy) return;
-		const { prev, src, listened, plan } = refreshPreview;
+		const { prev } = refreshPreview;
 		refreshPreview = null;
 		packState = "planning";
 		try {
+			// B9-6 (L14-11): recompute from fresh sources at confirm time; a track
+			// heard between the preview and now changes what the refresh removes.
+			const { src, listened, plan } = await computeRefreshPlan(prev);
+			if (!plan.drop.length || !plan.add.count) {
+				packState = "done";
+				packResult = packRefreshSummary(plan);
+				refreshNothing = plan.drop.length ? "Pas de nouveau titre pour remplacer les titres écoutés" : "Aucun titre écouté depuis le pack";
+				exposeRefresh({ prev, listened, plan }, { applied: false, recomputed: true });
+				exposePack();
+				return;
+			}
 			const byId = new Map<string, AudioListEntry>();
 			for (const e of entries) if (e.videoId) byId.set(e.videoId, e);
 			const removed: string[] = [];
