@@ -298,14 +298,61 @@ export interface ArrangedHomeRows {
 	more: HomeRow[];
 }
 
+// ---- c44a B7-2 "Arrivé en <mois>": the albums added during one month ----
+
+/** data-row key of the month row (GET local/albums?filter=added-month). */
+export const ARRIVED_MONTH_ROW = "arrive-mois";
+/** First month the acquisition dates mean something (the June 2026 migration rewrote the older ones). */
+export const ARRIVED_MONTH_MIN = "2026-07";
+/** The row needs this many albums (the server's own threshold for its month pick). */
+export const ARRIVED_MONTH_MIN_ALBUMS = 4;
+
+const MONTHS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+
+/** "septembre" for "2026-09", "" for anything else. */
+export function monthNameFr(month: string): string {
+	const m = /^(\d{4})-(\d{2})$/.exec(month || "");
+	if (!m) return "";
+	return MONTHS_FR[Number(m[2]) - 1] ?? "";
+}
+
+/**
+ * Row title: "Arrivé en septembre"; the year is added when it is not the
+ * current one ("Arrivé en décembre 2026"). "" when the month is malformed.
+ */
+export function arrivedMonthTitle(month: string, now: Date = new Date()): string {
+	const name = monthNameFr(month);
+	if (!name) return "";
+	const year = month.slice(0, 4);
+	return `Arrivé en ${name}` + (year !== String(now.getUTCFullYear()) ? ` ${year}` : "");
+}
+
+/**
+ * Month and albums of the added-month answer when the row can show: the
+ * server's month, >= `min` albums (its `total`), else null.
+ */
+export function arrivedMonthFrom(resp: unknown, min = ARRIVED_MONTH_MIN_ALBUMS): { month: string; items: RowItem[]; total: number } | null {
+	if (!resp || typeof resp !== "object") return null;
+	const r = resp as { month?: unknown; items?: unknown; total?: unknown };
+	const month = typeof r.month === "string" && monthNameFr(r.month) ? r.month : "";
+	if (!month || month < ARRIVED_MONTH_MIN) return null;
+	const items = capItems(r.items, Number.MAX_SAFE_INTEGER);
+	const total = typeof r.total === "number" && Number.isFinite(r.total) ? Math.max(r.total, items.length) : items.length;
+	if (total < min || items.length === 0) return null;
+	return { month, items, total };
+}
+
 /**
  * Which row keeps a card present in several rows: the first key here wins.
  * c44a B7-1: "artiste-du-jour" is a bonus card right after the album of the
- * day (artist refs never collide with the album rows).
+ * day (artist refs never collide with the album rows). c44a B7-2: the month
+ * row ranks just above Récemment acquis (the newest albums are the same
+ * cards: the month keeps them, the leftover of Récemment acquis is hidden
+ * under ALBUM_ROW_MIN like any deduped album row).
  */
-export const HOME_ROW_PRIORITY = ["reprendre", "pour-toi", "album-du-jour", "artiste-du-jour", "redecouvrir", "nouveautes-artistes", "jamais-ecoute", "recemment-acquis"];
+export const HOME_ROW_PRIORITY = ["reprendre", "pour-toi", "album-du-jour", "artiste-du-jour", "redecouvrir", "nouveautes-artistes", "jamais-ecoute", ARRIVED_MONTH_ROW, "recemment-acquis"];
 /** Paint order of the personal rows on /home. */
-export const HOME_ROW_ORDER = ["reprendre", "pour-toi", "album-du-jour", "artiste-du-jour", "recemment-acquis", "nouveautes-artistes", "redecouvrir", "jamais-ecoute"];
+export const HOME_ROW_ORDER = ["reprendre", "pour-toi", "album-du-jour", "artiste-du-jour", "recemment-acquis", ARRIVED_MONTH_ROW, "nouveautes-artistes", "redecouvrir", "jamais-ecoute"];
 /** Rows that always take a visible slot when they have something to show. */
 export const HOME_PINNED_ROWS = ["reprendre", "pour-toi"];
 /** F2: personal rows painted above the first YouTube row. */

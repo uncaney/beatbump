@@ -14,6 +14,9 @@
 	// c44a B7-1: "Artiste du jour" ([data-testid=artist-of-day]), one local
 	// artist with >= 2 albums per UTC day, never played by a named profile
 	// (library-wide for a guest), a second bonus card after the album.
+	// c44a B7-2: "Arrivé en <mois>" ([data-testid=row-arrived-month]), the
+	// albums added during the month the server picks (>= 4 albums, never
+	// before July 2026), a normal discovery row under the 4-row cap.
 	import { NNBSP, formatCountFr } from "$lib/utils/formatFr";
 	import ShareWeek from "$lib/components/ShareWeek/ShareWeek.svelte";
 	import { onMount } from "svelte";
@@ -21,8 +24,11 @@
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
 	import {
 		ALBUM_ROW_MIN,
+		ARRIVED_MONTH_ROW,
 		HOME_MORE_ROWS_KEY,
 		arrangeHomeRows,
+		arrivedMonthFrom,
+		arrivedMonthTitle,
 		artistName,
 		buildForYouRow,
 		buildRediscoverRow,
@@ -484,6 +490,25 @@
 		homeCachePersist.schedule();
 	}
 
+	// c44a B7-2 "Arrivé en <mois>": the albums added during the month the
+	// server picks (GET local/albums?filter=added-month: the current month
+	// when it holds >= 4 albums, else the latest month that does, never
+	// before 2026-07). Library-wide, not profile-bound, not cached: hidden
+	// under 4 albums like the other album rows (arrivedMonthFrom).
+	let arrivedMonth: any[] = [];
+	let arrivedMonthKey = "";
+	async function loadArrivedMonth() {
+		try {
+			const res = await APIClient.fetch(`/api/v1/local/albums?filter=added-month&limit=${ACQUIRED_FETCH}`);
+			if (!res.ok) return;
+			const got = arrivedMonthFrom(await res.json());
+			arrivedMonth = got ? capItems(got.items, ACQUIRED_FETCH).map(sanitizeCard) : [];
+			arrivedMonthKey = got ? got.month : "";
+		} catch {
+			arrivedMonth = [];
+		}
+	}
+
 	const NEVER_PLAYED_MAX = 10;
 	async function loadNeverPlayed() {
 		try {
@@ -555,6 +580,7 @@
 		{ key: ALBUM_OF_DAY_ROW, items: albumDay ? [albumDay.album] : [], bonusSlot: true },
 		{ key: ARTIST_OF_DAY_ROW, items: artistDay ? [artistDay.artist] : [], bonusSlot: true },
 		{ key: "recemment-acquis", items: acquired, max: MAX, minAfterDedupe: ALBUM_ROW_MIN },
+		{ key: ARRIVED_MONTH_ROW, items: arrivedMonth, max: MAX, minAfterDedupe: ALBUM_ROW_MIN },
 		{ key: "nouveautes-artistes", items: newInLibrary, minAfterDedupe: ALBUM_ROW_MIN },
 		{ key: "redecouvrir", items: rediscover },
 		{ key: "jamais-ecoute", items: neverPlayed, minAfterDedupe: ALBUM_ROW_MIN },
@@ -565,10 +591,11 @@
 	$: moreRows = arranged.more.filter((r) => r.key in DISCOVERY_ROWS);
 	$: moreCards = moreRows.reduce((n, r) => n + r.items.length, 0);
 
-	// The four discovery rows share one template; their copy, link and
-	// test ids live here. "Voir tout" lands on the list that shows the SAME
-	// thing as the row (F5 + BI4): the albums page with the row's filter and
-	// sort, the dedicated Redécouvrir list, the albums page newest first.
+	// The discovery rows share one template; their copy, link and test ids
+	// live here. "Voir tout" lands on the list that shows the SAME thing as
+	// the row (F5 + BI4): the albums page with the row's filter and sort,
+	// the dedicated Redécouvrir list, the albums page newest first. Reactive
+	// since c44a B7-2: the month row is titled after the month it shows.
 	interface DiscoveryRow {
 		title: string;
 		subheading: string;
@@ -576,12 +603,20 @@
 		testid: string;
 		isBrowseEndpoint: boolean;
 	}
-	const DISCOVERY_ROWS: Record<string, DiscoveryRow> = {
+	let DISCOVERY_ROWS: Record<string, DiscoveryRow>;
+	$: DISCOVERY_ROWS = {
 		"recemment-acquis": {
 			title: "Récemment acquis",
 			subheading: "Derniers albums ajoutés à la bibliothèque",
 			seeAllHref: "/library/albums?sort=dateAdded:desc",
 			testid: "row-recently-added",
+			isBrowseEndpoint: true,
+		},
+		[ARRIVED_MONTH_ROW]: {
+			title: arrivedMonthTitle(arrivedMonthKey) || "Arrivé ce mois-ci",
+			subheading: "Les albums entrés dans la bibliothèque ce mois-là",
+			seeAllHref: `/library/albums?filter=added-month&month=${encodeURIComponent(arrivedMonthKey)}&sort=dateAdded:desc`,
+			testid: "row-arrived-month",
 			isBrowseEndpoint: true,
 		},
 		"nouveautes-artistes": {
@@ -662,6 +697,7 @@
 		void loadWeekCard();
 		void loadAlbumOfDay();
 		void loadArtistOfDay();
+		void loadArrivedMonth();
 		let unwireProfile: (() => void) | undefined;
 		if (typeof BroadcastChannel !== "undefined") {
 			const channel = new BroadcastChannel(PROFILE_CHANNEL_NAME);

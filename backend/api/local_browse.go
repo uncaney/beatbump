@@ -150,13 +150,126 @@ var albumDocAttrs = []string{"id", "album", "albumArtist", "artistId", "year", "
 //	never-played  albums none of whose tracks the profile played (the
 //	              me/never-played logic, profile cookie), up to the scan cap
 //	added-30d     albums added in the last addedRecentlyDays days
-var albumFilters = map[string]bool{"never-played": true, "added-30d": true}
+//	added-month   albums added during one calendar month (c44a B7-2, below)
+var albumFilters = map[string]bool{"never-played": true, "added-30d": true, "added-month": true}
 
 const (
 	albumFilterScanPage = 200
 	albumFilterScanCap  = 1000
 	addedRecentlyDays   = 30
 )
+
+// c44a B7-2 "Arrive cet ete": ?filter=added-month[&month=YYYY-MM] lists the
+// albums added during one UTC calendar month (dateAdded, epoch seconds).
+// Months before addedMonthMin are refused (400): the June 2026 migration
+// rewrote most file mtimes, so earlier months only show the migration. A
+// month after the current one is refused too. WITHOUT month= the handler
+// picks the month the home row shows: the current month when it holds
+// >= addedMonthRowMin albums, else the latest month (>= addedMonthMin) that
+// does (reason "fallback"), else the current month as is (reason "thin").
+// The envelope names the month ("month") and carries the per-month counts
+// since addedMonthMin ("months"). Materialised through recentAlbumDocs:
+// bounded by albumFilterScanCap newest docs, like the other filters.
+const (
+	addedMonthMin    = "2026-07"
+	addedMonthRowMin = 4
+)
+
+// addedMonthNow is swapped by tests.
+var addedMonthNow = time.Now
+
+// parseMonth reads "YYYY-MM" as the first instant of that UTC month.
+func parseMonth(raw string) (time.Time, bool) {
+	if len(raw) != 7 || raw[4] != '-' {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01", raw)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t.UTC(), true
+}
+
+// monthOf is the "YYYY-MM" (UTC) of an epoch-seconds stamp.
+func monthOf(epoch int64) string {
+	return time.Unix(epoch, 0).UTC().Format("2006-01")
+}
+
+// addedMonthPick chooses the month the home row shows (see the comment
+// above): the current month, the latest full enough month, or the current
+// month flagged thin. counts maps "YYYY-MM" to album counts.
+func addedMonthPick(counts map[string]int, current string) (month, reason string) {
+	if counts[current] >= addedMonthRowMin {
+		return current, ""
+	}
+	best := ""
+	for k, n := range counts {
+		if n >= addedMonthRowMin && k < current && k > best {
+			best = k
+		}
+	}
+	if best != "" {
+		return best, "fallback"
+	}
+	return current, "thin"
+}
+
+// localAlbumsAddedMonth answers GET /local/albums?filter=added-month[&month=].
+func localAlbumsAddedMonth(c echo.Context, off, lim int, sortBy string) error {
+	bad := func(reason string) error {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": reason})
+	}
+	current := addedMonthNow().UTC().Format("2006-01")
+	month := strings.TrimSpace(c.QueryParam("month"))
+	if month != "" {
+		if _, ok := parseMonth(month); !ok {
+			return bad("month must be YYYY-MM: " + month)
+		}
+		if month < addedMonthMin {
+			return bad("month before " + addedMonthMin + ": dates de migration (the June 2026 migration rewrote the acquisition dates of older albums): " + month)
+		}
+		if month > current {
+			return bad("month in the future: " + month)
+		}
+	}
+	minStart, _ := parseMonth(addedMonthMin)
+	docs := recentAlbumDocs(c.QueryParam("q"), c.QueryParam("artistId"), minStart.Unix())
+	counts := map[string]int{}
+	for _, a := range docs {
+		counts[monthOf(albumDateAdded(a))]++
+	}
+	reason := ""
+	if month == "" {
+		month, reason = addedMonthPick(counts, current)
+	}
+	keep := make([]map[string]interface{}, 0, counts[month])
+	for _, a := range docs {
+		if monthOf(albumDateAdded(a)) == month {
+			keep = append(keep, a)
+		}
+	}
+	sortAlbumDocs(keep, sortBy)
+	total := len(keep)
+	start, end := off, off+lim
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+	items := make([]IListItemRenderer, 0, end-start)
+	for _, a := range keep[start:end] {
+		items = append(items, localAlbumItem(a))
+	}
+	resp := map[string]interface{}{
+		"items": items, "total": total, "offset": off, "limit": lim, "sort": sortBy, "filter": "added-month",
+		"month": month, "months": counts, "minMonth": addedMonthMin,
+	}
+	if reason != "" {
+		resp["reason"] = reason
+	}
+	return c.JSON(http.StatusOK, resp)
+}
 
 // badFilter is the 400 answer for an unknown ?filter= value.
 func badFilter(c echo.Context, raw string) error {
@@ -256,7 +369,7 @@ func sortAlbumDocs(docs []map[string]interface{}, sortBy string) {
 	})
 }
 
-// localAlbumsFiltered answers GET /local/albums?filter=never-played|added-30d.
+// localAlbumsFiltered answers GET /local/albums?filter=never-played|added-30d|added-month.
 // `total` is exact for added-30d; for never-played it counts the survivors
 // of the play_events pair filter (an upper bound: the Meili confirmation may
 // still reject a few, the client then sees a short page and stops).
@@ -264,6 +377,8 @@ func localAlbumsFiltered(c echo.Context, filter string, off, lim int, sortBy str
 	items := make([]IListItemRenderer, 0, lim)
 	total := 0
 	switch filter {
+	case "added-month":
+		return localAlbumsAddedMonth(c, off, lim, sortBy)
 	case "added-30d":
 		cutoff := time.Now().Add(-addedRecentlyDays * 24 * time.Hour).Unix()
 		docs := recentAlbumDocs(c.QueryParam("q"), c.QueryParam("artistId"), cutoff)
