@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ func useMergeDB(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	t.Setenv("YTM_STATS_INCLUDE_HARNESS", "")
+	resetAdoptions()
 }
 
 type loginOut struct {
@@ -203,9 +205,10 @@ func TestLoginIdempotent(t *testing.T) {
 	if again.Migrated != nil || again.ID != first.ID {
 		t.Fatalf("second login migrated: %s", again.raw)
 	}
-	// The stale anonymous cookie (another tab) logs in again: nothing left.
+	// The stale anonymous cookie (another tab) logs in again: nothing left,
+	// and (c45b L12-8) `migrated` is null, never an all-zero object.
 	stale, _ := login(t, "anon-3", "Eve", nil)
-	if stale.Migrated == nil || *stale.Migrated != (migratedCounts{}) {
+	if stale.Migrated != nil || !strings.Contains(stale.raw, `"migrated":null`) || stale.ID != first.ID {
 		t.Fatalf("stale cookie: %s", stale.raw)
 	}
 	if n := countWhere(t, &db.PlayEvent{}, first.ID); n != 2 {
@@ -270,5 +273,150 @@ func TestLoginMovesSkipEvents(t *testing.T) {
 	// the moved skips exclude the ref like the named profile's own
 	if refs := skippedRefs(out.ID, time.Now()); !refs["0123456789a"] {
 		t.Fatalf("moved skips not excluded: %v", refs)
+	}
+}
+
+// ---- c45b B7-17 (L12-8): clean login ----
+
+// loginRaw is login() without the fatal on a non-200 answer (concurrent use).
+func loginRaw(cookie, name string) (int, loginOut) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/me/login", strings.NewReader(`{"name":"`+name+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 Chrome/128")
+	if cookie != "" {
+		req.AddCookie(&http.Cookie{Name: "bbp", Value: cookie})
+	}
+	rec := httptest.NewRecorder()
+	if err := MeLoginHandler(echo.New().NewContext(req, rec)); err != nil {
+		return 0, loginOut{raw: err.Error()}
+	}
+	var out loginOut
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	out.raw = rec.Body.String()
+	return rec.Code, out
+}
+
+// Two concurrent logins on the same anonymous cookie (double tap, two tabs):
+// one adoption, the other answers the same profile with migrated null, no
+// row duplicated or lost.
+func TestLoginConcurrentAdoptsOnce(t *testing.T) {
+	useMergeDB(t)
+	seedProfile(t, "anon-cc", 7, []string{"v1", "v2"}, []string{"la-a"}, []string{"Route"})
+	const n = 4
+	codes := make([]int, n)
+	outs := make([]loginOut, n)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			codes[i], outs[i] = loginRaw("anon-cc", "Twins")
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	adopted := 0
+	for i := 0; i < n; i++ {
+		if codes[i] != http.StatusOK {
+			t.Fatalf("login %d: %d %s", i, codes[i], outs[i].raw)
+		}
+		if outs[i].ID != outs[0].ID || outs[i].Name != "Twins" {
+			t.Fatalf("login %d answered another profile: %s", i, outs[i].raw)
+		}
+		if outs[i].Migrated != nil {
+			adopted++
+			if outs[i].Migrated.Plays != 7 || outs[i].Migrated.Favorites != 2 || outs[i].Migrated.Follows != 1 || outs[i].Migrated.Playlists != 1 {
+				t.Fatalf("login %d migrated %+v", i, *outs[i].Migrated)
+			}
+		} else if !strings.Contains(outs[i].raw, `"migrated":null`) {
+			t.Fatalf("login %d: %s", i, outs[i].raw)
+		}
+	}
+	if adopted != 1 {
+		t.Fatalf("%d logins adopted, want exactly 1", adopted)
+	}
+	named := outs[0].ID
+	if countWhere(t, &db.PlayEvent{}, named) != 7 || countWhere(t, &db.Favorite{}, named) != 2 || countWhere(t, &db.Playlist{}, named) != 1 {
+		t.Fatalf("named rows: plays %d favs %d playlists %d", countWhere(t, &db.PlayEvent{}, named), countWhere(t, &db.Favorite{}, named), countWhere(t, &db.Playlist{}, named))
+	}
+	if countWhere(t, &db.PlayEvent{}, "anon-cc") != 0 {
+		t.Fatalf("plays left on the anonymous profile")
+	}
+	var profiles int64
+	db.DB.Model(&db.Profile{}).Where("id = ?", named).Count(&profiles)
+	if profiles != 1 {
+		t.Fatalf("%d profile rows for %s", profiles, named)
+	}
+}
+
+// A write that left with the anonymous cookie and lands after the merge is
+// served as the named profile (adoption grace), and a later login of the
+// same name re-adopts what still landed on the old id (prevAnon).
+func TestLoginInflightWriteFollowsAdoption(t *testing.T) {
+	useMergeDB(t)
+	seedProfile(t, "anon-if", 1, nil, nil, nil)
+	first, set := login(t, "anon-if", "Flo", nil)
+	if first.Migrated == nil || first.Migrated.Plays != 1 {
+		t.Fatalf("first: %s", first.raw)
+	}
+	// 1. in flight: POST me/history still carrying the old cookie (ctxFor
+	// would add its own p-test cookie first: build the request by hand).
+	hreq := httptest.NewRequest(http.MethodPost, "/api/v1/me/history", strings.NewReader(`{"videoId":"late1","title":"Late"}`))
+	hreq.Header.Set("Content-Type", "application/json")
+	hreq.Header.Set("User-Agent", "Mozilla/5.0 Chrome/128")
+	hreq.AddCookie(&http.Cookie{Name: "bbp", Value: "anon-if"})
+	rec := httptest.NewRecorder()
+	if err := MeRecordPlayHandler(echo.New().NewContext(hreq, rec)); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("history: %v %d %s", err, rec.Code, rec.Body.String())
+	}
+	if countWhere(t, &db.PlayEvent{}, first.ID) != 2 || countWhere(t, &db.PlayEvent{}, "anon-if") != 0 {
+		t.Fatalf("late play orphaned: named %d anon %d", countWhere(t, &db.PlayEvent{}, first.ID), countWhere(t, &db.PlayEvent{}, "anon-if"))
+	}
+	switched := ""
+	for _, ck := range rec.Result().Cookies() {
+		if ck.Name == "bbp" {
+			switched = ck.Value
+		}
+	}
+	if switched != set {
+		t.Fatalf("cookie not switched to the named profile: %q", switched)
+	}
+	// 2. after the grace: a play lands on the old id; the same name's next
+	// login with prevAnon takes it; another name never does.
+	adoptionNow = func() time.Time { return time.Now().Add(adoptionGrace + time.Minute) }
+	t.Cleanup(func() { adoptionNow = time.Now })
+	db.DB.Create(&db.PlayEvent{ProfileID: "anon-if", Ref: "late2", Title: "T", Data: `{"videoId":"late2"}`, PlayedAt: time.Now()})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/me/login", strings.NewReader(`{"name":"Gus","prevAnon":"anon-if"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 Chrome/128")
+	req.AddCookie(&http.Cookie{Name: "bbp", Value: set})
+	rr := httptest.NewRecorder()
+	if err := MeLoginHandler(echo.New().NewContext(req, rr)); err != nil || rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"migrated":null`) {
+		t.Fatalf("other name took the remembered id: %v %s", err, rr.Body.String())
+	}
+	if countWhere(t, &db.PlayEvent{}, "anon-if") != 1 {
+		t.Fatalf("late play moved to another name")
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/me/login", strings.NewReader(`{"name":"flo","prevAnon":"anon-if"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 Chrome/128")
+	req.AddCookie(&http.Cookie{Name: "bbp", Value: "fresh-anon"})
+	rr = httptest.NewRecorder()
+	if err := MeLoginHandler(echo.New().NewContext(req, rr)); err != nil || rr.Code != http.StatusOK {
+		t.Fatalf("relogin: %v %d", err, rr.Code)
+	}
+	var again loginOut
+	_ = json.Unmarshal(rr.Body.Bytes(), &again)
+	if again.ID != first.ID || again.Migrated == nil || again.Migrated.Plays != 1 {
+		t.Fatalf("prevAnon not re-adopted: %s", rr.Body.String())
+	}
+	if countWhere(t, &db.PlayEvent{}, first.ID) != 3 || countWhere(t, &db.PlayEvent{}, "anon-if") != 0 {
+		t.Fatalf("plays: named %d anon %d", countWhere(t, &db.PlayEvent{}, first.ID), countWhere(t, &db.PlayEvent{}, "anon-if"))
+	}
+	// the adopted id stays anonymous for every other reader
+	if !profileAnonymous("anon-if") {
+		t.Fatalf("adopted anonymous id reads as named")
 	}
 }

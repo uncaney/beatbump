@@ -3,6 +3,9 @@
 	// month, its top artist and album, distinct albums and the artists heard
 	// for the first time; plus the release decades of the local tracks played
 	// over the last 365 days.
+	// c45b (B7-11): "Partager mon année" next to the title, the person's own
+	// numbers only (yearShareFrom on the year already loaded here).
+	import ShareWeek from "$components/ShareWeek/ShareWeek.svelte";
 	import {
 		decadeLabel,
 		decadeShares,
@@ -13,6 +16,7 @@
 		type YearView,
 	} from "$lib/meStats";
 	import { formatCountFr, formatIntFr, NNBSP } from "$lib/utils/formatFr";
+	import { yearShareFrom } from "$lib/utils/shareWeek";
 	import { onMount } from "svelte";
 
 	let year: YearView | null = null;
@@ -28,6 +32,7 @@
 
 	$: maxMonth = year ? Math.max(0, ...year.months) : 0;
 	$: shares = decades ? decadeShares(decades.decades) : [];
+	$: share = yearShareFrom(year);
 	const fmtMin = (m: number) => {
 		const min = Math.round(m || 0);
 		return min < 60 ? `${min}${NNBSP}min` : `${formatIntFr(Math.floor(min / 60))}${NNBSP}h`;
@@ -40,7 +45,13 @@
 		data-testid="stats-year"
 		data-year={year.year}
 	>
-		<h2>Ton année {year.year}</h2>
+		<div class="yhead">
+			<h2>Ton année {year.year}</h2>
+			<ShareWeek
+				kind="year"
+				year={share}
+			/>
+		</div>
 		<div
 			class="months"
 			role="img"
@@ -123,6 +134,13 @@
 	}
 	h2 {
 		margin: 0.5rem 0 0.5rem;
+	}
+	.yhead {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem 0.75rem;
 	}
 	h3 {
 		margin: 1rem 0 0.4rem;

@@ -137,6 +137,10 @@ func TestComputeYear(t *testing.T) {
 	if y.TopArtist == nil || y.TopArtist.Title != "Daft Punk" || y.TopArtist.Count != 3 {
 		t.Fatalf("top artist: %+v", y.TopArtist)
 	}
+	// c45b B7-11: the top 3 of the same ranking, for "Partager mon année".
+	if len(y.TopArtists) != 3 || y.TopArtists[0].Title != "Daft Punk" || y.TopArtists[1].Title != "Air" || y.TopArtists[2].Title != "Justice" {
+		t.Fatalf("top artists: %+v", y.TopArtists)
+	}
 	if y.TopAlbum == nil || y.TopAlbum.Title != "Discovery" || y.TopAlbum.AlbumID != "lb-disc" {
 		t.Fatalf("top album: %+v", y.TopAlbum)
 	}
@@ -148,8 +152,12 @@ func TestComputeYear(t *testing.T) {
 	if y2.Plays != 4 || y2.Months[11] != 0 || y2.NewArtists != 1 {
 		t.Fatalf("tz edge: plays=%d dec=%v new=%d", y2.Plays, y2.Months[11], y2.NewArtists)
 	}
-	if e := computeYear(evs, rows, 2024, fixedTZ(0)); e.Plays != 0 || e.TopArtist != nil || e.TopAlbum != nil || e.NewArtistNames == nil {
+	if e := computeYear(evs, rows, 2024, fixedTZ(0)); e.Plays != 0 || e.TopArtist != nil || e.TopAlbum != nil || e.NewArtistNames == nil || e.TopArtists == nil || len(e.TopArtists) != 0 {
 		t.Fatalf("empty year: %+v", e)
+	}
+	// one artist: the list is that artist alone, not padded
+	if one := computeYear(evs[:1], rows, 2025, fixedTZ(0)); len(one.TopArtists) != 1 || one.TopArtists[0].Title != "Air" {
+		t.Fatalf("single artist: %+v", one.TopArtists)
 	}
 }
 

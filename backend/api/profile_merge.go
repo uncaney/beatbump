@@ -6,8 +6,10 @@ package api
 // into another named one (switching names must not mix two people).
 
 import (
+	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"beatbump-server/backend/db"
@@ -32,15 +34,6 @@ const playlistDeviceSuffix = " (appareil)"
 
 // namedProfileID: the u-<hash> ids MeLoginHandler mints.
 func namedProfileID(pid string) bool { return strings.HasPrefix(pid, "u-") }
-
-// mergeableSource reports whether `from` is an anonymous profile whose rows
-// may be moved onto `to`: distinct ids, not a u- id, no named Profile row.
-func mergeableSource(from, to string) bool {
-	if from == "" || from == to || namedProfileID(from) {
-		return false
-	}
-	return profileAnonymous(from)
-}
 
 // mergeProfileInto moves every per-profile row of `from` onto `to` inside tx.
 // Duplicates are resolved in favour of the target: a favourite (kind, ref) or
@@ -155,11 +148,147 @@ func mergeNowPlaying(tx *gorm.DB, from, to string) error {
 	return tx.Model(&db.NowPlaying{}).Where("profile_id = ?", from).Update("profile_id", to).Error
 }
 
-// loginAndMerge creates (or renames) the named profile `to` and, when `from`
-// is a mergeable anonymous profile, moves its rows, all in one transaction.
-// The returned counts are nil when nothing was eligible for a merge.
-func loginAndMerge(from, to, name string, merge bool) (*migratedCounts, error) {
-	var moved *migratedCounts
+// ---- c45b B7-17 (L12-8): clean login ----
+//
+// Three holes in the 39A merge: (1) a write that left with the anonymous
+// cookie and lands after the merge commits sits on the abandoned anonymous
+// id for ever; (2) two logins at once (double tap, two tabs) both found the
+// anonymous profile mergeable, the second answered `migrated: {plays: 0}`
+// ("0 écoute rattachée"); (3) `profileAnonymous(from)` ran outside the
+// transaction. Now:
+//   - logins are serialised (loginMu): one transaction at a time, the second
+//     concurrent login sees the rows already moved and adopts nothing;
+//   - the anonymous check runs inside the transaction (txProfileAnonymous);
+//   - an adopted anonymous id gets a Profile row {Name: "", AdoptedBy: to}:
+//     still anonymous for every other reader, but the next login of the SAME
+//     name with that id (stale cookie, or the client's remembered
+//     `prevAnon`) re-adopts whatever landed on it since; another name never
+//     takes those rows;
+//   - for adoptionGrace after the merge, a request still carrying the old
+//     cookie is served as the named profile (profileID -> resolveAdopted),
+//     so an in-flight play / favourite / now_playing is not orphaned;
+//   - `migrated` is null when nothing moved (all counters zero), so the
+//     client never shows "0 écoute rattachée".
+
+// loginMu serialises POST me/login: logins are rare, and the merge must not
+// run twice for the same anonymous source.
+var loginMu sync.Mutex
+
+// adoptionGrace: how long a request with an adopted anonymous cookie is still
+// served as the named profile it was moved onto.
+const adoptionGrace = 15 * time.Minute
+
+// adoptionMemoMax bounds the in-memory map (a login per entry).
+const adoptionMemoMax = 5000
+
+type adoption struct {
+	to string
+	at time.Time
+}
+
+var (
+	adoptionMu   sync.Mutex
+	adoptionMemo = map[string]adoption{}
+	adoptionNow  = time.Now
+)
+
+func rememberAdoption(from, to string) {
+	adoptionMu.Lock()
+	defer adoptionMu.Unlock()
+	if len(adoptionMemo) >= adoptionMemoMax {
+		now := adoptionNow()
+		for k, a := range adoptionMemo {
+			if now.Sub(a.at) > adoptionGrace {
+				delete(adoptionMemo, k)
+			}
+		}
+		if len(adoptionMemo) >= adoptionMemoMax {
+			adoptionMemo = map[string]adoption{}
+		}
+	}
+	adoptionMemo[from] = adoption{to: to, at: adoptionNow()}
+}
+
+// resolveAdopted maps a recently adopted anonymous id onto its named
+// profile; any other id (or an adoption older than adoptionGrace) is
+// returned as is.
+func resolveAdopted(pid string) string {
+	if pid == "" || namedProfileID(pid) {
+		return pid
+	}
+	adoptionMu.Lock()
+	defer adoptionMu.Unlock()
+	a, ok := adoptionMemo[pid]
+	if !ok {
+		return pid
+	}
+	if adoptionNow().Sub(a.at) > adoptionGrace {
+		delete(adoptionMemo, pid)
+		return pid
+	}
+	return a.to
+}
+
+// resetAdoptions forgets every remembered adoption (tests).
+func resetAdoptions() {
+	adoptionMu.Lock()
+	defer adoptionMu.Unlock()
+	adoptionMemo = map[string]adoption{}
+}
+
+// txProfileAnonymous is profileAnonymousErr inside a transaction: no Profile
+// row, or an empty name (an adopted anonymous id keeps an empty name).
+func txProfileAnonymous(tx *gorm.DB, pid string) (bool, error) {
+	if pid == "" {
+		return true, nil
+	}
+	var p db.Profile
+	if err := tx.Where("id = ?", pid).First(&p).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return true, nil
+		}
+		return false, err
+	}
+	return strings.TrimSpace(p.Name) == "", nil
+}
+
+// txAdoptedBy returns the AdoptedBy of pid's Profile row ("" without one).
+func txAdoptedBy(tx *gorm.DB, pid string) (string, error) {
+	var p db.Profile
+	if err := tx.Where("id = ?", pid).First(&p).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	return p.AdoptedBy, nil
+}
+
+func (m *migratedCounts) add(o migratedCounts) {
+	m.Plays += o.Plays
+	m.Favorites += o.Favorites
+	m.Follows += o.Follows
+	m.Playlists += o.Playlists
+	m.Skips += o.Skips
+}
+
+func (m migratedCounts) empty() bool {
+	return m.Plays == 0 && m.Favorites == 0 && m.Follows == 0 && m.Playlists == 0 && m.Skips == 0
+}
+
+// loginAndMerge creates (or renames) the named profile `to` and, in the same
+// transaction, moves onto it the rows of `from` (the device's cookie, when
+// `merge` and it is an anonymous profile) and of `prevAnon` (the anonymous id
+// the client remembers from its previous login, only when that id was
+// adopted by `to`). Every adopted source gets a Profile row {Name: "",
+// AdoptedBy: to} and is remembered for adoptionGrace. The returned counts
+// are nil when nothing moved: no eligible source, or sources already empty
+// (a second concurrent login, a stale cookie).
+func loginAndMerge(from, prevAnon, to, name string, merge bool) (*migratedCounts, error) {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	var moved migratedCounts
+	var adopted []string
 	err := db.DB.Transaction(func(tx *gorm.DB) error {
 		var p db.Profile
 		if err := tx.Where("id = ?", to).Assign(db.Profile{Name: name}).
@@ -169,25 +298,55 @@ func loginAndMerge(from, to, name string, merge bool) (*migratedCounts, error) {
 		if !merge {
 			return nil
 		}
-		m, err := mergeProfileInto(tx, from, to)
-		if err != nil {
-			return err
+		sources := []string{}
+		if from != "" && from != to && !namedProfileID(from) {
+			anon, err := txProfileAnonymous(tx, from)
+			if err != nil {
+				return err
+			}
+			if anon {
+				sources = append(sources, from)
+			}
 		}
-		moved = &m
+		if prevAnon != "" && prevAnon != to && prevAnon != from && !namedProfileID(prevAnon) {
+			by, err := txAdoptedBy(tx, prevAnon)
+			if err != nil {
+				return err
+			}
+			if by == to {
+				sources = append(sources, prevAnon)
+			}
+		}
+		for _, src := range sources {
+			m, err := mergeProfileInto(tx, src, to)
+			if err != nil {
+				return err
+			}
+			moved.add(m)
+			// Mark the source as adopted by `to` (empty name: still anonymous).
+			if err := tx.Where("id = ?", src).Assign(map[string]interface{}{"adopted_by": to}).
+				Attrs(db.Profile{CreatedAt: time.Now()}).FirstOrCreate(&db.Profile{}, db.Profile{ID: src}).Error; err != nil {
+				return err
+			}
+			adopted = append(adopted, src)
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	if moved != nil {
-		invalidateMixCache(from)
-		invalidateMixCache(to)
-		dropNeverPlayedMemoFor(from)
-		dropNeverPlayedMemoFor(to)
-		invalidateStatsTimeMemo(from)
-		invalidateStatsTimeMemo(to)
+	for _, src := range adopted {
+		rememberAdoption(src, to)
 	}
-	return moved, nil
+	if moved.empty() {
+		return nil, nil
+	}
+	for _, pid := range append(adopted, to) {
+		invalidateMixCache(pid)
+		dropNeverPlayedMemoFor(pid)
+		invalidateStatsTimeMemo(pid)
+	}
+	return &moved, nil
 }
 
 // dropNeverPlayedMemoFor forgets the memoised never-played scans of a

@@ -10,6 +10,12 @@ type Profile struct {
 	ID        string    `gorm:"primaryKey" json:"id"` // device-anon id, or u-<hash(name)> after login
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"createdAt"`
+	// AdoptedBy (c45b, L12-8): for an anonymous id whose rows a login moved
+	// onto a named profile, that named id (the name stays empty: the row is
+	// still anonymous for every reader). Lets the same name re-adopt what
+	// landed on the old id after the merge, and nobody else. AutoMigrate adds
+	// the column (ALTER TABLE ADD COLUMN), older rows read "".
+	AdoptedBy string `json:"-"`
 }
 
 type Favorite struct {

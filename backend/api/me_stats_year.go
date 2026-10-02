@@ -25,6 +25,9 @@ import (
 // decadeLookupChunk bounds one Meili `lid IN [...]` filter.
 const decadeLookupChunk = 200
 
+// yearTopArtists: how many artists `topArtists` lists (c45b B7-11).
+const yearTopArtists = 3
+
 // localTrackYears maps local lids to their release year (0 / absent when the
 // index has none). Missing Meili = empty map (the endpoint answers no decade).
 func localTrackYears(lids []string) map[string]int {
@@ -147,8 +150,11 @@ type yearResp struct {
 	DistinctAlbums  int         `json:"distinctAlbums"`
 	TopArtist       *topEntry   `json:"topArtist"` // null without plays
 	TopAlbum        *topEntry   `json:"topAlbum"`  // null without an album
-	NewArtists      int         `json:"newArtists"`
-	NewArtistNames  []string    `json:"newArtistNames"` // up to 5, most played that year first
+	// TopArtists (c45b B7-11): the first yearTopArtists of the same ranking,
+	// for "Partager mon année" (own numbers only, decision 6). Never null.
+	TopArtists     []topEntry `json:"topArtists"`
+	NewArtists     int        `json:"newArtists"`
+	NewArtistNames []string   `json:"newArtistNames"` // up to 5, most played that year first
 }
 
 // rowArtist resolves the artist of a per-ref row like aggregateBy does.
@@ -165,7 +171,7 @@ func rowArtist(r playRow) string {
 func computeYear(evs []statEvent, rows []playRow, year int, loc *time.Location) yearResp {
 	from := time.Date(year, 1, 1, 0, 0, 0, 0, loc)
 	to := from.AddDate(1, 0, 0)
-	out := yearResp{Year: year, TZ: tzOffsetMin(loc, time.Now()), Zone: zoneName(loc), NewArtistNames: []string{}}
+	out := yearResp{Year: year, TZ: tzOffsetMin(loc, time.Now()), Zone: zoneName(loc), NewArtistNames: []string{}, TopArtists: []topEntry{}}
 	byRef := make(map[string]playRow, len(rows))
 	for _, r := range rows {
 		byRef[r.Ref] = r
@@ -207,6 +213,7 @@ func computeYear(evs []statEvent, rows []playRow, year int, loc *time.Location) 
 	out.DistinctTracks, out.DistinctArtists, out.DistinctAlbums = s.DistinctTracks, s.DistinctArtists, s.DistinctAlbums
 	if top := aggregateBy(yearRows, "artists", 0); len(top) > 0 {
 		out.TopArtist = &top[0]
+		out.TopArtists = append(out.TopArtists, top[:min(yearTopArtists, len(top))]...)
 		// new artists, most played this year first (aggregateBy order)
 		for _, a := range top {
 			k := strings.ToLower(a.Title)
