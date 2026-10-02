@@ -38,7 +38,7 @@
 	} from "$lib/offlineQueue";
 	import { currentTrack } from "$lib/stores/list";
 	import { settings } from "$lib/stores/settings";
-	import { dataSaverActive, dataSaverNotice, readConnection } from "$lib/dataSaver";
+	import { dataSaverNotice, dataSaverReason, readConnection } from "$lib/dataSaver";
 	import { markOfflineSuccess } from "$lib/stores/pwa";
 	import { notify } from "$lib/utils";
 	import { formatCountFr } from "$lib/utils/formatFr";
@@ -52,10 +52,12 @@
 
 	// B8-1: data saver (the switch in Réglages > Lecture or the browser's own
 	// saveData / 2g) holds the automatic caching back: one line says so.
-	$: dataSaverConn = readConnection();
-	$: dataSaverFromBrowser = dataSaverActive(dataSaverConn);
-	$: dataSaverOn = dataSaverActive({ setting: $settings?.playback?.["Data Saver"], ...dataSaverConn });
-	$: dataSaverLine = dataSaverNotice(dataSaverOn, dataSaverFromBrowser);
+	// L14-10: re-read on the connection's `change` event (onMount), and the
+	// line names a slow link as such rather than as a phone setting.
+	let dataSaverConn = readConnection();
+	$: dataSaverWhy = dataSaverReason({ setting: $settings?.playback?.["Data Saver"], ...dataSaverConn });
+	$: dataSaverFromBrowser = dataSaverWhy === "save-data" || dataSaverWhy === "slow-link";
+	$: dataSaverLine = dataSaverNotice(dataSaverWhy !== null, dataSaverWhy);
 
 	let tracks: any[] = [];
 	let online = true;
@@ -142,17 +144,31 @@
 		const evicted = (e: MessageEvent) => {
 			if (e.data && e.data.type === "audio-evicted") refresh();
 		};
+		// L14-10: the browser's connection estimate changes while the page is
+		// open (a 2g estimate lifts after a few minutes): keep the line current.
+		let conn: EventTarget | null = null;
+		try {
+			const nav = navigator as Navigator & { connection?: EventTarget; mozConnection?: EventTarget; webkitConnection?: EventTarget };
+			conn = nav.connection ?? nav.mozConnection ?? nav.webkitConnection ?? null;
+		} catch {
+			conn = null;
+		}
+		const connChange = () => {
+			dataSaverConn = readConnection();
+		};
 		window.addEventListener("online", on);
 		window.addEventListener("offline", off);
 		window.addEventListener("storage", storage);
 		document.addEventListener("visibilitychange", visible);
 		sw?.addEventListener("message", evicted);
+		conn?.addEventListener?.("change", connChange);
 		return () => {
 			window.removeEventListener("online", on);
 			window.removeEventListener("offline", off);
 			window.removeEventListener("storage", storage);
 			document.removeEventListener("visibilitychange", visible);
 			sw?.removeEventListener("message", evicted);
+			conn?.removeEventListener?.("change", connChange);
 		};
 	});
 
@@ -391,6 +407,7 @@
 			class="data-saver"
 			data-testid="data-saver-notice"
 			data-source={dataSaverFromBrowser ? "browser" : "setting"}
+			data-reason={dataSaverWhy ?? ""}
 			role="status"
 		>
 			{dataSaverLine}
