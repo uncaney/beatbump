@@ -202,7 +202,16 @@
 
 	function playAll() {
 		if (!canPlay) return notify(playTitle, "error");
-		start(recent, 0);
+		// U14-8: the order the page shows: albums in page order with their
+		// tracks in disc order (Albums / Artistes), most recent first (Récents).
+		// The interleaving by recency stays the Mixtape's.
+		start(playAllOrder(view, { albums, artists, recent }), 0);
+	}
+	/** U14-8: what "Tout lire" plays, in the order of the current view. */
+	function playAllOrder(v: View, src: { albums: AlbumGroup[]; artists: ArtistGroup[]; recent: any[] }): any[] {
+		if (v === "albums") return src.albums.flatMap((a) => a.tracks);
+		if (v === "artists") return src.artists.flatMap((ar) => ar.albums.flatMap((a) => a.tracks));
+		return src.recent;
 	}
 	function playShuffle() {
 		if (!canShuffle) return notify(shuffleTitle, "error");
@@ -788,15 +797,15 @@
 		line-height: 1.35;
 		// B9-2 (U13-14): "Modifier" was a 48x16 target on its own line; keep it
 		// in line but give it a 44 px tall, underlined hit box.
+		// U14-10: an inline-flex 44px box pushed "Modifier" onto its own line;
+		// inline with vertical padding keeps it in the sentence and still paints
+		// (and taps) a 44px tall box: inline padding never changes the line box.
 		a {
-			display: inline-flex;
-			align-items: center;
-			min-height: 44px;
-			padding: 0 0.5rem;
+			display: inline;
+			padding: calc((44px - 1.35em) / 2) 0.5rem;
 			margin-left: 0.25rem;
 			color: inherit;
 			text-decoration: underline;
-			vertical-align: middle;
 		}
 	}
 	.failed-bar {
