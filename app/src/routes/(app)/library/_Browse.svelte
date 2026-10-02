@@ -4,6 +4,7 @@
 	import { goto } from "$app/navigation";
 	import { page } from "$app/stores";
 	import { APIClient } from "$lib/api";
+	import { emptyListText } from "$lib/browseEmpty";
 	import {
 		AZ_LETTERS,
 		findLetterIndex,
@@ -62,6 +63,8 @@
 	 * name EmptyState instead of the whole library.
 	 */
 	let anonymousFilter = false;
+	/** L13-13: the server's `reason` when it refused the list (400), "" otherwise. */
+	let emptyReason = "";
 	let mounted = false;
 	$: urlFilter = (() => {
 		const f = $page.url.searchParams.get("filter") || "";
@@ -120,6 +123,10 @@
 				extraParams;
 			const res = await APIClient.fetch(url);
 			const data = await res.json();
+			// L13-13: a refused deep link (400 with `reason`: month before the
+			// migration, in the future, malformed) is named in the empty state.
+			if (reset) emptyReason = "";
+			if (!res.ok && typeof data?.reason === "string") emptyReason = data.reason;
 			const got = Array.isArray(data.items) ? data.items : [];
 			// L10-6: the never-played offsets are candidate indexes of a scan
 			// memoised 60 s; a rescan between two pages can shift them, so a
@@ -344,7 +351,13 @@
 			</p>
 		</div>
 	{:else if items.length === 0}
-		<p class="state">{q || filter ? "Aucun résultat" : "Rien ici pour l’instant"}</p>
+		<p
+			class="state"
+			data-testid="browse-empty"
+			data-reason={emptyReason || undefined}
+		>
+			{emptyListText({ q, filter, reason: emptyReason })}
+		</p>
 	{:else if done}
 		<p class="state">Fin de la liste ({formatIntFr(items.length)})</p>
 	{/if}
