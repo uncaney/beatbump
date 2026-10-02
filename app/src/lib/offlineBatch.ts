@@ -67,7 +67,8 @@ const defaultDeps: KeepDeps = {
 	pin: (t) => pinOffline(t, true),
 	// A stable /localf or /aud URL goes straight to the SW, otherwise through
 	// the API URL resolution (downloadForOffline).
-	download: (t, opts) => (isStableAudioUrl(t?._offlineUrl) ? cacheTrackOffline(t, t._offlineUrl, opts) : downloadForOffline(t, opts)),
+	// U14-2: a keep is explicit: never deferred to a listen (cacheTrackOffline).
+	download: (t, opts) => (isStableAudioUrl(t?._offlineUrl) ? cacheTrackOffline(t, t._offlineUrl, { ...opts, explicit: true }) : downloadForOffline(t, opts)),
 	cacheInfo: async () => {
 		const l = await listCachedAudio().catch(() => null);
 		if (!l || !Array.isArray(l.entries)) return null;

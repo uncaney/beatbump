@@ -106,7 +106,8 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId } from "$lib/local";
 	import { recordHistory } from "$lib/me";
-	import { isListened, recordListen } from "$lib/listenLog";
+	import { recordListen } from "$lib/listenLog";
+	import { autoCacheListenThreshold } from "$lib/autoCacheGate";
 	import { historyThreshold, isLoopRestart, listenedSeconds } from "$stores/statsPlayCount";
 	import { downloadToDevice } from "$lib/offline";
 	import Icon from "$components/Icon/Icon.svelte";
@@ -204,7 +205,9 @@
 		_historySent = true;
 		recordHistory($currentTrack);
 	}
-	$: if (browser && _historyId && !_listenLogged && isListened(_historyListened, $historyDuration) && $currentTrack?.videoId === _historyId) {
+	// U14-2: automation only (Playwright sets navigator.webdriver); false for every real browser.
+	const _webdriver = browser && typeof navigator !== "undefined" && navigator.webdriver === true;
+	$: if (browser && _historyId && !_listenLogged && _historyListened >= autoCacheListenThreshold($historyDuration, _webdriver) && $currentTrack?.videoId === _historyId) {
 		_listenLogged = true;
 		recordListen(typeof localStorage === "undefined" ? null : localStorage, { videoId: _historyId, seconds: _historyListened, duration: $historyDuration });
 	}
