@@ -72,9 +72,10 @@
 	.sum {
 		margin: 0 0 0.6rem;
 	}
+	// U13-7: 12 px floor (the root font is 12 px on a phone: 0.85rem read 10,2 px).
 	.win {
 		color: #999;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 	}
 	.grid {
 		display: grid;
@@ -85,7 +86,7 @@
 	}
 	.hl,
 	.dl {
-		font-size: 0.7rem;
+		font-size: var(--text-secondary-size);
 		color: #999;
 		line-height: 1;
 		white-space: nowrap;

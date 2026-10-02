@@ -407,14 +407,18 @@
 		line-height: 1.1;
 		overflow-wrap: anywhere;
 	}
+	// U13-7 (audit UX v13): the root font is 12 px on a phone, so 0.85rem read
+	// 10,2 px and 0.7rem 8,4 px; every secondary text sits on the 12 px floor
+	// (--text-secondary-size = max(12px, 0.875rem)) and the axis labels never
+	// wrap ("12 h" broke as "12" / "h" under the histogram).
 	.lbl {
 		color: #bbb;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 	}
 	.meta {
 		margin: 0.75rem 0 0.5rem;
 		color: #bbb;
-		font-size: 0.9rem;
+		font-size: var(--text-secondary-size);
 	}
 	.hours {
 		display: grid;
@@ -422,7 +426,7 @@
 		gap: 2px;
 		height: 4.5rem;
 		align-items: end;
-		padding-bottom: 1rem;
+		padding-bottom: 1.25rem;
 		position: relative;
 	}
 	.hcol {
@@ -444,8 +448,10 @@
 		position: absolute;
 		top: 100%;
 		left: 0;
-		font-size: 0.7rem;
+		font-size: var(--text-secondary-size);
+		line-height: 1.2;
 		color: #999;
+		white-space: nowrap;
 	}
 	.lists {
 		display: grid;
@@ -506,7 +512,7 @@
 		line-height: 1.2;
 		margin-top: -0.9rem;
 		color: #999;
-		font-size: 0.8rem;
+		font-size: var(--text-secondary-size);
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
@@ -531,7 +537,7 @@
 		right: 0.4rem;
 		top: 0;
 		line-height: 1.5rem;
-		font-size: 0.85rem;
+		font-size: var(--text-secondary-size);
 		font-variant-numeric: tabular-nums;
 	}
 	.state {
@@ -539,8 +545,8 @@
 		margin: 0.75rem 0;
 	}
 	.hint {
-		color: #777;
-		font-size: 0.85rem;
+		color: #999;
+		font-size: var(--text-secondary-size);
 		margin: 0;
 	}
 	@media screen and (max-width: 56em) {

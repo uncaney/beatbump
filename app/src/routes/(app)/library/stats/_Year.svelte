@@ -173,8 +173,10 @@
 		left: 0;
 		right: 0;
 		text-align: center;
-		font-size: 0.7rem;
+		font-size: var(--text-secondary-size);
+		line-height: 1.2;
 		color: #999;
+		white-space: nowrap;
 	}
 	.facts {
 		list-style: none;
