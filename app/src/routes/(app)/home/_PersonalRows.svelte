@@ -75,6 +75,9 @@
 		type ArtistOfDay,
 	} from "$lib/artistOfDay";
 	import { get } from "svelte/store";
+	// B9-26: share the album of the day as a /listen?id= link (OG card from og_preview.go).
+	import Icon from "$components/Icon/Icon.svelte";
+	import { canonicalShareURL, shareLink } from "$lib/utils/shareLink";
 
 	const MAX = 20;
 	// F1: Récemment acquis is the lowest-priority row of the dedupe (the newest
@@ -154,6 +157,28 @@
 			return true;
 		} catch {
 			return false;
+		}
+	}
+	// B9-26: "Album du jour chez <site> : <album>", shared as the first track's
+	// /listen?id= link so the preview is a playable card. Loads the tracks first
+	// on a cached paint (same as "Écouter").
+	let albumDayShareBusy = false;
+	async function shareAlbumOfDay() {
+		if (!albumDay || albumDayShareBusy || typeof location === "undefined") return;
+		albumDayShareBusy = true;
+		try {
+			if (!albumDay.tracks.length) await loadAlbumOfDay();
+			const a = albumDay;
+			const first = a?.tracks[0]?.videoId;
+			if (!a || !first) return;
+			const site = location.host || "music.ekaii.fr";
+			const album = String(a.album.title ?? "");
+			const url = canonicalShareURL("track", first, location.origin);
+			await shareLink({ title: `Album du jour chez ${site}`, text: `Album du jour chez ${site} : ${album}`, url });
+		} catch (err) {
+			console.error("album-of-day share failed", err);
+		} finally {
+			albumDayShareBusy = false;
 		}
 	}
 	let albumDayBusy = false;
@@ -1014,6 +1039,21 @@
 								disabled={albumDayBusy}
 								on:click={playAlbumOfDay}>Écouter</button
 							>
+							<!-- B9-26: share the album of the day (first track's /listen?id= link). -->
+							<button
+								type="button"
+								class="btn-reset btn-ghost aod-share"
+								data-testid="album-of-day-share"
+								aria-label="Partager l'album du jour"
+								title="Partager l'album du jour"
+								disabled={albumDayShareBusy}
+								on:click={shareAlbumOfDay}
+							>
+								<Icon
+									name="share"
+									size="1.1em"
+								/>
+							</button>
 						</article>
 					</div>
 				{/if}
@@ -1316,6 +1356,19 @@
 	.resume-card-play {
 		flex: 0 0 auto;
 		white-space: nowrap;
+	}
+	/* B9-26: the share button beside "Écouter", a 44 px round hit box. */
+	.aod-share {
+		flex: 0 0 auto;
+		display: grid;
+		place-items: center;
+		min-width: 44px;
+		min-height: 44px;
+		border-radius: 50%;
+		color: inherit;
+	}
+	.aod-share:disabled {
+		cursor: progress;
 	}
 	/* c39b B6-1: the album-of-day card reuses the compact resume card;
 	   cover and title are links to the album page. */
