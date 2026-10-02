@@ -13,9 +13,11 @@
 //   `shouldStopAtTrackEnd(position, queue)` on its end-of-track path and calls
 //   `trackEnded()` after pausing (the auto-advance is skipped for that one
 //   track only; repeat / shuffle semantics are untouched). "tracks" counts
-//   track ends, "album" stops when the next row leaves the starting album
-//   (L12-1); player.ts forwards queue changes to `sleepQueueChanged()`, which
-//   cancels an "album" timer (with a toast) once another album plays.
+//   track ends and (L13-3) user "next" presses (`sleepTrackSkipped()` from
+//   player.ts `skipNext`), "album" stops when the next row leaves the
+//   starting album (L12-1); player.ts forwards queue changes to
+//   `sleepQueueChanged()`, which cancels an "album" timer (with a toast)
+//   once another album plays.
 // - "+10 min" (`extendSleepTimer`) pushes a minute deadline back, or starts a
 //   10 min timer when none (or a track-end one) is running.
 // - L12-16: the deadline is absolute (`Date.now()`); the 1 s interval only
@@ -166,12 +168,16 @@ export interface TrackEndEvent {
 	position: number;
 	mix?: ReadonlyArray<QueueRow>;
 	now: number;
+	/** L13-3: a user "next" on that track (a distinct action: never deduped against an end). */
+	skip?: boolean;
 }
 
 /**
  * A track just ended at `ev.position`: stop now, or the updated deadline.
  * - "tracks": one end consumed (the same position + track reported again
- *   within TRACK_END_DEDUPE_MS is the same end, not a new one);
+ *   within TRACK_END_DEDUPE_MS is the same end, not a new one); L13-3: a
+ *   user "next" (`ev.skip`) consumes one too ("Dans 3 titres" then two
+ *   skips = one title left);
  * - "album": stop when the next row is missing or from another album.
  */
 export function trackEndStep(d: SleepDeadline | null, ev: TrackEndEvent): { stop: boolean; next: SleepDeadline | null } {
@@ -181,7 +187,7 @@ export function trackEndStep(d: SleepDeadline | null, ev: TrackEndEvent): { stop
 	const p = clampPos(ev.position);
 	if (d.mode === "tracks") {
 		const endKey = `${p}:${rowVid(mix[p])}`;
-		if (endKey === d.lastEnd && ev.now - d.lastAt < TRACK_END_DEDUPE_MS) return { stop: false, next: d };
+		if (!ev.skip && endKey === d.lastEnd && ev.now - d.lastAt < TRACK_END_DEDUPE_MS) return { stop: false, next: d };
 		if (d.left <= 1) return { stop: true, next: null };
 		return { stop: false, next: { ...d, left: d.left - 1, lastEnd: endKey, lastAt: ev.now } };
 	}
@@ -396,6 +402,27 @@ export function shouldStopAtTrackEnd(
 	if (mode !== "album" && mode !== "tracks") return false;
 	if (typeof position !== "number" || !deadline || deadline.at !== "trackEnd") return true;
 	const step = trackEndStep(deadline, { position, mix: queue?.mix, now: Date.now() });
+	if (step.stop) return true;
+	deadline = step.next;
+	if (deadline && deadline.at === "trackEnd" && deadline.mode === "tracks") sleepTracksLeft.set(deadline.left);
+	return false;
+}
+
+/**
+ * L13-3: player.ts `skipNext` hook, a USER "next" (player / fullscreen
+ * buttons, keyboard, lock screen) on the track at `position`. "tracks"
+ * counts it as one title consumed, like a track end; true when that was the
+ * last counted one: the player then pauses in place instead of advancing
+ * (the same hold as the track-end path, `trackEnded()` follows). The other
+ * modes wait for the end of a track / the album: false, nothing changes.
+ */
+export function sleepTrackSkipped(
+	position?: number,
+	queue?: { mix?: ReadonlyArray<QueueRow> } | null,
+): boolean {
+	if (get(sleepMode) !== "tracks") return false;
+	if (typeof position !== "number" || !deadline || deadline.at !== "trackEnd" || deadline.mode !== "tracks") return false;
+	const step = trackEndStep(deadline, { position, mix: queue?.mix, now: Date.now(), skip: true });
 	if (step.stop) return true;
 	deadline = step.next;
 	if (deadline && deadline.at === "trackEnd" && deadline.mode === "tracks") sleepTracksLeft.set(deadline.left);

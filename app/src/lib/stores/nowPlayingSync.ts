@@ -245,7 +245,9 @@ export function makeGestureTracker(deps: {
 	userActive?: () => boolean;
 	windowMs?: number;
 } = {}): GestureTracker {
-	const now = deps.now ?? Date.now;
+	// Read `Date.now` at each call (not captured): the module singleton below
+	// must follow a clock swapped after load (fake timers).
+	const now = deps.now ?? (() => Date.now());
 	const windowMs = deps.windowMs ?? GESTURE_WINDOW_MS;
 	let last = -Infinity;
 	return {
@@ -283,6 +285,22 @@ function browserUserActive(): boolean {
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * L13-2: the page's gesture memory, shared by the sync runtime (pointer /
+ * key gestures, `wireGestureTracker`) and the MediaSession handlers of
+ * player.ts. A lock-screen, headset or Android Auto "play" / "next" /
+ * "previous" / "seek" dispatches no DOM event and leaves
+ * `navigator.userActivation` false, yet it is the user's own press: the
+ * handlers mark it here before acting, so the play that follows takes the
+ * playback back (`claimOnPlay`) instead of leaving both devices playing.
+ */
+export const playGesture: GestureTracker = makeGestureTracker({ userActive: browserUserActive });
+
+/** player.ts: a MediaSession action handler call counts as the user's gesture. */
+export function markMediaSessionGesture(): void {
+	playGesture.mark();
 }
 
 /**
@@ -664,10 +682,11 @@ export function startNowPlayingSync(): () => void {
 		let playing = false;
 		let first = true;
 		// L12-9: only a play that follows a gesture on this page (or a
-		// transient user activation) takes the playback back; an automatic
-		// play (Bluetooth reconnection, Android Auto, a restored session)
-		// leaves the other device playing and keeps this one silent.
-		const gesture = makeGestureTracker({ userActive: browserUserActive });
+		// transient user activation, or L13-2 a MediaSession action) takes
+		// the playback back; an automatic play (Bluetooth reconnection,
+		// a restored session) leaves the other device playing and keeps this
+		// one silent.
+		const gesture = playGesture;
 		cleanups.push(wireGestureTracker(gesture));
 		cleanups.push(
 			AudioPlayer.paused.subscribe((paused) => {

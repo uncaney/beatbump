@@ -22,6 +22,8 @@ import {
 	GESTURE_WINDOW_MS,
 	claimOnPlay,
 	makeGestureTracker,
+	markMediaSessionGesture,
+	playGesture,
 	wireGestureTracker,
 	takeRemoteResume,
 	takenAway,
@@ -626,6 +628,29 @@ describe("Continuer ici (40A)", () => {
 			},
 		});
 		expect(claimOnPlay(pusher, throwing)).toBe(false);
+	});
+	it("a MediaSession action (lock screen, headset) is the user's gesture for the claim window (L13-2)", () => {
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(5_000_000);
+			const claim = vi.fn();
+			const lost = { deviceId: "phone", deviceName: "iPhone" };
+			const pusher = { lostTo: () => lost as DeviceInfoLike | null, claim };
+			// no gesture ever: an automatic play never claims
+			expect(claimOnPlay(pusher, playGesture)).toBe(false);
+			expect(claim).not.toHaveBeenCalled();
+			// lock-screen "play": the handler marks the gesture, the play that follows claims
+			markMediaSessionGesture();
+			vi.setSystemTime(5_000_000 + GESTURE_WINDOW_MS);
+			expect(claimOnPlay(pusher, playGesture)).toBe(true);
+			expect(claim).toHaveBeenCalledTimes(1);
+			// past the window: automatic again (Bluetooth reconnection)
+			vi.setSystemTime(5_000_000 + GESTURE_WINDOW_MS + 1);
+			expect(claimOnPlay(pusher, playGesture)).toBe(false);
+			expect(claim).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 	it("wireGestureTracker marks pointerdown and keydown, and unwires", () => {
 		let t = 0;

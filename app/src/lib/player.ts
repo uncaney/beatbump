@@ -22,7 +22,8 @@ import {
 import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
-import { shouldStopAtTrackEnd, sleepTimeUpdate, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
+import { markMediaSessionGesture } from "./stores/nowPlayingSync";
+import { shouldStopAtTrackEnd, sleepTimeUpdate, sleepTrackSkipped, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
 import { syncTabs } from "./tabSync";
 import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
@@ -108,7 +109,11 @@ function metaDataHandler({
 			album: fields.album,
 			artwork: mediaArtwork(currentTrack, typeof location !== "undefined" ? location.origin : ""),
 		});
+		// L13-2: a lock-screen / headset / Android Auto action is the user's
+		// own gesture (no DOM event, no userActivation): mark it so the play
+		// takes the playback back after a "Continuer ici" elsewhere.
 		navigator.mediaSession.setActionHandler("play", () => {
+			markMediaSessionGesture();
 			AudioPlayer.play();
 		});
 		navigator.mediaSession.setActionHandler("pause", () => AudioPlayer.pause());
@@ -116,6 +121,7 @@ function metaDataHandler({
 		// handler called with a bare `{ seekTime }` still resolves.
 		const onSeek = (action: "seekto" | "seekbackward" | "seekforward") =>
 			(details?: MediaSessionActionDetails) => {
+				markMediaSessionGesture();
 				const target = mediaSessionSeekTarget(
 					{ ...(details ?? {}), action },
 					AudioPlayer.currentTime,
@@ -125,13 +131,15 @@ function metaDataHandler({
 				AudioPlayer.seekTo(target, action === "seekto" && details?.fastSeek === true);
 			};
 		setMediaAction("seekto", onSeek("seekto"));
-		navigator.mediaSession.setActionHandler("previoustrack", () =>
-			AudioPlayer.previousOrRestart(),
-		);
+		navigator.mediaSession.setActionHandler("previoustrack", () => {
+			markMediaSessionGesture();
+			return AudioPlayer.previousOrRestart();
+		});
 		// c40b B6-10: an early lock-screen "next" is recorded as a skip.
-		navigator.mediaSession.setActionHandler("nexttrack", () =>
-			AudioPlayer.skipNext("mediasession"),
-		);
+		navigator.mediaSession.setActionHandler("nexttrack", () => {
+			markMediaSessionGesture();
+			return AudioPlayer.skipNext("mediasession");
+		});
 		// C3: headset / lock screen ±10 s.
 		setMediaAction("seekbackward", onSeek("seekbackward"));
 		setMediaAction("seekforward", onSeek("seekforward"));
@@ -589,6 +597,15 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 			recordSkip(track, t, d, source);
 		} catch {
 			/* never block "next" on the skip log */
+		}
+		// L13-3: "Dans 3 titres" counts a user "next" as one title; the last
+		// counted one pauses here (no advance), like the track-end path.
+		if (sleepTrackSkipped(SessionListService.position, SessionListService.value)) {
+			this._sleepHold = true;
+			this.nextSrc.url = undefined;
+			this.pause();
+			sleepTimerTrackEnded();
+			return Promise.resolve();
 		}
 		return SessionListService.next(undefined, update);
 	}

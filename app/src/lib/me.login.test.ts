@@ -107,6 +107,38 @@ describe("L12-8: login() holds the writes until the cookie switch is done", () =
 		expect(postMock).toHaveBeenCalledTimes(1 + 4 + 1);
 	});
 
+	it("a login that never answers holds a write LOGIN_GATE_MAX_MS at most, never the keepalive now_playing push (L13-5)", async () => {
+		vi.useFakeTimers();
+		try {
+			const me = await import("./me");
+			const never = deferred<unknown>();
+			postMock.mockImplementation(async (url: string) => (url.endsWith("/me/login") ? never.p : ok({ ok: true })));
+			fetchMock.mockImplementation(async () => ok({}));
+			void me.login("Carol").catch(() => {});
+			expect(me.loginInProgress()).toBe(true);
+			// pagehide: the keepalive push goes out at once, with the current cookie
+			const keep = me.putNowPlaying({ deviceId: "d", deviceName: "D", position: 1, payload: {} }, true);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect((await keep).status).toBe(200);
+			// an ordinary write waits for the login, LOGIN_GATE_MAX_MS at most
+			const fav = me.addFavorite({ videoId: "v1" });
+			const sync = me.putNowPlaying({ deviceId: "d", deviceName: "D", position: 2, payload: {} });
+			await vi.advanceTimersByTimeAsync(me.LOGIN_GATE_MAX_MS - 1);
+			expect(postMock).toHaveBeenCalledTimes(1);
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			await vi.advanceTimersByTimeAsync(1);
+			await fav;
+			expect((await sync).status).toBe(200);
+			expect(postMock).toHaveBeenCalledTimes(2);
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			// the login is still on the wire: the gate stays for the next write
+			expect(me.loginInProgress()).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("a failed login releases the queue (the writes go out with whatever cookie the server kept)", async () => {
 		const me = await import("./me");
 		const loginAnswer = deferred<unknown>();

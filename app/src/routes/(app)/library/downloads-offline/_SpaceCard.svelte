@@ -82,6 +82,8 @@
 	import { fmtBytesFr, spaceButtonLabels, spaceStatusLine } from "$lib/offlineSpace";
 	import { cancelKeepJob, defaultKeepDeps, keepDepsWithAbort, keepJobs, keepSummary, startKeepJob, type KeepProgress, type KeepResult } from "$lib/offlineBatch";
 	import { getFavorites, getMix, getRecent } from "$lib/me";
+	import { readLastTrack } from "$lib/homeRows";
+	import { readListenLog } from "$lib/listenLog";
 	import { notify } from "$lib/utils";
 	import { formatMoFr } from "$lib/utils/formatFr";
 	import { currentTrack } from "$lib/stores/list";
@@ -342,7 +344,12 @@
 		const recent = Array.isArray(rec?.items) ? rec.items : [];
 		// me/stats/recent: `playedAt` (epoch ms) aligned with `items` (S3).
 		const playedAt = Array.isArray((rec as { playedAt?: unknown })?.playedAt) ? ((rec as { playedAt?: number[] }).playedAt as number[]) : [];
-		const plays = recent.map((it, i) => ({ videoId: it?.videoId, playedAt: Number(playedAt[i]) || 0 }));
+		// L13-1: the device's listen log carries the seconds really listened
+		// (listenedPackIds only trusts those); the server plays date the rest.
+		const plays = [
+			...recent.map((it, i) => ({ videoId: it?.videoId, playedAt: Number(playedAt[i]) || 0 })),
+			...readListenLog(storage()).map((e) => ({ videoId: e.videoId, playedAt: e.at, seconds: e.seconds, duration: e.duration })),
+		];
 		return { favorites, recent, plays, mix: Array.isArray(mix?.items) ? mix.items : [], cached, sizes };
 	}
 	/** B7-8: the average bitrate of what is cached (bytes / known length), 1 Mo/min by default. */
@@ -442,10 +449,12 @@
 			},
 		});
 	}
-	// B7-7 "Rafraîchir mon pack": the pack tracks listened to since the pack
-	// began (me/stats/recent playedAt, the SW lastAccess) are uncached (the
-	// same uncache-audio path as "Libérer", so pinned entries outside the pack
-	// stay) and as many seconds of new tracks are run as a pack.
+	// B7-7 "Rafraîchir mon pack": the pack tracks really listened to since the
+	// pack began (L13-1: >= 50 % / >= 2 min in the device's listen log, never
+	// the SW lastAccess, which a startup restore or a 2 s skip also moves) are
+	// uncached (the same uncache-audio path as "Libérer", so pinned entries
+	// outside the pack stay) and as many seconds of new tracks are run as a
+	// pack. The track playing and the restored last track are never dropped.
 	async function refreshPack() {
 		if (packRunning || busy || loading || !lastPack) return;
 		const prev = lastPack;
@@ -453,8 +462,9 @@
 		resetPackRun();
 		try {
 			const src = await packSources();
-			const listened = listenedPackIds(prev, { entries, plays: src.plays });
-			const plan = planPackRefresh(prev, listened, { favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes });
+			const listened = listenedPackIds(prev, { plays: src.plays });
+			const protect = [get(currentTrack)?.videoId, readLastTrack(storage() ?? undefined)?.videoId];
+			const plan = planPackRefresh(prev, listened, { favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes }, protect);
 			const expose = (extra: Record<string, unknown> = {}) => {
 				if (typeof window === "undefined") return;
 				(window as PackWindow).__ytmPackRefresh = {

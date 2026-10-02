@@ -283,22 +283,31 @@ describe("B7-7 refresh my pack", () => {
 		).toBeNull();
 	});
 
-	it("listenedPackIds: a play after the pack began, or an SW entry served after it was cached", () => {
-		const p = pack(1_000_000);
+	it("listenedPackIds: a play after the pack began with >= 50 % / >= 2 min listened; never an SW serve (L13-1)", () => {
+		const p = pack(1_000_000); // p1 600 s, p2 300 s, p3 900 s
 		const got = listenedPackIds(p, {
 			plays: [
-				{ videoId: "p1", playedAt: 1_000_001 }, // after the pack
-				{ videoId: "p2", playedAt: 999_999 }, // before the pack: not listened since
-				{ videoId: "zz", playedAt: 2_000_000 }, // not in the pack
+				{ videoId: "p1", playedAt: 1_000_001, seconds: 300 }, // after the pack, half of 600 s
+				{ videoId: "p2", playedAt: 999_999, seconds: 300 }, // before the pack: not listened since
+				{ videoId: "p3", playedAt: 1_000_002, seconds: 120, duration: 900 }, // 2 min of a 15 min track
+				{ videoId: "zz", playedAt: 2_000_000, seconds: 500 }, // not in the pack
 				null,
 			],
 			entries: [
-				{ videoId: "p3", at: 1_000_500, lastAccess: 1_000_900 }, // served after caching
-				{ videoId: "p2", at: 1_000_500, lastAccess: 1_000_500 }, // never served since caching
-				{ videoId: "zz", at: 1, lastAccess: 2 },
+				{ videoId: "p2", at: 1_000_500, lastAccess: 1_000_900 }, // served after caching (startup restore): NOT listened
 			],
 		});
 		expect([...got].sort()).toEqual(["p1", "p3"]);
+		// a server play (no seconds), a 2 s skip, a short listen: not listened
+		const weak = listenedPackIds(p, {
+			plays: [
+				{ videoId: "p1", playedAt: 1_000_001 },
+				{ videoId: "p2", playedAt: 1_000_001, seconds: 2 },
+				{ videoId: "p3", playedAt: 1_000_001, seconds: 119, duration: 900 },
+			],
+			entries: [{ videoId: "p1", at: 1_000_500, lastAccess: 1_000_900 }],
+		});
+		expect(weak.size).toBe(0);
 		expect(listenedPackIds(p, {}).size).toBe(0);
 	});
 
@@ -321,6 +330,13 @@ describe("B7-7 refresh my pack", () => {
 		expect(next.at).toBe(5);
 		expect(next.target).toBe(3600);
 		expect(next.items.map((i) => i.videoId)).toEqual(["p2", "n1", "n3"]);
+	});
+
+	it("planPackRefresh: the track playing / restored is never dropped (L13-1)", () => {
+		const r = planPackRefresh(pack(), ["p1", "p3"], { favorites: [tr("n1", { duration: 600 })] }, ["p3", undefined, null, ""]);
+		expect(r.drop.map((i) => i.videoId)).toEqual(["p1"]);
+		expect(r.keep.map((i) => i.videoId)).toEqual(["p2", "p3"]);
+		expect(r.seconds).toBe(600);
 	});
 
 	it("planPackRefresh: nothing listened plans nothing, no candidate keeps the pack whole", () => {

@@ -106,6 +106,7 @@
 	import { goto } from "$app/navigation";
 	import { resolveArtistId } from "$lib/local";
 	import { recordHistory } from "$lib/me";
+	import { isListened, recordListen } from "$lib/listenLog";
 	import { historyThreshold, isLoopRestart, listenedSeconds } from "$stores/statsPlayCount";
 	import { downloadToDevice } from "$lib/offline";
 	import Icon from "$components/Icon/Icon.svelte";
@@ -171,10 +172,15 @@
 	// playing, listenedSeconds), not on the position: a session restored at
 	// 40 s and listened to the end counts once, a restore alone counts nothing.
 	let _historyListened = 0;
+	// L13-1: the device's own listen log (listenLog.ts): one entry per playback
+	// once >= 2 min or half of the track really played here. "Rafraîchir mon
+	// pack" drops nothing that is not in it.
+	let _listenLogged = false;
 	$: if (browser && ($currentTrack?.videoId ?? "") !== _historyId) {
 		_historyId = $currentTrack?.videoId ?? "";
 		_historySent = false;
 		_historyListened = 0;
+		_listenLogged = false;
 	}
 	let _historyPrevTime = 0;
 	$: if (browser) {
@@ -182,6 +188,7 @@
 		if (isLoopRestart(_historyPrevTime, t, $historyDuration)) {
 			_historySent = false;
 			_historyListened = 0;
+			_listenLogged = false;
 		}
 		_historyListened += listenedSeconds(_historyPrevTime, t, !$historyPaused);
 		_historyPrevTime = t;
@@ -195,6 +202,10 @@
 	) {
 		_historySent = true;
 		recordHistory($currentTrack);
+	}
+	$: if (browser && _historyId && !_listenLogged && isListened(_historyListened, $historyDuration) && $currentTrack?.videoId === _historyId) {
+		_listenLogged = true;
+		recordListen(typeof localStorage === "undefined" ? null : localStorage, { videoId: _historyId, seconds: _historyListened, duration: $historyDuration });
 	}
 
 	// F2: favourite state of the playing track (mini-bar + fullscreen hearts).

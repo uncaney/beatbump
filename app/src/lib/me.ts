@@ -156,10 +156,30 @@ export async function isAnonymousProfile(): Promise<boolean> {
 // and sent as `prevAnon`: the server re-adopts what still landed on it, and
 // only for the same name. Logout forgets it (a new person on the device).
 export const PREV_ANON_KEY = "ytm-prev-anon";
+/**
+ * L13-5: the longest a write waits for a login on the wire. A mobile network
+ * that blackholes the POST me/login would otherwise hold every write of the
+ * tab for minutes (the browser's TCP timeout); past this the write goes out
+ * with the current cookie (the server redirects the adopted cookie for a
+ * while anyway, profile_merge.go).
+ */
+export const LOGIN_GATE_MAX_MS = 8_000;
 let loginGate: Promise<void> | null = null;
-/** Resolves when no login is in progress (immediately outside a login). */
-export function loginSettled(): Promise<void> {
-	return loginGate ?? Promise.resolve();
+/**
+ * Resolves when no login is in progress (immediately outside a login), or
+ * after `maxWaitMs` at the latest (L13-5).
+ */
+export function loginSettled(maxWaitMs = LOGIN_GATE_MAX_MS): Promise<void> {
+	const gate = loginGate;
+	if (!gate) return Promise.resolve();
+	if (!(maxWaitMs > 0) || !Number.isFinite(maxWaitMs)) return gate;
+	return new Promise<void>((resolve) => {
+		const timer = setTimeout(resolve, maxWaitMs);
+		void gate.then(() => {
+			clearTimeout(timer);
+			resolve();
+		});
+	});
 }
 /** true while POST me/login is on the wire. */
 export function loginInProgress(): boolean {
@@ -442,7 +462,10 @@ export async function putNowPlaying(
 	keepalive = false,
 ): Promise<{ status: number; takenBy?: string; deviceName?: string }> {
 	try {
-		await loginSettled(); // c45b: the resume state follows the named profile
+		// c45b: the resume state follows the named profile. L13-5: not the
+		// keepalive push (pagehide: the page is going away, there is no time
+		// to wait; the server redirects an adopted cookie for a while).
+		if (!keepalive) await loginSettled();
 		const r = await APIClient.fetch(`/api/v1/me/nowplaying`, {
 			method: "PUT",
 			headers: { "Content-Type": "application/json" },
