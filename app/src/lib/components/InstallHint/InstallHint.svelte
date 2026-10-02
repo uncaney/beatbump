@@ -20,10 +20,12 @@
 	// (safe-area inset) instead of under the top nav, where it covered the
 	// library nav and the page title; see ./dock.ts.
 	import { onDestroy, onMount } from "svelte";
+	import { goto } from "$app/navigation";
 	import { page } from "$app/stores";
 	import Icon from "$components/Icon/Icon.svelte";
 	import {
 		installPrompt,
+		isAndroid,
 		isInstalled,
 		isIOS,
 		isInstallHintSnoozed,
@@ -34,7 +36,7 @@
 	import { queue } from "$lib/stores/list";
 	import { fullscreenStore } from "$components/Player/channel";
 	import { installHintDock, installHintGeometry, installHintReserve } from "./dock";
-	import { heardFirstSound, installHintGate, showInstallHintLink } from "./gate";
+	import { heardFirstSound, installHintGate, installOffer, showInstallHintLink } from "./gate";
 
 	// Shown at most once per session: once true, stays true for the rest of
 	// this component's (= the app's) lifetime, whatever triggers next.
@@ -61,7 +63,11 @@
 	});
 	onDestroy(() => clearTimeout(startTimer));
 
-	$: canOffer = $isIOS || !!$installPrompt;
+	// U14-3: the captured prompt (one tap), the iOS Share steps, or the menu
+	// steps on an Android that never fired `beforeinstallprompt` (Vanadium,
+	// Firefox, a prompt refused once): the bar used to not exist there at all.
+	$: offer = installOffer({ isIOS: $isIOS, isAndroid: $isAndroid, hasPrompt: !!$installPrompt });
+	$: canOffer = offer !== null;
 	// Playback surfaces (fullscreen player, lyrics): the bar stays out of the way.
 	$: onPlaybackSurface =
 		$fullscreenStore === "open" || ($page?.url?.pathname ?? "").startsWith("/lyrics");
@@ -104,11 +110,15 @@
 		snoozeInstallHint();
 	}
 	async function install() {
+		let outcome: Awaited<ReturnType<typeof promptInstall>> = "unavailable";
 		try {
-			await promptInstall();
+			outcome = await promptInstall();
 		} finally {
 			dismissed = true;
 		}
+		// U14-3: the browser had no prompt to show after all ("This app cannot
+		// be installed"): the steps page, not a bar that silently closes.
+		if (outcome === "unavailable") void goto("/bienvenue");
 	}
 </script>
 
@@ -123,8 +133,11 @@
 		bind:offsetHeight={stripHeight}
 	>
 		<p class="text">
-			{#if $isIOS}
+			{#if offer === "ios"}
 				Installe l'app : Partager puis « Sur l'écran d'accueil ».
+			{:else if offer === "android-manual"}
+				<!-- U14-3: no `beforeinstallprompt` on this Android: the gesture in words. -->
+				<span data-testid="install-hint-steps">Installe l'app : menu ⋮ puis « Installer l'application » (ou « Ajouter à l'écran d'accueil »).</span>
 			{:else}
 				Installe l'application pour l'écouter sans réseau.
 			{/if}
@@ -139,7 +152,7 @@
 				>
 			{/if}
 		</p>
-		{#if !$isIOS}
+		{#if offer === "prompt"}
 			<button
 				type="button"
 				class="btn-primary install"

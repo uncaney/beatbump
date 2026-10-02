@@ -11,6 +11,7 @@
 	import { browser } from "$app/environment";
 	import Header from "$components/Layouts/Header.svelte";
 	import Icon from "$components/Icon/Icon.svelte";
+	import { isAndroidUA } from "$components/InstallHint/gate";
 	import { installPrompt, isInstalled, isIOS, promptInstall } from "$lib/stores/pwa";
 	import { notify } from "$lib/utils";
 	import { darkModules, encodeQr, type QrMatrix } from "$lib/utils/qr";
@@ -58,7 +59,7 @@
 
 	onMount(() => {
 		const ua = navigator.userAgent;
-		platform = $isIOS ? "ios" : /Android/i.test(ua) ? "android" : "desktop";
+		platform = $isIOS ? "ios" : isAndroidUA(ua) ? "android" : "desktop";
 		baseUrl = `${location.origin}/`;
 		try {
 			qr = encodeQr(baseUrl);
@@ -128,6 +129,14 @@
 						on:click={install}>{installing ? "Installation…" : "Installer l'application"}</button
 					>
 					<p class="hint">Ou à la main :</p>
+				{:else if !$isInstalled && platform === "android"}
+					<!-- U14-3: this browser fired no install prompt (Vanadium, Firefox, a prompt refused once): say so instead of a missing button. -->
+					<p
+						class="hint"
+						data-testid="bienvenue-manual"
+					>
+						Pas de bouton ici : ce navigateur installe depuis son menu ⋮, en trois étapes.
+					</p>
 				{/if}
 				<ol class="steps">
 					<li><span class="n">1</span><span>Ouvre cette page dans <strong>Chrome</strong>.</span></li>

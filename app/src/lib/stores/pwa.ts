@@ -23,6 +23,8 @@ export const installPrompt = writable<BeforeInstallPromptEvent | null>(null);
 export const isInstalled = writable(false);
 /** True on iPhone / iPad (incl. iPadOS 13+ which reports itself as a Mac). */
 export const isIOS = writable(false);
+/** U14-3: true on Android (any browser): without `beforeinstallprompt` the install bar shows the menu steps. */
+export const isAndroid = writable(false);
 
 // HL4: contextual install hint. Eligible once the visit counter reaches 3
 // (bumped once per app load, see `recordVisit` below) OR the first
@@ -96,6 +98,7 @@ export function initPwa(): void {
 
 	const ua = navigator.userAgent;
 	isIOS.set(/iPhone|iPad|iPod/.test(ua) || (ua.includes("Mac") && navigator.maxTouchPoints > 1));
+	isAndroid.set(/Android/i.test(ua));
 	isInstalled.set(runningStandalone());
 	if (recordVisit() >= 3) installHintEligible.set(true);
 
