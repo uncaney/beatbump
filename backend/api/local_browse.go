@@ -151,7 +151,10 @@ var albumDocAttrs = []string{"id", "album", "albumArtist", "artistId", "year", "
 //	              me/never-played logic, profile cookie), up to the scan cap
 //	added-30d     albums added in the last addedRecentlyDays days
 //	added-month   albums added during one calendar month (c44a B7-2, below)
-var albumFilters = map[string]bool{"never-played": true, "added-30d": true, "added-month": true}
+//	no-year       albums with a missing/empty/unparsable year (B8-19), up to
+//	              the scan cap; the albums index has no "year" filterable
+//	              attribute, so this is materialised like the other filters
+var albumFilters = map[string]bool{"never-played": true, "added-30d": true, "added-month": true, "no-year": true}
 
 const (
 	albumFilterScanPage = 200
@@ -470,6 +473,26 @@ func localAlbumsFiltered(c echo.Context, filter string, off, lim int, sortBy str
 			end = total
 		}
 		for _, a := range docs[start:end] {
+			items = append(items, localAlbumItem(a))
+		}
+	case "no-year":
+		docs := recentAlbumDocs(c.QueryParam("q"), c.QueryParam("artistId"), 0)
+		noYear := make([]map[string]interface{}, 0, len(docs))
+		for _, a := range docs {
+			if yearOf(mnumStr(a, "year")) == 0 {
+				noYear = append(noYear, a)
+			}
+		}
+		sortAlbumDocs(noYear, sortBy)
+		total = len(noYear)
+		start, end := off, off+lim
+		if start > total {
+			start = total
+		}
+		if end > total {
+			end = total
+		}
+		for _, a := range noYear[start:end] {
 			items = append(items, localAlbumItem(a))
 		}
 	case "never-played":
