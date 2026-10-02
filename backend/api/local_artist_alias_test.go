@@ -325,14 +325,20 @@ func TestLocalArtistsCollapsed(t *testing.T) {
 	if strings.Join(ts, "|") != "AC/DC|Daft Punk|Ed Sheeran" {
 		t.Fatalf("collapsed page: %v", ts)
 	}
-	if !strings.Contains(subs[0], "+1 variante") || strings.Contains(subs[0], "variantes") {
-		t.Errorf("AC/DC badge: %q", subs[0])
+	// B9-8: the subtitle is the counts, never the name again, then the badge.
+	if subs[0] != "3 albums · 30 titres · +1 variante" {
+		t.Errorf("AC/DC subtitle: %q", subs[0])
 	}
-	if strings.Contains(subs[1], "variante") {
-		t.Errorf("Daft Punk has no badge: %q", subs[1])
+	if subs[1] != "5 albums · 50 titres" {
+		t.Errorf("Daft Punk subtitle (no badge): %q", subs[1])
 	}
-	if !strings.Contains(subs[2], "+3 variantes") {
-		t.Errorf("Ed Sheeran badge: %q", subs[2])
+	if subs[2] != "10 albums · 100 titres · +3 variantes" {
+		t.Errorf("Ed Sheeran subtitle: %q", subs[2])
+	}
+	for i, s := range subs {
+		if strings.Contains(s, ts[i]) {
+			t.Errorf("subtitle repeats the name: %q", s)
+		}
 	}
 	if mint(out, "nextOffset") != 4 || mint(out, "total") != 7 || out["collapsed"] != true {
 		t.Errorf("paging: nextOffset %v total %v collapsed %v", out["nextOffset"], out["total"], out["collapsed"])

@@ -189,6 +189,10 @@ func localArtistsCollapsed(c echo.Context, off, lim int, sortBy string) error {
 	for _, a := range kept {
 		id := mstr(a, "id")
 		item := localArtistItem(a, covers[id])
+		// B9-8 (U13-12): the row's subtitle is its counts, not its own name
+		// again under its title; the badge follows. The routing fields
+		// (endpoint, artistInfo) are untouched.
+		item.Subtitle = []Artist{{Text: artistStatsText(a)}}
 		if i, ok := index[id]; ok && i < len(groups) && groups[i].ID == id {
 			item.Subtitle = append(item.Subtitle, Artist{Text: " · " + aliasBadge(groups[i].Size-1)})
 		}
@@ -197,6 +201,20 @@ func localArtistsCollapsed(c echo.Context, off, lim int, sortBy string) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"items": items, "total": total, "offset": off, "nextOffset": next, "limit": lim, "sort": sortBy, "collapsed": true,
 	})
+}
+
+// artistStatsText is the collapsed artists list's subtitle (B9-8): "N albums
+// · M titres" from the artists doc counts.
+func artistStatsText(a map[string]interface{}) string {
+	return frCount(mint(a, "albumCount"), "album", "albums") + " · " + frCount(mint(a, "trackCount"), "titre", "titres")
+}
+
+// frCount is "N one" / "N many" (French: 0 and 1 take the singular).
+func frCount(n int, one, many string) string {
+	if n <= 1 {
+		return strconv.Itoa(n) + " " + one
+	}
+	return strconv.Itoa(n) + " " + many
 }
 
 // albumDocAttrs is what localAlbumItem needs from an albums doc.
