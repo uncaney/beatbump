@@ -27,6 +27,7 @@ import { syncTabs } from "$lib/tabSync";
 import { derived, get } from "svelte/store";
 import { groupSession } from "../sessions";
 import { filterAutoPlay, playerLoading } from "../stores";
+import { sleepQueueChanged } from "../sleepTimer";
 import type { ISessionListProvider } from "./types.list";
 import { applyMixOp, planInsert, planReorder, removalAutoplay, removeAt, spreadShuffle } from "./queueOps";
 import {
@@ -1606,3 +1607,11 @@ const related = (() => {
 })();
 
 export { currentTrack, queue, queuePosition, related };
+
+// L12-1: a "Fin de l'album" sleep timer follows queue replacements / jumps. Subscribed here, where
+// `list` is defined: player.ts imports this module and is also loaded as a dynamic-import entry
+// (sleepTimer, resumeState, nowPlayingSync), so a top-level `list.subscribe` in player.ts ran
+// before `list` was initialised (TDZ "Cannot access before initialization", chain 45).
+if (typeof globalThis.self !== "undefined" && globalThis.self.name !== "IDB") {
+	list.subscribe((state) => sleepQueueChanged(state));
+}

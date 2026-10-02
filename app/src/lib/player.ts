@@ -22,7 +22,7 @@ import {
 import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
-import { shouldStopAtTrackEnd, sleepQueueChanged, sleepTimeUpdate, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
+import { shouldStopAtTrackEnd, sleepTimeUpdate, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
 import { syncTabs } from "./tabSync";
 import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
@@ -1355,11 +1355,6 @@ function handleError(err: PlayerRequestError | string | undefined) {
 		body: null,
 		error: true,
 	};
-}
-
-// L12-1: a "Fin de l'album" sleep timer follows queue replacements / jumps.
-if (browser && globalThis.self.name !== "IDB") {
-	SessionListService.subscribe((state) => sleepQueueChanged(state));
 }
 
 if (browser && globalThis.self.name !== "IDB" && settings) {
