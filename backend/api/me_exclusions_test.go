@@ -176,23 +176,30 @@ func TestLocalRelatedSeedExclusions(t *testing.T) {
 	}
 }
 
-// personal=1 bypasses the shared response cache (the answer depends on the
-// profile). L13-9 (was L12-17 "one entry per exclude= value"): exclude= is
-// no longer part of the cache key: the base answer (without exclude=, with
-// its spare candidates) is cached once per seed, a second request with
-// another exclude= list is a HIT, the exclusions are applied after the hit
-// and the list is refilled from the spare up to the cap.
-func TestPersonalRelatedBypassesSharedCache(t *testing.T) {
+// L14-3: personal=1 no longer bypasses the shared response cache: the base
+// answer is built without the profile (no personal=, no cookie) and the
+// profile's exclusions are applied after the hit, like exclude=. Only the
+// favorites seed (built FROM the profile) bypasses. L13-9 (was L12-17 "one
+// entry per exclude= value"): exclude= is no longer part of the cache key:
+// the base answer (without exclude=, with its spare candidates) is cached
+// once per seed, a second request with another exclude= list is a HIT, the
+// exclusions are applied after the hit and the list is refilled from the
+// spare up to the cap.
+func TestPersonalRelatedSharesBaseCache(t *testing.T) {
 	t.Setenv("YTM_API_CACHE", "")
+	useSkipDB(t) // personal=1 reads the profile's skips / plays
 	e := echo.New()
 	calls := 0
 	h := relatedCacheWith(newResponseCache(10), time.Minute, func(c echo.Context) error {
 		calls++
-		ck, _ := c.Cookie("bbp")
+		pid := ""
+		if ck, err := c.Cookie("bbp"); err == nil {
+			pid = ck.Value
+		}
 		spare := c.Request().Header.Get(relatedSpareHeader) == "1"
 		ans := relatedAnswer{
 			Items: []Item{{VideoID: "x", Title: "X"}, {VideoID: "y", Title: "Y"}, {VideoID: "z", Title: "Z"}},
-			Seed:  "ex=" + c.QueryParam("exclude"), Name: "p=" + ck.Value,
+			Seed:  "ex=" + c.QueryParam("exclude"), Name: "p=" + pid + ";personal=" + c.QueryParam("personal"),
 		}
 		if spare {
 			ans.Spare = []Item{{VideoID: "w", Title: "W"}, {VideoID: "v", Title: "V"}}
@@ -220,14 +227,26 @@ func TestPersonalRelatedBypassesSharedCache(t *testing.T) {
 		}
 		return out
 	}
+	// personal=1 of two profiles: one shared entry, built without profile.
 	b1, c1 := do("/api/v1/local/related?lid=e182ccc85ad&personal=1", "A")
 	b2, c2 := do("/api/v1/local/related?lid=e182ccc85ad&personal=1", "B")
-	if c1 != "BYPASS" || c2 != "BYPASS" || b1 == b2 || !strings.Contains(b1, "p=A") {
-		t.Fatalf("personal=1 must bypass: %s %s %q %q", c1, c2, b1, b2)
+	if c1 != "MISS" || c2 != "HIT" || calls != 1 || !strings.Contains(b1, `"name":"p=;personal="`) || ids(b1) != "xyz" || ids(b2) != "xyz" {
+		t.Fatalf("personal=1 must share the base entry: %s %s (%d calls) %q %q", c1, c2, calls, b1, b2)
+	}
+	// A profile's twice-skipped ref is left out on the HIT, refilled from the spare; another profile keeps it.
+	addSkips(t, "A", "y", time.Hour, 2*time.Hour)
+	b1, c1 = do("/api/v1/local/related?lid=e182ccc85ad&personal=1", "A")
+	b2, c2 = do("/api/v1/local/related?lid=e182ccc85ad&personal=1", "B")
+	if c1 != "HIT" || c2 != "HIT" || calls != 1 || ids(b1) != "xzw" || ids(b2) != "xyz" {
+		t.Fatalf("profile exclusions after the hit: %s %s (%d calls) %q %q", c1, c2, calls, ids(b1), ids(b2))
+	}
+	// The favorites seed is built from the profile: still a bypass.
+	if _, c0 := do("/api/v1/local/related?seed=favorites&personal=1", "A"); c0 != "BYPASS" {
+		t.Fatalf("favorites must bypass: %s", c0)
 	}
 	calls = 0
-	b3, c3 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=x", "A")
-	b4, c4 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=y", "A")
+	b3, c3 := do("/api/v1/local/related?lid=f182ccc85ad&exclude=x", "A")
+	b4, c4 := do("/api/v1/local/related?lid=f182ccc85ad&exclude=y", "A")
 	if c3 != "MISS" || c4 != "HIT" || calls != 1 {
 		t.Fatalf("exclude= must not key the cache: %s %s (%d handler calls)", c3, c4, calls)
 	}
@@ -240,9 +259,9 @@ func TestPersonalRelatedBypassesSharedCache(t *testing.T) {
 		t.Fatalf("base answer / client body: %q", b3)
 	}
 	// Served again from the same entry, each with its own exclusions.
-	b5, c5 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=x", "B")
-	b6, c6 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=y,z", "B")
-	b7, c7 := do("/api/v1/local/related?lid=e182ccc85ad", "B")
+	b5, c5 := do("/api/v1/local/related?lid=f182ccc85ad&exclude=x", "B")
+	b6, c6 := do("/api/v1/local/related?lid=f182ccc85ad&exclude=y,z", "B")
+	b7, c7 := do("/api/v1/local/related?lid=f182ccc85ad", "B")
 	if c5 != "HIT" || c6 != "HIT" || c7 != "HIT" || calls != 1 {
 		t.Fatalf("one cache entry per seed: %s %s %s (%d handler calls)", c5, c6, c7, calls)
 	}
@@ -252,6 +271,32 @@ func TestPersonalRelatedBypassesSharedCache(t *testing.T) {
 	// A different seed is another entry.
 	if _, c8 := do("/api/v1/local/related?lid=a1b2c3d4e5f&exclude=x", "B"); c8 != "MISS" || calls != 2 {
 		t.Fatalf("other seed: %s (%d calls)", c8, calls)
+	}
+	// L14-3: exclusions past the spare (4 of the 5 candidates): rebuilt live
+	// with the request's own exclusions (the stub echoes them), not served short.
+	calls = 0
+	b9, c9 := do("/api/v1/local/related?lid=f182ccc85ad&exclude=x,y,z,w", "B")
+	if c9 != "BYPASS" || calls != 1 || !strings.Contains(b9, `"seed":"ex=x,y,z,w"`) {
+		t.Fatalf("short answer must be rebuilt live: %s (%d calls) %q", c9, calls, b9)
+	}
+}
+
+// relatedAnswerShort: a base shorter than its cap is a small pool (served
+// as is); a full base filtered under the cap is short.
+func TestRelatedAnswerShort(t *testing.T) {
+	three := []Item{{VideoID: "x"}, {VideoID: "y"}, {VideoID: "z"}}
+	if relatedAnswerShort(relatedAnswer{Items: three, Cap: 3}, relatedAnswer{Items: three}) {
+		t.Fatalf("full answer is not short")
+	}
+	if !relatedAnswerShort(relatedAnswer{Items: three, Cap: 3}, relatedAnswer{Items: three[:1]}) {
+		t.Fatalf("1 of 3 is short")
+	}
+	if relatedAnswerShort(relatedAnswer{Items: three[:2], Cap: 3}, relatedAnswer{Items: three[:1]}) {
+		t.Fatalf("a small pool is not short")
+	}
+	// No cap (a direct answer): the base item count is the cap.
+	if !relatedAnswerShort(relatedAnswer{Items: three}, relatedAnswer{Items: three[:2]}) {
+		t.Fatalf("2 of 3 without a cap is short")
 	}
 }
 
@@ -264,8 +309,11 @@ func TestLocalRelatedCachedExcludeAfterHit(t *testing.T) {
 	resetTrackKeyMemo()
 	t.Cleanup(resetTrackKeyMemo)
 	h := relatedCacheWith(newResponseCache(10), time.Minute, LocalRelatedHandler)
-	do := func(target string) (map[string]bool, string, string) {
+	doAs := func(target, pid string) (map[string]bool, string, string) {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
+		if pid != "" {
+			req.AddCookie(&http.Cookie{Name: "bbp", Value: pid})
+		}
 		rec := httptest.NewRecorder()
 		if err := h(echo.New().NewContext(req, rec)); err != nil || rec.Code != http.StatusOK {
 			t.Fatalf("%s: %v %d %s", target, err, rec.Code, rec.Body.String())
@@ -280,6 +328,7 @@ func TestLocalRelatedCachedExcludeAfterHit(t *testing.T) {
 		}
 		return out, rec.Header().Get("X-Ytm-Cache"), rec.Body.String()
 	}
+	do := func(target string) (map[string]bool, string, string) { return doAs(target, "") }
 	base := "/api/v1/local/related?lid=e182ccc85ad"
 	got, st, _ := do(base + "&exclude=a1b2c3d4e5f")
 	if st != "MISS" || got["a1b2c3d4e5f"] || !got["0123456789a"] || !got["bbbbbbbbbbb"] {
@@ -288,6 +337,17 @@ func TestLocalRelatedCachedExcludeAfterHit(t *testing.T) {
 	got, st, _ = do(base + "&exclude=bbbbbbbbbbb")
 	if st != "HIT" || got["bbbbbbbbbbb"] || !got["a1b2c3d4e5f"] || !got["0123456789a"] {
 		t.Fatalf("second exclude on a HIT: %s %v", st, got)
+	}
+	// L14-3: the continuation's own request (personal=1 + exclude=, with a
+	// cookie) is a HIT too; the profile's twice-skipped ref is left out for
+	// that profile only.
+	addSkips(t, "p-skip", "0123456789a", time.Hour, 2*time.Hour)
+	got, st, _ = doAs(base+"&personal=1&exclude=bbbbbbbbbbb", "p-skip")
+	if st != "HIT" || got["0123456789a"] || got["bbbbbbbbbbb"] || !got["a1b2c3d4e5f"] {
+		t.Fatalf("personal=1 continuation on a HIT: %s %v", st, got)
+	}
+	if got, st, _ = doAs(base+"&personal=1", "p-other"); st != "HIT" || !got["0123456789a"] || !got["bbbbbbbbbbb"] {
+		t.Fatalf("another profile on the same entry: %s %v", st, got)
 	}
 	got, st, raw := do(base)
 	if st != "HIT" || !got["a1b2c3d4e5f"] || !got["0123456789a"] || !got["bbbbbbbbbbb"] || strings.Contains(raw, `"spare"`) || strings.Contains(raw, `"cap"`) {
