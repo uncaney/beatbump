@@ -298,10 +298,14 @@ export interface ArrangedHomeRows {
 	more: HomeRow[];
 }
 
-/** Which row keeps a card present in several rows: the first key here wins. */
-export const HOME_ROW_PRIORITY = ["reprendre", "pour-toi", "album-du-jour", "redecouvrir", "nouveautes-artistes", "jamais-ecoute", "recemment-acquis"];
+/**
+ * Which row keeps a card present in several rows: the first key here wins.
+ * c44a B7-1: "artiste-du-jour" is a bonus card right after the album of the
+ * day (artist refs never collide with the album rows).
+ */
+export const HOME_ROW_PRIORITY = ["reprendre", "pour-toi", "album-du-jour", "artiste-du-jour", "redecouvrir", "nouveautes-artistes", "jamais-ecoute", "recemment-acquis"];
 /** Paint order of the personal rows on /home. */
-export const HOME_ROW_ORDER = ["reprendre", "pour-toi", "album-du-jour", "recemment-acquis", "nouveautes-artistes", "redecouvrir", "jamais-ecoute"];
+export const HOME_ROW_ORDER = ["reprendre", "pour-toi", "album-du-jour", "artiste-du-jour", "recemment-acquis", "nouveautes-artistes", "redecouvrir", "jamais-ecoute"];
 /** Rows that always take a visible slot when they have something to show. */
 export const HOME_PINNED_ROWS = ["reprendre", "pour-toi"];
 /** F2: personal rows painted above the first YouTube row. */
