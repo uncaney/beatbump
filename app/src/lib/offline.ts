@@ -10,6 +10,7 @@
 import { APIClient, PREFETCH_INIT } from "$lib/api";
 import { settings } from "$lib/stores/settings";
 import { isDataSaver } from "$lib/dataSaver";
+import { autoKeepNotice, createAutoCacheGate } from "$lib/autoCacheGate";
 import { derived, get, readable, writable, type Readable } from "svelte/store";
 
 const KEY = "ytm-offline-tracks";
@@ -536,10 +537,31 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
  * "audio-cached" ack (with timeout) and stores `_cached` / `_bytes`.
  * Concurrent calls for the same URL share one in-flight promise. Never throws.
  */
-export function cacheTrackOffline(item: any, url: string, opts: { pinned?: boolean } = {}): Promise<OfflineResult> {
+export type CacheTrackOpts = {
+	/** I15: the SW writes the entry pinned (atomic pin). Also an explicit keep. */
+	pinned?: boolean;
+	/** U14-2: a save the user asked for (Garder, pack, re-download): never deferred. */
+	explicit?: boolean;
+};
+export function cacheTrackOffline(item: any, url: string, opts: CacheTrackOpts = {}): Promise<OfflineResult> {
 	const lid = item && item.videoId;
 	if (!lid) return Promise.resolve({ ok: false, reason: "no id" });
 	if (!cacheableUrl(url)) return Promise.resolve({ ok: false, reason: "not cacheable" });
+	// U14-2: an automatic keep (the player at track start, the prefetch hook
+	// through requestAutoCache) waits for a counted listen of the track;
+	// explicit saves and tracks already cached (metadata refresh) go on.
+	if (!opts.pinned && !opts.explicit && !isCached(lid)) {
+		const r = autoCacheGate.request(item, url, lid);
+		if (r !== "now") return Promise.resolve({ ok: false, reason: "deferred" });
+		return inflight.get("id:" + lid) ?? Promise.resolve({ ok: false, reason: "deferred" });
+	}
+	return startCache(item, url, opts);
+}
+
+/** The keep itself (SW cache-audio, list write, ack): what cacheTrackOffline runs once allowed. */
+function startCache(item: any, url: string, opts: CacheTrackOpts = {}): Promise<OfflineResult> {
+	const lid = item && item.videoId;
+	if (!lid) return Promise.resolve({ ok: false, reason: "no id" });
 	// One in-flight request per track (the SW dedups by videoId too, but this
 	// spares the round-trip and the duplicate list write).
 	const k = "id:" + lid;
@@ -602,7 +624,56 @@ export function cacheTrackOffline(item: any, url: string, opts: { pinned?: boole
 	return p;
 }
 
-// Prefetch hook (lane A4): window CustomEvent("ytm:prefetched", { detail: { item, url } }).
+// ---- U14-2: automatic keeps after a counted listen ----
+// One gate for the tab: the player's keep of the playing track waits for
+// that track's listen (listenLog rule, `ytm:listened` dispatched by
+// recordListen), a prefetched +1 / +2 waits for the CURRENT track's listen
+// (`after` in the ytm:prefetched detail, sessionList). The first automatic
+// keep of the session says so in one line ("Gardé hors-ligne (98 Mo)").
+let autoKeepNoticed = false;
+const autoCacheGate = createAutoCacheGate((item, url) => {
+	void startCache(item, url)
+		.then((r) => {
+			if (!r.ok || !r.cached || autoKeepNoticed) return;
+			autoKeepNoticed = true;
+			void autoKeepNotify(r.bytes);
+		})
+		.catch(() => {});
+});
+async function autoKeepNotify(bytes: number | undefined) {
+	try {
+		// Dynamic: $lib/utils pulls the alert store and the API client (import cycle with this module).
+		const [{ notify }, { goto }] = await Promise.all([import("$lib/utils"), import("$app/navigation")]);
+		notify(autoKeepNotice(bytes), "success", { label: "Réglages", run: () => void goto("/settings") });
+	} catch {
+		/* the keep itself is done; the line is a courtesy */
+	}
+}
+/** U14-2: a listen counted for `videoId` this session (the gate's own view; tests and the harness read it). */
+export function autoCacheListened(videoId: string): boolean {
+	return autoCacheGate.isListened(videoId);
+}
+/** U14-2: automatic keeps still waiting for a listen. */
+export function autoCachePending(): number {
+	return autoCacheGate.pending();
+}
+/**
+ * U14-2: ask for an automatic keep of `item` once the track `after` counts
+ * as listened (the item itself by default). Off under auto-cache OFF / data
+ * saver; a track already cached is refreshed at once.
+ */
+export function requestAutoCache(item: any, url: string, after?: string): "now" | "deferred" | "ignored" | "off" {
+	if (!autoCacheEnabled()) return "off";
+	const lid = item && item.videoId;
+	if (!lid || !cacheableUrl(url)) return "ignored";
+	if (isCached(lid)) {
+		void startCache(item, url).catch(() => {});
+		return "now";
+	}
+	return autoCacheGate.request(item, url, after);
+}
+
+// Prefetch hook (lane A4): window CustomEvent("ytm:prefetched", { detail: { item, url, after } }).
 let prefetchHooked = false;
 export function installPrefetchHook() {
 	if (prefetchHooked || typeof window === "undefined" || typeof document === "undefined") return;
@@ -612,7 +683,13 @@ export function installPrefetchHook() {
 		// stored or listed (F7). Explicit saves go through downloadForOffline.
 		if (!autoCacheEnabled()) return;
 		const d = (ev as CustomEvent).detail || {};
-		if (d && d.item && typeof d.url === "string") void cacheTrackOffline(d.item, d.url);
+		// U14-2: kept once the CURRENT track (`after`) counts as listened.
+		if (d && d.item && typeof d.url === "string") requestAutoCache(d.item, d.url, typeof d.after === "string" && d.after ? d.after : undefined);
+	});
+	// U14-2: listenLog.recordListen says a listen counted: release what waited on it.
+	window.addEventListener("ytm:listened", (ev: Event) => {
+		const id = (ev as CustomEvent).detail?.videoId;
+		if (typeof id === "string" && id) autoCacheGate.listened(id);
 	});
 }
 installPrefetchHook();
@@ -626,7 +703,7 @@ export async function recacheEvicted(): Promise<{ total: number; ok: number }> {
 	const targets = read().filter((t) => t._evicted === true && isStableAudioUrl(t._offlineUrl));
 	let ok = 0;
 	for (const t of targets) {
-		const r = await cacheTrackOffline(t, t._offlineUrl);
+		const r = await cacheTrackOffline(t, t._offlineUrl, { explicit: true });
 		if (r.ok) ok++;
 	}
 	return { total: targets.length, ok };
@@ -646,7 +723,7 @@ export async function downloadForOffline(item: any, opts: { pinned?: boolean } =
 
 	// Service-worker offline cache (works on macOS/Chrome/Android). iOS Safari/Brave
 	// in private mode or an in-app webview exposes no serviceWorker → degrade.
-	if (await getSW()) return cacheTrackOffline(item, url, opts);
+	if (await getSW()) return cacheTrackOffline(item, url, { ...opts, explicit: true });
 
 	// No usable service worker. If we own the file locally, save it straight to the
 	// device (Fichiers on iOS) — that survives offline without the SW. Otherwise be honest.
