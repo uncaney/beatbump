@@ -13,6 +13,7 @@ package api
 // "Copier le diagnostic" instead of an empty composer.
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -112,6 +113,192 @@ func LibraryStatsHandler(c echo.Context) error {
 	}
 	_, out.Albums = countIndex("albums", nil, []string{"id"})
 	_, out.Artists = countIndex("artists", nil, []string{"id"})
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return c.JSON(http.StatusOK, out)
+}
+
+// B8-22: GET /api/v1/local/lint, the /about "Bibliothèque" card's three
+// counters (LIBRARY-LINT.md, lane c44c): albums without a usable year
+// (B8-19's no-year filter), genres with at most one track (the "rare" fold
+// of the Genres page, B8-21), and groups of near-duplicate artist names
+// (case / accents / "feat." / punctuation only, local_match.go's matchNorm -
+// LIBRARY-LINT section 4). The scans are the same bounded, read-only reads
+// the duplicates and genres handlers already run (dupAlbumScanFn,
+// genreTrackCounts): nothing new is indexed or decided here, memoised
+// lintMemoTTL so /about costs one cache read most of the time.
+const (
+	lintMemoTTL = 10 * time.Minute
+	// lintArtistScanCap/-Page bound the artists scan (the library holds
+	// ~1900 distinct artists).
+	lintArtistScanCap  = 4000
+	lintArtistScanPage = 500
+)
+
+type libraryLint struct {
+	AlbumsNoYear int `json:"albumsNoYear"`
+	GenresRare   int `json:"genresRare"`
+	ArtistGroups int `json:"artistGroups"`
+}
+
+var (
+	lintMu      sync.Mutex
+	lintMemo    *libraryLint
+	lintMemoAt  time.Time
+	lintMemoNow = time.Now // swapped by tests
+)
+
+// lintArtistScanFn reads one page of the artists index (name only); a
+// variable for tests.
+var lintArtistScanFn = func(off, lim int) ([]map[string]interface{}, int) {
+	return meiliBrowse("artists", map[string]interface{}{
+		"q": "", "offset": off, "limit": lim, "sort": []string{"name:asc"},
+		"attributesToRetrieve": []string{"name"},
+	})
+}
+
+// scanAlbumsNoYear reuses the duplicates handler's bounded albums scan
+// (dupAlbumScanFn, dupScanCap/dupScanPage: newest-first, covers the whole
+// library) and counts the albums with a missing/empty/unparsable year
+// (yearOf), same test as B8-19's ?filter=no-year. ok is false when the scan
+// read nothing (Meili down): such an answer is not memoised.
+func scanAlbumsNoYear() (n int, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("lint: albums scan failed: %v", r)
+			n, ok = 0, false
+		}
+	}()
+	var docs []map[string]interface{}
+	total, lastFull := 0, false
+	for off := 0; off < dupScanCap; off += dupScanPage {
+		page, t := dupAlbumScanFn(off, dupScanPage)
+		docs = append(docs, page...)
+		if t > total {
+			total = t
+		}
+		lastFull = len(page) >= dupScanPage
+		if !lastFull || (total > 0 && len(docs) >= total) {
+			break
+		}
+	}
+	if len(docs) == 0 {
+		return 0, false
+	}
+	count := 0
+	for _, a := range docs {
+		if yearOf(mnumStr(a, "year")) == 0 {
+			count++
+		}
+	}
+	return count, true
+}
+
+// scanGenresRare reuses LocalGenresHandler's own facet + normalizeGenres
+// (local_genres.go): a genre with at most one track is the "rare" noise the
+// Genres page folds away (B8-21's same count<=1 test).
+func scanGenresRare() int {
+	entries := normalizeGenres(genreTrackCounts())
+	n := 0
+	for _, e := range entries {
+		if e.Count <= 1 {
+			n++
+		}
+	}
+	return n
+}
+
+// scanArtistCloseGroups groups the artists index by matchNorm(name) (case,
+// accents, "feat."/"&", punctuation - local_match.go, already used to group
+// duplicate albums) and counts the groups holding more than one distinct
+// name: the near-duplicate artist entries LIBRARY-LINT section 4 lists.
+// Bounded by lintArtistScanCap. ok is false when the scan read nothing.
+func scanArtistCloseGroups() (n int, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("lint: artists scan failed: %v", r)
+			n, ok = 0, false
+		}
+	}()
+	groups := map[string]map[string]bool{}
+	total, lastFull, scanned := 0, false, 0
+	for off := 0; off < lintArtistScanCap; off += lintArtistScanPage {
+		page, t := lintArtistScanFn(off, lintArtistScanPage)
+		if t > total {
+			total = t
+		}
+		for _, a := range page {
+			name := mstr(a, "name")
+			if name == "" {
+				continue
+			}
+			key := matchNorm(name)
+			if key == "" {
+				continue
+			}
+			if groups[key] == nil {
+				groups[key] = map[string]bool{}
+			}
+			groups[key][name] = true
+		}
+		scanned += len(page)
+		lastFull = len(page) >= lintArtistScanPage
+		if !lastFull || (total > 0 && scanned >= total) {
+			break
+		}
+	}
+	if scanned == 0 {
+		return 0, false
+	}
+	count := 0
+	for _, names := range groups {
+		if len(names) > 1 {
+			count++
+		}
+	}
+	return count, true
+}
+
+// scanLibraryLint is the full (unmemoised) computation of the three
+// counters. ok is false when every scan it needs failed (Meili down): such
+// an answer is not memoised.
+func scanLibraryLint() (out libraryLint, ok bool) {
+	noYear, okYear := scanAlbumsNoYear()
+	groups, okGroups := scanArtistCloseGroups()
+	if !okYear && !okGroups {
+		return libraryLint{}, false
+	}
+	return libraryLint{AlbumsNoYear: noYear, GenresRare: scanGenresRare(), ArtistGroups: groups}, true
+}
+
+// libraryLintCached is scanLibraryLint behind a lintMemoTTL memo.
+func libraryLintCached() libraryLint {
+	lintMu.Lock()
+	defer lintMu.Unlock()
+	now := lintMemoNow()
+	if lintMemo != nil && now.Sub(lintMemoAt) < lintMemoTTL {
+		return *lintMemo
+	}
+	out, ok := scanLibraryLint()
+	if ok {
+		lintMemo, lintMemoAt = &out, now
+	}
+	if lintMemo != nil {
+		return *lintMemo
+	}
+	return out
+}
+
+// resetLintMemo empties the lint memo (tests).
+func resetLintMemo() {
+	lintMu.Lock()
+	lintMemo, lintMemoAt = nil, time.Time{}
+	lintMu.Unlock()
+}
+
+// LocalLintHandler: GET /api/v1/local/lint (B8-22). Read-only; nothing is
+// indexed, written or decided here.
+func LocalLintHandler(c echo.Context) error {
+	out := libraryLintCached()
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, out)
 }
