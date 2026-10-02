@@ -61,13 +61,28 @@
 		color: #b3b3b3;
 		font-size: var(--text-secondary-size);
 	}
+	/* U13-6: the link read green on a grey pad (2.78:1): `.btn-reset` keeps
+	   the global button rule off it, but `.link` set no background and the
+	   accent green sat on the muted banner. No background, the primary text
+	   colour underlined (white on the page background: >= 4.5:1). */
 	.link {
 		min-height: 44px;
 		padding: 0 0.25rem;
-		color: var(--accent, #1ed760);
+		background: none;
+		border: 0;
+		color: #fff;
+		font: inherit;
 		font-weight: 600;
 		text-decoration: underline;
 		text-underline-offset: 2px;
 		cursor: pointer;
+	}
+	.link:hover,
+	.link:focus-visible {
+		text-decoration-thickness: 2px;
+	}
+	.link:focus-visible {
+		outline: 2px solid #fff;
+		outline-offset: 2px;
 	}
 </style>
