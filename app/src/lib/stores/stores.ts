@@ -1,7 +1,7 @@
 import type { Item } from "$lib/types";
 import { filter } from "$lib/utils/collections";
-import { derived, writable } from "svelte/store";
-import { settings } from "./settings";
+import { derived, writable, type Readable } from "svelte/store";
+import { settings, type UserSettings } from "./settings";
 
 export const ctxKey = {};
 export const currentTitle = writable(undefined);
@@ -17,27 +17,26 @@ export type Alert = {
 	id?: number;
 };
 
-// Derived from Settings
-export const theme = derived(
-	settings,
-	($settings) => $settings.appearance.Theme,
-);
-export const filterAutoPlay = derived(
-	settings,
-	($settings) => $settings?.playback["Dedupe Automix"],
-);
-export const preferWebM = derived(
-	settings,
-	($settings) => $settings?.playback["Prefer WebM Audio"],
-);
-export const preserveSearch = derived(
-	settings,
-	($settings) => $settings?.search?.Preserve,
-);
-export const immersiveQueue = derived(
-	settings,
-	($settings) => $settings?.appearance["Immersive Queue"],
-);
+// Derived from Settings.
+// L13-11: this module and `./settings` sit on an import cycle (settings.ts ->
+// $lib/utils -> utils/utils.ts -> stores/stores.ts -> settings.ts). A
+// top-level `derived(settings, ...)` reads the `settings` binding while the
+// cycle is still evaluating: safe today only because every entry reaches
+// settings.ts before this file; an entry through `$lib/stores/settings`
+// first would throw "Cannot access 'settings' before initialization" at
+// startup. The derived is built on the first subscription instead, when the
+// whole cycle has long been initialised (lazy, whatever the module order).
+function fromSettings<T>(pick: ($settings: UserSettings) => T): Readable<T> {
+	let inner: Readable<T> | null = null;
+	return {
+		subscribe: (run, invalidate) => (inner ??= derived(settings, pick)).subscribe(run, invalidate),
+	};
+}
+export const theme = fromSettings(($settings) => $settings.appearance.Theme);
+export const filterAutoPlay = fromSettings(($settings) => $settings?.playback["Dedupe Automix"]);
+export const preferWebM = fromSettings(($settings) => $settings?.playback["Prefer WebM Audio"]);
+export const preserveSearch = fromSettings(($settings) => $settings?.search?.Preserve);
+export const immersiveQueue = fromSettings(($settings) => $settings?.appearance["Immersive Queue"]);
 // Alert
 export const alertHandler = _alertHandler();
 function _alertHandler() {
