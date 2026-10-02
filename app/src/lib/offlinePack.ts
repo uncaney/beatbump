@@ -138,11 +138,16 @@ export function packLabel(done: number, total: number, doneBytes: number, target
 	return `${done}/${total} · ${mb(doneBytes)} sur ${mb(target)}`;
 }
 
-/** "12/30 · 48 min sur 1 h" while a duration pack runs. */
-export function packDurationText(done: number, total: number, doneSeconds: number, targetSeconds: number): string {
+/**
+ * "12/30 · 48 min sur 1 h" while a duration pack runs; U13-2: with the
+ * estimated bytes of the pack, "12/30 · 48 min sur 1 h · 180 Mo sur env. 1,1 Go"
+ * (what the pack costs on a data plan, never the size selector's target).
+ */
+export function packDurationText(done: number, total: number, doneSeconds: number, targetSeconds: number, doneBytes = 0, estimatedBytes = 0): string {
 	if (total <= 0) return "Aucun morceau à préparer";
 	const d = doneSeconds > 0 ? formatDuration(doneSeconds) : "0 min";
-	return `${done}/${total} · ${d} sur ${formatDuration(targetSeconds)}`;
+	const base = `${done}/${total} · ${d} sur ${formatDuration(targetSeconds)}`;
+	return estimatedBytes > 0 ? `${base} · ${formatBytesFr(doneBytes)} sur env. ${formatBytesFr(estimatedBytes)}` : base;
 }
 
 // ---- B7-8 (L12-14): space guard for a pack by duration ----
@@ -195,6 +200,66 @@ export function packItemEstimate(item: Pick<PackItem, "bytes" | "estimated" | "s
 /** Estimated bytes of a whole plan (see packItemEstimate). */
 export function estimatePackBytes(plan: Pick<PackPlan, "items">, bps: number): number {
 	return plan.items.reduce((s, i) => s + packItemEstimate(i, bps), 0);
+}
+
+/** U13-2: under data saver a duration pack is cut to this many estimated bytes. */
+export const PACK_DATA_SAVER_CAP = 300 * 1024 * 1024;
+
+/**
+ * U13-2: the head of a plan whose estimated bytes fit `maxBytes` (first fit
+ * in plan order on packItemEstimate: an item too big is skipped, a smaller
+ * one further down may still enter). `cut` false = the plan itself,
+ * untouched (also for an unbounded `maxBytes`); `estimated` is always the
+ * estimate of the plan returned.
+ */
+export function cutPackToBytes(plan: PackPlan, maxBytes: number, bps = PACK_DEFAULT_BPS): { plan: PackPlan; estimated: number; cut: boolean } {
+	const estimated = estimatePackBytes(plan, bps);
+	if (!(maxBytes >= 0) || estimated <= maxBytes) return { plan, estimated, cut: false };
+	const items: PackItem[] = [];
+	let bytes = 0;
+	let seconds = 0;
+	let used = 0;
+	for (const i of plan.items) {
+		const e = packItemEstimate(i, bps);
+		if (used + e > maxBytes) continue;
+		items.push(i);
+		used += e;
+		bytes += i.bytes;
+		seconds += i.seconds;
+	}
+	const shrunk: PackPlan = { items, bytes, seconds, count: items.length, target: plan.target, mode: plan.mode, left: plan.left + plan.items.length - items.length, candidates: plan.candidates };
+	return { plan: shrunk, estimated: used, cut: true };
+}
+
+/**
+ * U13-2: what a remembered pack has landed so far: its tracks now in the
+ * cache listing, plus, when the job's own `ready` counter is ahead of that
+ * listing, the next tracks in plan order (downloads run in that order). The
+ * Espace card adopts a pack started by another page (the home "Emporte 1 h"
+ * card) without having seen a byte of it.
+ */
+export function packDoneOf(pack: Pick<LastPack, "items"> | null | undefined, cached: Iterable<string> | null | undefined, ready = 0): { count: number; seconds: number; bytes: number } {
+	const set = cached instanceof Set ? (cached as Set<string>) : new Set<string>(cached ?? []);
+	let count = 0;
+	let seconds = 0;
+	let bytes = 0;
+	const rest: LastPackItem[] = [];
+	for (const i of pack?.items ?? []) {
+		if (!set.has(i.videoId)) {
+			rest.push(i);
+			continue;
+		}
+		count++;
+		seconds += i.seconds;
+		bytes += i.bytes;
+	}
+	for (const i of rest) {
+		if (count >= ready) break;
+		count++;
+		seconds += i.seconds;
+		bytes += i.bytes;
+	}
+	return { count, seconds, bytes };
 }
 
 export type PackSpace = {
@@ -275,19 +340,9 @@ export function guardPackSpace(plan: PackPlan, space: PackSpace, bps = PACK_DEFA
 	}
 	const estimated = estimatePackBytes(plan, bps);
 	if (estimated <= available) return { fits: true, estimated, available, limit, shrunk: plan, message: "" };
-	const items: PackItem[] = [];
-	let bytes = 0;
-	let seconds = 0;
-	let used = 0;
-	for (const i of plan.items) {
-		const e = packItemEstimate(i, bps);
-		if (used + e > available) continue;
-		items.push(i);
-		used += e;
-		bytes += i.bytes;
-		seconds += i.seconds;
-	}
-	const shrunk: PackPlan = { items, bytes, seconds, count: items.length, target: plan.target, mode: plan.mode, left: plan.left + plan.items.length - items.length, candidates: plan.candidates };
+	const { plan: shrunk, estimated: used } = cutPackToBytes(plan, available, bps);
+	const items = shrunk.items;
+	const seconds = shrunk.seconds;
 	const asked = plan.mode === "seconds" ? `${formatDuration(plan.target)} demandées` : `${formatBytesFr(plan.target)} demandés`;
 	const fitsTxt = items.length ? `${plan.mode === "seconds" ? formatDuration(seconds) : formatBytesFr(used)} ${items.length > 1 ? "tiennent" : "tient"}` : "rien ne tient";
 	// L13-4: the bound is the storage the browser grants this site, not the phone.
@@ -310,7 +365,14 @@ export function guardPackSpace(plan: PackPlan, space: PackSpace, bps = PACK_DEFA
 
 export const LAST_PACK_KEY = "ytm-offline-pack-last";
 export type LastPackItem = { videoId: string; seconds: number; bytes: number };
-export type LastPack = { at: number; mode: "bytes" | "seconds"; target: number; items: LastPackItem[] };
+export type LastPack = {
+	at: number;
+	mode: "bytes" | "seconds";
+	target: number;
+	items: LastPackItem[];
+	/** U13-2: estimated bytes of the whole pack when it started (known sizes, else length x bitrate): the progress line's "sur env. 1,1 Go". */
+	estimatedBytes?: number;
+};
 type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
 
 /** The record to remember for a plan that starts now. */
@@ -341,7 +403,14 @@ export function readLastPack(store: KV | null | undefined): LastPack | null {
 			items.push({ videoId: id, seconds: Number.isFinite(s) && s > 0 ? Math.round(s) : PACK_EST_SECONDS, bytes: Number.isFinite(b) && b > 0 ? Math.floor(b) : PACK_EST_BYTES });
 		}
 		if (!items.length) return null;
-		return { at: Number.isFinite(at) && at > 0 ? at : 0, mode: p.mode === "bytes" ? "bytes" : "seconds", target: Number(p.target) || 0, items };
+		const est = Number(p.estimatedBytes);
+		return {
+			at: Number.isFinite(at) && at > 0 ? at : 0,
+			mode: p.mode === "bytes" ? "bytes" : "seconds",
+			target: Number(p.target) || 0,
+			items,
+			...(Number.isFinite(est) && est > 0 ? { estimatedBytes: Math.floor(est) } : {}),
+		};
 	} catch {
 		return null;
 	}

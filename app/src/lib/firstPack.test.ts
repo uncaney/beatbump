@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { FIRST_PACK_SECONDS, firstPackSources, hasFirstPackMaterial, planFirstPack, shouldShowFirstPackCard } from "./firstPack";
+import { FIRST_PACK_SECONDS, firstPackSizeText, firstPackSources, hasFirstPackMaterial, planFirstPack, shouldShowFirstPackCard, sizeFirstPack } from "./firstPack";
+import { NNBSP } from "./utils/formatFr";
 
 describe("shouldShowFirstPackCard", () => {
 	it("shows for a profile without history once the service worker is active", () => {
@@ -65,5 +66,34 @@ describe("planFirstPack", () => {
 		expect(plan.items.map((i) => i.videoId)).toEqual(["a1", "a2", "s1", "m3"]);
 		expect(plan.seconds).toBe(45 * 60);
 		expect(plan.left).toBe(1);
+	});
+});
+
+describe("U13-2 size announced before the tap", () => {
+	const MB = 1024 * 1024;
+	// Three 10 min tracks (30 min of listening), no known size.
+	const plan = planFirstPack({ album: [track("a1", "10:00"), track("a2", "10:00")], artist: [track("s1", "10:00")], mix: [] });
+
+	it("sizeFirstPack: the estimate at the cache bitrate, the plan untouched off data saver", () => {
+		const r = sizeFirstPack(plan, MB, false);
+		expect(r.plan).toBe(plan);
+		expect(r.estimate).toEqual({ bytes: 1800 * MB, dataSaver: false, capped: false, count: 3, seconds: 1800 });
+		expect(firstPackSizeText(r.estimate)).toBe(`Environ 1,8${NNBSP}Go à télécharger (qualité d'origine).`);
+	});
+
+	it("sizeFirstPack: data saver cuts the plan to 300 Mo and the line says so, or just names the saver when it fits", () => {
+		const r = sizeFirstPack(plan, MB / 4, true);
+		expect(r.plan.items.map((i) => i.videoId)).toEqual(["a1", "a2"]);
+		expect(r.estimate).toEqual({ bytes: 300 * MB, dataSaver: true, capped: true, count: 2, seconds: 1200 });
+		expect(firstPackSizeText(r.estimate)).toBe(`Économie de données : pack limité à 300${NNBSP}Mo, soit 20 min (qualité d'origine, env. 300${NNBSP}Mo).`);
+		const small = sizeFirstPack(plan, MB / 100, true);
+		expect(small.plan).toBe(plan);
+		expect(small.estimate.capped).toBe(false);
+		expect(firstPackSizeText(small.estimate)).toBe(`Environ 18${NNBSP}Mo à télécharger (qualité d'origine), économie de données active.`);
+	});
+
+	it("firstPackSizeText: nothing without a plan", () => {
+		expect(firstPackSizeText(null)).toBe("");
+		expect(firstPackSizeText({ bytes: 0, dataSaver: false, capped: false, count: 0, seconds: 0 })).toBe("");
 	});
 });

@@ -9,7 +9,8 @@
 import { ALBUM_OF_DAY_URL, albumOfDayFrom } from "./albumOfDay";
 import { ARTIST_OF_DAY_URL, artistOfDayFrom, artistOfDaySongsUrl } from "./artistOfDay";
 import { mixCardsFrom, mixCardUrl } from "./mixes";
-import { planPack, type PackCandidates, type PackPlan } from "./offlinePack";
+import { PACK_DATA_SAVER_CAP, cutPackToBytes, packDurationLabel, planPack, type PackCandidates, type PackPlan } from "./offlinePack";
+import { formatBytesFr } from "./utils/formatFr";
 
 /** localStorage memo: "1" once the card was dismissed or its pack launched (never shown again). */
 export const FIRST_PACK_KEY = "ytm-first-pack-card";
@@ -94,4 +95,42 @@ export function planFirstPack(src: FirstPackSources, cached?: PackCandidates["ca
 export function hasFirstPackMaterial(src: FirstPackSources): boolean {
 	const isTrack = (x: any) => !!x && typeof x.videoId === "string" && x.videoId !== "";
 	return src.album.some(isTrack) || src.artist.some(isTrack) || src.mix.some(isTrack);
+}
+
+/** U13-2: what the card announces before the tap. */
+export type FirstPackEstimate = {
+	/** Estimated bytes of the pack (known sizes, else length x the cache's average bitrate). */
+	bytes: number;
+	/** Economie de donnees is on (the switch in Reglages, the OS switch or a 2g link). */
+	dataSaver: boolean;
+	/** The plan was cut to PACK_DATA_SAVER_CAP (data saver only). */
+	capped: boolean;
+	count: number;
+	seconds: number;
+};
+
+/**
+ * U13-2: size the plan before anything downloads. The library keeps lossless
+ * files, so "1 h" can mean 1,1 Go on a phone's data plan: the estimate uses
+ * the cache's measured bitrate (averageBytesPerSecond). Under data saver the
+ * plan is cut to PACK_DATA_SAVER_CAP (first fit, same order). The copies are
+ * the library's own (local/duplicates groups albums, not tracks, so no
+ * compressed copy is swapped in), hence "qualité d'origine" in the text.
+ */
+export function sizeFirstPack(plan: PackPlan, bps: number, dataSaver: boolean): { plan: PackPlan; estimate: FirstPackEstimate } {
+	const cut = cutPackToBytes(plan, dataSaver ? PACK_DATA_SAVER_CAP : Infinity, bps);
+	return { plan: cut.plan, estimate: { bytes: cut.estimated, dataSaver, capped: cut.cut, count: cut.plan.count, seconds: cut.plan.seconds } };
+}
+
+/**
+ * The size line of the card: "Environ 1,1 Go à télécharger (qualité
+ * d'origine)."; under data saver the cap is named with what it holds
+ * ("pack limité à 300 Mo, soit 25 min"). "" without a plan.
+ */
+export function firstPackSizeText(e: FirstPackEstimate | null | undefined): string {
+	if (!e || !(e.count > 0) || !(e.bytes > 0)) return "";
+	const size = formatBytesFr(e.bytes);
+	if (e.capped) return `Économie de données : pack limité à ${formatBytesFr(PACK_DATA_SAVER_CAP)}, soit ${packDurationLabel(e.seconds)} (qualité d'origine, env. ${size}).`;
+	if (e.dataSaver) return `Environ ${size} à télécharger (qualité d'origine), économie de données active.`;
+	return `Environ ${size} à télécharger (qualité d'origine).`;
 }

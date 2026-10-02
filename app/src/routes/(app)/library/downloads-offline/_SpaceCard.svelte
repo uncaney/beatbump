@@ -63,10 +63,12 @@
 		PACK_DURATIONS_SEC,
 		PACK_SIZES_MB,
 		averageBytesPerSecond,
+		estimatePackBytes,
 		guardPackSpace,
 		lastPackOf,
 		listenedPackIds,
 		originRoom,
+		packDoneOf,
 		packDurationLabel,
 		packDurationText,
 		packLabel,
@@ -257,6 +259,8 @@
 	let packProgress: KeepProgress | null = null;
 	let packDoneBytes = 0;
 	let packDoneSeconds = 0;
+	/** U13-2: estimated bytes of the running duration pack (the progress line's "sur env. 1,1 Go"). */
+	let packEstBytes = 0;
 	let packResult = "";
 	let packOwned = false; // started by this instance (its onDone writes the outcome)
 	/** B7-8: the refused plan and the head of it that fits ("Préparer 1 h 20 quand même"). */
@@ -285,15 +289,31 @@
 	// U12-9: a pack in progress (started here or found running on mount) unfolds
 	// the card once; only `packRunning` is read, so the user can still fold it.
 	$: if (packRunning) open = true;
-	$: packTarget = packPlan ? packPlan.target : durationSec || sizeMb * MB;
-	$: packMode = packPlan ? packPlan.mode : durationSec ? "seconds" : "bytes";
+	// U13-2 (audit UX v13): a pack started by another page (the home "Emporte
+	// 1 h" card) runs under PACK_KEY without a plan here. Its memo
+	// (LAST_PACK_KEY, written before the job starts) carries its mode, target,
+	// tracks and estimate, so the progress line reports THAT pack ("3/19 ·
+	// 12 min sur 1 h · 180 Mo sur env. 1,1 Go", done = its tracks now cached)
+	// and the disabled selector shows its duration, never the selector's own
+	// "100 Mo" (which used to read "0/19 · 0 Mo sur 100 Mo").
+	$: adopted = packJob && !packPlan && lastPack ? lastPack : null;
+	$: adoptedDone = adopted ? packDoneOf(adopted, $cachedIds, packProgress?.ready ?? 0) : null;
+	$: if (adopted && packState === "running") {
+		const want = adopted.mode === "seconds" ? `dur:${adopted.target}` : String(Math.round(adopted.target / MB));
+		if (parsePackChoice(want) && choice !== want) choice = want;
+	}
+	$: packTarget = packPlan ? packPlan.target : adopted ? adopted.target : durationSec || sizeMb * MB;
+	$: packMode = packPlan ? packPlan.mode : adopted ? adopted.mode : durationSec ? "seconds" : "bytes";
+	$: shownDoneSeconds = adoptedDone ? adoptedDone.seconds : packDoneSeconds;
+	$: shownDoneBytes = adoptedDone ? adoptedDone.bytes : packDoneBytes;
+	$: shownEstBytes = adopted ? (adopted.estimatedBytes ?? 0) : packEstBytes;
 	$: packText =
 		packState === "planning"
 			? "Préparation…"
 			: packState === "running"
 				? packMode === "seconds"
-					? packDurationText(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, packDoneSeconds, packTarget)
-					: packLabel(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, packDoneBytes, packTarget)
+					? packDurationText(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, shownDoneSeconds, packTarget, shownDoneBytes, shownEstBytes)
+					: packLabel(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, shownDoneBytes, packTarget)
 				: packResult;
 	type PackWindow = Window & { __ytmPackPlan?: Record<string, unknown>; __ytmPackRefresh?: Record<string, unknown> };
 	function exposePack(extra: Record<string, unknown> = {}) {
@@ -310,6 +330,7 @@
 			videoIds: packPlan ? packPlan.items.map((i) => i.videoId) : [],
 			state: packState,
 			doneBytes: packDoneBytes,
+			estimatedBytes: packEstBytes,
 			progress: packProgress,
 			guard: packGuard
 				? { fits: packGuard.fits, estimated: packGuard.estimated, available: packGuard.available, limit: packGuard.limit, shrunkCount: packGuard.shrunk.count, shrunkSeconds: packGuard.shrunk.seconds, message: packGuard.message }
@@ -323,6 +344,7 @@
 		packProgress = null;
 		packDoneBytes = 0;
 		packDoneSeconds = 0;
+		packEstBytes = 0;
 		packResult = "";
 		packGuard = null;
 		error = "";
@@ -430,11 +452,14 @@
 		packPlan = plan;
 		packState = "running";
 		packProgress = { ready: 0, failed: 0, refused: 0, total: plan.count };
+		// U13-2: a duration pack says what it costs in bytes ("y Mo sur env. 1,1 Go").
+		packEstBytes = plan.mode === "seconds" ? estimatePackBytes(plan, cacheBytesPerSecond()) : 0;
 		exposePack();
 		// O10: a pack is an explicit "keep offline".
 		void requestPersistentStorage();
-		lastPack = lastPackNext;
-		writeLastPack(storage(), lastPackNext);
+		const memo: LastPack = packEstBytes > 0 && !lastPackNext.estimatedBytes ? { ...lastPackNext, estimatedBytes: packEstBytes } : lastPackNext;
+		lastPack = memo;
+		writeLastPack(storage(), memo);
 		void startKeepJob(PACK_KEY, () => plan.items.map((i) => i.item), {
 			deps: (signal) =>
 				keepDepsWithAbort(signal, {
@@ -878,8 +903,9 @@
 				data-state={packState}
 				data-ready={packProgress?.ready ?? 0}
 				data-total={packProgress?.total ?? packPlan?.count ?? 0}
-				data-bytes={packDoneBytes}
-				data-seconds={packDoneSeconds}
+				data-bytes={shownDoneBytes}
+				data-seconds={shownDoneSeconds}
+				data-estimated={shownEstBytes}
 				data-mode={packMode}
 				role="status"
 				aria-live="polite"

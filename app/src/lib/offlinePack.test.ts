@@ -13,17 +13,21 @@ vi.mock("$lib/offline", () => ({
 	abortCacheAudio: vi.fn(),
 }));
 
+import { NNBSP } from "./utils/formatFr";
 import {
 	LAST_PACK_KEY,
+	PACK_DATA_SAVER_CAP,
 	PACK_DEFAULT_BPS,
 	PACK_EST_BYTES,
 	PACK_EST_SECONDS,
 	averageBytesPerSecond,
+	cutPackToBytes,
 	estimatePackBytes,
 	guardPackSpace,
 	lastPackOf,
 	listenedPackIds,
 	originRoom,
+	packDoneOf,
 	packDurationText,
 	packLabel,
 	packRefreshPreviewTitle,
@@ -398,5 +402,64 @@ describe("B7-7 refresh my pack", () => {
 		expect(dry.drop.map((i) => i.videoId)).toEqual(["p2"]);
 		expect(dry.add.count).toBe(0);
 		expect(packRefreshSummary(dry)).toBe("Rien à rafraîchir : pas de nouveau titre pour remplacer 1 titre écouté (5 min).");
+	});
+});
+
+describe("U13-2 size before the tap, progress of an adopted pack", () => {
+	const item = (id: string, seconds: number, bytes = 0) => ({ item: tr(id), videoId: id, bytes: bytes || PACK_EST_BYTES, estimated: !bytes, seconds, source: "mix" as const });
+	const plan = (items: ReturnType<typeof item>[]) => ({
+		items,
+		bytes: items.reduce((s, i) => s + i.bytes, 0),
+		seconds: items.reduce((s, i) => s + i.seconds, 0),
+		count: items.length,
+		target: 3600,
+		mode: "seconds" as const,
+		left: 0,
+		candidates: items.length,
+	});
+
+	it("cutPackToBytes keeps a plan under the cap (also unbounded) and cuts one over it, first fit in plan order", () => {
+		// 1 Mo per second: a 100 Mo, b 250 Mo, c 40 Mo.
+		const p = plan([item("a", 100), item("b", 250), item("c", 40)]);
+		const ok = cutPackToBytes(p, 500 * MB, MB);
+		expect(ok.cut).toBe(false);
+		expect(ok.plan).toBe(p);
+		expect(ok.estimated).toBe(390 * MB);
+		expect(cutPackToBytes(p, Infinity, MB).cut).toBe(false);
+		const cut = cutPackToBytes(p, PACK_DATA_SAVER_CAP, MB);
+		expect(cut.cut).toBe(true);
+		expect(cut.plan.items.map((i) => i.videoId)).toEqual(["a", "c"]);
+		expect(cut.estimated).toBe(140 * MB);
+		expect(cut.plan.seconds).toBe(140);
+		expect(cut.plan.count).toBe(2);
+		expect(cut.plan.left).toBe(1);
+		expect(cut.plan.mode).toBe("seconds");
+		expect(cut.plan.target).toBe(3600);
+	});
+
+	it("packDurationText adds the bytes against the estimate when it is known", () => {
+		expect(packDurationText(3, 19, 12 * 60, 3600, 180 * MB, 1.1 * 1024 * MB)).toBe(`3/19 · 12 min sur 1 h · 180${NNBSP}Mo sur env. 1,1${NNBSP}Go`);
+		expect(packDurationText(3, 19, 12 * 60, 3600, 180 * MB, 0)).toBe("3/19 · 12 min sur 1 h");
+		expect(packDurationText(0, 19, 0, 3600, 0, 1.1 * 1024 * MB)).toBe(`0/19 · 0 min sur 1 h · 0${NNBSP}Mo sur env. 1,1${NNBSP}Go`);
+	});
+
+	it("packDoneOf counts the pack tracks now cached, and trusts a higher ready count in plan order", () => {
+		const pack = { items: [{ videoId: "a", seconds: 100, bytes: 10 }, { videoId: "b", seconds: 200, bytes: 20 }, { videoId: "c", seconds: 300, bytes: 30 }] };
+		expect(packDoneOf(pack, ["b", "zz"])).toEqual({ count: 1, seconds: 200, bytes: 20 });
+		expect(packDoneOf(pack, new Set(["b"]), 2)).toEqual({ count: 2, seconds: 300, bytes: 30 });
+		expect(packDoneOf(pack, new Set(["b"]), 1)).toEqual({ count: 1, seconds: 200, bytes: 20 });
+		expect(packDoneOf(pack, null, 0)).toEqual({ count: 0, seconds: 0, bytes: 0 });
+		expect(packDoneOf(null, ["a"], 3)).toEqual({ count: 0, seconds: 0, bytes: 0 });
+	});
+
+	it("the memo keeps the estimate of the pack, ignores a bad one", () => {
+		const store = new Map<string, string>();
+		const kv = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+		writeLastPack(kv, { ...lastPackOf(plan([item("a", 100)]), 5), estimatedBytes: 1234 });
+		expect(readLastPack(kv)?.estimatedBytes).toBe(1234);
+		kv.setItem(LAST_PACK_KEY, JSON.stringify({ at: 5, mode: "seconds", target: 3600, items: [{ videoId: "a", seconds: 100, bytes: 1 }], estimatedBytes: -3 }));
+		const back = readLastPack(kv);
+		expect(back?.items.length).toBe(1);
+		expect(back?.estimatedBytes).toBeUndefined();
 	});
 });
