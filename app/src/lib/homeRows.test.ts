@@ -28,6 +28,11 @@ import {
 	ARRIVED_MONTH_MIN_ALBUMS,
 	HOME_ROW_PRIORITY,
 	HOME_ROW_ORDER,
+	TODAY_ROW,
+	TODAY_ALBUM_KEY,
+	TODAY_ARTIST_KEY,
+	buildTodayGroup,
+	todaySubheading,
 	monthNameFr,
 	arrivedMonthTitle,
 	arrivedMonthFrom,
@@ -513,5 +518,44 @@ describe("Arrivé en <mois> (c44a B7-2)", () => {
 		]);
 		expect(keys(capped.visible)).toEqual(["reprendre", "pour-toi", "nouveautes-artistes", "jamais-ecoute"]);
 		expect(keys(capped.more)).toEqual([ARRIVED_MONTH_ROW]);
+	});
+});
+
+describe("Aujourd'hui (U13-4): one header for the album and the artist of the day", () => {
+	const album = { album: { browseId: "lb-1", title: "Discovery" }, date: "2026-10-02" };
+	const artist = { artist: { browseId: "la-1", title: "Daft Punk" }, name: "Daft Punk", scope: "library", reason: "" };
+
+	it("groups the two cards when both rows won a place, in one row of two tiles", () => {
+		const g = buildTodayGroup(album, artist, new Set([TODAY_ALBUM_KEY, TODAY_ARTIST_KEY, "reprendre"]));
+		expect(g).toEqual({ album, artist, count: 2 });
+	});
+
+	it("keeps a lone card (the other not loaded, or dropped by arrangeHomeRows)", () => {
+		expect(buildTodayGroup(album, null, [TODAY_ALBUM_KEY, TODAY_ARTIST_KEY])).toEqual({ album, artist: null, count: 1 });
+		expect(buildTodayGroup(album, artist, [TODAY_ARTIST_KEY])).toEqual({ album: null, artist, count: 1 });
+		expect(buildTodayGroup(undefined, artist, [TODAY_ARTIST_KEY])).toEqual({ album: null, artist, count: 1 });
+	});
+
+	it("is null with nothing to show, so the section is not painted", () => {
+		expect(buildTodayGroup(null, null, [TODAY_ALBUM_KEY, TODAY_ARTIST_KEY])).toBeNull();
+		expect(buildTodayGroup(album, artist, [])).toBeNull();
+	});
+
+	it("follows the keys arrangeHomeRows uses for the two bonus rows", () => {
+		expect(HOME_ROW_PRIORITY).toContain(TODAY_ALBUM_KEY);
+		expect(HOME_ROW_PRIORITY).toContain(TODAY_ARTIST_KEY);
+		expect(TODAY_ROW).not.toBe(TODAY_ALBUM_KEY);
+	});
+
+	it("writes ONE subtitle with one 'demain' for the two tiles, by the artist's scope", () => {
+		const both = todaySubheading({ album, artist }, artist);
+		expect(both).toMatch(/les mêmes pour tout le monde/);
+		expect(both).toMatch(/demain d'autres$/);
+		expect(both.match(/demain/g)?.length).toBe(1);
+		expect(todaySubheading({ album, artist }, { scope: "profile", reason: "" })).toMatch(/jamais écouté · demain d'autres$/);
+		expect(todaySubheading({ album, artist }, { scope: "profile", reason: "all_played" })).toMatch(/à retrouver · demain d'autres$/);
+		expect(todaySubheading({ album, artist: null })).toMatch(/^Un album .* le même pour tout le monde · demain un autre$/);
+		expect(todaySubheading({ album: null, artist }, artist)).toMatch(/^Un artiste .* le même pour tout le monde · demain un autre$/);
+		expect(todaySubheading({ album: null, artist }, { scope: "profile", reason: "" })).toMatch(/jamais écouté · demain un autre$/);
 	});
 });

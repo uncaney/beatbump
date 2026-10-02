@@ -41,6 +41,9 @@
 		sanitizeCard,
 		shouldShowWeekCard,
 		thumbnailUrl,
+		TODAY_ROW,
+		buildTodayGroup,
+		todaySubheading,
 		WEEK_CARD_DISMISS_KEY,
 	} from "$lib/homeRows";
 	import { clickHandler as carouselClick } from "$lib/components/Carousel/functions";
@@ -69,7 +72,6 @@
 		artistOfDayId,
 		artistOfDayLine,
 		artistOfDaySongsUrl,
-		artistOfDaySubheading,
 		type ArtistOfDay,
 	} from "$lib/artistOfDay";
 	import { get } from "svelte/store";
@@ -624,6 +626,8 @@
 		{ key: "jamais-ecoute", items: neverPlayed, minAfterDedupe: ALBUM_ROW_MIN },
 	]);
 	$: visibleKeys = new Set(arranged.visible.map((r) => r.key));
+	// U13-4: the two day cards paint under one "Aujourd'hui" header.
+	$: today = buildTodayGroup(albumDay, artistDay, visibleKeys, { album: ALBUM_OF_DAY_ROW, artist: ARTIST_OF_DAY_ROW });
 	$: rowItems = Object.fromEntries([...arranged.visible, ...arranged.more].map((r) => [r.key, r.items])) as Record<string, any[]>;
 	$: discoveryVisible = arranged.visible.filter((r) => r.key in DISCOVERY_ROWS);
 	$: moreRows = arranged.more.filter((r) => r.key in DISCOVERY_ROWS);
@@ -935,137 +939,140 @@
 	</section>
 {/if}
 
-{#if visibleKeys.has(ALBUM_OF_DAY_ROW) && albumDay}
+<!-- U13-4: the album of the day and the artist of the day share ONE header
+     ("Aujourd'hui", one subtitle, one "demain"): a row of two tiles instead of
+     two near-identical cards. Each tile keeps its testid, data attributes and
+     buttons; the dedupe / bonus slots still run per card (arrangeHomeRows). -->
+{#if today}
 	<section
 		class="home-row"
-		data-row={ALBUM_OF_DAY_ROW}
+		data-row={TODAY_ROW}
 	>
 		<div
-			class="row-fade"
-			class:is-cache={albumDaySource === "cache"}
-			data-testid="album-of-day"
-			data-album={albumDay.album.browseId}
-			data-date={albumDay.date}
+			class="today-row"
+			data-testid="today-row"
+			data-tiles={today.count}
 		>
 			<div class="header resp-content-width">
-				<p class="subheading">Un album de ta bibliothèque, le même pour tout le monde aujourd'hui</p>
-				<span class="h2">Album du jour</span>
+				<p class="subheading">{todaySubheading(today, artistDay)}</p>
+				<span class="h2">Aujourd'hui</span>
 			</div>
-			<article class="resume-card aod-card">
-				<a
-					class="aod-cover-link"
-					href={albumOfDayHref(albumDay)}
-					aria-label="Ouvrir l'album {albumDay.album.title ?? ''}"
-				>
-					{#if thumbnailUrl(albumDay.album)}
-						<img
-							class="resume-card-cover"
-							src={thumbnailUrl(albumDay.album)}
-							width="64"
-							height="64"
-							loading="lazy"
-							decoding="async"
-							alt=""
-						/>
-					{:else}
-						<span
-							class="resume-card-cover placeholder"
-							aria-hidden="true"
-						/>
-					{/if}
-				</a>
-				<div class="resume-card-text">
-					<a
-						class="resume-card-title aod-title"
-						href={albumOfDayHref(albumDay)}
-						title={albumDay.album.title ?? ""}>{albumDay.album.title ?? ""}</a
+			<div class="today-tiles">
+				{#if today.album}
+					<div
+						class="row-fade today-tile"
+						class:is-cache={albumDaySource === "cache"}
+						data-testid="album-of-day"
+						data-album={today.album.album.browseId}
+						data-date={today.album.date}
 					>
-					{#if albumOfDayLine(artistName(albumDay.album), albumDay.year)}
-						<p class="resume-card-artist">{albumOfDayLine(artistName(albumDay.album), albumDay.year)}</p>
-					{/if}
-					<p class="aod-next">Demain un autre</p>
-				</div>
-				<button
-					type="button"
-					class="btn-reset btn-primary resume-card-play"
-					data-testid="album-of-day-play"
-					aria-label="Écouter {albumDay.album.title ?? ''}"
-					disabled={albumDayBusy}
-					on:click={playAlbumOfDay}>Écouter</button
-				>
-			</article>
-		</div>
-	</section>
-{/if}
-
-<!-- c44a B7-1: the artist of the day, a bonus card after the album of the day. -->
-{#if visibleKeys.has(ARTIST_OF_DAY_ROW) && artistDay}
-	<section
-		class="home-row"
-		data-row={ARTIST_OF_DAY_ROW}
-	>
-		<div
-			class="row-fade"
-			data-testid="artist-of-day"
-			data-artist={artistOfDayId(artistDay)}
-			data-date={artistDay.date}
-			data-scope={artistDay.scope}
-			data-reason={artistDay.reason}
-		>
-			<div class="header resp-content-width">
-				<p class="subheading">{artistOfDaySubheading(artistDay)}</p>
-				<span class="h2">Artiste du jour</span>
+						<article class="resume-card aod-card">
+							<a
+								class="aod-cover-link"
+								href={albumOfDayHref(today.album)}
+								aria-label="Ouvrir l'album {today.album.album.title ?? ''}"
+							>
+								{#if thumbnailUrl(today.album.album)}
+									<img
+										class="resume-card-cover"
+										src={thumbnailUrl(today.album.album)}
+										width="64"
+										height="64"
+										loading="lazy"
+										decoding="async"
+										alt=""
+									/>
+								{:else}
+									<span
+										class="resume-card-cover placeholder"
+										aria-hidden="true"
+									/>
+								{/if}
+							</a>
+							<div class="resume-card-text">
+								<p class="aod-kind">Album du jour</p>
+								<a
+									class="resume-card-title aod-title"
+									href={albumOfDayHref(today.album)}
+									title={today.album.album.title ?? ""}>{today.album.album.title ?? ""}</a
+								>
+								{#if albumOfDayLine(artistName(today.album.album), today.album.year)}
+									<p class="resume-card-artist">{albumOfDayLine(artistName(today.album.album), today.album.year)}</p>
+								{/if}
+							</div>
+							<button
+								type="button"
+								class="btn-reset btn-primary resume-card-play"
+								data-testid="album-of-day-play"
+								aria-label="Écouter {today.album.album.title ?? ''}"
+								disabled={albumDayBusy}
+								on:click={playAlbumOfDay}>Écouter</button
+							>
+						</article>
+					</div>
+				{/if}
+				{#if today.artist}
+					<div
+						class="row-fade today-tile"
+						data-testid="artist-of-day"
+						data-artist={artistOfDayId(today.artist)}
+						data-date={today.artist.date}
+						data-scope={today.artist.scope}
+						data-reason={today.artist.reason}
+					>
+						<article class="resume-card aod-card">
+							<a
+								class="aod-cover-link"
+								href={artistOfDayHref(today.artist)}
+								aria-label="Voir l'artiste {today.artist.name}"
+							>
+								{#if thumbnailUrl(today.artist.artist)}
+									<img
+										class="resume-card-cover aotd-cover"
+										src={thumbnailUrl(today.artist.artist)}
+										width="64"
+										height="64"
+										loading="lazy"
+										decoding="async"
+										alt=""
+									/>
+								{:else}
+									<span
+										class="resume-card-cover aotd-cover placeholder"
+										aria-hidden="true"
+									/>
+								{/if}
+							</a>
+							<div class="resume-card-text">
+								<p class="aod-kind">Artiste du jour</p>
+								<a
+									class="resume-card-title aod-title"
+									href={artistOfDayHref(today.artist)}
+									title={today.artist.name}>{today.artist.name}</a
+								>
+								{#if artistOfDayLine(today.artist.albumCount, today.artist.trackCount)}
+									<p class="resume-card-artist">{artistOfDayLine(today.artist.albumCount, today.artist.trackCount)}</p>
+								{/if}
+							</div>
+							<div class="aotd-actions">
+								<a
+									class="btn-secondary resume-card-play aotd-open"
+									data-testid="artist-of-day-open"
+									href={artistOfDayHref(today.artist)}>Voir</a
+								>
+								<button
+									type="button"
+									class="btn-reset btn-primary resume-card-play"
+									data-testid="artist-of-day-play"
+									aria-label="Écouter un mix de {today.artist.name}"
+									disabled={artistDayBusy}
+									on:click={playArtistOfDay}>Écouter</button
+								>
+							</div>
+						</article>
+					</div>
+				{/if}
 			</div>
-			<article class="resume-card aod-card">
-				<a
-					class="aod-cover-link"
-					href={artistOfDayHref(artistDay)}
-					aria-label="Voir l'artiste {artistDay.name}"
-				>
-					{#if thumbnailUrl(artistDay.artist)}
-						<img
-							class="resume-card-cover aotd-cover"
-							src={thumbnailUrl(artistDay.artist)}
-							width="64"
-							height="64"
-							loading="lazy"
-							decoding="async"
-							alt=""
-						/>
-					{:else}
-						<span
-							class="resume-card-cover aotd-cover placeholder"
-							aria-hidden="true"
-						/>
-					{/if}
-				</a>
-				<div class="resume-card-text">
-					<a
-						class="resume-card-title aod-title"
-						href={artistOfDayHref(artistDay)}
-						title={artistDay.name}>{artistDay.name}</a
-					>
-					{#if artistOfDayLine(artistDay.albumCount, artistDay.trackCount)}
-						<p class="resume-card-artist">{artistOfDayLine(artistDay.albumCount, artistDay.trackCount)}</p>
-					{/if}
-					<p class="aod-next">Demain un autre</p>
-				</div>
-				<div class="aotd-actions">
-					<a
-						class="btn-secondary resume-card-play aotd-open"
-						data-testid="artist-of-day-open"
-						href={artistOfDayHref(artistDay)}>Voir</a
-					>
-					<button
-						type="button"
-						class="btn-reset btn-primary resume-card-play"
-						data-testid="artist-of-day-play"
-						aria-label="Écouter un mix de {artistDay.name}"
-						disabled={artistDayBusy}
-						on:click={playArtistOfDay}>Écouter</button
-					>
-				</div>
-			</article>
 		</div>
 	</section>
 {/if}
@@ -1319,11 +1326,36 @@
 	.aod-title:hover {
 		text-decoration: underline;
 	}
-	.aod-next {
-		margin: 0.15em 0 0;
+	/* U13-4: the kind of each tile ("Album du jour" / "Artiste du jour"),
+	   the only text the two tiles do not share; the header carries the rest. */
+	.aod-kind {
+		margin: 0 0 0.1em;
 		/* 12px floor at the 12px mobile root */
 		font-size: max(0.8rem, 12px);
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		text-transform: uppercase;
 		opacity: 0.6;
+	}
+	/* U13-4: one row, two tiles: stacked on a phone, side by side from 720px. */
+	.today-tiles {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0.5rem;
+		margin: 0 1rem 0.5em;
+	}
+	.today-tiles .resume-card {
+		margin: 0;
+		height: 100%;
+		box-sizing: border-box;
+	}
+	.today-tile {
+		min-width: 0;
+	}
+	@media screen and (min-width: 720px) {
+		.today-tiles {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 	.resume-card-play:disabled {
 		cursor: progress;

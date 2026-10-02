@@ -30,17 +30,27 @@ export type FirstPackState = {
 	recentCount: number | null;
 	/** The service worker is active (the pack needs its cache-audio). */
 	swActive: boolean;
+	/**
+	 * U13-4: a sound was heard this session (AudioPlayer.paused went
+	 * true -> false once: `heardFirstSound` of InstallHint/gate). Undefined
+	 * reads as "not yet": the card never shares the first screen with the
+	 * Bienvenue block, it comes once Bienvenue has stepped aside.
+	 */
+	heardSound?: boolean;
 };
 
 /**
  * The card shows for a profile without history (no play recorded), once the
- * service worker is active, and never again once dismissed or used (memo "1").
- * An unknown history (me/stats/recent failed) hides it: a profile with plays
- * on another device must not be offered a day-one pack.
+ * service worker is active, after the first sound of the session (U13-4: the
+ * day-one first screen used to stack five calls to action), and never again
+ * once dismissed or used (memo "1"). An unknown history (me/stats/recent
+ * failed) hides it: a profile with plays on another device must not be
+ * offered a day-one pack.
  */
 export function shouldShowFirstPackCard(s: FirstPackState): boolean {
 	if (s.stored === "1") return false;
 	if (!s.swActive) return false;
+	if (s.heardSound !== true) return false;
 	if (s.recentCount === null) return false;
 	return !(Number.isFinite(s.recentCount) && s.recentCount > 0);
 }

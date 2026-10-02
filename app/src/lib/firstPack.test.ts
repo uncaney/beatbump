@@ -2,21 +2,27 @@ import { describe, expect, it } from "vitest";
 import { FIRST_PACK_SECONDS, firstPackSources, hasFirstPackMaterial, planFirstPack, shouldShowFirstPackCard } from "./firstPack";
 
 describe("shouldShowFirstPackCard", () => {
-	it("shows for a profile without history once the service worker is active", () => {
-		expect(shouldShowFirstPackCard({ stored: null, recentCount: 0, swActive: true })).toBe(true);
-		expect(shouldShowFirstPackCard({ stored: undefined, recentCount: 0, swActive: true })).toBe(true);
-		expect(shouldShowFirstPackCard({ stored: "", recentCount: NaN, swActive: true })).toBe(true);
+	it("shows for a profile without history once the service worker is active and a sound was heard", () => {
+		expect(shouldShowFirstPackCard({ stored: null, recentCount: 0, swActive: true, heardSound: true })).toBe(true);
+		expect(shouldShowFirstPackCard({ stored: undefined, recentCount: 0, swActive: true, heardSound: true })).toBe(true);
+		expect(shouldShowFirstPackCard({ stored: "", recentCount: NaN, swActive: true, heardSound: true })).toBe(true);
 	});
 
 	it("hides once dismissed or used (memo), without a service worker, or with a play recorded", () => {
-		expect(shouldShowFirstPackCard({ stored: "1", recentCount: 0, swActive: true })).toBe(false);
-		expect(shouldShowFirstPackCard({ stored: null, recentCount: 0, swActive: false })).toBe(false);
-		expect(shouldShowFirstPackCard({ stored: null, recentCount: 1, swActive: true })).toBe(false);
-		expect(shouldShowFirstPackCard({ stored: null, recentCount: 12, swActive: true })).toBe(false);
+		expect(shouldShowFirstPackCard({ stored: "1", recentCount: 0, swActive: true, heardSound: true })).toBe(false);
+		expect(shouldShowFirstPackCard({ stored: null, recentCount: 0, swActive: false, heardSound: true })).toBe(false);
+		expect(shouldShowFirstPackCard({ stored: null, recentCount: 1, swActive: true, heardSound: true })).toBe(false);
+		expect(shouldShowFirstPackCard({ stored: null, recentCount: 12, swActive: true, heardSound: true })).toBe(false);
 	});
 
 	it("L14-5: hides when the history is unknown (me/stats/recent failed) rather than assuming none", () => {
-		expect(shouldShowFirstPackCard({ stored: null, recentCount: null, swActive: true })).toBe(false);
+		expect(shouldShowFirstPackCard({ stored: null, recentCount: null, swActive: true, heardSound: true })).toBe(false);
+	});
+
+	it("U13-4: never on the first screen of the session, only after the first sound (the install-hint gate)", () => {
+		expect(shouldShowFirstPackCard({ stored: null, recentCount: 0, swActive: true })).toBe(false);
+		expect(shouldShowFirstPackCard({ stored: null, recentCount: 0, swActive: true, heardSound: false })).toBe(false);
+		expect(shouldShowFirstPackCard({ stored: null, recentCount: 0, swActive: true, heardSound: true })).toBe(true);
 	});
 });
 

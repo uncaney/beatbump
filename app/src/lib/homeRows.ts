@@ -431,6 +431,67 @@ export function arrangeHomeRows(
 	return { visible: visible.map(strip), more: more.map(strip) };
 }
 
+// ---- U13-4 "Aujourd'hui": the album and the artist of the day under one header ----
+
+/** data-row key of the shared "Aujourd'hui" section (the two cards keep their own keys in the dedupe). */
+export const TODAY_ROW = "aujourd-hui";
+/** The keys of the two day cards as arrangeHomeRows knows them (ALBUM_OF_DAY_ROW / ARTIST_OF_DAY_ROW). */
+export const TODAY_ALBUM_KEY = "album-du-jour";
+export const TODAY_ARTIST_KEY = "artiste-du-jour";
+
+export interface TodayGroup<A, B> {
+	/** The album of the day, when its row won a place. */
+	album: A | null;
+	/** The artist of the day, when its row won a place. */
+	artist: B | null;
+	/** How many tiles the row shows (1 or 2). */
+	count: number;
+}
+
+/**
+ * The tiles of the "Aujourd'hui" row: the album of the day and the artist
+ * of the day, each only when loaded AND kept by arrangeHomeRows (its key in
+ * `visibleKeys`: the per-card dedupe and bonus slots are unchanged, only the
+ * paint is shared). null when neither is there, so the section is not
+ * painted at all. Pure.
+ */
+export function buildTodayGroup<A, B>(
+	album: A | null | undefined,
+	artist: B | null | undefined,
+	visibleKeys: Iterable<string>,
+	keys: { album: string; artist: string } = { album: TODAY_ALBUM_KEY, artist: TODAY_ARTIST_KEY },
+): TodayGroup<A, B> | null {
+	const visible = new Set(visibleKeys);
+	const a = album && visible.has(keys.album) ? album : null;
+	const b = artist && visible.has(keys.artist) ? artist : null;
+	const count = (a ? 1 : 0) + (b ? 1 : 0);
+	return count ? { album: a, artist: b, count } : null;
+}
+
+/**
+ * The single subheading of the "Aujourd'hui" row (U13-4: one header, one
+ * subtitle, one "demain" for the two cards). The artist's scope keeps its
+ * meaning: for a named profile it is an artist never played by that
+ * profile, for a guest the same pick for everyone.
+ */
+export function todaySubheading(group: { album: unknown; artist: unknown }, artist?: { scope?: string; reason?: string } | null): string {
+	const hasAlbum = !!group.album;
+	const hasArtist = !!group.artist;
+	const profile = hasArtist && artist?.scope === "profile";
+	const allPlayed = profile && artist?.reason === "all_played";
+	if (hasAlbum && hasArtist) {
+		if (allPlayed) return "Un album pour tout le monde et un artiste à retrouver · demain d'autres";
+		if (profile) return "Un album pour tout le monde et un artiste que tu n'as jamais écouté · demain d'autres";
+		return "Un album et un artiste de ta bibliothèque, les mêmes pour tout le monde · demain d'autres";
+	}
+	if (hasArtist) {
+		if (allPlayed) return "Tu as déjà tout écouté : un artiste de ta bibliothèque à retrouver · demain un autre";
+		if (profile) return "Un artiste de ta bibliothèque que tu n'as jamais écouté · demain un autre";
+		return "Un artiste de ta bibliothèque à découvrir, le même pour tout le monde · demain un autre";
+	}
+	return "Un album de ta bibliothèque, le même pour tout le monde · demain un autre";
+}
+
 /** "1" in localStorage = the folded rows are open. Never throws. */
 export function readMoreRowsOpen(storage: { getItem(key: string): string | null } | undefined): boolean {
 	try {
