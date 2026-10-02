@@ -290,6 +290,20 @@ button.danger {
 		background: #d4d4d4;
 		border-color: #d4d4d4;
 	}
+	// U13-19: a disabled primary ("C'est moi" before a name is typed, "Lire
+	// tout" without a network) used to be the white pill at 60 % opacity: a
+	// solid grey slab that reads as pressed or broken next to the ghost "Plus
+	// tard". It now drops the fill and keeps a thin border and light text, so
+	// it reads as "waiting for the field" and stays legible (white 75 % on the
+	// dark panel is above 4.5:1). `opacity: 1` beats the shared 0.6 of
+	// %btn-system; the not-allowed cursor stays.
+	&:disabled,
+	&[aria-disabled="true"] {
+		background: rgba(255, 255, 255, 0.1);
+		border-color: rgba(255, 255, 255, 0.3);
+		color: rgba(255, 255, 255, 0.75);
+		opacity: 1;
+	}
 }
 
 .btn-secondary {
