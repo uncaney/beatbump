@@ -227,9 +227,76 @@ func TestArtistAliasesScanBoundedAndMemoised(t *testing.T) {
 		t.Errorf("memo not used inside the TTL: %d", s.scans)
 	}
 	now = base.Add(aliasMemoTTL + time.Second)
-	getAliases(t, "")
+	// B9-10: past the TTL the lint answers the stale memo at once and
+	// rescans behind it.
+	if _, _, raw := getAliases(t, ""); !strings.Contains(raw, `"stale":true`) {
+		t.Errorf("stale memo not flagged: %s", raw)
+	}
+	waitAliasRefresh(t)
 	if s.scans != 2*aliasScanCap/aliasScanPage {
 		t.Errorf("memo not refreshed after the TTL: %d", s.scans)
+	}
+	if _, _, raw := getAliases(t, ""); strings.Contains(raw, `"stale"`) {
+		t.Errorf("refreshed memo still flagged stale: %s", raw)
+	}
+}
+
+// waitAliasRefresh waits for the background rescan started by the lint to
+// finish (up to 5 s).
+func waitAliasRefresh(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for aliasRefreshing.Load() {
+		if time.Now().After(deadline) {
+			t.Fatalf("background alias refresh still running")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// B9-10 (L14-11): during a forced rescan (the scan function blocks), the
+// lint answers the previous groups in well under 100 ms instead of waiting
+// on the scan, like the artist page and the collapsed list already did.
+func TestArtistAliasesLintServesStaleDuringScan(t *testing.T) {
+	startAliasStub(t, edSheeranStub())
+	base := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	now := base
+	aliasMemoNow = func() time.Time { return now }
+	t.Cleanup(func() { aliasMemoNow = time.Now })
+	if _, out, _ := getAliases(t, ""); out.Total != 2 {
+		t.Fatalf("warm-up: %+v", out)
+	}
+	prev := aliasArtistScanFn
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	aliasArtistScanFn = func(off, lim int) ([]map[string]interface{}, int) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return prev(off, lim)
+	}
+	t.Cleanup(func() { aliasArtistScanFn = prev })
+	now = base.Add(aliasMemoTTL + time.Second)
+	t0 := time.Now()
+	code, out, raw := getAliases(t, "?id="+artistID("Ed Sheeran feat. Khalid"))
+	elapsed := time.Since(t0)
+	if code != 200 || out.Group == nil || out.Group.Name != "Ed Sheeran" || !strings.Contains(raw, `"stale":true`) {
+		t.Fatalf("stale answer: %d %s", code, raw)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("lint waited on the scan: %s", elapsed)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no background rescan started")
+	}
+	close(release)
+	waitAliasRefresh(t)
+	if _, _, raw := getAliases(t, ""); strings.Contains(raw, `"stale"`) {
+		t.Errorf("memo not refreshed by the background scan: %s", raw)
 	}
 }
 

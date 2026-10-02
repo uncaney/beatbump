@@ -15,27 +15,64 @@
 // Cheap heuristic, no whitelist: the fix is a lazy getter (stores.ts
 // `fromSettings`, cycle 46) or moving the subscription where the store is
 // defined (sessionList.ts, chain 45).
+//
+// B9-10 (c52b, L14-11): the graph covers app/src/lib/** AND app/src/routes/**
+// (.ts and .svelte): a cycle can close through a route (+layout.svelte
+// imports player.ts which imports a component which imports a store the
+// layout initialises). For a .svelte file the static imports of both script
+// blocks are edges (imports are hoisted whatever the block), and only the
+// `<script context="module">` block (Svelte 5: `<script module>`) is checked
+// for module-level uses: the instance script runs per component, after
+// every module is evaluated, so it cannot hit the TDZ.
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const LIB_DIR = __dirname;
 const SRC_DIR = path.resolve(LIB_DIR, "..");
+const ROUTES_DIR = path.join(SRC_DIR, "routes");
 
 type Import = { spec: string; names: string[] };
 
-function listTs(dir: string): string[] {
+/** The .ts (not .d.ts, not tests) and .svelte files under dir. */
+function listSources(dir: string): string[] {
 	const out: string[] = [];
+	if (!fs.existsSync(dir)) return out;
 	for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
 		const p = path.join(dir, ent.name);
 		if (ent.isDirectory()) {
 			if (ent.name === "node_modules") continue;
-			out.push(...listTs(p));
+			out.push(...listSources(p));
+		} else if (ent.isFile() && p.endsWith(".svelte")) {
+			out.push(p);
 		} else if (ent.isFile() && p.endsWith(".ts") && !p.endsWith(".d.ts") && !/\.(test|spec)\.ts$/.test(p)) {
 			out.push(p);
 		}
 	}
 	return out.sort();
+}
+
+/** The script blocks of a .svelte file: `module` is the context="module" / `module` block(s), `instance` the rest. */
+function svelteScripts(src: string): { module: string; instance: string } {
+	let module = "";
+	let instance = "";
+	const re = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/g;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(src))) {
+		const attrs = m[1];
+		const isModule = /\bcontext\s*=\s*["']module["']/.test(attrs) || /(^|\s)module(?=\s|$|=)/.test(attrs);
+		if (isModule) module += m[2] + "\n";
+		else instance += m[2] + "\n";
+	}
+	return { module, instance };
+}
+
+/** What the guard reads of a file: the source its imports are parsed from, and the source whose top-level statements are checked. */
+function moduleSource(file: string): { imports: string; topLevel: string } {
+	const src = fs.readFileSync(file, "utf8");
+	if (!file.endsWith(".svelte")) return { imports: src, topLevel: src };
+	const { module, instance } = svelteScripts(src);
+	return { imports: module + "\n" + instance, topLevel: module };
 }
 
 /** Comments out (block and line), strings and template literals blanked so braces / parens inside them do not count. */
@@ -88,15 +125,16 @@ const ALIASES: Array<[string, string]> = [
 	["$lib/", path.join(SRC_DIR, "lib") + "/"],
 	["$stores/", path.join(SRC_DIR, "lib", "stores") + "/"],
 	["$components/", path.join(SRC_DIR, "lib", "components") + "/"],
+	["$api/", path.join(SRC_DIR, "routes", "(app)", "api", "_lib") + "/"],
 ];
 
-/** The .ts file a specifier points to (aliases above, "./", "../"); null for packages, virtual modules, .svelte and files outside the graph. */
+/** The .ts / .svelte file a specifier points to (aliases above, "./", "../"); null for packages, virtual modules ($app/*) and files outside the graph. */
 function resolveSpec(fromFile: string, spec: string, nodes: Set<string>): string | null {
 	let base: string | null = null;
 	for (const [prefix, dir] of ALIASES) if (spec.startsWith(prefix)) base = dir + spec.slice(prefix.length);
 	if (!base && (spec.startsWith("./") || spec.startsWith("../"))) base = path.resolve(path.dirname(fromFile), spec);
 	if (!base) return null;
-	const candidates = [base, base.replace(/\.js$/, ".ts"), base + ".ts", path.join(base, "index.ts")];
+	const candidates = [base, base.replace(/\.js$/, ".ts"), base + ".ts", base + ".svelte", path.join(base, "index.ts")];
 	for (const c of candidates) if (nodes.has(c)) return c;
 	return null;
 }
@@ -211,13 +249,12 @@ function topLevelUses(src: string, names: string[]): Offender[] {
 }
 
 function buildGraph(): { nodes: string[]; graph: Map<string, Set<string>>; imports: Map<string, Import[]> } {
-	const nodes = listTs(LIB_DIR);
+	const nodes = [...listSources(LIB_DIR), ...listSources(ROUTES_DIR)].sort();
 	const set = new Set(nodes);
 	const graph = new Map<string, Set<string>>();
 	const imports = new Map<string, Import[]>();
 	for (const f of nodes) {
-		const src = fs.readFileSync(f, "utf8");
-		const imps = parseImports(src);
+		const imps = parseImports(moduleSource(f).imports);
 		imports.set(f, imps);
 		const edges = new Set<string>();
 		for (const imp of imps) {
@@ -235,8 +272,15 @@ describe("import cycles (B8-23, TDZ guard)", () => {
 	const { nodes, graph, imports } = buildGraph();
 	const sccs = cycles(graph);
 
-	it("parses the lib tree and finds its known cycles (player <-> sessionList, settings <-> stores)", () => {
+	it("parses lib + routes (.ts and .svelte) and finds the known cycles (player <-> sessionList, settings <-> stores)", () => {
 		expect(nodes.length).toBeGreaterThan(50);
+		const all = new Set(nodes.map(rel));
+		expect(all.has("routes/+layout.svelte")).toBe(true);
+		expect(all.has("routes/+layout.ts")).toBe(true);
+		expect(all.has("lib/components/Player/Player.svelte")).toBe(true);
+		// A .svelte node has edges (its imports resolved into the graph).
+		const layout = nodes.find((f) => rel(f) === "routes/+layout.svelte")!;
+		expect((graph.get(layout)?.size ?? 0) > 3).toBe(true);
 		const members = new Set(sccs.flat().map(rel));
 		expect(members.has("lib/player.ts")).toBe(true);
 		expect(members.has("lib/stores/list/sessionList.ts")).toBe(true);
@@ -246,15 +290,16 @@ describe("import cycles (B8-23, TDZ guard)", () => {
 
 	it("no module of a cycle uses a binding of another member at module level", () => {
 		const report: string[] = [];
+		const set = new Set(nodes);
 		for (const comp of sccs) {
 			const inCycle = new Set(comp);
 			for (const f of comp) {
 				const names: string[] = [];
 				for (const imp of imports.get(f) ?? []) {
-					const to = resolveSpec(f, imp.spec, new Set(nodes));
+					const to = resolveSpec(f, imp.spec, set);
 					if (to && to !== f && inCycle.has(to)) names.push(...imp.names);
 				}
-				for (const o of topLevelUses(fs.readFileSync(f, "utf8"), names)) {
+				for (const o of topLevelUses(moduleSource(f).topLevel, names)) {
 					report.push(`${rel(f)}:${o.line} uses \`${o.name}\` at module level (cycle of ${comp.length}: ${comp.map(rel).join(", ")}): ${o.statement}`);
 				}
 			}
@@ -329,6 +374,47 @@ describe("the heuristic itself", () => {
 			{ spec: "./side", names: [] },
 			{ spec: "../w", names: [] },
 		]);
+	});
+
+	it("reads a .svelte file: imports from both script blocks, module-level uses from the module block only", () => {
+		const src = [
+			'<script context="module" lang="ts">',
+			'\timport { list } from "$lib/stores/list";',
+			"\tlist.subscribe(() => {});",
+			"\texport const ssr = false;",
+			"</script>",
+			"",
+			'<script lang="ts">',
+			'\timport { settings } from "$lib/stores/settings";',
+			'\timport Player from "$lib/components/Player/Player.svelte";',
+			"\tsettings.subscribe(() => {});",
+			"\t$: theme = $settings.appearance.Theme;",
+			"</script>",
+			"",
+			"<Player /><style>.x { color: red; }</style>",
+		].join("\n");
+		const { module, instance } = svelteScripts(src);
+		expect(parseImports(module + "\n" + instance).map((i) => i.spec)).toEqual(["$lib/stores/list", "$lib/stores/settings", "$lib/components/Player/Player.svelte"]);
+		expect(topLevelUses(module, ["list", "settings"]).map((o) => `${o.line}:${o.name}`)).toEqual(["3:list"]);
+		expect(topLevelUses(instance, ["list", "settings"]).length).toBe(1); // the instance block is NOT what the guard checks
+		expect(svelteScripts("<script module>\n\timport { a } from './a';\n</script>").module).toContain("import { a }");
+		expect(svelteScripts("<p>no script</p>")).toEqual({ module: "", instance: "" });
+	});
+
+	it("resolves .svelte and route specifiers", () => {
+		const nodes = new Set([
+			path.join(SRC_DIR, "lib", "components", "Player", "Player.svelte"),
+			path.join(SRC_DIR, "lib", "components", "Popper", "index.ts"),
+			path.join(SRC_DIR, "routes", "(app)", "library", "_Browse.svelte"),
+			path.join(SRC_DIR, "routes", "(app)", "api", "_lib", "request.ts"),
+		]);
+		const from = path.join(SRC_DIR, "routes", "(app)", "library", "artists", "+page.svelte");
+		expect(resolveSpec(from, "$lib/components/Player/Player.svelte", nodes)).toBe(path.join(SRC_DIR, "lib", "components", "Player", "Player.svelte"));
+		expect(resolveSpec(from, "$lib/components/Popper", nodes)).toBe(path.join(SRC_DIR, "lib", "components", "Popper", "index.ts"));
+		expect(resolveSpec(from, "../_Browse.svelte", nodes)).toBe(path.join(SRC_DIR, "routes", "(app)", "library", "_Browse.svelte"));
+		expect(resolveSpec(from, "$api/request", nodes)).toBe(path.join(SRC_DIR, "routes", "(app)", "api", "_lib", "request.ts"));
+		expect(resolveSpec(from, "$app/stores", nodes)).toBe(null);
+		expect(resolveSpec(from, "svelte/store", nodes)).toBe(null);
 	});
 
 	it("finds strongly connected components", () => {
