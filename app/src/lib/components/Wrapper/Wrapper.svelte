@@ -8,12 +8,26 @@
 
 <script lang="ts">
 	import { scrollObserver } from "$lib/actions/scrollObserver";
-	import { createEventDispatcher } from "svelte";
+	import { beforeUpdate, createEventDispatcher } from "svelte";
 
 	import { cubicOut } from "svelte/easing";
 	import { fly } from "svelte/transition";
+	import { liveRouteKey } from "./routeKey";
 	export let main: HTMLElement;
 	export let key: string;
+	// c48c (BACKLOG P2, login_keeps_inflight_writes): `key` ($page.url.pathname)
+	// changes one flush AFTER SvelteKit swapped the page into the slot (the
+	// page store notifies in Root's afterUpdate), so keying on it recreated
+	// every page a second time right after its first mount; the first instance
+	// lingered 150 ms in the outro and a form filled meanwhile (the Compte
+	// login name, while a play started) was wiped. The live location, pushed
+	// BEFORE the swap, is read in beforeUpdate: the key moves in the same
+	// flush as the slot, the page mounts once. `key` stays the fallback.
+	const location_ = () => (typeof location === "undefined" ? null : location);
+	let routeKey = liveRouteKey(key, location_());
+	beforeUpdate(() => {
+		routeKey = liveRouteKey(key, location_());
+	});
 	// When false (error page), the content is keyed in without any fade: the
 	// 404 used to be captured mid-transition at 19 % opacity.
 	// K1 (audit perf v2): 0 ms delay + 150 ms fade (was 500 + 500: every page
@@ -31,7 +45,7 @@
 	use:scrollObserver={{ target: ".scroll-target" }}
 >
 	<div class="scroll-target" />
-	{#key key}
+	{#key routeKey}
 		<div
 			class="app-transition-wrapper"
 			in:fly={{
