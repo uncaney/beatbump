@@ -149,6 +149,27 @@
                     class="switch"
                 />
             </div>
+			<div class="setting">
+				<!-- B8-1 (cycle 47): data saver. The browser's own switch
+				     (navigator.connection.saveData) counts too, whatever this says. -->
+				<label for="data-saver"
+					>Économie de données
+					<span class="help"
+						>Ne précharge pas le titre suivant et ne garde pas automatiquement les titres écoutés hors-ligne ; actif aussi quand le téléphone est en économie de données</span
+					>
+				</label>
+				<input
+					name="data-saver"
+					id="data-saver"
+					type="checkbox"
+					data-testid="setting-data-saver"
+					bind:checked={$settings["playback"]["Data Saver"]}
+				/>
+				<label
+					for="data-saver"
+					class="switch"
+				/>
+			</div>
 		</section>
 		<OfflineSettings />
 		<section

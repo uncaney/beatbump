@@ -29,6 +29,7 @@ import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
 import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from "./utils/mediaRetry";
 import { reportClientError } from "./clientLog";
+import { isDataSaver } from "./dataSaver";
 import { setWorkerInterval } from "./utils/workerTimeout";
 import { resumeKeptFor } from "./stores/resumeState";
 import { recordSkip } from "./me";
@@ -1169,8 +1170,9 @@ export const getSrc = async (
 // Offline core: every track that actually starts playing is cached for offline
 // playback by the service worker (settings.offline.autoCache, default on; only
 // an explicit `false` disables it). Fire-and-forget, never blocks playback.
+// B8-1: not under data saver (Réglages > Lecture or the browser's switch).
 function autoCacheEnabled(): boolean {
-	return userSettings?.offline?.autoCache !== false;
+	return userSettings?.offline?.autoCache !== false && !isDataSaver();
 }
 function autoCache(track: { videoId?: string } | undefined, url: string | undefined) {
 	if (!browser || !track || !track.videoId || !url) return;
