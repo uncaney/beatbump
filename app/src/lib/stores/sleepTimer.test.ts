@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Sleep-timer fade (G11): the 30 fade steps must not persist the volume; only
 // the restore at the end goes through setVolume() (the store behind
@@ -31,7 +31,7 @@ const player = vi.hoisted(() => {
 });
 vi.mock("$lib/player", () => ({ AudioPlayer: player.AudioPlayer }));
 
-import { cancelSleepTimer, sleepFading, sleepMode, startSleepTimer } from "./sleepTimer";
+import { _setVolumeReadOnlyForTest, cancelSleepTimer, sleepFading, sleepMode, sleepTimeUpdate, startSleepTimer } from "./sleepTimer";
 import { get } from "svelte/store";
 
 beforeEach(() => {
@@ -72,5 +72,84 @@ describe("sleep timer fade", () => {
 		expect(player.AudioPlayer.setVolume.mock.calls).toEqual([[0.8]]);
 		expect(player.element.volume).toBe(0.8);
 		expect(player.storage.get("volume")).toBe("0.8");
+	});
+});
+
+// L12-16: the minute deadline is absolute and re-checked from the player's
+// timeupdate (and on visibilitychange): a throttled or suspended interval
+// no longer delays the pause.
+describe("L12-16: deadline driven by timeupdate, not the interval alone", () => {
+	afterEach(() => {
+		cancelSleepTimer(true);
+		_setVolumeReadOnlyForTest(null);
+		vi.unstubAllGlobals();
+	});
+
+	it("iPhone (no fade): a timeupdate past the deadline pauses although no interval tick ran", async () => {
+		_setVolumeReadOnlyForTest(true);
+		const t0 = new Date("2026-10-02T22:00:00Z").getTime();
+		vi.setSystemTime(t0);
+		startSleepTimer(1);
+		// 59 s later with the interval suspended (fake timers never advanced): nothing yet.
+		vi.setSystemTime(t0 + 59_000);
+		sleepTimeUpdate();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(player.AudioPlayer.pause).not.toHaveBeenCalled();
+		expect(get(sleepMode)).toBe(1);
+		// 61 s: the next timeupdate lands the pause.
+		vi.setSystemTime(t0 + 61_000);
+		sleepTimeUpdate();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(player.AudioPlayer.pause).toHaveBeenCalledTimes(1);
+		expect(get(sleepMode)).toBeNull();
+		// A later timeupdate or a late interval tick never pauses twice.
+		sleepTimeUpdate();
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(player.AudioPlayer.pause).toHaveBeenCalledTimes(1);
+	});
+
+	it("desktop (fade): a timeupdate past the deadline starts the fade, then pauses once", async () => {
+		_setVolumeReadOnlyForTest(false);
+		const t0 = Date.now();
+		startSleepTimer(1);
+		vi.setSystemTime(t0 + 61_000);
+		sleepTimeUpdate();
+		expect(get(sleepFading)).toBe(true);
+		sleepTimeUpdate(); // during the fade: no second expiry
+		await vi.advanceTimersByTimeAsync(3_500);
+		expect(player.AudioPlayer.pause).toHaveBeenCalledTimes(1);
+		expect(player.AudioPlayer.setVolume.mock.calls).toEqual([[0.8]]);
+		expect(get(sleepMode)).toBeNull();
+		expect(get(sleepFading)).toBe(false);
+	});
+
+	it("re-checks the deadline when the page becomes visible again", async () => {
+		_setVolumeReadOnlyForTest(true);
+		const listeners: Array<() => void> = [];
+		const doc = {
+			hidden: true,
+			addEventListener: vi.fn((_: string, fn: () => void) => void listeners.push(fn)),
+			removeEventListener: vi.fn(),
+		};
+		vi.stubGlobal("document", doc);
+		const t0 = Date.now();
+		startSleepTimer(1);
+		expect(doc.addEventListener).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+		vi.setSystemTime(t0 + 61_000);
+		doc.hidden = false;
+		for (const fn of listeners) fn();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(player.AudioPlayer.pause).toHaveBeenCalledTimes(1);
+		expect(doc.removeEventListener).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+		expect(get(sleepMode)).toBeNull();
+	});
+
+	it("does nothing in a track-end mode or when idle", () => {
+		sleepTimeUpdate();
+		startSleepTimer("track");
+		vi.setSystemTime(Date.now() + 3_600_000);
+		sleepTimeUpdate();
+		expect(player.AudioPlayer.pause).not.toHaveBeenCalled();
+		expect(get(sleepMode)).toBe("track");
 	});
 });
