@@ -24,6 +24,13 @@
 	// A duration fills the pack by track length (planPack mode "seconds") and
 	// "Libérer" is disabled then (it frees by size only). `?pack=dur:7200` (the
 	// home weekend card) preselects the choice and unfolds the card.
+	//
+	// B7-7 (cycle 44, "Rafraîchir mon pack"): the last pack is remembered
+	// (localStorage LAST_PACK_KEY); [data-testid=pack-refresh] replaces its
+	// tracks already listened to (a play since the pack began, or the SW
+	// lastAccess moved) by new ones of the same listening time, run as a pack
+	// (same job key, same "Annuler"). Pinned entries outside the pack are never
+	// touched. window.__ytmPackRefresh carries the outcome for the harness.
 	import { createEventDispatcher, onMount, tick } from "svelte";
 	import { get } from "svelte/store";
 	import {
@@ -40,13 +47,21 @@
 	import {
 		PACK_DURATIONS_SEC,
 		PACK_SIZES_MB,
+		lastPackOf,
+		listenedPackIds,
 		packDurationLabel,
 		packDurationText,
 		packLabel,
+		packRefreshSummary,
 		packSecondsOf,
 		packSizeOf,
 		parsePackChoice,
 		planPack,
+		planPackRefresh,
+		readLastPack,
+		refreshedLastPack,
+		writeLastPack,
+		type LastPack,
 		type PackPlan,
 	} from "$lib/offlinePack";
 	import { fmtBytesFr, spaceButtonLabels, spaceStatusLine } from "$lib/offlineSpace";
@@ -218,6 +233,15 @@
 	let packDoneSeconds = 0;
 	let packResult = "";
 	let packOwned = false; // started by this instance (its onDone writes the outcome)
+	/** B7-7: the last pack this device prepared (null = no "Rafraîchir" button). */
+	let lastPack: LastPack | null = null;
+	function storage(): Storage | null {
+		try {
+			return typeof localStorage !== "undefined" ? localStorage : null;
+		} catch {
+			return null;
+		}
+	}
 	$: packJob = $keepJobs.get(PACK_KEY);
 	$: if (packJob?.progress) packProgress = packJob.progress;
 	// A pack started before (a previous visit of the page) still runs: show it;
@@ -241,7 +265,7 @@
 					? packDurationText(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, packDoneSeconds, packTarget)
 					: packLabel(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, packDoneBytes, packTarget)
 				: packResult;
-	type PackWindow = Window & { __ytmPackPlan?: Record<string, unknown> };
+	type PackWindow = Window & { __ytmPackPlan?: Record<string, unknown>; __ytmPackRefresh?: Record<string, unknown> };
 	function exposePack(extra: Record<string, unknown> = {}) {
 		if (typeof window === "undefined") return;
 		(window as PackWindow).__ytmPackPlan = {
@@ -260,9 +284,7 @@
 			...extra,
 		};
 	}
-	async function startPack() {
-		if (packRunning || busy || loading) return;
-		packState = "planning";
+	function resetPackRun() {
 		packOwned = true;
 		packPlan = null;
 		packProgress = null;
@@ -270,65 +292,146 @@
 		packDoneSeconds = 0;
 		packResult = "";
 		error = "";
+	}
+	type PackSources = { favorites: any[]; recent: any[]; plays: Array<{ videoId?: string; playedAt?: number }>; mix: any[]; cached: Set<string>; sizes: Map<string, number> };
+	/** The three sources of a pack plus the cache (fresh SW listing, local sizes). */
+	async function packSources(): Promise<PackSources> {
+		const [fav, rec, mix, l] = await Promise.all([
+			safe(getFavorites(), { favorites: [], items: [] } as { favorites: any[]; items: any[] }),
+			safe(getRecent(100), { items: [] } as { items: any[]; playedAt?: number[] }),
+			safe(getMix(), { items: [], seeds: 0 } as { items: any[]; seeds: number }),
+			safe(listCachedAudio(), null),
+		]);
+		if (l && Array.isArray(l.entries)) {
+			entries = l.entries;
+			total = l.total || 0;
+			pinnedBytes = Number(l.pinnedBytes) || 0;
+			quota = typeof l.quota === "number" ? l.quota : 0;
+		}
+		const cached = new Set<string>(get(cachedIds));
+		const sizes = new Map<string, number>();
+		for (const t of getOfflineTracks()) if (t.videoId && Number(t._bytes) > 0) sizes.set(t.videoId, Number(t._bytes));
+		for (const e of entries) {
+			if (e.videoId) cached.add(e.videoId);
+			if (e.videoId && e.bytes > 0) sizes.set(e.videoId, e.bytes);
+		}
+		const favorites = Array.isArray(fav?.items) && fav.items.length ? fav.items : Array.isArray(fav?.favorites) ? fav.favorites : [];
+		const recent = Array.isArray(rec?.items) ? rec.items : [];
+		// me/stats/recent: `playedAt` (epoch ms) aligned with `items` (S3).
+		const playedAt = Array.isArray((rec as { playedAt?: unknown })?.playedAt) ? ((rec as { playedAt?: number[] }).playedAt as number[]) : [];
+		const plays = recent.map((it, i) => ({ videoId: it?.videoId, playedAt: Number(playedAt[i]) || 0 }));
+		return { favorites, recent, plays, mix: Array.isArray(mix?.items) ? mix.items : [], cached, sizes };
+	}
+	async function startPack() {
+		if (packRunning || busy || loading) return;
+		packState = "planning";
+		resetPackRun();
 		try {
-			const [fav, rec, mix, l] = await Promise.all([
-				safe(getFavorites(), { favorites: [], items: [] } as { favorites: any[]; items: any[] }),
-				safe(getRecent(100), { items: [] } as { items: any[] }),
-				safe(getMix(), { items: [], seeds: 0 } as { items: any[]; seeds: number }),
-				safe(listCachedAudio(), null),
-			]);
-			if (l && Array.isArray(l.entries)) {
-				entries = l.entries;
-				total = l.total || 0;
-			}
-			const cached = new Set<string>(get(cachedIds));
-			const sizes = new Map<string, number>();
-			for (const t of getOfflineTracks()) if (t.videoId && Number(t._bytes) > 0) sizes.set(t.videoId, Number(t._bytes));
-			for (const e of entries) {
-				if (e.videoId) cached.add(e.videoId);
-				if (e.videoId && e.bytes > 0) sizes.set(e.videoId, e.bytes);
-			}
-			const favItems = Array.isArray(fav?.items) && fav.items.length ? fav.items : Array.isArray(fav?.favorites) ? fav.favorites : [];
-			packPlan = planPack({ favorites: favItems, recent: rec?.items, mix: mix?.items, cached, sizes }, durationSec || sizeMb * MB, durationSec ? "seconds" : "bytes");
+			const src = await packSources();
+			packPlan = planPack({ favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes }, durationSec || sizeMb * MB, durationSec ? "seconds" : "bytes");
 			if (!packPlan.count) {
 				packState = "done";
 				packResult = packPlan.candidates ? "Rien ne rentre dans ce pack : choisis une taille ou une durée plus grande." : "Rien à préparer : tes favoris et tes écoutes récentes sont déjà hors-ligne.";
 				exposePack();
 				return;
 			}
-			packState = "running";
-			packProgress = { ready: 0, failed: 0, refused: 0, total: packPlan.count };
-			exposePack();
-			// O10: a pack is an explicit "keep offline".
-			void requestPersistentStorage();
-			const plan = packPlan;
-			void startKeepJob(PACK_KEY, () => plan.items.map((i) => i.item), {
-				deps: (signal) =>
-					keepDepsWithAbort(signal, {
-						...defaultKeepDeps,
-						download: async (t, o) => {
-							const r = await defaultKeepDeps.download(t, o);
-							if (r.ok) {
-								packDoneBytes += Number(r.bytes) || packSizeOf(t, sizes).bytes;
-								packDoneSeconds += packSecondsOf(t);
-							}
-							return r;
-						},
-					}),
-				onDone: (r: KeepResult) => {
-					packState = r.cancelled ? "cancelled" : "done";
-					packProgress = { ready: r.ready, failed: r.failed, refused: r.refused, total: r.total };
-					const s = keepSummary(r);
-					packResult = `${s.text} · ${plan.mode === "seconds" ? packDurationLabel(packDoneSeconds) || "0 min" : fmtBytesFr(packDoneBytes)}`;
-					notify(s.text, s.type);
-					exposePack({ result: { ...r } });
-					void refresh();
-					dispatch("changed");
-				},
-			});
+			runPack(packPlan, src.sizes);
 		} catch (e) {
 			packState = "";
 			error = `Impossible de préparer le pack : ${(e as Error)?.message ?? e}`;
+		}
+	}
+	/**
+	 * Run a plan as THE pack job (PACK_KEY): downloads + pins, 2 at a time,
+	 * cancellable; `lastPackNext` is what the device remembers as its pack
+	 * once the job starts (the plan itself for a pack, keep + add for a refresh).
+	 */
+	function runPack(plan: PackPlan, sizes: Map<string, number>, lastPackNext: LastPack = lastPackOf(plan)) {
+		packPlan = plan;
+		packState = "running";
+		packProgress = { ready: 0, failed: 0, refused: 0, total: plan.count };
+		exposePack();
+		// O10: a pack is an explicit "keep offline".
+		void requestPersistentStorage();
+		lastPack = lastPackNext;
+		writeLastPack(storage(), lastPackNext);
+		void startKeepJob(PACK_KEY, () => plan.items.map((i) => i.item), {
+			deps: (signal) =>
+				keepDepsWithAbort(signal, {
+					...defaultKeepDeps,
+					download: async (t, o) => {
+						const r = await defaultKeepDeps.download(t, o);
+						if (r.ok) {
+							packDoneBytes += Number(r.bytes) || packSizeOf(t, sizes).bytes;
+							packDoneSeconds += packSecondsOf(t);
+						}
+						return r;
+					},
+				}),
+			onDone: (r: KeepResult) => {
+				packState = r.cancelled ? "cancelled" : "done";
+				packProgress = { ready: r.ready, failed: r.failed, refused: r.refused, total: r.total };
+				const s = keepSummary(r);
+				packResult = `${s.text} · ${plan.mode === "seconds" ? packDurationLabel(packDoneSeconds) || "0 min" : fmtBytesFr(packDoneBytes)}`;
+				notify(s.text, s.type);
+				exposePack({ result: { ...r } });
+				void refresh();
+				dispatch("changed");
+			},
+		});
+	}
+	// B7-7 "Rafraîchir mon pack": the pack tracks listened to since the pack
+	// began (me/stats/recent playedAt, the SW lastAccess) are uncached (the
+	// same uncache-audio path as "Libérer", so pinned entries outside the pack
+	// stay) and as many seconds of new tracks are run as a pack.
+	async function refreshPack() {
+		if (packRunning || busy || loading || !lastPack) return;
+		const prev = lastPack;
+		packState = "planning";
+		resetPackRun();
+		try {
+			const src = await packSources();
+			const listened = listenedPackIds(prev, { entries, plays: src.plays });
+			const plan = planPackRefresh(prev, listened, { favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes });
+			const expose = (extra: Record<string, unknown> = {}) => {
+				if (typeof window === "undefined") return;
+				(window as PackWindow).__ytmPackRefresh = {
+					packAt: prev.at,
+					packIds: prev.items.map((i) => i.videoId),
+					listened: [...listened],
+					dropped: plan.drop.map((i) => i.videoId),
+					kept: plan.keep.map((i) => i.videoId),
+					seconds: plan.seconds,
+					added: plan.add.items.map((i) => i.videoId),
+					addedSeconds: plan.add.seconds,
+					...extra,
+				};
+			};
+			if (!plan.drop.length || !plan.add.count) {
+				packState = "done";
+				packResult = packRefreshSummary(plan);
+				expose({ applied: false });
+				exposePack();
+				return;
+			}
+			const byId = new Map<string, AudioListEntry>();
+			for (const e of entries) if (e.videoId) byId.set(e.videoId, e);
+			const removed: string[] = [];
+			let failed = 0;
+			for (const d of plan.drop) {
+				const e = byId.get(d.videoId);
+				const r = await swRequest<{ type: "audio-uncached"; ok: boolean }>({ type: "uncache-audio", url: e?.url || "", videoId: d.videoId }, "audio-uncached", 5_000);
+				if (r && r.ok) removed.push(d.videoId);
+				else if (e) failed++;
+			}
+			if (removed.length) applySwEviction(removed);
+			scheduleSwAudioRefresh();
+			expose({ applied: true, removed, failed });
+			notify(packRefreshSummary(plan), "success");
+			runPack(plan.add, src.sizes, refreshedLastPack(prev, plan));
+		} catch (e) {
+			packState = "";
+			error = `Impossible de rafraîchir le pack : ${(e as Error)?.message ?? e}`;
 		}
 	}
 	function cancelPack() {
@@ -349,6 +452,8 @@
 		} catch {
 			/* ignore */
 		}
+		// B7-7: the pack this device prepared last ("Rafraîchir mon pack").
+		lastPack = readLastPack(storage());
 		// B6-17: /library/downloads-offline?pack=dur:7200 (home weekend card)
 		// preselects the pack and unfolds the card, without storing a preference.
 		try {
@@ -488,6 +593,22 @@
 				>
 					{packState === "planning" ? "Préparation…" : labels.pack}
 				</button>
+				{#if lastPack && lastPack.items.length}
+					<!-- B7-7: only once a pack was prepared on this device. -->
+					<button
+						type="button"
+						id="offline-pack-refresh"
+						class="btn-reset btn-secondary"
+						data-testid="pack-refresh"
+						data-pack-count={lastPack.items.length}
+						aria-describedby="offline-space-desc"
+						disabled={loading || !!busy || packRunning || !!freePlan}
+						title="Remplace les titres du pack déjà écoutés par de nouveaux, même durée d'écoute ; les épinglés hors du pack ne bougent pas"
+						on:click={refreshPack}
+					>
+						Rafraîchir mon pack
+					</button>
+				{/if}
 			{/if}
 		</div>
 		<p

@@ -13,7 +13,24 @@ vi.mock("$lib/offline", () => ({
 	abortCacheAudio: vi.fn(),
 }));
 
-import { PACK_EST_BYTES, PACK_EST_SECONDS, packDurationText, packLabel, packSecondsOf, packSizeOf, parsePackChoice, planPack } from "./offlinePack";
+import {
+	LAST_PACK_KEY,
+	PACK_EST_BYTES,
+	PACK_EST_SECONDS,
+	lastPackOf,
+	listenedPackIds,
+	packDurationText,
+	packLabel,
+	packRefreshSummary,
+	packSecondsOf,
+	packSizeOf,
+	parsePackChoice,
+	planPack,
+	planPackRefresh,
+	readLastPack,
+	refreshedLastPack,
+	writeLastPack,
+} from "./offlinePack";
 
 const MB = 1024 * 1024;
 const tr = (id: string, extra: Record<string, unknown> = {}) => ({ videoId: id, title: "T " + id, ...extra });
@@ -139,5 +156,105 @@ describe("packLabel", () => {
 	it("reads count + Mo in French", () => {
 		expect(packLabel(0, 0, 0, 100 * MB)).toBe("Aucun morceau à préparer");
 		expect(packLabel(3, 12, 12.4 * MB, 100 * MB)).toBe("3/12 · 12\u202fMo sur 100\u202fMo");
+	});
+});
+
+describe("B7-7 refresh my pack", () => {
+	const pack = (at = 1_000_000) => ({
+		at,
+		mode: "seconds" as const,
+		target: 3600,
+		items: [
+			{ videoId: "p1", seconds: 600, bytes: 5 * MB },
+			{ videoId: "p2", seconds: 300, bytes: 3 * MB },
+			{ videoId: "p3", seconds: 900, bytes: 8 * MB },
+		],
+	});
+
+	it("lastPackOf / write / read round-trip through a storage, bad records ignored", () => {
+		const store = new Map<string, string>();
+		const kv = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+		const plan = planPack({ favorites: [tr("a", { duration: 600, _bytes: 5 * MB }), tr("b")] }, 3600, "seconds");
+		const lp = lastPackOf(plan, 42);
+		expect(lp).toEqual({
+			at: 42,
+			mode: "seconds",
+			target: 3600,
+			items: [
+				{ videoId: "a", seconds: 600, bytes: 5 * MB },
+				{ videoId: "b", seconds: PACK_EST_SECONDS, bytes: PACK_EST_BYTES },
+			],
+		});
+		writeLastPack(kv, lp);
+		expect(JSON.parse(store.get(LAST_PACK_KEY) || "{}").items).toHaveLength(2);
+		expect(readLastPack(kv)).toEqual(lp);
+		writeLastPack(kv, null);
+		expect(readLastPack(kv)).toBeNull();
+		kv.setItem(LAST_PACK_KEY, "{not json");
+		expect(readLastPack(kv)).toBeNull();
+		kv.setItem(LAST_PACK_KEY, JSON.stringify({ at: "x", items: [{ videoId: "a", seconds: -3 }, { videoId: "a" }, { nope: 1 }] }));
+		expect(readLastPack(kv)).toEqual({ at: 0, mode: "seconds", target: 0, items: [{ videoId: "a", seconds: PACK_EST_SECONDS, bytes: PACK_EST_BYTES }] });
+		expect(readLastPack(null)).toBeNull();
+		expect(
+			readLastPack({
+				getItem: () => {
+					throw new Error("private");
+				},
+				setItem() {},
+				removeItem() {},
+			}),
+		).toBeNull();
+	});
+
+	it("listenedPackIds: a play after the pack began, or an SW entry served after it was cached", () => {
+		const p = pack(1_000_000);
+		const got = listenedPackIds(p, {
+			plays: [
+				{ videoId: "p1", playedAt: 1_000_001 }, // after the pack
+				{ videoId: "p2", playedAt: 999_999 }, // before the pack: not listened since
+				{ videoId: "zz", playedAt: 2_000_000 }, // not in the pack
+				null,
+			],
+			entries: [
+				{ videoId: "p3", at: 1_000_500, lastAccess: 1_000_900 }, // served after caching
+				{ videoId: "p2", at: 1_000_500, lastAccess: 1_000_500 }, // never served since caching
+				{ videoId: "zz", at: 1, lastAccess: 2 },
+			],
+		});
+		expect([...got].sort()).toEqual(["p1", "p3"]);
+		expect(listenedPackIds(p, {}).size).toBe(0);
+	});
+
+	it("planPackRefresh: drops the listened tracks and plans the same seconds of new tracks, pack ids excluded", () => {
+		const p = pack();
+		const r = planPackRefresh(p, ["p1", "p3", "nope"], {
+			favorites: [tr("p1", { duration: 600 }), tr("n1", { duration: 1200 }), tr("n2", { duration: 300 })],
+			recent: [tr("p2", { duration: 300 }), tr("n3", { duration: 100 })],
+			cached: ["n2"],
+		});
+		expect(r.drop.map((i) => i.videoId)).toEqual(["p1", "p3"]);
+		expect(r.keep.map((i) => i.videoId)).toEqual(["p2"]);
+		expect(r.seconds).toBe(1500);
+		expect(r.add.mode).toBe("seconds");
+		expect(r.add.target).toBe(1500);
+		expect(r.add.items.map((i) => i.videoId)).toEqual(["n1", "n3"]);
+		expect(r.add.seconds).toBe(1300);
+		expect(packRefreshSummary(r)).toBe("2 titres écoutés remplacés par 2 nouveaux (22 min)");
+		const next = refreshedLastPack(p, r, 5);
+		expect(next.at).toBe(5);
+		expect(next.target).toBe(3600);
+		expect(next.items.map((i) => i.videoId)).toEqual(["p2", "n1", "n3"]);
+	});
+
+	it("planPackRefresh: nothing listened plans nothing, no candidate keeps the pack whole", () => {
+		const none = planPackRefresh(pack(), [], { favorites: [tr("n1")] });
+		expect(none.drop).toEqual([]);
+		expect(none.seconds).toBe(0);
+		expect(none.add.count).toBe(0);
+		expect(packRefreshSummary(none)).toBe("Rien à rafraîchir : aucun titre du pack n'a encore été écouté.");
+		const dry = planPackRefresh(pack(), ["p2"], { favorites: [tr("p2")], recent: null });
+		expect(dry.drop.map((i) => i.videoId)).toEqual(["p2"]);
+		expect(dry.add.count).toBe(0);
+		expect(packRefreshSummary(dry)).toBe("Rien à rafraîchir : pas de nouveau titre pour remplacer 1 titre écouté (5 min).");
 	});
 });
