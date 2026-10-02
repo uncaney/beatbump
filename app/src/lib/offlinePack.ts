@@ -202,9 +202,33 @@ export type PackSpace = {
 	quota: number;
 	/** Bytes already pinned (never evicted, so a pack can only add to them). */
 	pinnedBytes: number;
-	/** Free bytes on the device (navigator.storage.estimate quota - usage), null when unknown. */
-	deviceFree?: number | null;
+	/**
+	 * L13-4: the room left in the storage the browser grants this ORIGIN
+	 * (originRoom: estimate quota - usage, plus the unpinned audio the SW
+	 * would evict by itself), null when the browser gave no estimate. Never
+	 * the device's free space: Safari / private windows report a small
+	 * origin quota on a nearly empty phone.
+	 */
+	originFree?: number | null;
 };
+
+/**
+ * L13-4: what `navigator.storage.estimate()` leaves this origin: quota - usage,
+ * plus the bytes of the cached audio entries that are NOT pinned (the service
+ * worker evicts them on its own under its quota, so a pack may take their
+ * place). null when the browser gave no usable estimate (quota 0 / absent).
+ */
+export function originRoom(
+	estimate: { quota?: number | null; usage?: number | null } | null | undefined,
+	entries?: ReadonlyArray<{ bytes?: number; pinned?: boolean } | null | undefined> | null,
+): number | null {
+	const quota = Number(estimate?.quota);
+	if (!estimate || !Number.isFinite(quota) || quota <= 0) return null;
+	const usage = Math.max(0, Number(estimate.usage) || 0);
+	let evictable = 0;
+	for (const e of entries ?? []) if (e && !e.pinned) evictable += Math.max(0, Number(e.bytes) || 0);
+	return Math.max(0, quota - usage + evictable);
+}
 
 export type PackGuard = {
 	/** true: the whole plan fits, start it as is. */
@@ -213,9 +237,13 @@ export type PackGuard = {
 	estimated: number;
 	/** Bytes the pack may take (Infinity when nothing bounds it). */
 	available: number;
-	/** What bounds `available`: the quota, the device, or nothing. */
-	limit: "none" | "quota" | "device";
-	/** The longest head of the plan that fits (the plan itself when it fits). */
+	/** What bounds `available`: the SW quota, the room the browser grants the origin, or nothing. */
+	limit: "none" | "quota" | "origin";
+	/**
+	 * The plan cut to what fits (the plan itself when it fits): first fit in
+	 * plan order, an item too big is skipped and a smaller one further down may
+	 * still enter (not strictly the longest head).
+	 */
 	shrunk: PackPlan;
 	/** "Pas assez de place : …" when it does not fit, "" otherwise. */
 	message: string;
@@ -237,12 +265,12 @@ export function guardPackSpace(plan: PackPlan, space: PackSpace, bps = PACK_DEFA
 		limit = "quota";
 	}
 	// null / undefined = the browser gave no estimate: nothing to bound.
-	const free = space.deviceFree == null ? NaN : Number(space.deviceFree);
+	const free = space.originFree == null ? NaN : Number(space.originFree);
 	if (Number.isFinite(free) && free >= 0) {
-		const dev = Math.floor(free * keep);
-		if (dev < available) {
-			available = dev;
-			limit = "device";
+		const room = Math.floor(free * keep);
+		if (room < available) {
+			available = room;
+			limit = "origin";
 		}
 	}
 	const estimated = estimatePackBytes(plan, bps);
@@ -262,7 +290,8 @@ export function guardPackSpace(plan: PackPlan, space: PackSpace, bps = PACK_DEFA
 	const shrunk: PackPlan = { items, bytes, seconds, count: items.length, target: plan.target, mode: plan.mode, left: plan.left + plan.items.length - items.length, candidates: plan.candidates };
 	const asked = plan.mode === "seconds" ? `${formatDuration(plan.target)} demandées` : `${formatBytesFr(plan.target)} demandés`;
 	const fitsTxt = items.length ? `${plan.mode === "seconds" ? formatDuration(seconds) : formatBytesFr(used)} ${items.length > 1 ? "tiennent" : "tient"}` : "rien ne tient";
-	const why = limit === "device" ? "l'appareil est presque plein" : `quota ${formatBytesFr(quota)}, ${formatBytesFr(pinned)} épinglés`;
+	// L13-4: the bound is the storage the browser grants this site, not the phone.
+	const why = limit === "origin" ? "l'espace accordé au site est presque plein" : `quota ${formatBytesFr(quota)}, ${formatBytesFr(pinned)} épinglés`;
 	const message = `Pas assez de place : ${asked} (≈ ${formatBytesFr(estimated)}), ${fitsTxt} dans les ${formatBytesFr(available)} libres (${why}).`;
 	return { fits: false, estimated, available, limit, shrunk, message };
 }

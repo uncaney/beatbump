@@ -27,7 +27,8 @@
 	//
 	// B7-8 (cycle 44, L12-14): a pack by duration is measured before it starts
 	// (guardPackSpace: known sizes else length x average bitrate of the cache,
-	// against quota - pinned bytes and the device's free storage). Too big =
+	// against quota - pinned bytes and, L13-4, the storage the browser grants
+	// this origin: estimate quota - usage + unpinned audio). Too big =
 	// packState "too-big" ([data-testid=pack-progress][data-state=too-big],
 	// "Pas assez de place : …") with the head that fits offered behind
 	// [data-testid=pack-shrink]; nothing is downloaded until the user says so.
@@ -62,6 +63,7 @@
 		guardPackSpace,
 		lastPackOf,
 		listenedPackIds,
+		originRoom,
 		packDurationLabel,
 		packDurationText,
 		packLabel,
@@ -375,11 +377,13 @@
 				return;
 			}
 			// B7-8 (L12-14): a duration bounds listening time, not bytes: measure
-			// the plan against the room left (quota - pinned, the device) first.
+			// the plan against the room left (quota - pinned, and L13-4 the
+			// storage the browser grants this origin, unpinned audio counted as
+			// free since the SW evicts it by itself) first.
 			if (packPlan.mode === "seconds") {
 				const st = await safe(storageStatus(), { persisted: null, usage: 0, quota: 0 });
-				const deviceFree = st.quota > 0 ? Math.max(0, st.quota - st.usage) : null;
-				const guard = guardPackSpace(packPlan, { quota, pinnedBytes, deviceFree }, cacheBytesPerSecond());
+				const originFree = originRoom(st, entries);
+				const guard = guardPackSpace(packPlan, { quota, pinnedBytes, originFree }, cacheBytesPerSecond());
 				if (!guard.fits) {
 					packGuard = guard;
 					packState = "too-big";
