@@ -127,7 +127,7 @@ func relatedIDs(t *testing.T, target, cookie string) map[string]bool {
 	return out
 }
 
-func relatedFixture(t *testing.T) {
+func relatedFixture(t *testing.T) *shelfStub {
 	t.Helper()
 	stub := newShelfStub(t)
 	stub.hits["tracks"] = []map[string]interface{}{
@@ -136,6 +136,7 @@ func relatedFixture(t *testing.T) {
 		{"lid": "0123456789a", "title": "Lady", "artist": "Modjo", "albumArtist": "Modjo", "album": "Modjo", "genre": "House", "track": 3.0, "durationSec": 300.0},
 		{"lid": "bbbbbbbbbbb", "title": "Music Sounds Better", "artist": "Stardust", "albumArtist": "Stardust", "album": "Stardust", "genre": "House", "track": 1.0, "durationSec": 300.0},
 	}
+	return stub
 }
 
 // local/related: exclude= always applies; personal=1 + bbp cookie adds the
@@ -203,6 +204,12 @@ func TestPersonalRelatedBypassesSharedCache(t *testing.T) {
 	if c3 != "MISS" || c4 != "MISS" || !strings.Contains(b4, "ex=y") {
 		t.Fatalf("exclude= must key the cache: %s %s %q", c3, c4, b4)
 	}
+	// L12-17: one entry per exclude= value, each served again with its own body.
+	b5, c5 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=x", "B")
+	b6, c6 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=y", "B")
+	if c5 != "HIT" || c6 != "HIT" || !strings.Contains(b5, "ex=x") || !strings.Contains(b6, "ex=y") {
+		t.Fatalf("one cache entry per exclude= value: %s %s %q %q", c5, c6, b5, b6)
+	}
 }
 
 // local/mix (the context continuation): exclude= and personal=1 are left
@@ -238,8 +245,22 @@ func TestRequestExclusionsBounded(t *testing.T) {
 		refs = append(refs, fmt.Sprintf("%011x", i))
 	}
 	c, _ := ctxFor(http.MethodGet, "/api/v1/local/related?lid=x&exclude="+strings.Join(refs, ",")+",,%20", "", nil)
-	if n := len(requestExclusions(c)); n != maxExcludeParam {
+	if n := len(requestRefs(c)); n != maxExcludeParam {
 		t.Fatalf("exclusions = %d, want %d", n, maxExcludeParam)
+	}
+	// L12-17: a raw exclude= value over 16 KiB is ignored as a whole; the
+	// other exclude= values still apply.
+	var big []string
+	for i := 0; i < 1500; i++ {
+		big = append(big, fmt.Sprintf("%011x", i))
+	}
+	raw := strings.Join(big, ",")
+	if len(raw) <= maxExcludeBytes {
+		t.Fatalf("fixture too small: %d", len(raw))
+	}
+	c, _ = ctxFor(http.MethodGet, "/api/v1/local/related?lid=x&exclude="+raw+"&exclude=0123456789a", "", nil)
+	if got := requestRefs(c); len(got) != 1 || !got["0123456789a"] {
+		t.Fatalf("oversize exclude= not ignored: %d refs", len(got))
 	}
 }
 
@@ -284,5 +305,83 @@ func TestLocalRelatedAvoidsRecentPlays(t *testing.T) {
 	}
 	if !got["bbbbbbbbbbb"] {
 		t.Fatalf("a 5 h old play should be allowed: %v", got)
+	}
+}
+
+// L12-18: an exclusion applies to every copy of the song. me/mix: the seed's
+// pool holds p2 and its soulseek copy c2 (same artist, same title, other
+// lid); once p2 is skipped twice neither p2 nor c2 comes back.
+func TestMixExcludesCopiesOfSkipped(t *testing.T) {
+	stub := newMixTestEnv(t, 0)
+	if err := db.DB.AutoMigrate(&db.SkipEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	seed := "0123456789a"
+	stub.copies = map[string]string{seed + "-c2": seed + "-p2"}
+	db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: seed, Source: "local", PlayedAt: time.Now().Add(-48 * time.Hour)})
+	_, before := getMix(t, "p-test")
+	ids := mixIDs(before)
+	if ids[seed+"-p2"] == ids[seed+"-c2"] {
+		t.Fatalf("baseline mix should hold exactly one copy of p2: %v", ids)
+	}
+	addSkips(t, "p-test", seed+"-p2", time.Hour, 3*24*time.Hour)
+	invalidateMixCache("p-test")
+	_, after := getMix(t, "p-test")
+	ids = mixIDs(after)
+	if ids[seed+"-p2"] || ids[seed+"-c2"] {
+		t.Fatalf("a copy of the twice-skipped song is back in me/mix: %v", ids)
+	}
+	if !ids[seed+"-p1"] || !ids[seed+"-p3"] || !ids[seed] {
+		t.Fatalf("refs wrongly excluded: %v", ids)
+	}
+}
+
+// L12-18: local/related leaves out every copy of an excluded song, through
+// exclude= and through the profile's skips (personal=1); the copy itself
+// may be the ref that was skipped.
+func TestLocalRelatedExcludesCopies(t *testing.T) {
+	useSkipDB(t)
+	stub := relatedFixture(t)
+	stub.hits["tracks"] = append(stub.hits["tracks"], map[string]interface{}{
+		"lid": "c0c0c0c0c0c", "title": "Around The World", "artist": "Daft Punk", "albumArtist": "Daft Punk",
+		"album": "Alive 2007", "genre": "House", "track": 5.0, "durationSec": 215.0,
+	})
+	base := "/api/v1/local/related?lid=e182ccc85ad"
+	all := relatedIDs(t, base, "")
+	if all["a1b2c3d4e5f"] == all["c0c0c0c0c0c"] {
+		t.Fatalf("baseline should hold exactly one copy of the song: %v", all)
+	}
+	if got := relatedIDs(t, base+"&exclude=a1b2c3d4e5f", ""); got["a1b2c3d4e5f"] || got["c0c0c0c0c0c"] || !got["0123456789a"] {
+		t.Fatalf("exclude= let a copy through: %v", got)
+	}
+	addSkips(t, "p-skip", "c0c0c0c0c0c", time.Hour, 2*time.Hour)
+	if got := relatedIDs(t, base+"&personal=1", "p-skip"); got["a1b2c3d4e5f"] || got["c0c0c0c0c0c"] || !got["0123456789a"] {
+		t.Fatalf("personal=1 let a copy of the skipped song through: %v", got)
+	}
+	if got := relatedIDs(t, base+"&personal=1", "p-other"); got["a1b2c3d4e5f"] == got["c0c0c0c0c0c"] {
+		t.Fatalf("another profile's skips leaked: %v", got)
+	}
+}
+
+// L12-18: local/mix (the context continuation) leaves out every copy of an
+// excluded song.
+func TestLocalMixExcludesCopies(t *testing.T) {
+	useSkipDB(t)
+	stub := newMixStub(t)
+	orig := stub.tracks[0]
+	const copyLid = "c0c0c0c0c0c"
+	stub.tracks = append(stub.tracks, map[string]interface{}{
+		"lid": copyLid, "title": mstr(orig, "title"), "artist": mstr(orig, "artist"), "albumArtist": mstr(orig, "artist"),
+		"album": "Nineties 0 (soulseek)", "track": 1.0, "durationSec": 200.0, "year": mstr(orig, "year"), "genre": "Rock",
+	})
+	resp := getJSON(t, LocalMixHandler, "/api/v1/local/mix?decade=1990&exclude="+mstr(orig, "lid"))
+	items, _ := resp["items"].([]interface{})
+	if len(items) == 0 {
+		t.Fatalf("empty mix: %v", resp)
+	}
+	for _, it := range items {
+		if v := mstr(it.(map[string]interface{}), "videoId"); v == mstr(orig, "lid") || v == copyLid {
+			t.Fatalf("a copy of the excluded song is in the mix: %s", v)
+		}
 	}
 }

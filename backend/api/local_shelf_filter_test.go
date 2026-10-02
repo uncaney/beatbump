@@ -26,6 +26,19 @@ func stubInt(v interface{}) int {
 	return int(f)
 }
 
+// stubLidIn parses a `lid IN ["a","b"]` filter (excludedTrackKeys,
+// localTrackYears) into a lid set.
+func stubLidIn(filter string) map[string]bool {
+	out := map[string]bool{}
+	list := strings.TrimSuffix(strings.TrimPrefix(filter, "lid IN ["), "]")
+	for _, l := range strings.Split(list, ",") {
+		if l = strings.Trim(strings.TrimSpace(l), "\""); l != "" {
+			out[l] = true
+		}
+	}
+	return out
+}
+
 func (s *shelfStub) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/indexes/") && strings.Contains(r.URL.Path, "/documents/") {
@@ -51,6 +64,17 @@ func (s *shelfStub) handler() http.Handler {
 		json.NewDecoder(r.Body).Decode(&body)
 		s.filters = append(s.filters, mstr(body, "filter"))
 		all := s.hits[index]
+		// The one filter evaluated: `lid IN [...]` (c43b, excludedTrackKeys).
+		if f := mstr(body, "filter"); strings.HasPrefix(f, "lid IN [") {
+			want := stubLidIn(f)
+			var sel []map[string]interface{}
+			for _, h := range all {
+				if want[mstr(h, "lid")] {
+					sel = append(sel, h)
+				}
+			}
+			all = sel
+		}
 		off, lim := stubInt(body["offset"]), stubInt(body["limit"])
 		if s.pageless {
 			off = 0

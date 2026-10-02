@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isSkip, isSkipItem, skipBody, skipItem, SKIP_MARK } from "./skips";
+import { isSkip, isSkipItem, skipBody, skipItem, SKIP_MARK, tenth } from "./skips";
 
 const postMock = vi.fn();
 /** vitest 0.32 has no vi.waitFor: poll `ok` over a few macrotasks. */
@@ -18,6 +18,27 @@ describe("c40b B6-10: skip rule", () => {
 		expect(isSkip(170, 600)).toBe(true);
 		expect(isSkip(-1, 100)).toBe(false);
 		expect(isSkip(NaN, 100)).toBe(false);
+	});
+
+	it("L12-10: short tracks: never a skip from 90 % of the track on", () => {
+		expect(isSkip(40, 40)).toBe(false); // played to the end
+		expect(isSkip(36, 40)).toBe(false);
+		expect(isSkip(35.9, 40)).toBe(false); // past 20 s and past 30 %
+		expect(isSkip(19.9, 40)).toBe(true);
+		expect(isSkip(20, 40)).toBe(false);
+		expect(isSkip(14, 15)).toBe(false); // interlude
+		expect(isSkip(10, 15)).toBe(true);
+		expect(isSkip(25, 240)).toBe(true);
+		expect(isSkip(29.6, 240)).toBe(true);
+		expect(isSkip(215, 240)).toBe(false);
+	});
+
+	it("L12-10: the position is floored to a tenth, never rounded past the 20 s rule", () => {
+		expect(tenth(19.96)).toBe(19.9);
+		expect(tenth(5.04)).toBe(5);
+		const t = { videoId: "0123456789a", title: "Song" };
+		expect(skipItem(t, 19.96, 240.37, "player")).toMatchObject({ position: 19.9, duration: 240.3 });
+		expect(skipItem(t, 39.5, 40, "player")).toBeNull(); // 40 s track played to its end
 	});
 
 	it("skipItem: only for a loaded track pressed early", () => {

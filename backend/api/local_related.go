@@ -24,7 +24,9 @@ import (
 //
 // c40b B6-10: `exclude=<ref>,<ref>` (the queue the client just played) and
 // `personal=1` (the profile's twice-skipped refs, requestExclusions) are left
-// out of both answers. personal=1 is served uncached (perProfileRelated).
+// out of both answers, every copy of those songs included (c43b L12-18).
+// personal=1 is served uncached (perProfileRelated); exclude= is part of the
+// shared cache key.
 func LocalRelatedHandler(c echo.Context) error {
 	if seed := strings.TrimSpace(c.QueryParam("seed")); seed != "" {
 		return localRelatedSeedHandler(c, seed)
@@ -202,7 +204,7 @@ func favoriteTracks(pid string) []map[string]interface{} {
 // at one card per album - too narrow for a from-scratch "Radio" queue, which
 // wants real tracks, not one per album).
 // Refs in `ex` (c40b) never enter the radio, the extension included.
-func radioFromSeedTracks(core []map[string]interface{}, limit, maxPerAlbum int, ex map[string]bool) []Item {
+func radioFromSeedTracks(core []map[string]interface{}, limit, maxPerAlbum int, ex *exclusions) []Item {
 	var ext []map[string]interface{}
 	if len(core) > 0 {
 		first := core[0]

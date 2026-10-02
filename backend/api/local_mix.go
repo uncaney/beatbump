@@ -371,11 +371,11 @@ func LocalMixHandler(c echo.Context) error {
 	// c40b B6-10: exclude= / personal=1 (the queue continuation) leave refs
 	// out; the sample is drawn larger so the mix stays full.
 	ex := requestExclusions(c)
-	if len(ex) == 0 {
+	if ex.empty() {
 		resp["items"] = mixSample(filter, total, mixSize)
 		return c.JSON(http.StatusOK, resp)
 	}
-	extra := len(ex)
+	extra := len(ex.refs)
 	if extra > mixSize {
 		extra = mixSize
 	}

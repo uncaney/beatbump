@@ -19,6 +19,24 @@ import (
 type mixMeiliStub struct {
 	calls, inflight, maxInflight int32
 	delay                        time.Duration
+	// copies: lid -> the pool lid it duplicates (same artist, same title,
+	// another album); such a lid is served next to the original (L12-18).
+	copies map[string]string
+}
+
+// track is the stub's hit for lid: "T <lid>" by "Art-<lid>" for a seed,
+// "P <lid>" by the seed's artist for a pool lid "<seed>-pN"; a lid in
+// copies carries the title and artist of the lid it duplicates.
+func (s *mixMeiliStub) track(lid string) map[string]interface{} {
+	src := lid
+	if of, ok := s.copies[lid]; ok {
+		src = of
+	}
+	if i := strings.Index(src, "-p"); i >= 0 {
+		artist := "Art-" + src[:i]
+		return map[string]interface{}{"lid": lid, "title": "P " + src, "artist": artist, "albumArtist": artist}
+	}
+	return map[string]interface{}{"lid": lid, "title": "T " + src, "artist": "Art-" + src, "albumArtist": "Art-" + src}
 }
 
 func extractQuoted(filter, prefix string) string {
@@ -48,13 +66,21 @@ func (s *mixMeiliStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		limit := int(body["limit"].(float64))
 		switch {
 		case strings.HasPrefix(filter, `lid = "`):
-			lid := extractQuoted(filter, `lid = "`)
-			hits = append(hits, map[string]interface{}{"lid": lid, "title": "T " + lid, "artist": "Art-" + lid, "albumArtist": "Art-" + lid})
+			hits = append(hits, s.track(extractQuoted(filter, `lid = "`)))
+		case strings.HasPrefix(filter, `lid IN [`):
+			for lid := range stubLidIn(filter) {
+				hits = append(hits, s.track(lid))
+			}
 		case strings.HasPrefix(filter, `albumArtist = "`):
 			artist := extractQuoted(filter, `albumArtist = "`)
 			for i := 1; i <= 3; i++ {
 				lid := strings.TrimPrefix(artist, "Art-") + fmt.Sprintf("-p%d", i)
-				hits = append(hits, map[string]interface{}{"lid": lid, "title": "P " + lid, "artist": artist, "albumArtist": artist})
+				hits = append(hits, s.track(lid))
+				for c, of := range s.copies {
+					if of == lid {
+						hits = append(hits, s.track(c))
+					}
+				}
 			}
 		default: // random window (offset + sort)
 			off := int(body["offset"].(float64))

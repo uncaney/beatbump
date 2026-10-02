@@ -22,7 +22,7 @@ import {
 import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
-import { shouldStopAtTrackEnd, sleepQueueChanged, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
+import { shouldStopAtTrackEnd, sleepQueueChanged, sleepTimeUpdate, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
 import { syncTabs } from "./tabSync";
 import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
@@ -883,6 +883,9 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 
 		this.onEvent("timeupdate", async () => {
 			this._currentTimeStore.set(this.player.currentTime);
+			// L12-16: the sleep timer re-checks its absolute deadline here; its
+			// 1 s interval is throttled in the background / on a locked iPhone.
+			sleepTimeUpdate();
 			/*const duration = isAppleMobileDevice
 				? this.player.duration / 2
 				: this.player.duration;*/

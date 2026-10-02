@@ -38,6 +38,9 @@ func (s *mixStub) match(h map[string]interface{}, filter string) bool {
 		}
 		return true
 	}
+	if strings.HasPrefix(filter, "lid IN [") {
+		return stubLidIn(filter)[mstr(h, "lid")]
+	}
 	if field, val, ok := strings.Cut(filter, " = \""); ok && field != "genre" {
 		return mstr(h, field) == strings.TrimSuffix(val, "\"")
 	}

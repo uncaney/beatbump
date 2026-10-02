@@ -18,6 +18,11 @@
 //   cancels an "album" timer (with a toast) once another album plays.
 // - "+10 min" (`extendSleepTimer`) pushes a minute deadline back, or starts a
 //   10 min timer when none (or a track-end one) is running.
+// - L12-16: the deadline is absolute (`Date.now()`); the 1 s interval only
+//   drives the countdown. A background tab throttles that interval and a
+//   locked iPhone suspends it, so player.ts also calls `sleepTimeUpdate()`
+//   from the media element's `timeupdate` (which keeps firing while audio
+//   plays) and the store re-checks on `visibilitychange`.
 //
 // The player module is imported lazily (dynamic import) to keep this store
 // free of an import cycle with `$lib/player`.
@@ -256,12 +261,26 @@ export function volumeIsReadOnly(): boolean {
 let interval: ReturnType<typeof setInterval> | null = null;
 let deadline: SleepDeadline | null = null;
 let fadeToken = 0;
+let onVisible: (() => void) | null = null;
 
 function clearTick() {
 	if (interval) {
 		clearInterval(interval);
 		interval = null;
 	}
+	if (onVisible && typeof document !== "undefined") {
+		document.removeEventListener("visibilitychange", onVisible);
+	}
+	onVisible = null;
+}
+
+/** L12-16: a tab coming back to the foreground re-checks the deadline at once. */
+function watchVisibility() {
+	if (onVisible || typeof document === "undefined") return;
+	onVisible = () => {
+		if (!document.hidden) sleepTimeUpdate();
+	};
+	document.addEventListener("visibilitychange", onVisible);
 }
 
 function tick() {
@@ -269,6 +288,9 @@ function tick() {
 	const left = Math.ceil((deadline.endsAt - Date.now()) / 1000);
 	if (left <= 0) {
 		clearTick();
+		// The deadline is consumed here: a late interval tick, a timeupdate or
+		// a visibility change arriving during the fade must not expire twice.
+		deadline = null;
 		sleepRemaining.set(0);
 		sleepCountdown.set(null);
 		void expire();
@@ -285,6 +307,20 @@ function runMinutes(d: SleepDeadline & { at: "time" }, mode: number) {
 	sleepCountdown.set(null);
 	sleepRemaining.set(Math.max(0, Math.ceil((d.endsAt - Date.now()) / 1000)));
 	interval = setInterval(tick, 1000);
+	watchVisibility();
+}
+
+/**
+ * L12-16: player.ts calls this from the media element's `timeupdate`. The
+ * 1 s interval is throttled by a background tab and suspended by a locked
+ * iPhone while the deadline is absolute (`Date.now()`); re-checking it on
+ * every `timeupdate` (about 4 a second while audio plays, screen locked
+ * included) lands the pause on time even when no interval tick ran. Cheap
+ * when idle or in a track-end mode.
+ */
+export function sleepTimeUpdate() {
+	if (!deadline || deadline.at !== "time") return;
+	tick();
 }
 
 /**
@@ -451,6 +487,7 @@ export const sleepTimer = {
 	start: startSleepTimer,
 	extend: extendSleepTimer,
 	cancel: cancelSleepTimer,
+	timeUpdate: sleepTimeUpdate,
 	shouldStopAtTrackEnd,
 	queueChanged: sleepQueueChanged,
 	trackEnded,

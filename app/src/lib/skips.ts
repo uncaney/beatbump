@@ -7,16 +7,29 @@
 
 export const SKIP_MAX_SECONDS = 20;
 export const SKIP_MAX_FRACTION = 0.3;
+/** L12-10: from 90 % of a known duration on, a press is never a skip (short tracks). */
+export const SKIP_END_FRACTION = 0.9;
 /** Outbox item marker: this entry is a skip, not a play (me.ts postPlay routes it). */
 export const SKIP_MARK = "__skip";
 
 export type SkipSource = "player" | "mediasession" | "fullscreen" | "keyboard";
 
-/** Early enough to be a skip: < 20 s, or < 30 % of a known duration. */
+/**
+ * Early enough to be a skip: < 20 s, or < 30 % of a known duration, and
+ * never from 90 % of a known duration on (L12-10: "next" at 14 s of a 15 s
+ * interlude is a listen). Same rule as backend/api/me_skips.go.
+ */
 export function isSkip(position: number, duration: number): boolean {
 	if (!Number.isFinite(position) || position < 0) return false;
-	if (position < SKIP_MAX_SECONDS) return true;
-	return Number.isFinite(duration) && duration > 0 && position < duration * SKIP_MAX_FRACTION;
+	const known = Number.isFinite(duration) && duration > 0;
+	if (!known) return position < SKIP_MAX_SECONDS;
+	if (position >= duration * SKIP_END_FRACTION) return false;
+	return position < SKIP_MAX_SECONDS || position < duration * SKIP_MAX_FRACTION;
+}
+
+/** Tenth of a second, floored (L12-10): 19.96 s stays under the 20 s rule on the server too. */
+export function tenth(seconds: number): number {
+	return Math.floor(seconds * 10) / 10;
 }
 
 export interface SkipItem {
@@ -44,8 +57,8 @@ export function skipItem(track: unknown, position: number, duration: number, sou
 		[SKIP_MARK]: true,
 		videoId: id,
 		...(typeof title === "string" && title ? { title: title.slice(0, 200) } : {}),
-		position: Math.round(position * 10) / 10,
-		duration: Math.round(duration * 10) / 10,
+		position: tenth(position),
+		duration: tenth(duration),
 		source,
 	};
 }
