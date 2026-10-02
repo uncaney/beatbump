@@ -13,6 +13,7 @@
 	import { isMobileMQ } from "$stores/window";
 	import PlayAllBar from "$components/PlayAllBar/PlayAllBar.svelte";
 	import { APIClient } from "$lib/api";
+	import { aliasChipLabel, foldAliases } from "$lib/artistAliases";
 	import type { PageData } from "./$types";
 
 	export let data: PageData;
@@ -31,6 +32,12 @@
 		name: string;
 		href?: string;
 	}[];
+	// U13-3: 3 chips then "+N autres" (a wall of 16 chips stood between the
+	// header and the titles); the page's own name is dropped from a "feat."
+	// credit ("ft. Daya"). Folded again on every artist -> artist navigation.
+	let aliasesOpen = false;
+	$: if (id) aliasesOpen = false;
+	$: aliasFold = foldAliases(aliasOthers, aliasesOpen);
 
 	$: id = $page.params.slug;
 
@@ -137,14 +144,24 @@
 					aria-label="Aussi sous d'autres noms"
 				>
 					<span class="aliases-label">Aussi sous :</span>
-					{#each aliasOthers as alias (alias.id)}
+					{#each aliasFold.shown as alias (alias.id)}
 						<a
 							class="alias-chip"
 							data-testid="artist-alias-chip"
 							href={alias.href || `/artist/${alias.id}`}
-							title="Voir la page {alias.name}">{alias.name}</a
+							title="Voir la page {alias.name}">{aliasChipLabel(alias.name, String(header?.name ?? ""))}</a
 						>
 					{/each}
+					{#if aliasFold.hidden > 0}
+						<button
+							type="button"
+							class="btn-reset alias-chip alias-more"
+							data-testid="artist-aliases-more"
+							aria-expanded={aliasesOpen}
+							aria-label={aliasesOpen ? "Replier les autres noms" : `Voir les ${aliasFold.hidden} autres noms`}
+							on:click={() => (aliasesOpen = !aliasesOpen)}>{aliasFold.toggle}</button
+						>
+					{/if}
 				</nav>
 			{/if}
 			{#if songs?.items?.length > 0}
@@ -288,6 +305,14 @@
 		&:focus-visible {
 			background: rgba(255, 255, 255, 0.2);
 		}
+	}
+	// U13-3: the "+N autres" toggle is a chip like the others (btn-reset
+	// keeps the global button rule off it: same pill, same 44px, inherited
+	// colour).
+	.alias-more {
+		cursor: pointer;
+		font: inherit;
+		font-weight: 600;
 	}
 
 	// Audit v8 TOP 1: the global `button:not(.icon-btn)` rule gave it black
