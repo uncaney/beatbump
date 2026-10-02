@@ -276,8 +276,13 @@ export function keepDoneReady(r: KeepResult | null | undefined, expected: number
  * batch's own total, so keepDoneReady(done, done.total) was a tautology: a
  * complete batch of a queue SHORTER than the source (loader cap, a truncated
  * queue) said "Prêt hors-ligne" for the whole source. `expected` (the
- * source's own count: an album's trackCount, a card's size) now bounds it,
+ * source's own count: an album's trackCount) bounds it when a caller has one,
  * and the batch total is the fallback only when the source has no count.
+ * L15-6: no caller passes `expected` today. Album / playlist / favourites
+ * pages pass their tracks (n > 0); the only loader-backed source is a mix
+ * card, whose queue is DRAWN by the loader at batch time (there is no other
+ * count of "the mix"): for it the batch total is the source by construction,
+ * not a tautology. KeepOfflineButton therefore passes null on purpose.
  */
 export function keepIdleTotal(n: number, expected: number | null | undefined, done: KeepResult | null | undefined): number {
 	if (n > 0) return n;
