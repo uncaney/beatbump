@@ -129,6 +129,8 @@ func relatedIDs(t *testing.T, target, cookie string) map[string]bool {
 
 func relatedFixture(t *testing.T) *shelfStub {
 	t.Helper()
+	resetTrackKeyMemo() // L14-2: synthetic lids are reused across stubs
+	t.Cleanup(resetTrackKeyMemo)
 	stub := newShelfStub(t)
 	stub.hits["tracks"] = []map[string]interface{}{
 		{"lid": "e182ccc85ad", "title": "One More Time", "artist": "Daft Punk", "albumArtist": "Daft Punk", "album": "Discovery", "genre": "House", "track": 1.0, "durationSec": 320.0},
@@ -538,7 +540,9 @@ func TestLocalMixExcludesCopies(t *testing.T) {
 	useSkipDB(t)
 	stub := newMixStub(t)
 	orig := stub.tracks[0]
-	const copyLid = "c0c0c0c0c0c"
+	// L14-2: its own lid (TestLocalRelatedExcludesCopies memoises c0c0c0c0c0c
+	// under another title in the global lid -> key memo).
+	const copyLid = "d0d0d0d0d0d"
 	stub.tracks = append(stub.tracks, map[string]interface{}{
 		"lid": copyLid, "title": mstr(orig, "title"), "artist": mstr(orig, "artist"), "albumArtist": mstr(orig, "artist"),
 		"album": "Nineties 0 (soulseek)", "track": 1.0, "durationSec": 200.0, "year": mstr(orig, "year"), "genre": "Rock",
