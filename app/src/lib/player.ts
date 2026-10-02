@@ -30,7 +30,7 @@ import { objectKeys } from "./utils/collections/objects";
 import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from "./utils/mediaRetry";
 import { reportClientError } from "./clientLog";
 import { isDataSaver } from "./dataSaver";
-import { knownTrackDuration, shouldAdvanceAtTrackEnd } from "./trackEnd";
+import { knownTrackDuration, repeatActionAtTrackEnd, shouldAdvanceAtTrackEnd } from "./trackEnd";
 import { setWorkerInterval } from "./utils/workerTimeout";
 import { resumeKeptFor } from "./stores/resumeState";
 import { recordSkip } from "./me";
@@ -773,18 +773,15 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		}
 	}
 
-	private async handleRepeat() {
-		if (
-			this._repeat === "playlist" &&
-			SessionListService.$.value.position >=
-			SessionListService.$.value.mix.length - 1
-		) {
-			await SessionListService.updatePosition(1);
-			await SessionListService.previous();
-			return true;
-		} else if (this._repeat === "track") {
-			return false;
-		}
+	/**
+	 * L15-2: repeat "playlist" on the last row: back to the first row through
+	 * the regular previous() path (updatePosition(1) then "back" = index 0,
+	 * local queue or YouTube continuation alike). The caller does NOT chain a
+	 * next() after it: that is what restarted the loop on the second track.
+	 */
+	private async restartQueue() {
+		await SessionListService.updatePosition(1);
+		await SessionListService.previous();
 	}
 
 	private createAudioNode() {
@@ -932,14 +929,19 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 				sleepTimerTrackEnded();
 				return;
 			}
+			// L15-2: taken BEFORE the first await. `timeupdate` (inside the margin)
+			// and `ended` fire in the same end-of-media task; the lock used to be
+			// set only after `await handleRepeat()`, so in repeat "playlist" on
+			// the last row the re-entering `ended` ran a second advance in
+			// parallel (index 2 instead of 0). The finally below releases it.
+			locked = true;
 			try {
-				if (this._repeat !== "off") {
-					const allowContinuation = await this.handleRepeat();
-					if (allowContinuation === false) {
-						return;
-					}
+				const action = repeatActionAtTrackEnd(this._repeat, SessionListService.position, SessionListService.value.mix.length);
+				if (action === "hold") return;
+				if (action === "restart") {
+					await this.restartQueue();
+					return;
 				}
-				if (!locked) locked = true;
 
 				if (groupSession.initialized) {
 					return await Promise.resolve(
@@ -1178,11 +1180,17 @@ export const getSrc = async (
 	// `playlistId=undefined&playerParams=undefined`; offline, no request at
 	// all: the toast says the local title is not cached.
 	const res = videoId && isLocalTrackId(videoId) ? await fetchLocalPlayer(videoId, prefetch) : await fetchPlayerJson(videoId, playlistId, params, 0, prefetch);
+	// L15-1: a startup restoration (deferToPlay: +layout -> restoreResumeState)
+	// that cannot reach its source stays paused, queue and context shown: no
+	// toast, no "passage au suivant" and no play() without a gesture (the
+	// installed Android PWA would start the next track by itself at launch).
+	// resumeState clears the seek and the home "Reprendre la file" retries.
+	const fail = (err: PlayerRequestError) => (opts?.deferToPlay ? quietRestoreFailure(err) : handleError(err));
 	if (res instanceof PlayerRequestError) {
-		return handleError(res);
+		return fail(res);
 	}
 	if (!res || (!res?.streamingData && res?.playabilityStatus?.status === "UNPLAYABLE")) {
-		return handleError(new PlayerRequestError(404, "unplayable", "UNPLAYABLE", res?.playabilityStatus?.reason || ""));
+		return fail(new PlayerRequestError(404, "unplayable", "UNPLAYABLE", res?.playabilityStatus?.reason || ""));
 	}
 	const formats = sort({
 		data: res,
@@ -1290,6 +1298,13 @@ export async function fetchLocalPlayer(lid: string, prefetch = false): Promise<a
 	if (response.ok) {
 		try {
 			const body = await response.json();
+			// L15-1: `{"offline":true}` is the service worker's answer for an API
+			// call it could neither reach nor replay (navigator.onLine true with
+			// no real network: one bar of 4G, a captive portal): the title exists,
+			// it is "not available offline", not "introuvable".
+			if (body && body.offline === true) {
+				return new PlayerRequestError(0, "local_offline", "LOCAL_OFFLINE", LOCAL_PLAYER_MESSAGES.offline);
+			}
 			if (body?.streamingData?.adaptiveFormats?.length || body?.streamingData?.formats?.length) return body;
 		} catch {
 			/* fall through: no usable body */
@@ -1408,6 +1423,19 @@ async function retryMediaSource(videoId: string, playlistId: string | undefined,
 // (a dead backend would otherwise race through the whole queue). The streak is
 // reset by the next successful setTrack.
 let playerFailStreak = 0;
+
+/**
+ * L15-1: a source failure during the paused startup restoration. Logged, no
+ * toast, no auto-skip (handleError), no fail streak: nothing was asked for
+ * yet, the player simply stays paused on the restored row.
+ */
+function quietRestoreFailure(e: PlayerRequestError) {
+	console.warn("[player] startup restore: source unavailable", e.code, e.kind, e.status, e.reason);
+	return {
+		body: null,
+		error: true,
+	};
+}
 
 function handleError(err: PlayerRequestError | string | undefined) {
 	const e = typeof err === "string" || !err ? new PlayerRequestError(0, "unknown", "UNKNOWN", typeof err === "string" ? err : "") : err;

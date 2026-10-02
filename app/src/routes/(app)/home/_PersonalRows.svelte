@@ -63,7 +63,7 @@
 	import { AudioPlayer } from "$lib/player";
 	import list, { currentTrack } from "$lib/stores/list";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
-	import { ALBUM_OF_DAY_ROW, ALBUM_OF_DAY_URL, albumOfDayFrom, albumOfDayHref, albumOfDayLine, type AlbumOfDay } from "$lib/albumOfDay";
+	import { ALBUM_OF_DAY_ROW, ALBUM_OF_DAY_URL, albumOfDayFrom, albumOfDayHref, albumOfDayLine, todaySubtitle, type AlbumOfDay } from "$lib/albumOfDay";
 	import {
 		ARTIST_OF_DAY_ROW,
 		ARTIST_OF_DAY_URL,
@@ -134,7 +134,9 @@
 	async function openAlbumOfDayShortcut(a: AlbumOfDay) {
 		try {
 			await tick();
-			document.querySelector<HTMLElement>('[data-testid="album-of-day"]')?.scrollIntoView({ block: "center" });
+			// L15-4: no scrollIntoView before the goto: the page changes right
+			// away (the scroll was useless) and, reached by an internal
+			// navigation, it scrolled during the crossfade (c56a black screen).
 			await goto(albumOfDayHref(a));
 		} catch (err) {
 			console.error("album-of-day shortcut failed", err);
@@ -984,8 +986,9 @@
 		>
 			<div class="header resp-content-width">
 				<!-- B9-27: one steady subtitle; the morning "why it has not changed"
-				     is answered by naming when the next one comes. -->
-				<p class="subheading">Le même pour tout le monde, un autre à minuit (UTC+2)</p>
+				     is answered by naming when the next one comes. L15-8: the server
+				     switches at 00:00 UTC, said in the viewer's local time. -->
+				<p class="subheading">{todaySubtitle()}</p>
 				<span class="h2">Aujourd'hui</span>
 			</div>
 			<div class="today-tiles">

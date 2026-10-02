@@ -22,15 +22,20 @@
 	import { cancelKeepJob, compactKeepAriaLabel, findKeepJob, keepDoneReady, keepIdleTotal, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepJob, type KeepProgress, type KeepResult } from "$lib/offlineBatch";
 	import { notify } from "$lib/utils";
 
-	/** Tracks of the source, or a loader (album pages resolve their queue lazily). */
+	/** Tracks of the source, or a loader (mix cards resolve their queue lazily). */
 	export let tracks: any[] = [];
 	export let load: (() => Promise<any[]>) | null = null;
 	/**
-	 * L13-16: track count of a lazily loaded source (`load` with no `tracks`),
-	 * when the caller knows it. Without it, a complete batch of a queue shorter
-	 * than the source read as "Prêt hors-ligne" for the whole source.
+	 * L15-6: the idle rule. A source whose tracks are at hand (`tracks`: album,
+	 * server playlist, favourites) is "Prêt hors-ligne" when the last batch
+	 * covered THAT many tracks. A loader-backed source (a mix card: the mix
+	 * is drawn by the loader at batch time, there is no other count of it)
+	 * is ready when the last batch of its drawn queue completed: the batch
+	 * total IS the source (keepIdleTotal fallback). The `expected` prop of
+	 * L13-16 (a count for a loader-backed album page) had no caller: album
+	 * pages pass their `tracks`, so it is gone rather than a null passed
+	 * everywhere that read as a guard.
 	 */
-	export let expected: number | null = null;
 	/** Identity of the source (defaults to the page URL: one source button per page). */
 	export let sourceKey: string | null = null;
 	/** data-testid of the button (HL6: "mix-keep" on a mix card). */
@@ -85,9 +90,9 @@
 		void $offlineTracks; // c43d: re-evaluate when the shared list changes (another tab's writes / reconcile)
 		const done = lastDoneKey === key ? lastDone : null;
 		const n = keepableTracks(tracks).length;
-		// A lazily loaded source (album queue, mix card) has no tracks here: the
-		// caller's `expected` count bounds it, the batch result is the fallback (L13-16).
-		const total = keepIdleTotal(n, expected, done);
+		// A loader-backed source (mix card) has no tracks here: its last batch's
+		// queue is the source (L15-6; `null`: no caller knows a better count).
+		const total = keepIdleTotal(n, null, done);
 		progress = total && (keepDoneReady(done, total) || (n > 0 && allPinned(tracks))) ? { ready: total, failed: 0, refused: 0, total } : null;
 	}
 	$: label = keepLabel(progress, running);

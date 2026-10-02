@@ -3,6 +3,7 @@
 	import { genreHref, normalizeGenreList } from "$lib/localGenres";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
+	import { scrollIntoViewWhenSettled } from "$lib/routeSettled";
 	import { onMount, tick } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 
@@ -31,7 +32,11 @@
 	async function openRare() {
 		rareOpen = true;
 		await tick();
-		rareToggle?.scrollIntoView({ block: "start", behavior: "smooth" });
+		// L15-4 (same class as c56a): from the /about "genres rares" link the
+		// fetch above answers within the 150 ms page crossfade (LAN, SW replay)
+		// and a scroll during it lands on the outgoing page (black screen,
+		// position clamped back to the top). Wait for the route to settle.
+		await scrollIntoViewWhenSettled(rareToggle, { block: "start", behavior: "smooth" });
 	}
 
 	onMount(async () => {

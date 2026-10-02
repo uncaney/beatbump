@@ -53,3 +53,31 @@ export function albumOfDayHref(a: Pick<AlbumOfDay, "album">): string {
 export function albumOfDayLine(artist: string, year: string): string {
 	return [artist.trim(), year.trim()].filter(Boolean).join(" · ");
 }
+
+/**
+ * L15-8: the backend changes its pick (album and artist of the day) at
+ * 00:00 UTC (local_album_day.go, local_artist_day.go): the local wall-clock
+ * time of the NEXT 00:00 UTC, "02:00" in Paris in summer, "01:00" in winter,
+ * "00:00" in London in winter. `timeZone` is for tests; the viewer's zone
+ * otherwise. Empty when Intl cannot format (then the caller says "minuit UTC").
+ */
+export function nextPickLocalTime(now: Date = new Date(), timeZone?: string): string {
+	const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+	try {
+		return next.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", ...(timeZone ? { timeZone } : {}) });
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * B9-27 / L15-8: the steady subtitle of the "Aujourd'hui" row: "Le même pour
+ * tout le monde, un autre à 02:00 (minuit UTC)". It used to promise "minuit
+ * (UTC+2)": neither the hour (the switch is at 00:00 UTC) nor the fixed
+ * offset (wrong from the last Sunday of October) held.
+ */
+export function todaySubtitle(now: Date = new Date(), timeZone?: string): string {
+	const t = nextPickLocalTime(now, timeZone);
+	if (!t || t === "00:00") return "Le même pour tout le monde, un autre à minuit UTC";
+	return `Le même pour tout le monde, un autre à ${t} (minuit UTC)`;
+}

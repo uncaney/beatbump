@@ -564,6 +564,43 @@ export function packRefreshPreviewTitle(plan: Pick<PackRefreshPlan, "drop" | "se
 	return `${dropped} et remplacé${n > 1 ? "s" : ""} par ${add} nouveau${add > 1 ? "x" : ""} (${formatDuration(plan.add.seconds)}) :`;
 }
 
+/**
+ * L15-7: the plan shown in the preview and the one recomputed at confirmation
+ * remove and add the same tracks (by id, order ignored). When they differ (a
+ * pack track heard between the two moments, a new candidate) the card shows
+ * the new preview instead of applying a plan the user never saw.
+ */
+export function samePackRefreshPlan(a: Pick<PackRefreshPlan, "drop" | "add">, b: Pick<PackRefreshPlan, "drop" | "add">): boolean {
+	const ids = (p: Pick<PackRefreshPlan, "drop" | "add">) => ({
+		drop: [...new Set(p.drop.map((i) => i.videoId))].sort(),
+		add: [...new Set(p.add.items.map((i) => i.videoId))].sort(),
+	});
+	const x = ids(a);
+	const y = ids(b);
+	return x.drop.length === y.drop.length && x.add.length === y.add.length && x.drop.every((id, i) => id === y.drop[i]) && x.add.every((id, i) => id === y.add[i]);
+}
+
+/** L15-7: "Le plan a changé : 3 titres à retirer, 2 nouveaux. Vérifie la liste avant de confirmer." */
+export function packRefreshChangedNote(plan: Pick<PackRefreshPlan, "drop" | "add">): string {
+	const n = plan.drop.length;
+	const add = plan.add.count;
+	return `Le plan a changé : ${n} titre${n > 1 ? "s" : ""} à retirer, ${add} nouveau${add > 1 ? "x" : ""}. Vérifie la liste avant de confirmer.`;
+}
+
+/**
+ * L15-7: why a recomputed refresh has nothing to drop. The preview listed
+ * tracks, so an empty `drop` at confirmation means the listened pack tracks
+ * are all protected (the one playing / the restored last track), not that
+ * nothing was heard.
+ */
+export function packRefreshNothingReason(plan: Pick<PackRefreshPlan, "drop" | "add">, pack: Pick<LastPack, "items">, listened: Iterable<string>): string {
+	if (plan.drop.length) return "Pas de nouveau titre pour remplacer les titres écoutés";
+	const heard = new Set<string>();
+	for (const id of listened) if (typeof id === "string" && id) heard.add(id);
+	if (pack.items.some((i) => heard.has(i.videoId))) return "Le titre en cours est gardé : rien à retirer du pack";
+	return "Aucun titre écouté depuis le pack";
+}
+
 /** "3 titres écoutés remplacés par 4 nouveaux (42 min)" / "Rien à rafraîchir : …". */
 export function packRefreshSummary(plan: Pick<PackRefreshPlan, "drop" | "seconds" | "add">): string {
 	if (!plan.drop.length) return "Rien à rafraîchir : aucun titre du pack n'a encore été écouté.";

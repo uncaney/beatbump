@@ -72,8 +72,11 @@
 		packDurationLabel,
 		packDurationText,
 		packLabel,
+		packRefreshChangedNote,
+		packRefreshNothingReason,
 		packRefreshPreviewTitle,
 		packRefreshRows,
+		samePackRefreshPlan,
 		packRefreshSummary,
 		packSecondsOf,
 		packSizeOf,
@@ -520,6 +523,8 @@
 	let refreshPlanning = false;
 	/** U13-18: why the last refresh had nothing to do ("" = it had): the button's title while it stays disabled. */
 	let refreshNothing = "";
+	/** L15-7: the preview shown is a recomputed plan that differs from the one first previewed. */
+	let refreshChanged = "";
 	let refreshButton: HTMLButtonElement | null = null;
 	let refreshConfirmButton: HTMLButtonElement | null = null;
 	function exposeRefresh(p: Pick<RefreshPreview, "prev" | "listened" | "plan">, extra: Record<string, unknown> = {}) {
@@ -568,6 +573,7 @@
 			// holds), then from the pack sources the plan was built on.
 			const rows = packRefreshRows(plan.drop, [...getOfflineTracks(), ...src.favorites, ...src.recent, ...src.mix]);
 			packState = "";
+			refreshChanged = "";
 			refreshPreview = { prev, src, listened, plan, rows };
 			exposeRefresh({ prev, listened, plan }, { preview: true, rows: rows.map((r) => ({ videoId: r.videoId, title: r.title, artist: r.artist })) });
 			await tick();
@@ -583,13 +589,15 @@
 		if (!refreshPreview) return;
 		exposeRefresh(refreshPreview, { preview: false, cancelled: true });
 		refreshPreview = null;
+		refreshChanged = "";
 		await tick();
 		refreshButton?.focus();
 	}
 	async function confirmRefresh() {
 		if (!refreshPreview || packRunning || busy) return;
-		const { prev } = refreshPreview;
+		const { prev, plan: shown } = refreshPreview;
 		refreshPreview = null;
+		refreshChanged = "";
 		packState = "planning";
 		try {
 			// B9-6 (L14-11): recompute from fresh sources at confirm time; a track
@@ -597,10 +605,24 @@
 			const { src, listened, plan } = await computeRefreshPlan(prev);
 			if (!plan.drop.length || !plan.add.count) {
 				packState = "done";
-				packResult = packRefreshSummary(plan);
-				refreshNothing = plan.drop.length ? "Pas de nouveau titre pour remplacer les titres écoutés" : "Aucun titre écouté depuis le pack";
+				// L15-7: the preview listed tracks; an empty drop now means the
+				// listened ones are protected (the title playing), say so.
+				refreshNothing = packRefreshNothingReason(plan, prev, listened);
+				packResult = !plan.drop.length && refreshNothing.startsWith("Le titre en cours") ? "Rien à rafraîchir : le titre en cours est gardé, rien à retirer du pack." : packRefreshSummary(plan);
 				exposeRefresh({ prev, listened, plan }, { applied: false, recomputed: true });
 				exposePack();
+				return;
+			}
+			if (!samePackRefreshPlan(shown, plan)) {
+				// L15-7: the recomputed plan is not the one the user confirmed:
+				// show it (same panel, a note on top), apply nothing yet.
+				const rows = packRefreshRows(plan.drop, [...getOfflineTracks(), ...src.favorites, ...src.recent, ...src.mix]);
+				packState = "";
+				refreshChanged = packRefreshChangedNote(plan);
+				refreshPreview = { prev, src, listened, plan, rows };
+				exposeRefresh({ prev, listened, plan }, { preview: true, recomputed: true, changed: true, rows: rows.map((r) => ({ videoId: r.videoId, title: r.title, artist: r.artist })) });
+				await tick();
+				refreshConfirmButton?.focus();
 				return;
 			}
 			const byId = new Map<string, AudioListEntry>();
@@ -847,6 +869,16 @@
 				data-seconds={refreshPreview.plan.seconds}
 				data-add={refreshPreview.plan.add.count}
 			>
+				{#if refreshChanged}
+					<!-- L15-7: a plan recomputed at confirmation that differs from the previewed one. -->
+					<p
+						class="preview-changed"
+						role="status"
+						data-testid="pack-refresh-changed"
+					>
+						{refreshChanged}
+					</p>
+				{/if}
 				<span id="offline-pack-refresh-preview">{packRefreshPreviewTitle(refreshPreview.plan)}</span>
 				<ol class="preview-list">
 					{#each refreshPreview.rows as r (r.videoId)}
@@ -1142,6 +1174,12 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
+	}
+	// L15-7: the "plan changed" note above a recomputed preview.
+	.preview-changed {
+		margin: 0;
+		font-weight: 600;
+		color: rgb(255, 200, 120);
 	}
 	// B8-11: the tracks a refresh would remove, one line each (title, artist).
 	.preview-list {
