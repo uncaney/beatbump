@@ -677,7 +677,8 @@
 		display: flex;
 		grid-area: n;
 		line-height: 1.3;
-		font-size: 0.95em;
+		// U14-5: 0.95em of the 12px mobile root read 11.4px on the title; 12px floor.
+		font-size: max(0.95em, 12px);
 		gap: 0.95em;
 		// grid item: allow the text column to shrink instead of wrapping mid-word
 		min-width: 0;

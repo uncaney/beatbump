@@ -153,16 +153,17 @@
 		Popup,
 	}
 
+	// U14-5: French labels (ids unchanged: the harness and the code key on them).
 	const upNextTab: TabItem = {
 		id: "UpNext",
-		text: "Up Next",
+		text: "Suite",
 		action: () => {
 			active = "UpNext";
 		},
 	};
 	const relatedTab: TabItem = {
 		id: "Related",
-		text: "Related",
+		text: "Similaires",
 		action: () => {
 			active = "Related";
 		},
@@ -1264,11 +1265,12 @@
 	// Audit v8 TOP 8 / 3.2: the ProgressBar times ("0:46") rendered at 8.55px
 	// on the 12px mobile root. Floor them from the panel (ProgressBar is shared
 	// with the mini-bar and keeps its own scale there).
+	// U14-5: 12px floor (the shared --text-secondary-size token) instead of 11.
 	.container :global(.timestamp) {
-		font-size: max(0.6875rem, 11px);
+		font-size: var(--text-secondary-size, max(0.75rem, 12px));
 	}
 	.context-return {
-		font-size: max(0.75rem, 11px);
+		font-size: var(--text-secondary-size, max(0.75rem, 12px));
 		padding: 0.2em 0.7em;
 		border-radius: 999px;
 		border: 1px solid hsla(0, 0%, 100%, 0.35) !important;
@@ -1358,7 +1360,8 @@
 		text-transform: none !important;
 		box-shadow: none !important;
 		white-space: nowrap;
-		font-size: 0.85em;
+		// U14-5: 0.85em read 10.2px on phones; 12px floor.
+		font-size: max(0.85em, var(--text-secondary-size, 12px));
 		font-weight: 600;
 		cursor: pointer;
 		&:hover,
@@ -1551,6 +1554,8 @@
 	// fill + 2px underline; inactive tabs keep a transparent background.
 	@media screen and (min-width: 720px) {
 		.tracklist :global(.tab-bar .tab) {
+			// U14-5: the 0.9em tab labels read 10.8px on phones; 12px floor.
+			font-size: max(0.9em, var(--text-secondary-size, 12px));
 			box-shadow: inset 0 -2px 0 transparent;
 			transition:
 				background-color 120ms ease,
