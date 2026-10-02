@@ -28,9 +28,26 @@ import (
 // estimatedTrackMinutes is used for plays whose item carries no length.
 const estimatedTrackMinutes = 3.5
 
-// harnessRequest reports whether a history POST comes from the e2e harness
-// (Playwright HeadlessChrome or an explicit X-Ytm-Harness: 1 header). Such
-// plays are not recorded unless YTM_STATS_INCLUDE_HARNESS=1.
+// harnessUserAgents are the stable, lower-cased substrings of the user agents
+// the e2e harness presents (B9 section 0: a capture run used to write real
+// play_events): the Playwright default (HeadlessChrome), the markers of the
+// raw probes (ytm-harness-c*, ytm-smoke) and the link-preview robots of
+// e2e/fixtures.json `robotUserAgents` (the OG card steps). Kept in sync by
+// hand: the fixture file is not read at run time.
+var harnessUserAgents = []string{
+	"headlesschrome", "playwright", "ytm-harness", "ytm-smoke",
+	"whatsapp/", "twitterbot", "facebookexternalhit", "telegrambot", "discordbot", "slackbot", "linkedinbot",
+}
+
+// harnessHumanUserAgent is fixtures.json `humanUserAgent`, matched whole: a
+// real Chrome carries AppleWebKit / Safari tokens around "Chrome/126".
+const harnessHumanUserAgent = "Mozilla/5.0 (X11; Linux x86_64) Chrome/126"
+
+// harnessRequest reports whether a request comes from the e2e harness: an
+// explicit X-Ytm-Harness: 1 header (a Playwright context with a phone UA
+// still sends it), or one of the harness user agents above. Such plays are
+// neither recorded nor counted in the stats unless YTM_STATS_INCLUDE_HARNESS=1
+// (staging).
 func harnessRequest(r *http.Request) bool {
 	if os.Getenv("YTM_STATS_INCLUDE_HARNESS") == "1" {
 		return false
@@ -38,7 +55,17 @@ func harnessRequest(r *http.Request) bool {
 	if r.Header.Get("X-Ytm-Harness") == "1" {
 		return true
 	}
-	return strings.Contains(r.UserAgent(), "HeadlessChrome")
+	ua := strings.TrimSpace(r.UserAgent())
+	if ua == harnessHumanUserAgent {
+		return true
+	}
+	lower := strings.ToLower(ua)
+	for _, s := range harnessUserAgents {
+		if strings.Contains(lower, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // statsDays parses ?days= (default 30, clamped to 1..3650). days=0 or "all"

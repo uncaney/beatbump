@@ -107,6 +107,68 @@ func TestRecordPlayIncludesHarnessWithEnv(t *testing.T) {
 	}
 }
 
+// B9 section 0: the fixture robots, the raw-probe markers and the fixture
+// "human" UA are harness too; a phone UA with the header is harness; a real
+// phone or desktop browser is not; the env flag includes everything.
+func TestHarnessRequestFixtureAgents(t *testing.T) {
+	t.Setenv("YTM_STATS_INCLUDE_HARNESS", "")
+	iphone := "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+	chrome := "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+	harness := []string{
+		"WhatsApp/2.23.20.0 A",
+		"Twitterbot/1.0",
+		"facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+		"TelegramBot (like TwitterBot)",
+		"Discordbot/2.0; +https://discordapp.com",
+		"Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+		"LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)",
+		"Mozilla/5.0 (X11; Linux x86_64) Chrome/126",
+		"ytm-harness-c52",
+		"ytm-smoke",
+		"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0 Safari/537.36",
+	}
+	req := func(ua string, hdr bool) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/me/history", nil)
+		r.Header.Set("User-Agent", ua)
+		if hdr {
+			r.Header.Set("X-Ytm-Harness", "1")
+		}
+		return r
+	}
+	for _, ua := range harness {
+		if !harnessRequest(req(ua, false)) {
+			t.Errorf("fixture UA not recognised: %q", ua)
+		}
+	}
+	if !harnessRequest(req(iphone, true)) {
+		t.Errorf("iPhone context with the header must be harness")
+	}
+	for _, ua := range []string{iphone, chrome, ""} {
+		if harnessRequest(req(ua, false)) {
+			t.Errorf("real browser taken for the harness: %q", ua)
+		}
+	}
+	// A phone-UA harness context posting a play: ignored, nothing recorded.
+	useTestDB(t)
+	c, rec := ctxFor(http.MethodPost, "/api/v1/me/history", songBody, map[string]string{"User-Agent": iphone, "X-Ytm-Harness": "1"})
+	if err := MeRecordPlayHandler(c); err != nil || rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ignored":true`) {
+		t.Fatalf("phone harness play: %v %d %s", err, rec.Code, rec.Body.String())
+	}
+	c, rec = ctxFor(http.MethodPost, "/api/v1/me/history", songBody, map[string]string{"User-Agent": harness[0]})
+	if err := MeRecordPlayHandler(c); err != nil || rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ignored":true`) {
+		t.Fatalf("robot play: %v %d %s", err, rec.Code, rec.Body.String())
+	}
+	if n := countEvents(t); n != 0 {
+		t.Fatalf("harness plays recorded: %d", n)
+	}
+	t.Setenv("YTM_STATS_INCLUDE_HARNESS", "1")
+	for _, ua := range harness {
+		if harnessRequest(req(ua, true)) {
+			t.Errorf("env flag must include %q", ua)
+		}
+	}
+}
+
 func TestRecordPlayNormalWritesAlbum(t *testing.T) {
 	useTestDB(t)
 	c, rec := ctxFor(http.MethodPost, "/api/v1/me/history", songBody, map[string]string{"User-Agent": "Mozilla/5.0 Chrome/128"})

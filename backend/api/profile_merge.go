@@ -295,6 +295,11 @@ const adoptionGrace = 15 * time.Minute
 // adoptionMemoMax bounds the in-memory map (a login per entry).
 const adoptionMemoMax = 5000
 
+// adoptionNegativeMax bounds the negative entries within the map (B9-9,
+// L14-8): anonymous visitors who never log in used to fill it to
+// adoptionMemoMax and wipe every remembered adoption at once.
+const adoptionNegativeMax = 1000
+
 // adoptionNegativeTTL: how long "this id was not adopted" (a database
 // lookup that found nothing, L13-6) is remembered, so a plain anonymous
 // cookie does not cost one profiles read per request.
@@ -310,7 +315,12 @@ type adoption struct {
 var (
 	adoptionMu   sync.Mutex
 	adoptionMemo = map[string]adoption{}
-	adoptionNow  = time.Now
+	// adoptionOrder lists the memoised ids, least recently used first
+	// (B9-9: eviction is LRU like statsTimeOrder, never a full reset).
+	adoptionOrder []string
+	// adoptionNegatives counts the negative entries in adoptionMemo.
+	adoptionNegatives int
+	adoptionNow       = time.Now
 )
 
 // stale reports whether the entry is past its life (grace or negative TTL).
@@ -321,27 +331,96 @@ func (a adoption) stale(now time.Time) bool {
 	return now.Sub(a.at) > adoptionGrace
 }
 
+// adoptionTouch moves id to the recent end (adoptionMu held).
+func adoptionTouch(id string) {
+	for i, k := range adoptionOrder {
+		if k == id {
+			adoptionOrder = append(adoptionOrder[:i], adoptionOrder[i+1:]...)
+			break
+		}
+	}
+	adoptionOrder = append(adoptionOrder, id)
+}
+
+// adoptionDrop forgets id (adoptionMu held).
+func adoptionDrop(id string) {
+	a, ok := adoptionMemo[id]
+	if !ok {
+		return
+	}
+	if a.to == "" {
+		adoptionNegatives--
+	}
+	delete(adoptionMemo, id)
+	for i, k := range adoptionOrder {
+		if k == id {
+			adoptionOrder = append(adoptionOrder[:i], adoptionOrder[i+1:]...)
+			return
+		}
+	}
+}
+
+// adoptionPurgeStale drops every expired entry in one pass (adoptionMu held).
+func adoptionPurgeStale(now time.Time) {
+	kept := adoptionOrder[:0]
+	for _, k := range adoptionOrder {
+		a := adoptionMemo[k]
+		if a.stale(now) {
+			if a.to == "" {
+				adoptionNegatives--
+			}
+			delete(adoptionMemo, k)
+			continue
+		}
+		kept = append(kept, k)
+	}
+	adoptionOrder = kept
+}
+
 func rememberAdoption(from, to string) {
 	rememberAdoptionAt(from, to, adoptionNow())
 }
 
 // rememberAdoptionAt stores (from -> to, at); to == "" is the negative
-// entry. The stale entries are purged when the map is full.
+// entry. When the map is full the expired entries go first, then the least
+// recently used one; a negative entry past adoptionNegativeMax evicts the
+// oldest negative one, so anonymous visitors never push a remembered
+// adoption out.
 func rememberAdoptionAt(from, to string, at time.Time) {
 	adoptionMu.Lock()
 	defer adoptionMu.Unlock()
-	if _, ok := adoptionMemo[from]; !ok && len(adoptionMemo) >= adoptionMemoMax {
-		now := adoptionNow()
-		for k, a := range adoptionMemo {
-			if a.stale(now) {
-				delete(adoptionMemo, k)
+	if prev, ok := adoptionMemo[from]; ok {
+		if prev.to == "" {
+			adoptionNegatives--
+		}
+	} else {
+		if len(adoptionMemo) >= adoptionMemoMax {
+			adoptionPurgeStale(adoptionNow())
+		}
+		if to == "" && adoptionNegatives >= adoptionNegativeMax {
+			for _, k := range adoptionOrder {
+				if adoptionMemo[k].to == "" {
+					adoptionDrop(k)
+					break
+				}
 			}
 		}
-		if len(adoptionMemo) >= adoptionMemoMax {
-			adoptionMemo = map[string]adoption{}
+		for len(adoptionMemo) >= adoptionMemoMax && len(adoptionOrder) > 0 {
+			adoptionDrop(adoptionOrder[0])
 		}
 	}
+	if to == "" {
+		adoptionNegatives++
+	}
 	adoptionMemo[from] = adoption{to: to, at: at}
+	adoptionTouch(from)
+}
+
+// adoptionMemoLen is the number of memoised ids and of negative ones (tests).
+func adoptionMemoLen() (int, int) {
+	adoptionMu.Lock()
+	defer adoptionMu.Unlock()
+	return len(adoptionMemo), adoptionNegatives
 }
 
 // adoptedByRow reads AdoptedBy / AdoptedAt from pid's Profile row ("" and
@@ -370,6 +449,7 @@ func resolveAdopted(pid string) string {
 	adoptionMu.Lock()
 	a, ok := adoptionMemo[pid]
 	if ok && !a.stale(now) {
+		adoptionTouch(pid)
 		adoptionMu.Unlock()
 		if a.to == "" {
 			return pid
@@ -377,7 +457,7 @@ func resolveAdopted(pid string) string {
 		return a.to
 	}
 	if ok {
-		delete(adoptionMemo, pid)
+		adoptionDrop(pid)
 	}
 	adoptionMu.Unlock()
 	to, at := adoptedByRow(pid)
@@ -394,6 +474,8 @@ func resetAdoptions() {
 	adoptionMu.Lock()
 	defer adoptionMu.Unlock()
 	adoptionMemo = map[string]adoption{}
+	adoptionOrder = nil
+	adoptionNegatives = 0
 }
 
 // txProfileAnonymous is profileAnonymousErr inside a transaction: no Profile

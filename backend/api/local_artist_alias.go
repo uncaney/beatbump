@@ -313,6 +313,24 @@ func artistAliasCached() ([]aliasGroup, map[string]int) {
 	return groups, index
 }
 
+// artistAliasServe is what the lint handler reads (B9-10, L14-11): a fresh
+// memo as is; a stale one as is too, flagged, with one rescan started in
+// the background (the next read gets the new groups), like
+// artistAliasCached; only the very first read, before any scan, waits for
+// one (there is nothing else to answer).
+func artistAliasServe() (groups []aliasGroup, index map[string]int, truncated bool, stale bool) {
+	g, i, tr, at := artistAliasSnapshot()
+	if g == nil {
+		groups, index, truncated = artistAliasGroups()
+		return groups, index, truncated, false
+	}
+	if aliasMemoFresh(g, at, aliasMemoNow()) {
+		return g, i, tr, false
+	}
+	refreshArtistAliasesAsync()
+	return g, i, tr, true
+}
+
 // artistAliasGroupOf is the cached group an artist id belongs to (primary
 // or alias); ok is false when it belongs to none (or before the first scan).
 func artistAliasGroupOf(id string) (aliasGroup, bool) {
@@ -460,14 +478,20 @@ func aliasBadge(n int) string {
 // albumCount, trackCount}], size}], "total": N, "offset", "limit",
 // "truncated"}. `id` / `name` are the primary (most albums); `aliases` the
 // other credits. `total` is always a number and `groups` always an array.
-// `truncated` says the scan stopped at aliasScanCap artists. Read only:
-// nothing is merged, in the base or in the index (B7-10).
+// `truncated` says the scan stopped at aliasScanCap artists; `stale` (only
+// when true) that the memo is past aliasMemoTTL and a rescan runs behind
+// the answer (B9-10: the request never waits on it). Read only: nothing is
+// merged, in the base or in the index (B7-10).
 func LocalArtistAliasesHandler(c echo.Context) error {
-	groups, index, truncated := artistAliasGroups()
+	groups, index, truncated, stale := artistAliasServe()
 	if id := strings.TrimSpace(c.QueryParam("id")); id != "" {
 		if i, ok := index[id]; ok && i >= 0 && i < len(groups) {
 			g := groups[i]
-			return c.JSON(http.StatusOK, map[string]interface{}{"group": g, "groups": []aliasGroup{g}, "total": 1, "truncated": truncated})
+			out := map[string]interface{}{"group": g, "groups": []aliasGroup{g}, "total": 1, "truncated": truncated}
+			if stale {
+				out["stale"] = true
+			}
+			return c.JSON(http.StatusOK, out)
 		}
 		return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "not_found", "group": nil, "groups": []aliasGroup{}, "total": 0})
 	}
@@ -489,7 +513,11 @@ func LocalArtistAliasesHandler(c echo.Context) error {
 		}
 		page = groups[off:end]
 	}
-	return c.JSON(http.StatusOK, map[string]interface{}{
+	out := map[string]interface{}{
 		"groups": page, "total": len(groups), "offset": off, "limit": lim, "truncated": truncated,
-	})
+	}
+	if stale {
+		out["stale"] = true
+	}
+	return c.JSON(http.StatusOK, out)
 }
