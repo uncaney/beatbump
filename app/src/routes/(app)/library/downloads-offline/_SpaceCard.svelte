@@ -1070,8 +1070,12 @@
 			outline-offset: 2px;
 		}
 	}
+	// B9-3 (U13-15): "Annuler" read at 2.97 as red text on dark; a solid red
+	// fill with white text clears 4.5 (white on #c62828 ~= 5.9).
 	.danger {
-		border-color: rgba(220, 53, 69, 0.6);
+		background: #c62828;
+		color: #fff;
+		border-color: #c62828;
 	}
 	.space-desc {
 		margin: 0.5rem 0 0;
@@ -1116,6 +1120,11 @@
 		&::before {
 			content: " · ";
 		}
+	}
+	// B9-3 (U13-15): the progress line ("0/19 · 0 Mo sur 100 Mo") read at 11.25 px;
+	// floor it at 12 px.
+	.pack-progress {
+		font-size: max(0.85rem, 12px);
 	}
 	.pack-progress progress {
 		width: 100%;
