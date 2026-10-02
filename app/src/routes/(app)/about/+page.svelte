@@ -217,6 +217,14 @@
 		]
 			.filter(Boolean)
 			.join(" · ");
+	// B9-7 (U13-9): one group = the suggested copy with its meta, then the
+	// other copies folded on one line ("et N autres exemplaires : 7, 4, 2
+	// titres", each count a link to its copy). The title is never repeated.
+	const dupSuggested = (g: DupGroup): DupAlbum => g.albums.find((a) => a.id === g.suggested) ?? g.albums[0];
+	const dupOthers = (g: DupGroup): DupAlbum[] => {
+		const s = dupSuggested(g);
+		return g.albums.filter((a) => a !== s);
+	};
 
 	onMount(async () => {
 		void loadDuplicates();
@@ -445,6 +453,8 @@
 				</p>
 				<ul class="dups">
 					{#each dupGroups as g (g.key)}
+						{@const s = dupSuggested(g)}
+						{@const others = dupOthers(g)}
 						<li
 							class="dup"
 							data-testid="about-duplicates-group"
@@ -456,21 +466,40 @@
 								<span class="muted">· {g.albums.length} exemplaires</span>
 							</p>
 							<ul class="copies">
-								{#each g.albums as a (a.id)}
-									<li data-suggested={a.id === g.suggested ? "true" : "false"}>
+								{#if s}
+									<li data-suggested="true">
 										<a
-											href={`/release?id=${encodeURIComponent(a.id)}`}
-											data-testid="about-duplicates-copy">{a.title}</a
+											href={`/release?id=${encodeURIComponent(s.id)}`}
+											data-testid="about-duplicates-copy">{dupMeta(s)}</a
 										>
-										<span class="muted">{dupMeta(a)}</span>
-										{#if a.id === g.suggested}
-											<span
-												class="badge"
-												data-testid="about-duplicates-suggested">conseillé</span
-											>
-										{/if}
+										<span
+											class="badge"
+											data-testid="about-duplicates-suggested">conseillé</span
+										>
 									</li>
-								{/each}
+								{/if}
+								{#if others.length}
+									<li
+										class="others"
+										data-suggested="false"
+										data-testid="about-duplicates-others"
+										data-count={others.length}
+									>
+										<span class="muted"
+											>et {others.length} {others.length > 1 ? "autres exemplaires" : "autre exemplaire"} :</span
+										>
+										<span class="muted">
+											{#each others as a, i (a.id)}
+												<a
+													href={`/release?id=${encodeURIComponent(a.id)}`}
+													title={dupMeta(a)}
+													data-testid="about-duplicates-copy">{fmtInt(a.trackCount)}</a
+												>{i < others.length - 1 ? ", " : ""}
+											{/each}
+											{others.length === 1 && others[0].trackCount <= 1 ? "titre" : "titres"}
+										</span>
+									</li>
+								{/if}
 							</ul>
 						</li>
 					{/each}
@@ -636,6 +665,10 @@
 	}
 	.copies .muted {
 		font-size: var(--text-secondary-size);
+	}
+	.copies .others a {
+		min-height: 0;
+		padding: 0.6rem 0.1rem;
 	}
 	.badge {
 		font-size: var(--text-secondary-size);
