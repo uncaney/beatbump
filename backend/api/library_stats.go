@@ -160,16 +160,16 @@ var lintArtistScanFn = func(off, lim int) ([]map[string]interface{}, int) {
 	})
 }
 
-// scanAlbumsNoYear reuses the duplicates handler's bounded albums scan
+// scanNoYearAlbumDocs reuses the duplicates handler's bounded albums scan
 // (dupAlbumScanFn, dupScanCap/dupScanPage: newest-first, covers the whole
-// library) and counts the albums with a missing/empty/unparsable year
-// (yearOf), same test as B8-19's ?filter=no-year. ok is false when the scan
-// read nothing (Meili down): such an answer is not memoised.
-func scanAlbumsNoYear() (n int, ok bool) {
+// library) and keeps the albums with a missing/empty/unparsable year
+// (yearOf), newest first. ok is false when the scan read nothing (Meili
+// down): such an answer is not memoised.
+func scanNoYearAlbumDocs() (noYear []map[string]interface{}, ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("lint: albums scan failed: %v", r)
-			n, ok = 0, false
+			noYear, ok = nil, false
 		}
 	}()
 	var docs []map[string]interface{}
@@ -186,15 +186,74 @@ func scanAlbumsNoYear() (n int, ok bool) {
 		}
 	}
 	if len(docs) == 0 {
-		return 0, false
+		return nil, false
 	}
-	count := 0
+	noYear = make([]map[string]interface{}, 0)
 	for _, a := range docs {
 		if yearOf(mnumStr(a, "year")) == 0 {
-			count++
+			noYear = append(noYear, a)
 		}
 	}
-	return count, true
+	return noYear, true
+}
+
+// L14-4: the /about counter and ?filter=no-year (local_browse.go) used two
+// scans with two bounds (8 000 albums here, 1 000 there: the counter said
+// 148, the list showed a fraction without saying so). Both now read this
+// one memo of the no-year docs (a few hundred small docs), scanned once per
+// lintMemoTTL, off the lock (a stale memo is served while one caller
+// rescans, like libraryLintCached).
+var (
+	noYearMu     sync.Mutex
+	noYearScanMu sync.Mutex
+	noYearMemo   []map[string]interface{}
+	noYearMemoAt time.Time
+)
+
+func noYearSnapshot() ([]map[string]interface{}, time.Time) {
+	noYearMu.Lock()
+	defer noYearMu.Unlock()
+	return noYearMemo, noYearMemoAt
+}
+
+// noYearAlbumsCached answers the memoised no-year docs (shared, never
+// mutated by the callers: copy before sorting). ok is false only when there
+// is no memo and the scan read nothing.
+func noYearAlbumsCached() (docs []map[string]interface{}, ok bool) {
+	now := lintMemoNow()
+	memo, at := noYearSnapshot()
+	if memo != nil && now.Sub(at) < lintMemoTTL {
+		return memo, true
+	}
+	if memo != nil {
+		if !noYearScanMu.TryLock() {
+			return memo, true
+		}
+	} else {
+		noYearScanMu.Lock()
+	}
+	defer noYearScanMu.Unlock()
+	now = lintMemoNow()
+	if memo, at = noYearSnapshot(); memo != nil && now.Sub(at) < lintMemoTTL {
+		return memo, true
+	}
+	docs, ok = scanNoYearAlbumDocs()
+	noYearMu.Lock()
+	defer noYearMu.Unlock()
+	if ok {
+		noYearMemo, noYearMemoAt = docs, now
+	}
+	if noYearMemo != nil {
+		return noYearMemo, true
+	}
+	return nil, false
+}
+
+// resetNoYearAlbumsMemo empties the no-year docs memo (tests).
+func resetNoYearAlbumsMemo() {
+	noYearMu.Lock()
+	noYearMemo, noYearMemoAt = nil, time.Time{}
+	noYearMu.Unlock()
 }
 
 // scanGenresRare reuses LocalGenresHandler's own facet + normalizeGenres
@@ -266,12 +325,12 @@ func scanArtistCloseGroups() (n int, ok bool) {
 // counters. ok is false when every scan it needs failed (Meili down): such
 // an answer is not memoised.
 func scanLibraryLint() (out libraryLint, ok bool) {
-	noYear, okYear := scanAlbumsNoYear()
+	noYearDocs, okYear := noYearAlbumsCached()
 	groups, okGroups := scanArtistCloseGroups()
 	if !okYear && !okGroups {
 		return libraryLint{}, false
 	}
-	return libraryLint{AlbumsNoYear: noYear, GenresRare: scanGenresRare(), ArtistGroups: groups}, true
+	return libraryLint{AlbumsNoYear: len(noYearDocs), GenresRare: scanGenresRare(), ArtistGroups: groups}, true
 }
 
 // lintSnapshot copies the memo under the lock.
@@ -316,11 +375,13 @@ func libraryLintCached() libraryLint {
 	return out
 }
 
-// resetLintMemo empties the lint memo (tests).
+// resetLintMemo empties the lint memo and the no-year docs memo it counts
+// from (tests).
 func resetLintMemo() {
 	lintMu.Lock()
 	lintMemo, lintMemoAt = nil, time.Time{}
 	lintMu.Unlock()
+	resetNoYearAlbumsMemo()
 }
 
 // LocalLintHandler: GET /api/v1/local/lint (B8-22). Read-only; nothing is
