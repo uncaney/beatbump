@@ -26,7 +26,10 @@ import {
 	originRoom,
 	packDurationText,
 	packLabel,
+	packRefreshPreviewTitle,
+	packRefreshRows,
 	packRefreshSummary,
+	UNKNOWN_TITLE,
 	packSecondsOf,
 	packSizeOf,
 	parsePackChoice,
@@ -355,6 +358,27 @@ describe("B7-7 refresh my pack", () => {
 		expect(partial.items.map((i) => i.videoId)).toEqual(["p2", "p3", "n1", "n3"]);
 		expect(partial.items.find((i) => i.videoId === "p3")?.seconds).toBe(900);
 		expect(refreshedLastPack(p, r, 5, []).items.map((i) => i.videoId)).toEqual(["p2", "n1", "n3"]);
+	});
+
+	it("B8-11: packRefreshRows names the tracks to drop from any source at hand, never hides an unknown one", () => {
+		const p = pack();
+		const r = planPackRefresh(p, ["p1", "p3"], { favorites: [tr("n1", { duration: 600 })] });
+		const rows = packRefreshRows(r.drop, [
+			null,
+			{ videoId: "p1", title: "  Around the World ", artistInfo: { artist: [{ text: "Daft Punk" }] } },
+			{ videoId: "p1", title: "duplicate later: ignored", artist: "Nobody" },
+			{ videoId: "n1", title: "not dropped" },
+		]);
+		expect(rows).toEqual([
+			{ videoId: "p1", title: "Around the World", artist: "Daft Punk", seconds: 600 },
+			{ videoId: "p3", title: UNKNOWN_TITLE, artist: "", seconds: 900 },
+		]);
+		// `name` is accepted as a title, a known item without an artist says so
+		expect(packRefreshRows([{ videoId: "x", seconds: 0 }], [{ videoId: "x", name: "Nom" }])).toEqual([{ videoId: "x", title: "Nom", artist: "Artiste inconnu", seconds: 0 }]);
+		expect(packRefreshRows([], null)).toEqual([]);
+		expect(packRefreshPreviewTitle(r)).toBe("2 titres écoutés seront retirés du pack (25 min) et remplacés par 1 nouveau (10 min) :");
+		const one = planPackRefresh(p, ["p1"], { favorites: [tr("n1", { duration: 300 }), tr("n2", { duration: 300 })] });
+		expect(packRefreshPreviewTitle(one)).toBe("1 titre écouté sera retiré du pack (10 min) et remplacé par 2 nouveaux (10 min) :");
 	});
 
 	it("planPackRefresh: the track playing / restored is never dropped (L13-1)", () => {

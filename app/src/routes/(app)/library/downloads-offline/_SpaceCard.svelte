@@ -39,6 +39,8 @@
 	// lastAccess moved) by new ones of the same listening time, run as a pack
 	// (same job key, same "Annuler"). Pinned entries outside the pack are never
 	// touched. window.__ytmPackRefresh carries the outcome for the harness.
+	// B8-11 (cycle 47): the refresh is previewed first ([pack-refresh-preview]
+	// lists the tracks that would go, [pack-refresh-confirm] runs it).
 	//
 	// B7-12: `?pack=1` (manifest shortcut "Pack trajet") unfolds the card and
 	// focuses the size / duration selector.
@@ -68,6 +70,8 @@
 		packDurationLabel,
 		packDurationText,
 		packLabel,
+		packRefreshPreviewTitle,
+		packRefreshRows,
 		packRefreshSummary,
 		packSecondsOf,
 		packSizeOf,
@@ -80,6 +84,8 @@
 		type LastPack,
 		type PackGuard,
 		type PackPlan,
+		type PackRefreshPlan,
+		type PackRefreshRow,
 	} from "$lib/offlinePack";
 	import { durationOf } from "$lib/offlineQueue";
 	import { fmtBytesFr, spaceButtonLabels, spaceStatusLine } from "$lib/offlineSpace";
@@ -460,37 +466,80 @@
 	// uncached (the same uncache-audio path as "Libérer", so pinned entries
 	// outside the pack stay) and as many seconds of new tracks are run as a
 	// pack. The track playing and the restored last track are never dropped.
+	//
+	// B8-11 (cycle 47): the refresh is previewed first. "Rafraîchir mon pack"
+	// computes the plan and shows [data-testid=pack-refresh-preview]: the
+	// tracks that would be uncached (title, artist, one [pack-refresh-row]
+	// each), what replaces them, then [pack-refresh-confirm] runs it and
+	// [pack-refresh-cancel] drops it. Nothing is uncached before the
+	// confirmation. window.__ytmPackRefresh carries the plan at the preview
+	// (`preview: true`, no `applied`), then the outcome (`applied`).
+	type RefreshPreview = { prev: LastPack; src: PackSources; listened: Set<string>; plan: PackRefreshPlan; rows: PackRefreshRow[] };
+	let refreshPreview: RefreshPreview | null = null;
+	/** The refresh plan is being computed (the "Rafraîchir" button says so, not "Préparer un pack"). */
+	let refreshPlanning = false;
+	let refreshButton: HTMLButtonElement | null = null;
+	let refreshConfirmButton: HTMLButtonElement | null = null;
+	function exposeRefresh(p: Pick<RefreshPreview, "prev" | "listened" | "plan">, extra: Record<string, unknown> = {}) {
+		if (typeof window === "undefined") return;
+		(window as PackWindow).__ytmPackRefresh = {
+			packAt: p.prev.at,
+			packIds: p.prev.items.map((i) => i.videoId),
+			listened: [...p.listened],
+			dropped: p.plan.drop.map((i) => i.videoId),
+			kept: p.plan.keep.map((i) => i.videoId),
+			seconds: p.plan.seconds,
+			added: p.plan.add.items.map((i) => i.videoId),
+			addedSeconds: p.plan.add.seconds,
+			...extra,
+		};
+	}
 	async function refreshPack() {
-		if (packRunning || busy || loading || !lastPack) return;
+		if (packRunning || busy || loading || !lastPack || refreshPreview) return;
 		const prev = lastPack;
 		packState = "planning";
+		refreshPlanning = true;
 		resetPackRun();
 		try {
 			const src = await packSources();
 			const listened = listenedPackIds(prev, { plays: src.plays });
 			const protect = [get(currentTrack)?.videoId, readLastTrack(storage() ?? undefined)?.videoId];
 			const plan = planPackRefresh(prev, listened, { favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes }, protect);
-			const expose = (extra: Record<string, unknown> = {}) => {
-				if (typeof window === "undefined") return;
-				(window as PackWindow).__ytmPackRefresh = {
-					packAt: prev.at,
-					packIds: prev.items.map((i) => i.videoId),
-					listened: [...listened],
-					dropped: plan.drop.map((i) => i.videoId),
-					kept: plan.keep.map((i) => i.videoId),
-					seconds: plan.seconds,
-					added: plan.add.items.map((i) => i.videoId),
-					addedSeconds: plan.add.seconds,
-					...extra,
-				};
-			};
 			if (!plan.drop.length || !plan.add.count) {
 				packState = "done";
 				packResult = packRefreshSummary(plan);
-				expose({ applied: false });
+				exposeRefresh({ prev, listened, plan }, { applied: false });
 				exposePack();
 				return;
 			}
+			// The names come from the local offline list first (what the SW
+			// holds), then from the pack sources the plan was built on.
+			const rows = packRefreshRows(plan.drop, [...getOfflineTracks(), ...src.favorites, ...src.recent, ...src.mix]);
+			packState = "";
+			refreshPreview = { prev, src, listened, plan, rows };
+			exposeRefresh({ prev, listened, plan }, { preview: true, rows: rows.map((r) => ({ videoId: r.videoId, title: r.title, artist: r.artist })) });
+			await tick();
+			refreshConfirmButton?.focus();
+		} catch (e) {
+			packState = "";
+			error = `Impossible de rafraîchir le pack : ${(e as Error)?.message ?? e}`;
+		} finally {
+			refreshPlanning = false;
+		}
+	}
+	async function cancelRefresh() {
+		if (!refreshPreview) return;
+		exposeRefresh(refreshPreview, { preview: false, cancelled: true });
+		refreshPreview = null;
+		await tick();
+		refreshButton?.focus();
+	}
+	async function confirmRefresh() {
+		if (!refreshPreview || packRunning || busy) return;
+		const { prev, src, listened, plan } = refreshPreview;
+		refreshPreview = null;
+		packState = "planning";
+		try {
 			const byId = new Map<string, AudioListEntry>();
 			for (const e of entries) if (e.videoId) byId.set(e.videoId, e);
 			const removed: string[] = [];
@@ -503,7 +552,7 @@
 			}
 			if (removed.length) applySwEviction(removed);
 			scheduleSwAudioRefresh();
-			expose({ applied: true, removed, failed });
+			exposeRefresh({ prev, listened, plan }, { applied: true, removed, failed });
 			notify(packRefreshSummary(plan), "success");
 			// L13-16: a drop the SW did not uncache stays pinned: keep it in the
 			// remembered pack rather than forgetting it while it holds its bytes.
@@ -690,7 +739,7 @@
 					bind:this={packStartButton}
 					on:click={startPack}
 				>
-					{packState === "planning" ? "Préparation…" : labels.pack}
+					{packState === "planning" && !refreshPlanning ? "Préparation…" : labels.pack}
 				</button>
 				{#if lastPack && lastPack.items.length}
 					<!-- B7-7: only once a pack was prepared on this device. -->
@@ -701,15 +750,63 @@
 						data-testid="pack-refresh"
 						data-pack-count={lastPack.items.length}
 						aria-describedby="offline-space-desc"
-						disabled={loading || !!busy || packRunning || !!freePlan}
-						title="Remplace les titres du pack déjà écoutés par de nouveaux, même durée d'écoute ; les épinglés hors du pack ne bougent pas"
+						disabled={loading || !!busy || packRunning || !!freePlan || !!refreshPreview}
+						title="Montre d'abord les titres du pack déjà écoutés qui seraient remplacés par de nouveaux, même durée d'écoute ; les épinglés hors du pack ne bougent pas"
+						bind:this={refreshButton}
 						on:click={refreshPack}
 					>
-						Rafraîchir mon pack
+						{refreshPlanning ? "Préparation…" : "Rafraîchir mon pack"}
 					</button>
 				{/if}
 			{/if}
 		</div>
+		{#if refreshPreview}
+			<!-- B8-11: what the refresh would uncache, before anything happens. -->
+			<div
+				class="panel"
+				role="group"
+				aria-labelledby="offline-pack-refresh-preview"
+				data-testid="pack-refresh-preview"
+				data-count={refreshPreview.rows.length}
+				data-seconds={refreshPreview.plan.seconds}
+				data-add={refreshPreview.plan.add.count}
+			>
+				<span id="offline-pack-refresh-preview">{packRefreshPreviewTitle(refreshPreview.plan)}</span>
+				<ol class="preview-list">
+					{#each refreshPreview.rows as r (r.videoId)}
+						<li
+							data-testid="pack-refresh-row"
+							data-video-id={r.videoId}
+						>
+							<span class="preview-title">{r.title}</span>
+							{#if r.artist}<span class="preview-artist">{r.artist}</span>{/if}
+						</li>
+					{/each}
+				</ol>
+				<div class="panel-actions">
+					<button
+						type="button"
+						id="offline-pack-refresh-confirm"
+						class="btn-reset btn-secondary danger"
+						data-testid="pack-refresh-confirm"
+						disabled={!!busy || packRunning}
+						bind:this={refreshConfirmButton}
+						on:click={confirmRefresh}
+					>
+						Rafraîchir
+					</button>
+					<button
+						type="button"
+						id="offline-pack-refresh-cancel"
+						class="btn-reset btn-ghost"
+						data-testid="pack-refresh-cancel"
+						on:click={cancelRefresh}
+					>
+						Annuler
+					</button>
+				</div>
+			</div>
+		{/if}
 		<p
 			class="space-desc"
 			id="offline-space-desc"
@@ -947,6 +1044,27 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
+	}
+	// B8-11: the tracks a refresh would remove, one line each (title, artist).
+	.preview-list {
+		margin: 0;
+		padding-left: 1.4rem;
+		max-height: 14rem;
+		overflow-y: auto;
+		li {
+			padding: 0.2rem 0;
+			line-height: 1.3;
+		}
+	}
+	.preview-title {
+		overflow-wrap: anywhere;
+	}
+	.preview-artist {
+		color: $muted;
+		font-size: var(--text-secondary-size);
+		&::before {
+			content: " · ";
+		}
 	}
 	.pack-progress progress {
 		width: 100%;

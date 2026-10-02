@@ -6,7 +6,7 @@
 // the items to keepOffline (downloaded + pinned, 2 at a time, cancellable).
 import { isListened } from "$lib/listenLog";
 import { keepableTracks } from "$lib/offlineBatch";
-import { durationOf } from "$lib/offlineQueue";
+import { artistName, durationOf } from "$lib/offlineQueue";
 import { formatBytesFr, formatMoFr } from "$lib/utils/formatFr";
 import { formatDuration } from "$lib/utils/releaseMeta";
 
@@ -454,6 +454,43 @@ export function refreshedLastPack(
 	for (const id of stillCached ?? []) if (typeof id === "string" && id) still.add(id);
 	const kept = still.size ? [...plan.keep, ...plan.drop.filter((i) => still.has(i.videoId))] : plan.keep;
 	return { at, mode: prev.mode, target: prev.target, items: [...kept, ...lastPackOf(plan.add, at).items] };
+}
+
+// ---- B8-11 preview before "Rafraîchir mon pack" ----
+// The refresh uncaches tracks that may be unreachable offline afterwards: the
+// card lists what would go (title, artist) and waits for a confirmation. The
+// rows are pure: the pack only remembers ids and lengths, the names come from
+// whatever the card has at hand (the local offline list, the pack sources).
+
+export type PackRefreshRow = { videoId: string; title: string; artist: string; seconds: number };
+export const UNKNOWN_TITLE = "Titre inconnu";
+
+/**
+ * The tracks `drop` names, with their title and artist looked up in `lookup`
+ * (first match per id wins; any item shape artistName accepts). An id nobody
+ * knows still gets a row ("Titre inconnu", no artist): the list never hides a
+ * track that is about to be removed.
+ */
+export function packRefreshRows(drop: ReadonlyArray<Pick<LastPackItem, "videoId" | "seconds">>, lookup?: Iterable<Record<string, any> | null | undefined> | null): PackRefreshRow[] {
+	const byId = new Map<string, Record<string, any>>();
+	for (const t of lookup ?? []) {
+		const id = t?.videoId;
+		if (typeof id === "string" && id && !byId.has(id)) byId.set(id, t as Record<string, any>);
+	}
+	return drop.map((d) => {
+		const t = byId.get(d.videoId);
+		const title = typeof t?.title === "string" && t.title.trim() ? t.title.trim() : typeof t?.name === "string" && t.name.trim() ? t.name.trim() : UNKNOWN_TITLE;
+		const artist = t ? artistName(t as any) : "";
+		return { videoId: d.videoId, title, artist, seconds: Math.max(0, Number(d.seconds) || 0) };
+	});
+}
+
+/** "2 titres écoutés seront retirés du pack (15 min) et remplacés par 3 nouveaux (14 min) :". */
+export function packRefreshPreviewTitle(plan: Pick<PackRefreshPlan, "drop" | "seconds" | "add">): string {
+	const n = plan.drop.length;
+	const dropped = `${n} titre${n > 1 ? "s" : ""} écouté${n > 1 ? "s" : ""} ${n > 1 ? "seront retirés" : "sera retiré"} du pack (${formatDuration(plan.seconds)})`;
+	const add = plan.add.count;
+	return `${dropped} et remplacé${n > 1 ? "s" : ""} par ${add} nouveau${add > 1 ? "x" : ""} (${formatDuration(plan.add.seconds)}) :`;
 }
 
 /** "3 titres écoutés remplacés par 4 nouveaux (42 min)" / "Rien à rafraîchir : …". */
