@@ -734,8 +734,19 @@ func LocalSongsHandler(c echo.Context) error {
 		// U12-5: a clean genre name also matches the raw multi-valued tags holding it.
 		filters = append(filters, genreSongsFilter(g))
 	}
+	groupNames := 0
 	if ar := c.QueryParam("artist"); ar != "" {
-		filters = append(filters, "albumArtist = \""+escapeMeili(ar)+"\"")
+		if c.QueryParam("group") == "1" {
+			// B8-20 (c48b): the union of the artist's credits ("Ed Sheeran"
+			// and its "feat." variants, local_artist_alias.go), resolved
+			// server side from the aliases memo; the artist alone when it
+			// has none (or before the first scan). Bounded by aliasGroupCap.
+			names := artistAliasNames(ar)
+			groupNames = len(names)
+			filters = append(filters, aliasSongsFilter(names))
+		} else {
+			filters = append(filters, "albumArtist = \""+escapeMeili(ar)+"\"")
+		}
 	}
 	payload := map[string]interface{}{
 		"q": c.QueryParam("q"), "offset": off, "limit": lim, "sort": []string{sortBy},
@@ -746,9 +757,13 @@ func LocalSongsHandler(c echo.Context) error {
 	}
 	hits, total := meiliBrowse("tracks", payload)
 	items := localSongItemsWithCovers(hits)
-	return c.JSON(http.StatusOK, map[string]interface{}{
+	out := map[string]interface{}{
 		"items": items, "total": total, "offset": off, "limit": lim, "sort": sortBy,
-	})
+	}
+	if groupNames > 0 {
+		out["group"] = groupNames // credits unioned (1 = the artist alone)
+	}
+	return c.JSON(http.StatusOK, out)
 }
 
 // LocalGenresHandler returns genre values by track count (best-effort: the genre

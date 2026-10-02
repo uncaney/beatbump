@@ -76,13 +76,31 @@ func buildLocalArtist(artistId string) map[string]interface{} {
 	// tout) is what the seeAll link really loads (one LocalSongsHandler
 	// page, capped at localArtistSeeAllLimit); the full count rides along as
 	// artistTotal with the page URLs that cover it.
+	// B8-20 (c48b): the other credits of this artist's group ("Ed Sheeran
+	// feat. Khalid" next to "Ed Sheeran"), read from the aliases memo (never
+	// a scan on the page's path), and the count of the group's titles so
+	// "Tout lire" / "Voir les N titres" cover the union (seeAll ?group=1).
+	// The inline preview stays the artist's own titles.
+	peers := artistAliasPeers(artistId)
+	groupTotal := songsTotal
+	if len(peers) > 0 {
+		resp["aliases"] = localArtistAliasesBlock(artistId, peers)
+		if _, n := meiliBrowse("tracks", map[string]interface{}{
+			"q": "", "filter": aliasSongsFilter(artistAliasNames(name)), "limit": 1,
+			"attributesToRetrieve": []string{"lid"},
+		}); n > groupTotal {
+			groupTotal = n
+		}
+	}
 	var seeAll map[string]interface{}
 	shownTotal := songsTotal
-	if name != "" && songsTotal > 0 {
-		seeAll = localArtistSeeAll(name, songsTotal)
+	if name != "" && groupTotal > 0 {
+		seeAll = localArtistSeeAllGroup(name, groupTotal, len(peers) > 0)
+		seeAll["ownTotal"] = songsTotal
 		shownTotal = seeAll["total"].(int)
 		resp["songsTotal"] = shownTotal
-		resp["artistSongsTotal"] = songsTotal
+		resp["artistSongsTotal"] = groupTotal
+		resp["artistOwnSongsTotal"] = songsTotal
 		resp["seeAll"] = seeAll
 	}
 	if len(songItems) > 0 {
@@ -121,9 +139,35 @@ const localArtistSeeAllPages = 5
 // not play; `artistTotal` is the real count and `pages` the URLs (offset by
 // limit, at most localArtistSeeAllPages) that load all of them.
 func localArtistSeeAll(name string, total int) map[string]interface{} {
+	return localArtistSeeAllGroup(name, total, false)
+}
+
+// localArtistAliasesBlock is the `aliases` block of a local artist page
+// (B8-20): the group's primary and the OTHER credits (primary first when
+// this page is an alias), each with its page href. Display only.
+func localArtistAliasesBlock(id string, peers []aliasArtist) map[string]interface{} {
+	g, _ := artistAliasGroupOf(id)
+	others := make([]map[string]interface{}, 0, len(peers))
+	for _, p := range peers {
+		others = append(others, map[string]interface{}{
+			"id": p.ID, "name": p.Name, "albumCount": p.AlbumCount, "trackCount": p.TrackCount,
+			"href": "/artist/" + p.ID,
+		})
+	}
+	return map[string]interface{}{"primary": g.ID, "primaryName": g.Name, "size": g.Size, "others": others}
+}
+
+// localArtistSeeAllGroup is localArtistSeeAll over the union of the
+// artist's credits when group is true (B8-20): every page URL carries
+// ?group=1 (LocalSongsHandler resolves the names server side), `total` /
+// `artistTotal` count the union and `group` says so.
+func localArtistSeeAllGroup(name string, total int, group bool) map[string]interface{} {
 	pageURL := func(offset int) string {
 		q := url.Values{}
 		q.Set("artist", name)
+		if group {
+			q.Set("group", "1")
+		}
 		q.Set("limit", strconv.Itoa(localArtistSeeAllLimit))
 		q.Set("sort", "album:asc")
 		if offset > 0 {
@@ -146,6 +190,9 @@ func localArtistSeeAll(name string, total int) map[string]interface{} {
 		"artistTotal": total,
 		"limit":       localArtistSeeAllLimit,
 		"pages":       pages,
+	}
+	if group {
+		out["group"] = true
 	}
 	if total > localArtistSeeAllLimit {
 		out["next"] = pageURL(localArtistSeeAllLimit)

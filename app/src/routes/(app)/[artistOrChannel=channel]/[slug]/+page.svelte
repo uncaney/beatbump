@@ -22,6 +22,15 @@
 
 	$: carousels = (body?.["carousels"] ?? []) as ArtistPageBody["carousels"];
 	$: songs = (body?.["songs"] ?? []) as ArtistPageBody["songs"];
+	// B8-20 (c48b): the other credits of this local artist's group ("Ed
+	// Sheeran feat. Khalid" next to "Ed Sheeran"), display only: chips to
+	// their pages. "Tout lire" plays the union (the API's seeAll carries
+	// ?group=1 and counts it in artistTotal).
+	$: aliasOthers = (Array.isArray(body?.["aliases"]?.others) ? body["aliases"].others : []) as {
+		id: string;
+		name: string;
+		href?: string;
+	}[];
 
 	$: id = $page.params.slug;
 
@@ -121,6 +130,23 @@
 	/>
 	<main>
 		<div class="artist-body">
+			{#if aliasOthers.length > 0}
+				<nav
+					class="artist-aliases resp-content-width"
+					data-testid="artist-aliases"
+					aria-label="Aussi sous d'autres noms"
+				>
+					<span class="aliases-label">Aussi sous :</span>
+					{#each aliasOthers as alias (alias.id)}
+						<a
+							class="alias-chip"
+							data-testid="artist-alias-chip"
+							href={alias.href || `/artist/${alias.id}`}
+							title="Voir la page {alias.name}">{alias.name}</a
+						>
+					{/each}
+				</nav>
+			{/if}
 			{#if songs?.items?.length > 0}
 				<section class="song-list resp-content-width">
 					<div class="header">
@@ -230,6 +256,38 @@
 
 	.songs {
 		margin-bottom: 1rem;
+	}
+
+	// B8-20: "Aussi sous :" chips (44px tap targets, wrapping row), same
+	// pill as the _Browse filter chip.
+	.artist-aliases {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0 0 1rem;
+	}
+	.aliases-label {
+		color: #999;
+		font-size: var(--text-secondary-size);
+		margin-right: 0.25rem;
+	}
+	.alias-chip {
+		display: inline-flex;
+		align-items: center;
+		box-sizing: border-box;
+		min-height: max(2.75rem, 44px);
+		padding: 0 0.9rem;
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.12);
+		border: 1px solid rgba(255, 255, 255, 0.2);
+		color: inherit;
+		text-decoration: none;
+		font-weight: 600;
+		&:hover,
+		&:focus-visible {
+			background: rgba(255, 255, 255, 0.2);
+		}
 	}
 
 	// Audit v8 TOP 1: the global `button:not(.icon-btn)` rule gave it black

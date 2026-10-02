@@ -246,3 +246,74 @@ func TestArtistAliasesMeiliDownNotMemoised(t *testing.T) {
 		t.Fatalf("an empty scan must not be memoised: %+v", out)
 	}
 }
+
+// local/songs?artist=X&group=1 plays the union of the group's credits;
+// without group=1 the plain equality filter is untouched.
+func TestLocalSongsGroupUnion(t *testing.T) {
+	s := edSheeranStub()
+	startAliasStub(t, s)
+	artistAliasGroups() // warm the memo (the handler never scans itself)
+	get := func(q string) map[string]interface{} {
+		c, rec := ctxFor(http.MethodGet, "/api/v1/local/songs?"+q, "", nil)
+		if err := LocalSongsHandler(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != 200 {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var out map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	plain := get("artist=Ed+Sheeran&limit=200")
+	if mint(plain, "total") != 3 || s.trackFilter != `albumArtist = "Ed Sheeran"` {
+		t.Fatalf("plain: total %v filter %q", plain["total"], s.trackFilter)
+	}
+	if _, ok := plain["group"]; ok {
+		t.Errorf("plain answer must not carry group: %v", plain["group"])
+	}
+	union := get("artist=Ed+Sheeran&group=1&limit=200")
+	if mint(union, "total") != 5 || mint(union, "group") != 4 {
+		t.Fatalf("union: total %v group %v (%s)", union["total"], union["group"], s.trackFilter)
+	}
+	if !strings.HasPrefix(s.trackFilter, "albumArtist IN [") || !strings.Contains(s.trackFilter, `"Ed Sheeran feat. Khalid"`) || !strings.Contains(s.trackFilter, `"Ed Sheeran feat. Camila Cabello & Cardi B"`) {
+		t.Errorf("union filter: %q", s.trackFilter)
+	}
+	// An artist of no group: the union is the artist alone.
+	alone := get("artist=Daft+Punk&group=1&limit=200")
+	if mint(alone, "total") != 2 || mint(alone, "group") != 1 {
+		t.Errorf("Daft Punk alone: %v", alone)
+	}
+}
+
+// The local artist page carries its group's other credits and a seeAll
+// link over the union (?group=1, union total).
+func TestLocalArtistPageAliasesAndGroupSeeAll(t *testing.T) {
+	startAliasStub(t, edSheeranStub())
+	artistAliasGroups()
+	resp := buildLocalArtist(artistID("Ed Sheeran feat. Khalid"))
+	block, ok := resp["aliases"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("no aliases block: %v", resp["aliases"])
+	}
+	others, _ := block["others"].([]map[string]interface{})
+	if block["primary"] != artistID("Ed Sheeran") || len(others) != 3 || others[0]["name"] != "Ed Sheeran" || others[0]["href"] != "/artist/"+artistID("Ed Sheeran") {
+		t.Fatalf("aliases block: %v", block)
+	}
+	seeAll, _ := resp["seeAll"].(map[string]interface{})
+	if seeAll == nil || !strings.Contains(mstr(seeAll, "url"), "group=1") || seeAll["artistTotal"] != 5 || seeAll["ownTotal"] != 1 || seeAll["group"] != true {
+		t.Fatalf("seeAll: %v", seeAll)
+	}
+	if resp["artistSongsTotal"] != 5 || resp["artistOwnSongsTotal"] != 1 {
+		t.Errorf("totals: %v / %v", resp["artistSongsTotal"], resp["artistOwnSongsTotal"])
+	}
+	// An artist of no group: no block, plain seeAll.
+	resp = buildLocalArtist(artistID("Daft Punk"))
+	if _, ok := resp["aliases"]; ok {
+		t.Errorf("Daft Punk has no aliases block: %v", resp["aliases"])
+	}
+	seeAll, _ = resp["seeAll"].(map[string]interface{})
+	if seeAll == nil || strings.Contains(mstr(seeAll, "url"), "group=1") || seeAll["artistTotal"] != 2 {
+		t.Errorf("plain seeAll: %v", seeAll)
+	}
+}
