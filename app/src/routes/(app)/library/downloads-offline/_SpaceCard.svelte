@@ -90,6 +90,7 @@
 		type PackRefreshRow,
 	} from "$lib/offlinePack";
 	import { durationOf } from "$lib/offlineQueue";
+	import { scrollIntoViewWhenSettled } from "$lib/routeSettled";
 	import { fmtBytesFr, spaceButtonLabels, spaceStatusLine } from "$lib/offlineSpace";
 	import { cancelKeepJob, defaultKeepDeps, keepDepsWithAbort, keepJobs, keepSummary, startKeepJob, type KeepProgress, type KeepResult } from "$lib/offlineBatch";
 	import { getFavorites, getMix, getRecent } from "$lib/me";
@@ -650,6 +651,12 @@
 		// B7-12: ?pack=1 (manifest shortcut "Pack trajet") unfolds it and
 		// focuses the selector, the duration list first; the parameter is then
 		// dropped so a reload does not replay it.
+		// c56a (black screen from the home "Préparer 2 h" card): the scroll to
+		// the selector / the start button waits for the root layout's page
+		// crossfade to end (scrollIntoViewWhenSettled). Scrolling during the
+		// 150 ms fade moved the container past the outgoing home page, still
+		// in flow above this one at opacity 0: the installed app showed a
+		// black screen, and the scroll was clamped back to the top anyway.
 		try {
 			const url = new URL(window.location.href);
 			const wanted = url.searchParams.get("pack");
@@ -662,14 +669,20 @@
 				void goto(url.pathname + url.search + url.hash, { replaceState: true, noScroll: true, keepFocus: true }).catch(() => {
 					/* keep the parameter: harmless */
 				});
-				void tick().then(() => {
-					sizeSelect?.scrollIntoView({ block: "center" });
-					sizeSelect?.focus();
-				});
+				void tick()
+					.then(() => scrollIntoViewWhenSettled(sizeSelect))
+					.then(() => sizeSelect?.focus({ preventScroll: true }))
+					.catch(() => {
+						/* focus/scroll are comfort only */
+					});
 			} else if (wanted && parsePackChoice(wanted)) {
 				choice = wanted;
 				open = true;
-				void tick().then(() => document.getElementById("offline-pack-start")?.scrollIntoView({ block: "center" }));
+				void tick()
+					.then(() => scrollIntoViewWhenSettled(document.getElementById("offline-pack-start")))
+					.catch(() => {
+						/* comfort only */
+					});
 			}
 		} catch {
 			/* ignore */

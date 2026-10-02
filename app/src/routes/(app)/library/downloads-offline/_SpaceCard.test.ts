@@ -135,3 +135,59 @@ describe("_SpaceCard pack start (c52d, chain 60)", () => {
 		expect((window as any).__ytmPackPlan?.state).toBe("running");
 	});
 });
+
+// c56a (black screen on the home card "Préparer 2 h"): with ?pack=dur:7200 the
+// card used to scrollIntoView the start button right after its first tick,
+// while the root layout was still crossfading the OUTGOING page (a keyed
+// .app-transition-wrapper with a Svelte animation, in flow above this one at
+// opacity 0). The container scrolled past the black outgoing block and the
+// installed app showed a black screen. The scroll must wait for that block
+// to be gone.
+describe("_SpaceCard ?pack= scroll waits for the route transition (c56a)", () => {
+	let card: { $destroy(): void } | null = null;
+	let outgoing: HTMLElement;
+	let incoming: HTMLElement;
+	const scrollIntoView = vi.fn();
+	beforeEach(async () => {
+		localStorage.clear();
+		scrollIntoView.mockReset();
+		(Element.prototype as any).scrollIntoView = scrollIntoView;
+		window.history.replaceState({}, "", "/library/downloads-offline?pack=dur:7200");
+		// The layout's two keyed blocks during the 150 ms fade: the old page (home, animating out) above the new one.
+		outgoing = document.body.appendChild(document.createElement("div"));
+		outgoing.className = "app-transition-wrapper";
+		outgoing.style.animation = "150ms linear 0ms 1 normal both running __svelte_81793601_0";
+		outgoing.textContent = "Podcasts Energize Relax";
+		incoming = document.body.appendChild(document.createElement("div"));
+		incoming.className = "app-transition-wrapper";
+		const { default: SpaceCard } = await import("./_SpaceCard.svelte");
+		card = new SpaceCard({ target: incoming });
+	});
+	afterEach(() => {
+		card?.$destroy();
+		card = null;
+		outgoing.remove();
+		incoming.remove();
+		window.history.replaceState({}, "", "/");
+	});
+
+	it("preselects 2 h and unfolds, but does not scroll while the outgoing page is still animating", async () => {
+		await settle(3);
+		expect(q<HTMLSelectElement>('[data-testid="pack-size"]')!.value).toBe("dur:7200");
+		expect(q('[data-testid="space-toggle"]')!.getAttribute("aria-expanded")).toBe("true");
+		expect(q("#offline-pack-start"), "start button rendered").not.toBeNull();
+		expect(scrollIntoView, "no scroll during the crossfade").not.toHaveBeenCalled();
+		// The fade ends: the outgoing block is removed; now the scroll may happen, once.
+		outgoing.remove();
+		await until(() => scrollIntoView.mock.calls.length > 0, 2000);
+		expect(scrollIntoView).toHaveBeenCalledTimes(1);
+		expect(scrollIntoView.mock.instances[0]).toBe(q("#offline-pack-start"));
+	});
+
+	it("scrolls right away when no page is animating", async () => {
+		outgoing.style.animation = "";
+		outgoing.remove();
+		await until(() => scrollIntoView.mock.calls.length > 0, 2000);
+		expect(scrollIntoView).toHaveBeenCalledTimes(1);
+	});
+});
