@@ -1,7 +1,7 @@
 <script lang="ts">
 	import MeOffline from "$components/Offline/MeOffline.svelte";
 	import { migratedSummary, readMigration } from "$lib/identity";
-	import { whoami, login, logout } from "$lib/me";
+	import { whoami, login, loginErrorText, logout } from "$lib/me";
 	import { meLoadOffline } from "$lib/offline";
 	import { DEVICE_NAME_MAX, guessedDeviceName, localDeviceName, saveLocalDeviceName } from "$lib/stores/nowPlayingSync";
 	import { notify } from "$lib/utils/utils";
@@ -82,7 +82,9 @@
 			attached = r.migrated ? migratedSummary(r.migrated, r.name) : "";
 			name = "";
 		} catch (e) {
-			msg = "Connexion impossible.";
+			// L14-6: a 503 busy (the name is being merged from another tab or
+			// device, already retried once) says so; the name stays typed.
+			msg = loginErrorText(e);
 		}
 		busy = false;
 	}
