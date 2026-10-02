@@ -19,6 +19,13 @@ func TestMatchNorm(t *testing.T) {
 		"Random Access Memories (10th Anniversary Edition)": "random access memories",
 		"Get Lucky (feat. Pharrell Williams)":               "get lucky",
 		"Get Lucky feat. Pharrell":                          "get lucky",
+		"Get Lucky(feat. Pharrell)":                         "get lucky",
+		// L14-9: a name that STARTS with the marker is a name, not an empty credit.
+		"FT Island":    "ft island",
+		"Feat Band":    "feat band",
+		"featuring":    "featuring",
+		"Ft. Someone":  "ft someone",
+		"Daft Punk ft": "daft punk",
 		"Céline Dion":                                       "celine dion",
 		"Mylène Farmer":                                     "mylene farmer",
 		"L'École du micro d'argent":                         "lecole du micro dargent",
@@ -44,6 +51,17 @@ func TestMatchNorm(t *testing.T) {
 	} {
 		if got := matchNorm(in); got != want {
 			t.Errorf("matchNorm(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// L14-9: the primary artist follows the same rule.
+	for in, want := range map[string]string{
+		"FT Island":                     "ft island",
+		"FT Island & Guest":             "ft island",
+		"Daft Punk feat. Pharrell":      "daft punk",
+		"Daft Punk & Pharrell Williams": "daft punk",
+	} {
+		if got := matchPrimaryArtist(in); got != want {
+			t.Errorf("matchPrimaryArtist(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
