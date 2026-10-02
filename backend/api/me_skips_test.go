@@ -171,6 +171,9 @@ func TestIsSkipPosition(t *testing.T) {
 	}{
 		{0, 0, true}, {19.9, 0, true}, {20, 0, false}, {20, 100, true}, {29, 100, true},
 		{30, 100, false}, {25, 50, false}, {59, 200, true}, {60, 200, false}, {-1, 100, false},
+		// L12-10: short tracks and rounding
+		{40, 40, false}, {36, 40, false}, {35.9, 40, false}, {19.9, 40, true}, {20, 40, false}, {14, 15, false}, {10, 15, true},
+		{5, 5.5, false}, {19.9, 240, true}, {25, 240, true}, {29.6, 240, true}, {215, 240, false},
 	}
 	for _, k := range cases {
 		if got := isSkipPosition(k.pos, k.dur); got != k.want {
@@ -209,5 +212,34 @@ func TestSkipRetentionPurge(t *testing.T) {
 	// the composite index exists
 	if !db.DB.Migrator().HasIndex(&db.SkipEvent{}, "idx_se_profile_ref_at") {
 		t.Fatal("missing idx_se_profile_ref_at")
+	}
+}
+
+// L12-10: a 40 s track played to its end is a listen (not a skip, whatever
+// the "< 20 s" rule says about short tracks); a 4 min track left at 25 s is
+// a skip; a 15 s interlude left at 14 s is a listen.
+func TestRecordSkipShortTracks(t *testing.T) {
+	useSkipDB(t)
+	if code, out := postSkip(t, `{"lid":"0123456789a","position":40,"duration":40}`, nil); code != http.StatusBadRequest || out["error"] != "not_a_skip" {
+		t.Fatalf("40 s track played fully: %d %v", code, out)
+	}
+	if code, out := postSkip(t, `{"lid":"0123456789a","position":14,"duration":15}`, nil); code != http.StatusBadRequest || out["error"] != "not_a_skip" {
+		t.Fatalf("15 s interlude at 14 s: %d %v", code, out)
+	}
+	if n := countSkips(t); n != 0 {
+		t.Fatalf("a full listen stored %d skips", n)
+	}
+	if code, _ := postSkip(t, `{"lid":"0123456789a","position":25,"duration":240}`, nil); code != http.StatusOK {
+		t.Fatalf("4 min track left at 25 s: %d", code)
+	}
+	if code, _ := postSkip(t, `{"lid":"0123456789b","position":19.9,"duration":240}`, nil); code != http.StatusOK {
+		t.Fatalf("press at 19.96 s floored to 19.9: %d", code)
+	}
+	var ev db.SkipEvent
+	if err := db.DB.Where("ref = ?", "0123456789a").First(&ev).Error; err != nil || ev.Position != 25 || ev.Duration != 240 {
+		t.Fatalf("stored %+v (%v)", ev, err)
+	}
+	if n := countSkips(t); n != 2 {
+		t.Fatalf("skips stored = %d, want 2", n)
 	}
 }

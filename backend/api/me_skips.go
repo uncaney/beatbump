@@ -20,6 +20,10 @@ const (
 	// or before 30 % of the track (same rule as app/src/lib/skips.ts).
 	skipMaxSeconds  = 20.0
 	skipMaxFraction = 0.30
+	// skipEndFraction (L12-10): never a skip from 90 % of a known duration
+	// on, whatever the position: "next" at 14 s of a 15 s interlude, or a
+	// 40 s track played to its end, is a listen.
+	skipEndFraction = 0.90
 	// skipDedupeWindow: an outbox replay of the same (ref, at) is a duplicate.
 	skipDedupeWindow = 2 * time.Second
 	// skipRetention / skipPurgeEvery (L12-6): skips only matter for 30 days
@@ -54,15 +58,20 @@ func purgeOldSkips(now time.Time) int64 {
 var skipSources = map[string]bool{"player": true, "mediasession": true, "fullscreen": true, "keyboard": true}
 
 // isSkipPosition is the server copy of the client rule: before 20 s, or
-// before 30 % of a known duration.
+// before 30 % of a known duration, and (L12-10) never from 90 % of a known
+// duration on. The client sends the position floored to a tenth, so a
+// press at 19.96 s arrives as 19.9 and is a skip on both sides.
 func isSkipPosition(position, duration float64) bool {
 	if position < 0 {
 		return false
 	}
-	if position < skipMaxSeconds {
-		return true
+	if duration <= 0 {
+		return position < skipMaxSeconds
 	}
-	return duration > 0 && position < duration*skipMaxFraction
+	if position >= duration*skipEndFraction {
+		return false
+	}
+	return position < skipMaxSeconds || position < duration*skipMaxFraction
 }
 
 func numField(m map[string]interface{}, k string) float64 {
