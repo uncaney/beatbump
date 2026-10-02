@@ -290,3 +290,76 @@ func TestArtistDayMemoLRU(t *testing.T) {
 		t.Fatal("d0 should have been evicted")
 	}
 }
+
+// L13-7: the "never played" check compares normalised artist credits, not
+// raw strings: a play recorded as "Daft Punk feat. Pharrell", "Daft Punk &
+// Pharrell", "Pharrell feat. Daft Punk" or with accents / punctuation marks
+// Daft Punk as played.
+func TestPlayedArtistNamesNormalised(t *testing.T) {
+	cases := map[string][]string{
+		"Daft Punk feat. Pharrell Williams": {"daft punk", "pharrell williams"},
+		"Daft Punk & Pharrell Williams":     {"daft punk", "pharrell williams"},
+		"Pharrell Williams ft Daft Punk":    {"pharrell williams", "daft punk"},
+		"  DAFT PUNK  ":                     {"daft punk"},
+		"Beyoncé":                           {"beyonce"},
+		"Simon & Garfunkel":                 {"simon and garfunkel", "simon", "garfunkel"},
+		"":                                  nil,
+	}
+	for raw, want := range cases {
+		got := playedArtistNames(raw)
+		have := map[string]bool{}
+		for _, n := range got {
+			have[n] = true
+		}
+		for _, w := range want {
+			if !have[w] {
+				t.Fatalf("%q: names %v, want %q among them", raw, got, w)
+			}
+		}
+		if want == nil && len(got) != 0 {
+			t.Fatalf("%q: names %v, want none", raw, got)
+		}
+	}
+	p := playedArtists{names: map[string]bool{}, ids: map[string]bool{}}
+	for _, n := range playedArtistNames("Daft Punk feat. Pharrell Williams") {
+		p.names[n] = true
+	}
+	if !p.has(map[string]interface{}{"id": "la-x", "name": "Daft Punk"}) || !p.has(map[string]interface{}{"id": "la-y", "name": "Pharrell Williams"}) {
+		t.Fatalf("a featured credit must mark both artists as played")
+	}
+	if p.has(map[string]interface{}{"id": "la-z", "name": "Daft"}) || p.has(map[string]interface{}{"id": "la-w", "name": ""}) {
+		t.Fatalf("a prefix or an empty name must not match")
+	}
+}
+
+func TestArtistOfDayExcludesFeaturedCredits(t *testing.T) {
+	stub := newArtistDayStub(t, 40)
+	db.DB.Create(&db.Profile{ID: "p-test", Name: "Camille", CreatedAt: time.Now()})
+	// Every eligible artist is played except "Artist 07", each through a
+	// credit the raw comparison used to miss.
+	i := 0
+	for _, a := range stub.artists {
+		name := mstr(a, "name")
+		if mint(a, "albumCount") < artistDayMinAlbums || name == "Artist 07" {
+			continue
+		}
+		var credit string
+		switch i % 4 {
+		case 0:
+			credit = name + " feat. Guest Star"
+		case 1:
+			credit = "Guest Star feat. " + name
+		case 2:
+			credit = strings.ToUpper(name) + " & Guest Star"
+		default:
+			credit = "Guest Star; " + name
+		}
+		i++
+		db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: "v" + name, Title: "t", Artist: credit, Source: "local", PlayedAt: time.Now()})
+	}
+	want := artistID("Artist 07")
+	resp := getJSON(t, LocalArtistOfDayHandler, "/api/v1/local/artist-of-the-day")
+	if artistDayID(resp) != want || resp["scope"] != "profile" || resp["reason"] != "du jour" {
+		t.Fatalf("picked %s (%v), want the only never-played artist", nameOf(stub, artistDayID(resp)), resp["reason"])
+	}
+}
