@@ -251,7 +251,7 @@
 	async function recacheOne(t: any) {
 		if (!t || !isStableAudioUrl(t._offlineUrl)) return notify("Ce morceau ne peut pas être retéléchargé d'ici", "error");
 		tracks = tracks.map((x) => (x.videoId === t.videoId ? { ...x, _evicted: undefined } : x));
-		const r = await cacheTrackOffline(t, t._offlineUrl, { explicit: true });
+		const r = await cacheTrackOffline(t, t._offlineUrl);
 		await refresh();
 		if (r.ok) notify("Morceau retéléchargé", "success");
 		else notify(r.reason === "quota" ? QUOTA_MSG : "Retéléchargement impossible pour l'instant", "error");
@@ -310,7 +310,7 @@
 	// Download a not-yet-cached track (stable /localf or /aud URL straight to the
 	// SW, otherwise through the API URL resolution), then pin it.
 	async function downloadThenPin(t: any): Promise<{ status: "ok" | "quota" | "failed"; bytes: number }> {
-		const r = isStableAudioUrl(t?._offlineUrl) ? await cacheTrackOffline(t, t._offlineUrl, { explicit: true }) : await downloadForOffline(t);
+		const r = isStableAudioUrl(t?._offlineUrl) ? await cacheTrackOffline(t, t._offlineUrl) : await downloadForOffline(t);
 		if (!r.ok) return { status: /quota/.test(r.reason || "") ? "quota" : "failed", bytes: 0 };
 		const p = await pinOffline(t, true);
 		if (p.ok) return { status: "ok", bytes: Number(r.bytes) || 0 };

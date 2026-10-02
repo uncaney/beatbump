@@ -8,8 +8,6 @@
 // not enough on its own. Pure (storage injected), bounded: the oldest
 // entries are dropped past LISTEN_LOG_MAX.
 export const LISTEN_LOG_KEY = "ytm-listen-log";
-/** U14-2: window CustomEvent dispatched by recordListen (detail: the ListenEntry). */
-export const LISTEN_EVENT = "ytm:listened";
 export const LISTEN_LOG_MAX = 300;
 /** Seconds listened after which a track counts as listened whatever its length. */
 export const LISTEN_MIN_SECONDS = 120;
@@ -80,17 +78,10 @@ export function recordListen(
 	entry: { videoId: string; seconds: number; duration?: number; at?: number },
 	max = LISTEN_LOG_MAX,
 ): void {
-	const n = normalize({ ...entry, at: entry.at ?? Date.now() });
-	if (!n) return;
-	// U14-2: the tab's listeners (the automatic offline keep waits for a counted
-	// listen, $lib/offline) hear it even when nothing can be stored.
-	try {
-		if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") window.dispatchEvent(new CustomEvent(LISTEN_EVENT, { detail: { ...n } }));
-	} catch {
-		/* listeners are optional */
-	}
 	try {
 		if (!store) return;
+		const n = normalize({ ...entry, at: entry.at ?? Date.now() });
+		if (!n) return;
 		const list = readListenLog(store);
 		list.push(n);
 		store.setItem(LISTEN_LOG_KEY, JSON.stringify(list.length > max ? list.slice(list.length - max) : list));

@@ -849,11 +849,11 @@ export class ListService {
      * worker's `cache-audio`, so a prefetch never downloads a track twice).
      * Best-effort, no-op on SSR.
      */
-    private static announcePrefetched(item: Item, url: string, after?: string) {
+    private static announcePrefetched(item: Item, url: string) {
         try {
             if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
                 window.dispatchEvent(
-                    new CustomEvent("ytm:prefetched", { detail: { item, url, after } }),
+                    new CustomEvent("ytm:prefetched", { detail: { item, url } }),
                 );
             }
         } catch {
@@ -934,11 +934,7 @@ export class ListService {
             if (!url) return;
 
             this.rememberPrefetched(vid, url);
-            // U14-2: the prefetched URL serves next() at once, but the offline
-            // layer keeps the track only once the CURRENT track counts as
-            // listened (`after`): a skip-through never fills the cache.
-            const current = this._$.value.mix?.[this._$.value.position]?.videoId;
-            ListService.announcePrefetched(track, url, typeof current === "string" && current ? current : undefined);
+            ListService.announcePrefetched(track, url);
             this.promoteIfNext(index, vid, url);
         } catch {
             /* prefetch is best-effort */
