@@ -64,10 +64,15 @@ func companionURL() string {
 const httpClientTimeout = 120 * time.Second
 
 // defaultPlayerTimeout is the budget for one player resolution through the
-// bridge. It must cover the bridge's own chain: companion (45 s) and, when the
-// anonymous companion is walled, the logged-in iv-vp fallback (up to 75 s,
-// metube download). Cutting it shorter would turn a late success into a 504.
-const defaultPlayerTimeout = 90 * time.Second
+// bridge. PF5-3: it was 90 s, sized on the bridge's own chain (companion
+// 45 s, then the logged-in iv-vp fallback up to 75 s), so a walled video
+// held the SPA for 30 s and more without ever failing (two 200s at 30.2 s
+// and 33.6 s in audit v5, and the browser gave up at 30 s anyway). 20 s now:
+// past it the handler answers the existing 504 TIMEOUT (player.go) and the
+// SPA can tell the user instead of hanging; the bridge keeps working on the
+// late success, which the next play picks up. PLAYER_TIMEOUT_SECONDS still
+// overrides it (an operator can restore 90 for a slow iv-vp).
+const defaultPlayerTimeout = 20 * time.Second
 
 // PlayerTimeout returns the player call budget, overridable with
 // PLAYER_TIMEOUT_SECONDS (integer seconds, > 0).

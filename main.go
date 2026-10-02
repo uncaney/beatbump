@@ -32,6 +32,10 @@ func main() {
 	// c48b B8-20: first artist-aliases scan in the background (the artist
 	// page chips, the songs union and the folded Artists list read the memo).
 	api.WarmArtistAliases()
+	// PF5-2: prime home.json so the first visitor after a deploy gets a HIT.
+	api.WarmHome()
+	// PF5-5: prime local/mixes (160-200 ms of album and genre counts per MISS).
+	api.WarmLocalMixes()
 
 	e := newServer()
 	e.Logger.Fatal(e.Start(":8080"))
@@ -93,7 +97,8 @@ func newServer() *echo.Echo {
 	// Audit L10-1: a panic in any handler must cost one 500, never the process.
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
-	e.Use(middleware.Logger())
+	// PF5-8: the default access line plus the cache verdicts (logger.go, accessLogConfig).
+	e.Use(middleware.LoggerWithConfig(accessLogConfig(nil)))
 	// Compression: the shell, hashed bundles and JSON APIs were served uncompressed (444 KB
 	// vendor chunk, 690 KB search.json). Audio proxy streams are skipped (already compressed
 	// media; Range/206 must pass through untouched).
@@ -129,20 +134,22 @@ func newServer() *echo.Echo {
 	api.RegisterAudioProxyRoutes(e)
 
 	// Read-mostly, user-independent JSON: short TTL response cache (backend/api/rescache.go).
-	e.GET("/api/v1/search.json", api.CacheResponse(60*time.Second, api.SearchEndpointHandler))
+	// PF5-6: 10 min TTL + 1 h stale-while-revalidate grace (was 60 s: a MISS on every search).
+	e.GET("/api/v1/search.json", api.SearchCached())
 	e.GET("/api/v1/player.json", api.PlayerEndpointHandler)
 	e.GET("/api/v1/playlist.json", api.PlaylistEndpointHandler)
 	// K6: next.json (p50 1.0 s) and related.json (p50 0.4 s) depend on the
 	// videoId/playlistId/continuation query only; player.json stays uncached
 	// (signed stream URLs).
-	e.GET("/api/v1/next.json", api.CacheResponse(2*time.Minute, api.NextEndpointHandler))
+	e.GET("/api/v1/next.json", api.NextCached()) // PF5-6: 10 min + 1 h grace (was 2 min)
 	e.GET("/api/v1/related.json", api.CacheResponse(5*time.Minute, api.RelatedEndpointHandler))
 	e.GET("/api/v1/main.json", api.CacheResponse(5*time.Minute, api.AlbumEndpointHandler))
 	e.GET("/api/v1/get_queue.json", api.GetQueueHandler)
 	// K5: one YouTube round trip (~200 ms) per keystroke; the answer only depends on q.
 	e.GET("/api/v1/get_search_suggestions.json", api.CacheResponse(10*time.Minute, api.GetSearchSuggstionsHandler))
 
-	e.GET("/api/v1/home.json", api.CacheResponseSWR(2*time.Minute, 30*time.Minute, api.HomeEndpointHandler))
+	// PF5-2: 2 min TTL + 24 h stale-while-revalidate grace, primed at boot (api.WarmHome).
+	e.GET("/api/v1/home.json", api.HomeCached())
 	e.GET("/api/v1/explore/:category", api.CacheResponse(5*time.Minute, api.ExploreEndpointHandler))
 	e.GET("/api/v1/explore", api.CacheResponse(5*time.Minute, api.ExploreEndpointHandler))
 	e.GET("/api/v1/trending", api.CacheResponse(5*time.Minute, api.TrendingEndpointHandler))
@@ -166,7 +173,8 @@ func newServer() *echo.Echo {
 	e.GET("/api/v1/local/genres", api.LocalGenresHandler)
 	// c29b D1: decade / genre mixes (user-independent, cached like local/related).
 	e.GET("/api/v1/local/mix", api.LocalMixHandler)
-	e.GET("/api/v1/local/mixes", api.CacheResponse(5*time.Minute, api.LocalMixesHandler))
+	// PF5-5: 5 min TTL + 24 h grace, primed at boot (api.WarmLocalMixes).
+	e.GET("/api/v1/local/mixes", api.LocalMixesCached())
 	// c39b B6-1: album of the day (same for every profile, memoised per UTC date).
 	e.GET("/api/v1/local/album-of-day", api.LocalAlbumOfDayHandler)
 	e.GET("/api/v1/local/album-of-the-day", api.LocalAlbumOfDayHandler)
