@@ -97,7 +97,8 @@ func newServer() *echo.Echo {
 	// Audit L10-1: a panic in any handler must cost one 500, never the process.
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
-	e.Use(middleware.Logger())
+	// PF5-8: the default access line plus the cache verdicts (logger.go, accessLogConfig).
+	e.Use(middleware.LoggerWithConfig(accessLogConfig(nil)))
 	// Compression: the shell, hashed bundles and JSON APIs were served uncompressed (444 KB
 	// vendor chunk, 690 KB search.json). Audio proxy streams are skipped (already compressed
 	// media; Range/206 must pass through untouched).
