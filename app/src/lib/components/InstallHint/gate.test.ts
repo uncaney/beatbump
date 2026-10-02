@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { heardFirstSound, installHintGate } from "./gate";
+import { heardFirstSound, installHintGate, showInstallHintLink } from "./gate";
 
 describe("installHintGate", () => {
 	it("never on first paint: no sound heard, an ordinary page", () => {
@@ -18,6 +18,16 @@ describe("installHintGate", () => {
 		expect(installHintGate({ heardSound: false, pathname: "/bienvenue" })).toBe(true);
 		expect(installHintGate({ heardSound: false, pathname: "/bienvenue/" })).toBe(true);
 		expect(installHintGate({ heardSound: false, pathname: "/bienvenue-x" })).toBe(false);
+	});
+});
+
+describe("showInstallHintLink", () => {
+	it("hides the self-referential link on the install page, keeps it elsewhere", () => {
+		expect(showInstallHintLink("/bienvenue")).toBe(false);
+		expect(showInstallHintLink("/bienvenue/")).toBe(false);
+		expect(showInstallHintLink("/home")).toBe(true);
+		expect(showInstallHintLink("/bienvenue-x")).toBe(true);
+		expect(showInstallHintLink("")).toBe(true);
 	});
 });
 

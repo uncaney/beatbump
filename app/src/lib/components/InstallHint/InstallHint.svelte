@@ -34,7 +34,7 @@
 	import { queue } from "$lib/stores/list";
 	import { fullscreenStore } from "$components/Player/channel";
 	import { installHintDock, installHintGeometry, installHintReserve } from "./dock";
-	import { heardFirstSound, installHintGate } from "./gate";
+	import { heardFirstSound, installHintGate, showInstallHintLink } from "./gate";
 
 	// Shown at most once per session: once true, stays true for the rest of
 	// this component's (= the app's) lifetime, whatever triggers next.
@@ -70,6 +70,8 @@
 	$: geometry = installHintGeometry(dock);
 	// c48c B8-4: after the first sound of the session, or on /bienvenue; never on first paint.
 	$: allowed = installHintGate({ heardSound, pathname: $page?.url?.pathname ?? "" });
+	// B9-1 (U13-13): on /bienvenue the page IS the guide, so drop the self-referential link.
+	$: showHowLink = showInstallHintLink($page?.url?.pathname ?? "");
 	$: show =
 		!dismissed &&
 		!snoozed &&
@@ -126,13 +128,16 @@
 			{:else}
 				Installe l'application pour l'écouter sans réseau.
 			{/if}
-			<!-- B7-13: the steps page, for whoever does not know the gesture. -->
-			<a
-				class="how"
-				href="/bienvenue"
-				data-testid="install-hint-how"
-				on:click={() => (dismissed = true)}>Comment installer ?</a
-			>
+			<!-- B7-13: the steps page, for whoever does not know the gesture.
+			     B9-1 (U13-13): never on /bienvenue, where it would point to this page. -->
+			{#if showHowLink}
+				<a
+					class="how"
+					href="/bienvenue"
+					data-testid="install-hint-how"
+					on:click={() => (dismissed = true)}>Comment installer ?</a
+				>
+			{/if}
 		</p>
 		{#if !$isIOS}
 			<button

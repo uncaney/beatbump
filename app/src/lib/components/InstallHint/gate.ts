@@ -22,3 +22,14 @@ export function installHintGate(s: InstallHintGateInput): boolean {
 export function heardFirstSound(prevPaused: boolean, paused: boolean): boolean {
 	return prevPaused && !paused;
 }
+
+/**
+ * B9-1 (U13-13): on /bienvenue the page already IS the step-by-step guide, so the
+ * bar's "Comment installer ?" link would only point back to the current page.
+ * The bar itself stays (its "Installer" button is still useful), but the link is
+ * dropped there. Returns false exactly on the install page(s).
+ */
+export function showInstallHintLink(pathname: string): boolean {
+	const p = (pathname || "").replace(/\/+$/, "") || "/";
+	return !INSTALL_HINT_PATHS.some((base) => p === base || p.startsWith(base + "/"));
+}
