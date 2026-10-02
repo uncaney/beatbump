@@ -67,6 +67,14 @@
 			/* private mode: hidden for this visit only */
 		}
 	}
+	/** L15-9: the pack job crashed before downloading anything: the card may show again. */
+	function forget() {
+		try {
+			storage()?.removeItem(FIRST_PACK_KEY);
+		} catch {
+			/* private mode: nothing was stored */
+		}
+	}
 	/** The service worker is active (navigator.serviceWorker.ready, bounded: a first visit installs it). */
 	async function swActive(ms = 15000): Promise<boolean> {
 		try {
@@ -217,16 +225,37 @@
 			// line reports THIS pack ("y Mo sur env. 1,1 Go"), not its selector.
 			writeLastPack(storage(), { ...lastPackOf(plan), estimatedBytes });
 			const items = plan.items.map((i) => i.item);
-			void startKeepJob(FIRST_PACK_JOB_KEY, () => items, {
-				deps: (signal) => keepDepsWithAbort(signal, defaultKeepDeps),
-				onDone: (r: KeepResult) => {
-					const s = keepSummary(r);
-					notify(s.text, s.type);
-					expose({ result: { ...r } });
-				},
-			});
+			// L15-9: the memo above is written BEFORE the job on purpose (the
+			// Espace card adopts it for its progress line as soon as the job is
+			// registered, U13-2), but it must not outlive a job that never ran:
+			// startKeepJob registers the job synchronously (a throwing `deps`
+			// factory lands in the catch below, where the memo is rolled back),
+			// and its promise resolves null when the batch itself crashed (SW not
+			// answering): then the memo and the "card shown once" marker are
+			// dropped, so "Rafraîchir mon pack" does not describe a pack that
+			// was never downloaded and the card comes back for a later trip.
+			let started: Promise<KeepResult | null>;
+			try {
+				started = startKeepJob(FIRST_PACK_JOB_KEY, () => items, {
+					deps: (signal) => keepDepsWithAbort(signal, defaultKeepDeps),
+					onDone: (r: KeepResult) => {
+						const s = keepSummary(r);
+						notify(s.text, s.type);
+						expose({ result: { ...r } });
+					},
+				});
+			} catch (e) {
+				writeLastPack(storage(), null);
+				throw e;
+			}
 			remember();
 			eligible = false;
+			void started.then((r) => {
+				if (r !== null) return;
+				writeLastPack(storage(), null);
+				forget();
+				expose({ result: null, reason: "job_crashed" });
+			});
 			await goto(FIRST_PACK_HREF);
 		} catch (e) {
 			notify(`Impossible de préparer le pack : ${(e as Error)?.message ?? e}`, "error");
