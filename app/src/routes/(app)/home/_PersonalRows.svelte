@@ -44,7 +44,6 @@
 		withoutCurrentTrack,
 		TODAY_ROW,
 		buildTodayGroup,
-		todaySubheading,
 		WEEK_CARD_DISMISS_KEY,
 	} from "$lib/homeRows";
 	import { clickHandler as carouselClick } from "$lib/components/Carousel/functions";
@@ -959,7 +958,9 @@
 			data-tiles={today.count}
 		>
 			<div class="header resp-content-width">
-				<p class="subheading">{todaySubheading(today, artistDay)}</p>
+				<!-- B9-27: one steady subtitle; the morning "why it has not changed"
+				     is answered by naming when the next one comes. -->
+				<p class="subheading">Le même pour tout le monde, un autre à minuit (UTC+2)</p>
 				<span class="h2">Aujourd'hui</span>
 			</div>
 			<div class="today-tiles">
