@@ -933,12 +933,24 @@
 				aria-live="polite"
 			>
 				{#if packHasBar}
-					<!-- Planning: no value = indeterminate, not a bar stuck at 0. -->
-					<progress
-						max={Math.max(1, packProgress?.total ?? packPlan?.count ?? 1)}
-						value={packState === "planning" ? undefined : (packProgress?.ready ?? 0)}
-						aria-label="Progression du pack"
-					/>
+					{#if packState === "planning"}
+						<!-- Planning: no value attribute = indeterminate, not a bar stuck
+						     at 0. c52d: never `value={undefined}` on a <progress>: Svelte
+						     sets the DOM property, the setter throws (non-finite double)
+						     inside the flush and the scheduler never resets
+						     update_scheduled: the whole app stops re-rendering
+						     ("Préparation…" forever, chain 60). -->
+						<progress
+							max="1"
+							aria-label="Progression du pack"
+						/>
+					{:else}
+						<progress
+							max={Math.max(1, packProgress?.total ?? packPlan?.count ?? 1)}
+							value={packProgress?.ready ?? 0}
+							aria-label="Progression du pack"
+						/>
+					{/if}
 				{/if}
 				<span id="offline-pack-text">{packText}</span>
 				{#if packState === "too-big" && packGuard}

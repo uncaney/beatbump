@@ -2,6 +2,7 @@ import { sveltekit } from "@sveltejs/kit/vite";
 import { svelteRuntimeChunk } from "./scripts/svelteRuntimeChunk";
 import type { ConfigEnv } from "vite";
 import type { UserConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
 
 const version = new Date(Date.now());
 const version_fmt = `${version.getUTCFullYear()}.${version
@@ -53,6 +54,13 @@ const config: UserConfig = {
 	},
 	test: {
 		include: ["src/**/*.{test,spec}.{js,ts}"],
+		// c52d: component tests (`// @vitest-environment jsdom`) mount real .svelte
+		// files. Vitest 0.32 externalises `svelte` and Node resolves its default
+		// export, src/runtime/ssr.js, where onMount is a no-op (the card never
+		// loaded its cache listing). The bare specifier is aliased to the browser
+		// runtime file for tests only; its internals are the same module instance
+		// the compiled components import through svelte/internal.
+		alias: [{ find: /^svelte$/, replacement: fileURLToPath(new URL("./node_modules/svelte/src/runtime/index.js", import.meta.url)) }],
 	},
 	worker: {
 		plugins: [],
