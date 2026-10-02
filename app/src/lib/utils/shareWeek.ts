@@ -84,6 +84,16 @@ export interface YearShareSource {
 	newArtists?: number;
 }
 
+/**
+ * B8-5: a "Partager" button only when there is something to share: at least
+ * one minute listened over the period (a 0 min week / year is nothing to
+ * send, and a blank profile must see its empty state alone). Pure.
+ */
+export function shareableMinutes(v: { minutes?: number | null } | null | undefined): boolean {
+	const m = Number(v?.minutes);
+	return Number.isFinite(m) && Math.round(m) >= 1;
+}
+
 /** What to share from a me/stats/year answer; null without a play that year. */
 export function yearShareFrom(v: YearShareSource | null | undefined): YearShare | null {
 	if (!v || !(v.plays > 0)) return null;

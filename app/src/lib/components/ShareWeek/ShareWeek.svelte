@@ -6,10 +6,13 @@
 	// c45b (B7-11) kind="year": "Partager mon année" from the year the parent
 	// already loaded (me/stats/year, `year` prop); nothing is rendered without
 	// a play that year (the parent's empty state stands alone).
+	// B8-5 (cycle 47): no button at all when the period has 0 minute (a blank
+	// profile's week: loadWeekShare answers { minutes: 0 }; the year the same
+	// way), for either kind: shareableMinutes.
 	import Icon from "$components/Icon/Icon.svelte";
 	import { loadWeekShare } from "$lib/meStats";
 	import { shareLink } from "$lib/utils/shareLink";
-	import { weekShareCopy, weekShareData, yearShareData, type WeekShare, type YearShare } from "$lib/utils/shareWeek";
+	import { shareableMinutes, weekShareCopy, weekShareData, yearShareData, type WeekShare, type YearShare } from "$lib/utils/shareWeek";
 	import { onMount } from "svelte";
 
 	export let kind: "week" | "year" = "week";
@@ -28,7 +31,7 @@
 		}
 	});
 
-	$: ready = kind === "year" ? !!year : !!week;
+	$: ready = kind === "year" ? shareableMinutes(year) : shareableMinutes(week);
 
 	async function onShare() {
 		if (busy || !ready || typeof location === "undefined") return;
