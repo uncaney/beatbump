@@ -175,15 +175,28 @@ func TestLocalRelatedSeedExclusions(t *testing.T) {
 }
 
 // personal=1 bypasses the shared response cache (the answer depends on the
-// profile); exclude= is part of the cache key.
+// profile). L13-9 (was L12-17 "one entry per exclude= value"): exclude= is
+// no longer part of the cache key: the base answer (without exclude=, with
+// its spare candidates) is cached once per seed, a second request with
+// another exclude= list is a HIT, the exclusions are applied after the hit
+// and the list is refilled from the spare up to the cap.
 func TestPersonalRelatedBypassesSharedCache(t *testing.T) {
 	t.Setenv("YTM_API_CACHE", "")
 	e := echo.New()
 	calls := 0
-	h := cacheResponseUnlessWith(newResponseCache(10), time.Minute, perProfileRelated, func(c echo.Context) error {
+	h := relatedCacheWith(newResponseCache(10), time.Minute, func(c echo.Context) error {
 		calls++
 		ck, _ := c.Cookie("bbp")
-		return c.String(http.StatusOK, fmt.Sprintf("p=%s ex=%s", ck.Value, c.QueryParam("exclude")))
+		spare := c.Request().Header.Get(relatedSpareHeader) == "1"
+		ans := relatedAnswer{
+			Items: []Item{{VideoID: "x", Title: "X"}, {VideoID: "y", Title: "Y"}, {VideoID: "z", Title: "Z"}},
+			Seed:  "ex=" + c.QueryParam("exclude"), Name: "p=" + ck.Value,
+		}
+		if spare {
+			ans.Spare = []Item{{VideoID: "w", Title: "W"}, {VideoID: "v", Title: "V"}}
+			ans.Cap = 3
+		}
+		return c.JSON(http.StatusOK, ans)
 	})
 	do := func(url, pid string) (string, string) {
 		req := httptest.NewRequest(http.MethodGet, url, nil)
@@ -194,21 +207,177 @@ func TestPersonalRelatedBypassesSharedCache(t *testing.T) {
 		}
 		return rec.Body.String(), rec.Header().Get("X-Ytm-Cache")
 	}
+	ids := func(body string) string {
+		var ans relatedAnswer
+		if err := json.Unmarshal([]byte(body), &ans); err != nil {
+			t.Fatalf("bad body %q: %v", body, err)
+		}
+		out := ""
+		for _, it := range ans.Items {
+			out += it.VideoID
+		}
+		return out
+	}
 	b1, c1 := do("/api/v1/local/related?lid=e182ccc85ad&personal=1", "A")
 	b2, c2 := do("/api/v1/local/related?lid=e182ccc85ad&personal=1", "B")
-	if c1 != "BYPASS" || c2 != "BYPASS" || b1 == b2 {
+	if c1 != "BYPASS" || c2 != "BYPASS" || b1 == b2 || !strings.Contains(b1, "p=A") {
 		t.Fatalf("personal=1 must bypass: %s %s %q %q", c1, c2, b1, b2)
 	}
-	_, c3 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=x", "A")
+	calls = 0
+	b3, c3 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=x", "A")
 	b4, c4 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=y", "A")
-	if c3 != "MISS" || c4 != "MISS" || !strings.Contains(b4, "ex=y") {
-		t.Fatalf("exclude= must key the cache: %s %s %q", c3, c4, b4)
+	if c3 != "MISS" || c4 != "HIT" || calls != 1 {
+		t.Fatalf("exclude= must not key the cache: %s %s (%d handler calls)", c3, c4, calls)
 	}
-	// L12-17: one entry per exclude= value, each served again with its own body.
+	// The exclusions apply after the hit, the cap is refilled from the spare.
+	if ids(b3) != "yzw" || ids(b4) != "xzw" {
+		t.Fatalf("filtered answers: %q %q (want yzw / xzw)", ids(b3), ids(b4))
+	}
+	// The handler was asked for the base answer: no exclude=, spare asked.
+	if !strings.Contains(b3, `"seed":"ex="`) || strings.Contains(b3, "spare") || strings.Contains(b3, `"cap"`) {
+		t.Fatalf("base answer / client body: %q", b3)
+	}
+	// Served again from the same entry, each with its own exclusions.
 	b5, c5 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=x", "B")
-	b6, c6 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=y", "B")
-	if c5 != "HIT" || c6 != "HIT" || !strings.Contains(b5, "ex=x") || !strings.Contains(b6, "ex=y") {
-		t.Fatalf("one cache entry per exclude= value: %s %s %q %q", c5, c6, b5, b6)
+	b6, c6 := do("/api/v1/local/related?lid=e182ccc85ad&exclude=y,z", "B")
+	b7, c7 := do("/api/v1/local/related?lid=e182ccc85ad", "B")
+	if c5 != "HIT" || c6 != "HIT" || c7 != "HIT" || calls != 1 {
+		t.Fatalf("one cache entry per seed: %s %s %s (%d handler calls)", c5, c6, c7, calls)
+	}
+	if ids(b5) != "yzw" || ids(b6) != "xwv" || ids(b7) != "xyz" {
+		t.Fatalf("filtered answers: %q %q %q (want yzw / xwv / xyz)", ids(b5), ids(b6), ids(b7))
+	}
+	// A different seed is another entry.
+	if _, c8 := do("/api/v1/local/related?lid=a1b2c3d4e5f&exclude=x", "B"); c8 != "MISS" || calls != 2 {
+		t.Fatalf("other seed: %s (%d calls)", c8, calls)
+	}
+}
+
+// L13-9 through the real handler: the exclusions of a continuation request
+// are honoured on a cache HIT, and the plain answer carries no spare.
+func TestLocalRelatedCachedExcludeAfterHit(t *testing.T) {
+	t.Setenv("YTM_API_CACHE", "")
+	useSkipDB(t)
+	relatedFixture(t)
+	resetTrackKeyMemo()
+	t.Cleanup(resetTrackKeyMemo)
+	h := relatedCacheWith(newResponseCache(10), time.Minute, LocalRelatedHandler)
+	do := func(target string) (map[string]bool, string, string) {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		rec := httptest.NewRecorder()
+		if err := h(echo.New().NewContext(req, rec)); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("%s: %v %d %s", target, err, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Items []map[string]interface{} `json:"items"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		out := map[string]bool{}
+		for _, it := range body.Items {
+			out[mstr(it, "videoId")] = true
+		}
+		return out, rec.Header().Get("X-Ytm-Cache"), rec.Body.String()
+	}
+	base := "/api/v1/local/related?lid=e182ccc85ad"
+	got, st, _ := do(base + "&exclude=a1b2c3d4e5f")
+	if st != "MISS" || got["a1b2c3d4e5f"] || !got["0123456789a"] || !got["bbbbbbbbbbb"] {
+		t.Fatalf("first: %s %v", st, got)
+	}
+	got, st, _ = do(base + "&exclude=bbbbbbbbbbb")
+	if st != "HIT" || got["bbbbbbbbbbb"] || !got["a1b2c3d4e5f"] || !got["0123456789a"] {
+		t.Fatalf("second exclude on a HIT: %s %v", st, got)
+	}
+	got, st, raw := do(base)
+	if st != "HIT" || !got["a1b2c3d4e5f"] || !got["0123456789a"] || !got["bbbbbbbbbbb"] || strings.Contains(raw, `"spare"`) || strings.Contains(raw, `"cap"`) {
+		t.Fatalf("plain answer: %s %v %s", st, got, raw)
+	}
+	// seed= radios take the same path.
+	got, st, _ = do("/api/v1/local/related?seed=artist:" + artistID("Daft Punk") + "&exclude=a1b2c3d4e5f")
+	if st != "MISS" || got["a1b2c3d4e5f"] || !got["e182ccc85ad"] {
+		t.Fatalf("seed radio: %s %v", st, got)
+	}
+	if got, st, _ = do("/api/v1/local/related?seed=artist:" + artistID("Daft Punk") + "&exclude=e182ccc85ad"); st != "HIT" || got["e182ccc85ad"] || !got["a1b2c3d4e5f"] {
+		t.Fatalf("seed radio HIT: %s %v", st, got)
+	}
+}
+
+// L13-8: the normalised keys of the excluded refs are resolved once per lid
+// (memo) and a generic title ("Intro") never excludes the other "Intro"s
+// of the same artist, while a real duplicate (other copy) still is.
+func TestExcludedTrackKeysMemoAndGenericTitles(t *testing.T) {
+	stub := relatedFixture(t)
+	stub.hits["tracks"] = append(stub.hits["tracks"],
+		map[string]interface{}{"lid": "1111111111a", "title": "Intro", "artist": "Modjo", "albumArtist": "Modjo", "album": "Modjo"},
+		map[string]interface{}{"lid": "2222222222a", "title": "Intro", "artist": "Modjo", "albumArtist": "Modjo", "album": "Second"},
+		map[string]interface{}{"lid": "3333333333a", "title": "Lady", "artist": "Modjo", "albumArtist": "Modjo", "album": "Best Of"},
+		map[string]interface{}{"lid": "4444444444a", "title": "Go", "artist": "Modjo", "albumArtist": "Modjo", "album": "Best Of"},
+		map[string]interface{}{"lid": "5555555555a", "title": "Go", "artist": "Modjo", "albumArtist": "Modjo", "album": "Modjo"},
+	)
+	resetTrackKeyMemo()
+	t.Cleanup(resetTrackKeyMemo)
+	lookups := func() int {
+		n := 0
+		for _, f := range stub.filters {
+			if strings.HasPrefix(f, "lid IN [") {
+				n++
+			}
+		}
+		return n
+	}
+	ex := resolveExclusions(map[string]bool{"1111111111a": true, "0123456789a": true, "4444444444a": true})
+	if lookups() != 1 {
+		t.Fatalf("%d lid lookups, want 1", lookups())
+	}
+	if ex.keys[songTrackKey("Intro", "Modjo")] || ex.keys[songTrackKey("Go", "Modjo")] || !ex.keys[songTrackKey("Lady", "Modjo")] {
+		t.Fatalf("generic keys must be ignored, real ones kept: %v", ex.keys)
+	}
+	kept := withoutRefs(append([]map[string]interface{}{}, stub.hits["tracks"]...), ex)
+	lids := map[string]bool{}
+	for _, h := range kept {
+		lids[mstr(h, "lid")] = true
+	}
+	if lids["1111111111a"] || lids["0123456789a"] || lids["4444444444a"] {
+		t.Fatalf("excluded refs kept: %v", lids)
+	}
+	if !lids["2222222222a"] || !lids["5555555555a"] {
+		t.Fatalf("the other Intro / Go of the artist were excluded by the generic key: %v", lids)
+	}
+	if lids["3333333333a"] {
+		t.Fatalf("the other copy of Lady was kept: %v", lids)
+	}
+	// The same refs again (a continuation request repeats its queue): no lookup.
+	resolveExclusions(map[string]bool{"1111111111a": true, "0123456789a": true, "4444444444a": true})
+	if lookups() != 1 {
+		t.Fatalf("%d lid lookups after the memo, want 1", lookups())
+	}
+	if trackKeyMemoLen() < 3 {
+		t.Fatalf("memo holds %d lids", trackKeyMemoLen())
+	}
+	// A ref never seen (neither excluded nor a candidate) costs one lookup
+	// for that ref only; the candidates' keys were memoised by withoutRefs.
+	stub.hits["tracks"] = append(stub.hits["tracks"],
+		map[string]interface{}{"lid": "6666666666a", "title": "Lady", "artist": "Modjo", "albumArtist": "Modjo", "album": "Live"})
+	ex = resolveExclusions(map[string]bool{"1111111111a": true, "3333333333a": true, "6666666666a": true})
+	if last := stub.filters[len(stub.filters)-1]; lookups() != 2 || !strings.Contains(last, "6666666666a") || strings.Contains(last, "1111111111a") || strings.Contains(last, "3333333333a") {
+		t.Fatalf("partial lookup: %d %q", lookups(), stub.filters[len(stub.filters)-1])
+	}
+	if !ex.keys[songTrackKey("Lady", "Modjo")] || ex.keys[songTrackKey("Intro", "Modjo")] {
+		t.Fatalf("keys from the memo: %v", ex.keys)
+	}
+	// The per-candidate key is memoised too: one normalisation per lid.
+	n := 0
+	for i := 0; i < 3; i++ {
+		trackKeyMemoised("abcdefabcde", func() string { n++; return "k" })
+	}
+	if n != 1 {
+		t.Fatalf("candidate key computed %d times, want 1", n)
+	}
+	// Bounded: trackKeyMemoMax+10 lids keep trackKeyMemoMax entries.
+	for i := 0; i < trackKeyMemoMax+10; i++ {
+		trackKeyRemember(fmt.Sprintf("%011x", i), "k", time.Now())
+	}
+	if trackKeyMemoLen() != trackKeyMemoMax {
+		t.Fatalf("memo size %d, want %d", trackKeyMemoLen(), trackKeyMemoMax)
 	}
 }
 

@@ -25,8 +25,17 @@ import (
 // c40b B6-10: `exclude=<ref>,<ref>` (the queue the client just played) and
 // `personal=1` (the profile's twice-skipped refs, requestExclusions) are left
 // out of both answers, every copy of those songs included (c43b L12-18).
-// personal=1 is served uncached (perProfileRelated); exclude= is part of the
-// shared cache key.
+// personal=1 is served uncached (perProfileRelated).
+//
+// L13-9: exclude= is NOT part of the shared cache key any more. The
+// registered handler (LocalRelatedCached, rescache.go) asks this handler
+// for the base answer without exclude= and with the relatedSpareHeader set:
+// the answer then carries, besides the `items` it would have returned, a
+// `spare` list (the next relatedSpareFactor-1 candidates in the same order)
+// and the `cap`; the wrapper caches that, applies the request's exclusions
+// after the cache hit and refills from `spare` up to the cap, so a
+// continuation request with a different queue is a HIT and still answers a
+// full list. Called directly (no header), the handler answers as before.
 func LocalRelatedHandler(c echo.Context) error {
 	if seed := strings.TrimSpace(c.QueryParam("seed")); seed != "" {
 		return localRelatedSeedHandler(c, seed)
@@ -46,8 +55,49 @@ func LocalRelatedHandler(c echo.Context) error {
 	if seed == nil {
 		return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "not_found", "items": []Item{}})
 	}
-	items := relatedByAlbum(seed, lid, withoutRefs(radioPool(seed, lid), requestExclusions(c)), 20)
-	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "seed": lid})
+	limit, spare := relatedLimits(c, 20)
+	items := relatedByAlbum(seed, lid, withoutRefs(radioPool(seed, lid), requestExclusions(c)), limit)
+	return c.JSON(http.StatusOK, relatedEnvelope(items, spare, map[string]interface{}{"seed": lid}))
+}
+
+// relatedSpareHeader marks a request from the cache wrapper: the answer
+// carries the spare candidates (see LocalRelatedHandler, L13-9).
+const relatedSpareHeader = "X-Ytm-Related-Spare"
+
+// relatedSpareFactor: how many caps' worth of candidates a spare answer
+// holds (items + spare), so the post-cache exclusions of one played queue
+// (at most maxExcludeParam refs, mostly from the same pool) leave enough.
+const relatedSpareFactor = 4
+
+// relatedLimits returns the list length to build and the cap to answer:
+// (cap, 0) for a direct request, (cap*relatedSpareFactor, cap) for the
+// cache wrapper.
+func relatedLimits(c echo.Context, cap int) (limit, spare int) {
+	if c.Request().Header.Get(relatedSpareHeader) == "1" {
+		return cap * relatedSpareFactor, cap
+	}
+	return cap, 0
+}
+
+// relatedEnvelope is the JSON answer: {"items": ...} plus `extra`; with a
+// cap (spare request) the items beyond it go under "spare" and the cap
+// under "cap".
+func relatedEnvelope(items []Item, cap int, extra map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{}
+	for k, v := range extra {
+		out[k] = v
+	}
+	if cap > 0 {
+		spare := []Item{}
+		if len(items) > cap {
+			spare = items[cap:]
+			items = items[:cap]
+		}
+		out["spare"] = spare
+		out["cap"] = cap
+	}
+	out["items"] = items
+	return out
 }
 
 // relatedByAlbum turns the radio pool into the "Dans ta bibliothèque" cards
@@ -174,8 +224,9 @@ func localRelatedSeedHandler(c echo.Context, seed string) error {
 		return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "not_found", "items": []Item{}})
 	}
 	ex := requestExclusions(c)
-	items := radioFromSeedTracks(withoutRefs(core, ex), 30, 2, ex)
-	return c.JSON(http.StatusOK, map[string]interface{}{"items": items, "seed": seed, "name": name})
+	limit, spare := relatedLimits(c, 30)
+	items := radioFromSeedTracks(withoutRefs(core, ex), limit, 2, ex)
+	return c.JSON(http.StatusOK, relatedEnvelope(items, spare, map[string]interface{}{"seed": seed, "name": name}))
 }
 
 // favoriteTracks resolves a profile's favourited local songs (lid refs only)

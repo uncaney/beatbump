@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/list"
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -219,14 +220,101 @@ func cacheResponseUnlessWith(rc *responseCache, ttl time.Duration, skip func(ech
 // perProfileRelated reports whether a local/related request depends on the
 // caller's profile (favorites seed, or c40b personal=1: the profile's skip /
 // recent-play exclusions) and so must never be served from the shared cache.
-// exclude= needs no bypass: it is part of the query, hence of the cache key.
+// exclude= needs no bypass: it is applied after the cache (relatedCacheWith).
 func perProfileRelated(c echo.Context) bool {
 	return c.QueryParam("seed") == "favorites" || personalRequest(c)
 }
 
 // LocalRelatedCached is the registered handler for GET /api/v1/local/related.
 func LocalRelatedCached(ttl time.Duration) echo.HandlerFunc {
-	return CacheResponseUnless(ttl, perProfileRelated, LocalRelatedHandler)
+	return relatedCacheWith(apiResponseCache, ttl, LocalRelatedHandler)
+}
+
+// relatedAnswer is the cached base answer of local/related (see
+// LocalRelatedHandler: items + spare + cap) and what the client receives
+// (items only, Spare and Cap left out).
+type relatedAnswer struct {
+	Items []Item `json:"items"`
+	Spare []Item `json:"spare,omitempty"`
+	Cap   int    `json:"cap,omitempty"`
+	Seed  string `json:"seed,omitempty"`
+	Name  string `json:"name,omitempty"`
+}
+
+// relatedCacheWith (L13-9) serves local/related from the shared cache keyed
+// WITHOUT exclude=: every continuation request of a seed (the client sends
+// the queue it just played as exclude=, a different list each time) used to
+// be its own cache entry, so the cache fragmented and rarely hit. Now the
+// base answer (no exclude=, with its spare candidates: relatedSpareHeader)
+// is cached once per seed; the request's exclusions are applied to the
+// cached items after the hit and the list is refilled from the spare up to
+// the cap. Per-profile requests (perProfileRelated) bypass as before.
+func relatedCacheWith(rc *responseCache, ttl time.Duration, next echo.HandlerFunc) echo.HandlerFunc {
+	cached := cacheResponseUnlessWith(rc, ttl, perProfileRelated, next)
+	return func(c echo.Context) error {
+		if perProfileRelated(c) {
+			return cached(c)
+		}
+		ex := requestExclusions(c)
+		req := c.Request()
+		u := *req.URL
+		q := u.Query()
+		q.Del("exclude")
+		u.RawQuery = q.Encode()
+		r2 := req.Clone(req.Context())
+		r2.URL = &u
+		r2.RequestURI = u.RequestURI()
+		r2.Header.Set(relatedSpareHeader, "1")
+		e := c.Echo()
+		if e == nil {
+			e = echo.New()
+		}
+		bw := &bufferWriter{header: http.Header{}}
+		c2 := e.NewContext(r2, bw)
+		c2.SetPath(c.Path())
+		if err := cached(c2); err != nil {
+			return err
+		}
+		h := c.Response().Header()
+		if v := bw.header.Get("X-Ytm-Cache"); v != "" {
+			h.Set("X-Ytm-Cache", v)
+		}
+		ct := bw.header.Get(echo.HeaderContentType)
+		if bw.status != http.StatusOK {
+			return c.Blob(bw.status, ct, bw.buf.Bytes())
+		}
+		var ans relatedAnswer
+		if err := json.Unmarshal(bw.buf.Bytes(), &ans); err != nil {
+			return c.Blob(http.StatusOK, ct, bw.buf.Bytes())
+		}
+		return c.JSON(http.StatusOK, applyRelatedExclusions(ans, ex))
+	}
+}
+
+// applyRelatedExclusions drops the excluded songs from a base answer and
+// refills from its spare up to the cap (the base item count when the
+// answer carries no cap); Spare and Cap are cleared for the client.
+func applyRelatedExclusions(ans relatedAnswer, ex *exclusions) relatedAnswer {
+	cap := ans.Cap
+	if cap <= 0 {
+		cap = len(ans.Items)
+	}
+	out := make([]Item, 0, cap)
+	for _, it := range append(ans.Items, ans.Spare...) {
+		if len(out) >= cap {
+			break
+		}
+		artist := ""
+		if len(it.Subtitle) > 0 {
+			artist = it.Subtitle[0].Text
+		}
+		if ex.song(it.VideoID, it.Title, artist) {
+			continue
+		}
+		out = append(out, it)
+	}
+	ans.Items, ans.Spare, ans.Cap = out, nil, 0
+	return ans
 }
 
 func cacheResponseWith(rc *responseCache, ttl time.Duration, next echo.HandlerFunc) echo.HandlerFunc {
