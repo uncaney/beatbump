@@ -156,3 +156,31 @@ func TestLocalAlbumsAndArtistsQueryPagination(t *testing.T) {
 		}
 	}
 }
+
+// L14-11: the folded artists list's header counts rows, not raw credits.
+func TestAliasShownTotalCountsFoldedRows(t *testing.T) {
+	groups := []aliasGroup{
+		{ID: "la-ed", Name: "Ed Sheeran", Size: 3},
+		{ID: "la-daft", Name: "Daft Punk", Size: 1},
+	}
+	index := map[string]int{
+		"la-ed":        0,
+		"la-ed-feat-1": 0, // "Ed Sheeran feat. Camila Cabello"
+		"la-ed-feat-2": 0, // "Ed Sheeran & Justin Bieber"
+		"la-daft":      1,
+	}
+	if got := aliasShownTotal(1936, groups, index); got != 1934 {
+		t.Fatalf("shown = %d, want 1934 (two credits folded under Ed Sheeran)", got)
+	}
+	if got := aliasShownTotal(1936, nil, map[string]int{}); got != 1936 {
+		t.Fatalf("before the first scan the index total stands: %d", got)
+	}
+	// A stale index entry pointing past the groups is not a fold; a total
+	// smaller than the folds (index rebuilt under the memo) never goes negative.
+	if got := aliasShownTotal(10, groups, map[string]int{"x": 7, "la-ed-feat-1": 0}); got != 9 {
+		t.Fatalf("stale index entry counted as a fold: %d", got)
+	}
+	if got := aliasShownTotal(1, groups, index); got != 0 {
+		t.Fatalf("negative shown total: %d", got)
+	}
+}

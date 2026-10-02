@@ -303,7 +303,14 @@ func TestPlayedArtistNamesNormalised(t *testing.T) {
 		"  DAFT PUNK  ":                     {"daft punk"},
 		"Beyoncé":                           {"beyonce"},
 		"Simon & Garfunkel":                 {"simon and garfunkel", "simon", "garfunkel"},
+		// L14-9: a name starting with the marker is the artist, not an empty credit.
+		"FT Island":                         {"ft island"},
+		"FT Island feat. Guest":             {"ft island", "guest"},
 		"":                                  nil,
+	}
+	notWanted := map[string][]string{
+		"FT Island":             {"island", ""},
+		"FT Island feat. Guest": {"island", ""},
 	}
 	for raw, want := range cases {
 		got := playedArtistNames(raw)
@@ -319,6 +326,21 @@ func TestPlayedArtistNamesNormalised(t *testing.T) {
 		if want == nil && len(got) != 0 {
 			t.Fatalf("%q: names %v, want none", raw, got)
 		}
+		for _, nw := range notWanted[raw] {
+			if have[nw] {
+				t.Fatalf("%q: names %v, %q must not be marked as played", raw, got, nw)
+			}
+		}
+	}
+	ft := playedArtists{names: map[string]bool{}, ids: map[string]bool{}}
+	for _, n := range playedArtistNames("FT Island") {
+		ft.names[n] = true
+	}
+	if !ft.has(map[string]interface{}{"id": "la-ft", "name": "FT Island"}) {
+		t.Fatalf("a play of \"FT Island\" must mark the band as played by name")
+	}
+	if ft.has(map[string]interface{}{"id": "la-i", "name": "Island"}) {
+		t.Fatalf("a play of \"FT Island\" must not mark \"Island\" as played")
 	}
 	p := playedArtists{names: map[string]bool{}, ids: map[string]bool{}}
 	for _, n := range playedArtistNames("Daft Punk feat. Pharrell Williams") {

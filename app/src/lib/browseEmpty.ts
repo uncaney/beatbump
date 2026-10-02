@@ -37,6 +37,18 @@ export function reasonFr(reason: string | null | undefined): string {
 }
 
 /** The line under an empty grid: the reason when the server gave one, else the usual texts. */
+/**
+ * L14-11: the count the collection header shows ("1 934 artistes"). The folded
+ * artists list (local_browse.go `collapsed`) sends `shown` = rows after the
+ * aliases are folded, next to `total` = raw index credits that the pager
+ * still needs (nextOffset is a raw offset); the header prefers `shown`. Any
+ * other list has only `total`; a list without either counts its rows.
+ */
+export function browseHeaderCount(data: { total?: unknown; shown?: unknown } | null | undefined, rows: number): number {
+	const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null);
+	return num(data?.shown) ?? num(data?.total) ?? rows;
+}
+
 export function emptyListText(i: EmptyListInput): string {
 	const why = reasonFr(i.reason);
 	if (why) return `Aucun résultat : ${why}.`;

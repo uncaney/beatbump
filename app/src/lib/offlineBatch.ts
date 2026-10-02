@@ -270,6 +270,22 @@ export function keepDoneReady(r: KeepResult | null | undefined, expected: number
 }
 
 /**
+ * L13-16: the track count the idle button compares the last batch with. A
+ * source whose tracks are at hand (n > 0) counts them. A lazily loaded source
+ * (n === 0: a mix card, an album queue resolved by `load`) used to take the
+ * batch's own total, so keepDoneReady(done, done.total) was a tautology: a
+ * complete batch of a queue SHORTER than the source (loader cap, a truncated
+ * queue) said "Prêt hors-ligne" for the whole source. `expected` (the
+ * source's own count: an album's trackCount, a card's size) now bounds it,
+ * and the batch total is the fallback only when the source has no count.
+ */
+export function keepIdleTotal(n: number, expected: number | null | undefined, done: KeepResult | null | undefined): number {
+	if (n > 0) return n;
+	if (typeof expected === "number" && Number.isFinite(expected) && expected > 0) return Math.floor(expected);
+	return done && !done.cancelled ? done.total : 0;
+}
+
+/**
  * L10-13: accessible name of the compact (icon-only) keep button: its state
  * AND the card it belongs to ("Garder hors-ligne : Années 1990", "Prêt
  * hors-ligne : Rock", "9/14 prêts : Daft Punk"); 20 identical names on

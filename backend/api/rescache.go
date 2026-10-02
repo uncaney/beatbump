@@ -258,6 +258,14 @@ type relatedAnswer struct {
 // When the exclusions eat past the spare (a long listening session on one
 // radio), the answer is rebuilt live from the full pool (BYPASS) rather
 // than served short. The favorites seed (perProfileRelated) bypasses.
+//
+// Headers (L14-11): only X-Ytm-Cache crosses from the inner answer to the
+// client. A Set-Cookie the inner handler would put on c2 is dropped on
+// purpose: the base answer is profile-free and shared by every profile, so a
+// cookie minted while computing it must never be replayed to the next
+// caller. No related handler sets one today (favoriteTracks(profileID) is on
+// the bypass path); a handler that needs to must set it on the OUTER
+// context, which this wrapper does not expose: add it here explicitly.
 func relatedCacheWith(rc *responseCache, ttl time.Duration, next echo.HandlerFunc) echo.HandlerFunc {
 	cached := cacheResponseUnlessWith(rc, ttl, perProfileRelated, next)
 	return func(c echo.Context) error {
@@ -287,6 +295,7 @@ func relatedCacheWith(rc *responseCache, ttl time.Duration, next echo.HandlerFun
 			return err
 		}
 		h := c.Response().Header()
+		// Only the cache status crosses; a Set-Cookie stays in bw (see above).
 		if v := bw.header.Get("X-Ytm-Cache"); v != "" {
 			h.Set("X-Ytm-Cache", v)
 		}

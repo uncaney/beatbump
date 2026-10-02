@@ -219,6 +219,24 @@ describe("button contract (U11-1): a link dressed as a button carries a system c
 		expect(stale, stale.join("\n")).toEqual([]);
 	});
 
+	it("a disabled .btn-primary is not the white pill faded to grey (U13-19, modules/_button.scss)", () => {
+		// The rule text is the contract: inside the `.btn-primary` block a
+		// `&:disabled` rule must drop the white fill (translucent background,
+		// light text) and restore `opacity: 1` over %btn-system's 0.6, so
+		// "C'est moi" waiting for a name reads as inactive, not as a grey slab.
+		const scss = readFileSync(join(SRC, "global/redesign/modules/_button.scss"), "utf8");
+		const start = scss.indexOf(".btn-primary {");
+		expect(start).toBeGreaterThan(-1);
+		const block = scss.slice(start, scss.indexOf("\n}\n", start));
+		const disabled = block.match(/&:disabled,\s*&\[aria-disabled="true"\]\s*\{([^}]*)\}/);
+		expect(disabled, "no &:disabled rule inside .btn-primary").not.toBeNull();
+		const body = disabled![1];
+		expect(body).toMatch(/background:\s*rgba\(255,\s*255,\s*255,\s*0?\.\d+\)/);
+		expect(body).toMatch(/color:\s*rgba\(255,\s*255,\s*255,\s*0?\.[7-9]\d*\)/);
+		expect(body).toMatch(/opacity:\s*1\s*;/);
+		expect(body).not.toMatch(/background:\s*#fff/);
+	});
+
 	it("the global link rule keeps excluding the button-system classes (base/_typography.scss)", () => {
 		// No compilation: the rule text itself is the contract. `a:not(.no-style)`
 		// must always be followed by the :where() exclusion, otherwise its

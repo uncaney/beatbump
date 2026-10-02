@@ -4,7 +4,7 @@
 	import { goto } from "$app/navigation";
 	import { page } from "$app/stores";
 	import { APIClient } from "$lib/api";
-	import { emptyListText } from "$lib/browseEmpty";
+	import { browseHeaderCount, emptyListText } from "$lib/browseEmpty";
 	import {
 		AZ_LETTERS,
 		findLetterIndex,
@@ -30,6 +30,9 @@
 	let q = "";
 	let items: any[] = [];
 	let total = 0;
+	// L14-11: what the header counts (the folded artists list sends `shown` =
+	// rows after the aliases fold; `total` stays the raw credits the pager uses).
+	let headerCount = 0;
 	let offset = 0;
 	const limit = 60;
 	// BI2: an A-Z seek loads bigger pages (server cap) to reach the letter fast.
@@ -136,6 +139,7 @@
 			items = reset ? got : appendUnique(items, got);
 			anonymousFilter = !!filter && data?.reason === "anonymous";
 			total = data.total ?? items.length;
+			headerCount = browseHeaderCount(data, items.length);
 			// L9-2: the never-played list pages over candidates and says where
 			// to continue (nextOffset); the other lists page by row count.
 			offset = typeof data.nextOffset === "number" ? data.nextOffset : offset + got.length;
@@ -242,7 +246,7 @@
 		<div>
 			<h1>{title}</h1>
 			{#if subtitle}<span class="sub">{subtitle}</span>{/if}
-			{#if total}<span class="sub">· {formatCountFr(total, COUNT_WORD[kind])}</span>{/if}
+			{#if headerCount}<span class="sub">· {formatCountFr(headerCount, COUNT_WORD[kind])}</span>{/if}
 		</div>
 		<div class="controls">
 			<input

@@ -19,12 +19,18 @@
 	import { page } from "$app/stores";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { getOfflineTracks, offlineTracks } from "$lib/offline";
-	import { cancelKeepJob, compactKeepAriaLabel, findKeepJob, keepDoneReady, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepJob, type KeepProgress, type KeepResult } from "$lib/offlineBatch";
+	import { cancelKeepJob, compactKeepAriaLabel, findKeepJob, keepDoneReady, keepIdleTotal, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepJob, type KeepProgress, type KeepResult } from "$lib/offlineBatch";
 	import { notify } from "$lib/utils";
 
 	/** Tracks of the source, or a loader (album pages resolve their queue lazily). */
 	export let tracks: any[] = [];
 	export let load: (() => Promise<any[]>) | null = null;
+	/**
+	 * L13-16: track count of a lazily loaded source (`load` with no `tracks`),
+	 * when the caller knows it. Without it, a complete batch of a queue shorter
+	 * than the source read as "Prêt hors-ligne" for the whole source.
+	 */
+	export let expected: number | null = null;
 	/** Identity of the source (defaults to the page URL: one source button per page). */
 	export let sourceKey: string | null = null;
 	/** data-testid of the button (HL6: "mix-keep" on a mix card). */
@@ -79,8 +85,9 @@
 		void $offlineTracks; // c43d: re-evaluate when the shared list changes (another tab's writes / reconcile)
 		const done = lastDoneKey === key ? lastDone : null;
 		const n = keepableTracks(tracks).length;
-		// A lazily loaded source (album queue) has no tracks here: its batch result gives the count.
-		const total = n || (done && !done.cancelled ? done.total : 0);
+		// A lazily loaded source (album queue, mix card) has no tracks here: the
+		// caller's `expected` count bounds it, the batch result is the fallback (L13-16).
+		const total = keepIdleTotal(n, expected, done);
 		progress = total && (keepDoneReady(done, total) || (n > 0 && allPinned(tracks))) ? { ready: total, failed: 0, refused: 0, total } : null;
 	}
 	$: label = keepLabel(progress, running);

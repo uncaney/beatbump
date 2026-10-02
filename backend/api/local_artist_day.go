@@ -118,7 +118,9 @@ type playedArtists struct {
 
 // playedArtistSplitRe turns a "feat." / "ft." / "featuring" credit into a
 // plain separator so the featured artist counts as played too.
-var playedArtistSplitRe = regexp.MustCompile(`[\(\[]?\b(?:feat|ft|featuring)\b\.?\s*`)
+// L14-9: like matchFeatRe, the marker needs a credit before it, so a play of
+// "FT Island" marks "ft island" (and not "island") as played.
+var playedArtistSplitRe = regexp.MustCompile(`(\S)\s*[\(\[]?\b(?:feat|ft|featuring)\b\.?\s*`)
 
 // playedArtistNames (L13-7) lists the normalised names a play row's artist
 // credit marks as played: the credit as a whole (matchNorm, which already
@@ -142,7 +144,7 @@ func playedArtistNames(raw string) []string {
 	}
 	add(matchNorm(raw))
 	add(matchPrimaryArtist(raw))
-	s := playedArtistSplitRe.ReplaceAllString(matchAccents.Replace(strings.ToLower(raw)), " & ")
+	s := playedArtistSplitRe.ReplaceAllString(matchAccents.Replace(strings.ToLower(raw)), "${1} & ")
 	for _, part := range matchArtistSep.Split(s, -1) {
 		add(matchNorm(part))
 	}

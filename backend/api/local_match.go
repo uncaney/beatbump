@@ -42,7 +42,11 @@ var (
 	matchBracketRe = regexp.MustCompile(`[\(\[\{][^\)\]\}]*\b(?:` + matchEditionWords + `)\b[^\)\]\}]*[\)\]\}]`)
 	matchDashRe    = regexp.MustCompile(`\s+-\s+[^-]*\b(?:` + matchEditionWords + `)\b.*$`)
 	matchContentRe = regexp.MustCompile(`\b(?:` + matchContentWords + `)\b`)
-	matchFeatRe    = regexp.MustCompile(`[\(\[]?\b(?:feat|ft|featuring)\b\.?.*$`)
+	// L14-9: the marker needs something before it: "FT Island" / "Feat Band"
+	// are names, not an empty credit with a featured tail (they normalised to
+	// "", so the artist of the day, the alias groups and the strict match
+	// never matched them by name). "feat" alone at the start stays as is.
+	matchFeatRe    = regexp.MustCompile(`(\S)\s*[\(\[]?\b(?:feat|ft|featuring)\b\.?.*$`)
 	matchNonAlnum  = regexp.MustCompile(`[^a-z0-9]+`)
 	matchArtistSep = regexp.MustCompile(`\s*(?:,|&|/|;|\bx\b|\band\b|\bet\b|\bwith\b)\s*`)
 )
@@ -74,7 +78,7 @@ func matchHasPackaging(s string) bool {
 func matchNorm(s string) string {
 	s = matchAccents.Replace(strings.ToLower(s))
 	s = matchDropPackaging(s)
-	s = matchFeatRe.ReplaceAllString(s, " ")
+	s = matchFeatRe.ReplaceAllString(s, "${1} ")
 	s = strings.ReplaceAll(s, "&", " and ")
 	s = strings.ReplaceAll(s, "'", "")
 	s = matchNonAlnum.ReplaceAllString(s, " ")
@@ -85,7 +89,7 @@ func matchNorm(s string) string {
 // ("Daft Punk & Pharrell" -> "daft punk").
 func matchPrimaryArtist(s string) string {
 	s = matchAccents.Replace(strings.ToLower(s))
-	s = matchFeatRe.ReplaceAllString(s, " ")
+	s = matchFeatRe.ReplaceAllString(s, "${1} ")
 	if parts := matchArtistSep.Split(s, 2); len(parts) > 0 {
 		s = parts[0]
 	}
