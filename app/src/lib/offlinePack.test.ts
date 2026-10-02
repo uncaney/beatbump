@@ -13,7 +13,28 @@ vi.mock("$lib/offline", () => ({
 	abortCacheAudio: vi.fn(),
 }));
 
-import { PACK_EST_BYTES, PACK_EST_SECONDS, packDurationText, packLabel, packSecondsOf, packSizeOf, parsePackChoice, planPack } from "./offlinePack";
+import {
+	LAST_PACK_KEY,
+	PACK_DEFAULT_BPS,
+	PACK_EST_BYTES,
+	PACK_EST_SECONDS,
+	averageBytesPerSecond,
+	estimatePackBytes,
+	guardPackSpace,
+	lastPackOf,
+	listenedPackIds,
+	packDurationText,
+	packLabel,
+	packRefreshSummary,
+	packSecondsOf,
+	packSizeOf,
+	parsePackChoice,
+	planPack,
+	planPackRefresh,
+	readLastPack,
+	refreshedLastPack,
+	writeLastPack,
+} from "./offlinePack";
 
 const MB = 1024 * 1024;
 const tr = (id: string, extra: Record<string, unknown> = {}) => ({ videoId: id, title: "T " + id, ...extra });
@@ -139,5 +160,178 @@ describe("packLabel", () => {
 	it("reads count + Mo in French", () => {
 		expect(packLabel(0, 0, 0, 100 * MB)).toBe("Aucun morceau à préparer");
 		expect(packLabel(3, 12, 12.4 * MB, 100 * MB)).toBe("3/12 · 12\u202fMo sur 100\u202fMo");
+	});
+});
+
+describe("B7-8 space guard (L12-14)", () => {
+	const NB = " ";
+	it("averageBytesPerSecond measures the cached entries with a known length, default under two", () => {
+		const secs = new Map([
+			["a", 100],
+			["b", 300],
+		]);
+		expect(averageBytesPerSecond([{ videoId: "a", bytes: 1_000_000 }, { videoId: "b", bytes: 3_000_000 }, { videoId: "c", bytes: 9 }], secs)).toBe(10_000);
+		expect(averageBytesPerSecond([{ videoId: "a", bytes: 1_000_000 }], secs)).toBe(PACK_DEFAULT_BPS);
+		expect(averageBytesPerSecond(null, null)).toBe(PACK_DEFAULT_BPS);
+		expect(PACK_DEFAULT_BPS).toBe(17476); // 1 Mo per minute
+	});
+
+	it("estimatePackBytes uses the known size, else the length at the bitrate", () => {
+		const p = planPack({ favorites: [tr("a", { _bytes: 10 * MB, duration: 600 }), tr("b", { duration: 120 })] }, 3600, "seconds");
+		expect(estimatePackBytes(p, 10_000)).toBe(10 * MB + 1_200_000);
+	});
+
+	it("fits: an unlimited quota never refuses, a quota keeps 10 % headroom above the pinned bytes", () => {
+		const p = planPack({ favorites: [tr("a", { duration: 600 }), tr("b", { duration: 600 })] }, 3600, "seconds");
+		const bps = 10_000; // 6 Mo per track
+		const free = guardPackSpace(p, { quota: 0, pinnedBytes: 5_000 * MB }, bps);
+		expect(free.fits).toBe(true);
+		expect(free.limit).toBe("none");
+		expect(free.available).toBe(Infinity);
+		expect(free.shrunk).toBe(p);
+		expect(free.message).toBe("");
+		// 100 Mo quota, 80 Mo pinned: 18 Mo usable, 12 Mo asked.
+		const ok = guardPackSpace(p, { quota: 100 * MB, pinnedBytes: 80 * MB }, bps);
+		expect(ok.fits).toBe(true);
+		expect(ok.available).toBe(Math.floor(20 * MB * 0.9));
+		expect(ok.limit).toBe("quota");
+	});
+
+	it("too big: cuts the plan to the head that fits and names the demand, what fits and why", () => {
+		const favs = Array.from({ length: 12 }, (_, i) => tr("t" + i, { duration: 600 }));
+		const p = planPack({ favorites: favs }, 7200, "seconds"); // 12 x 10 min = 2 h
+		const bps = Math.round(MB / 60); // 10 Mo per track, 120 Mo asked
+		const g = guardPackSpace(p, { quota: 500 * MB, pinnedBytes: 450 * MB }, bps); // 45 Mo usable
+		expect(g.fits).toBe(false);
+		expect(g.limit).toBe("quota");
+		expect(g.estimated).toBe(12 * 600 * bps);
+		expect(g.shrunk.count).toBe(4);
+		expect(g.shrunk.seconds).toBe(2400);
+		expect(g.shrunk.mode).toBe("seconds");
+		expect(g.shrunk.target).toBe(7200);
+		expect(g.shrunk.left).toBe(8);
+		expect(g.shrunk.items.map((i) => i.videoId)).toEqual(["t0", "t1", "t2", "t3"]);
+		expect(g.message).toBe(`Pas assez de place : 2 h demandées (≈ 120${NB}Mo), 40 min tiennent dans les 45${NB}Mo libres (quota 500${NB}Mo, 450${NB}Mo épinglés).`);
+	});
+
+	it("too big: nothing fits when the pinned bytes already reach the quota", () => {
+		const p = planPack({ favorites: [tr("a", { duration: 600 })] }, 1800, "seconds");
+		const g = guardPackSpace(p, { quota: 100 * MB, pinnedBytes: 100 * MB });
+		expect(g.fits).toBe(false);
+		expect(g.available).toBe(0);
+		expect(g.shrunk.count).toBe(0);
+		expect(g.message).toBe(`Pas assez de place : 30 min demandées (≈ 10${NB}Mo), rien ne tient dans les 0${NB}Mo libres (quota 100${NB}Mo, 100${NB}Mo épinglés).`);
+	});
+
+	it("the device free space bounds the pack when it is lower than the quota room", () => {
+		const p = planPack({ favorites: [tr("a", { duration: 600 }), tr("b", { duration: 600 })] }, 3600, "seconds");
+		const g = guardPackSpace(p, { quota: 0, pinnedBytes: 0, deviceFree: 12 * MB }, Math.round(MB / 60));
+		expect(g.fits).toBe(false);
+		expect(g.limit).toBe("device");
+		expect(g.available).toBe(Math.floor(12 * MB * 0.9));
+		expect(g.shrunk.count).toBe(1);
+		expect(g.message).toContain("l'appareil est presque plein");
+		// An unknown device estimate (null / NaN) bounds nothing.
+		expect(guardPackSpace(p, { quota: 0, pinnedBytes: 0, deviceFree: null }).fits).toBe(true);
+	});
+});
+
+describe("B7-7 refresh my pack", () => {
+	const pack = (at = 1_000_000) => ({
+		at,
+		mode: "seconds" as const,
+		target: 3600,
+		items: [
+			{ videoId: "p1", seconds: 600, bytes: 5 * MB },
+			{ videoId: "p2", seconds: 300, bytes: 3 * MB },
+			{ videoId: "p3", seconds: 900, bytes: 8 * MB },
+		],
+	});
+
+	it("lastPackOf / write / read round-trip through a storage, bad records ignored", () => {
+		const store = new Map<string, string>();
+		const kv = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+		const plan = planPack({ favorites: [tr("a", { duration: 600, _bytes: 5 * MB }), tr("b")] }, 3600, "seconds");
+		const lp = lastPackOf(plan, 42);
+		expect(lp).toEqual({
+			at: 42,
+			mode: "seconds",
+			target: 3600,
+			items: [
+				{ videoId: "a", seconds: 600, bytes: 5 * MB },
+				{ videoId: "b", seconds: PACK_EST_SECONDS, bytes: PACK_EST_BYTES },
+			],
+		});
+		writeLastPack(kv, lp);
+		expect(JSON.parse(store.get(LAST_PACK_KEY) || "{}").items).toHaveLength(2);
+		expect(readLastPack(kv)).toEqual(lp);
+		writeLastPack(kv, null);
+		expect(readLastPack(kv)).toBeNull();
+		kv.setItem(LAST_PACK_KEY, "{not json");
+		expect(readLastPack(kv)).toBeNull();
+		kv.setItem(LAST_PACK_KEY, JSON.stringify({ at: "x", items: [{ videoId: "a", seconds: -3 }, { videoId: "a" }, { nope: 1 }] }));
+		expect(readLastPack(kv)).toEqual({ at: 0, mode: "seconds", target: 0, items: [{ videoId: "a", seconds: PACK_EST_SECONDS, bytes: PACK_EST_BYTES }] });
+		expect(readLastPack(null)).toBeNull();
+		expect(
+			readLastPack({
+				getItem: () => {
+					throw new Error("private");
+				},
+				setItem() {},
+				removeItem() {},
+			}),
+		).toBeNull();
+	});
+
+	it("listenedPackIds: a play after the pack began, or an SW entry served after it was cached", () => {
+		const p = pack(1_000_000);
+		const got = listenedPackIds(p, {
+			plays: [
+				{ videoId: "p1", playedAt: 1_000_001 }, // after the pack
+				{ videoId: "p2", playedAt: 999_999 }, // before the pack: not listened since
+				{ videoId: "zz", playedAt: 2_000_000 }, // not in the pack
+				null,
+			],
+			entries: [
+				{ videoId: "p3", at: 1_000_500, lastAccess: 1_000_900 }, // served after caching
+				{ videoId: "p2", at: 1_000_500, lastAccess: 1_000_500 }, // never served since caching
+				{ videoId: "zz", at: 1, lastAccess: 2 },
+			],
+		});
+		expect([...got].sort()).toEqual(["p1", "p3"]);
+		expect(listenedPackIds(p, {}).size).toBe(0);
+	});
+
+	it("planPackRefresh: drops the listened tracks and plans the same seconds of new tracks, pack ids excluded", () => {
+		const p = pack();
+		const r = planPackRefresh(p, ["p1", "p3", "nope"], {
+			favorites: [tr("p1", { duration: 600 }), tr("n1", { duration: 1200 }), tr("n2", { duration: 300 })],
+			recent: [tr("p2", { duration: 300 }), tr("n3", { duration: 100 })],
+			cached: ["n2"],
+		});
+		expect(r.drop.map((i) => i.videoId)).toEqual(["p1", "p3"]);
+		expect(r.keep.map((i) => i.videoId)).toEqual(["p2"]);
+		expect(r.seconds).toBe(1500);
+		expect(r.add.mode).toBe("seconds");
+		expect(r.add.target).toBe(1500);
+		expect(r.add.items.map((i) => i.videoId)).toEqual(["n1", "n3"]);
+		expect(r.add.seconds).toBe(1300);
+		expect(packRefreshSummary(r)).toBe("2 titres écoutés remplacés par 2 nouveaux (22 min)");
+		const next = refreshedLastPack(p, r, 5);
+		expect(next.at).toBe(5);
+		expect(next.target).toBe(3600);
+		expect(next.items.map((i) => i.videoId)).toEqual(["p2", "n1", "n3"]);
+	});
+
+	it("planPackRefresh: nothing listened plans nothing, no candidate keeps the pack whole", () => {
+		const none = planPackRefresh(pack(), [], { favorites: [tr("n1")] });
+		expect(none.drop).toEqual([]);
+		expect(none.seconds).toBe(0);
+		expect(none.add.count).toBe(0);
+		expect(packRefreshSummary(none)).toBe("Rien à rafraîchir : aucun titre du pack n'a encore été écouté.");
+		const dry = planPackRefresh(pack(), ["p2"], { favorites: [tr("p2")], recent: null });
+		expect(dry.drop.map((i) => i.videoId)).toEqual(["p2"]);
+		expect(dry.add.count).toBe(0);
+		expect(packRefreshSummary(dry)).toBe("Rien à rafraîchir : pas de nouveau titre pour remplacer 1 titre écouté (5 min).");
 	});
 });
