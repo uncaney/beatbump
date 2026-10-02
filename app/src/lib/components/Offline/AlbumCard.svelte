@@ -157,9 +157,7 @@
 				<span class="sub"
 					>{#if showArtist}<span class="artist">{album.artist}</span><span class="dot"
 							>{" · "}</span
-						>{/if}{count} {count > 1 ? "pistes" : "piste"}{#if size}<span class="dot"
-							>{" · "}</span
-						>{size}{/if}</span
+						>{/if}{count} {count > 1 ? "pistes" : "piste"}</span
 				>
 			</span>
 		</button>
@@ -247,7 +245,8 @@
 	</div>
 	{#if count > 0}
 		<div class="readiness">
-			<span class="ready" data-testid="album-ready">{readyCount}/{count} prêts</span>
+			<!-- U14-7: the size sits here (the subtitle was cut by the action column: "4 pistes · 133 ···"). -->
+			<span class="ready" data-testid="album-ready">{readyCount}/{count} prêts{#if size} · {size}{/if}</span>
 			{#if readyCount < count}
 				<button
 					type="button"
