@@ -655,10 +655,12 @@ func MeMixHandler(c echo.Context) error {
 	}
 	// c40b B6-10: twice-skipped refs are neither seeds nor items; ex (all the
 	// profile exclusions, incl. what was played in the last 3 h: still a
-	// fine seed, not an item) keeps them out of the answer.
+	// fine seed, not an item) keeps them out of the answer. c43b L12-18: ex
+	// also carries the normalised (artist, title) keys of those refs, so
+	// another copy of a skipped song (other album, other lid) stays out.
 	now := time.Now()
 	skipped := skippedRefs(pid, now)
-	ex := profileExclusions(pid, now)
+	ex := resolveExclusions(profileExclusions(pid, now))
 	seeds := []string{}
 	addSeed := func(refs []string) {
 		for _, r := range refs {
@@ -736,14 +738,14 @@ func MeMixHandler(c echo.Context) error {
 		if h == nil {
 			continue
 		}
-		if !seen[lid] && !ex[lid] && freshKey(h) {
+		if !seen[lid] && !ex.hit(h) && freshKey(h) {
 			seen[lid] = true
 			items = append(items, localSongItem(h))
 		}
 		added := 0
 		for _, ph := range collapseDuplicates(results[i].pool, preferred) {
 			l := mstr(ph, "lid")
-			if l == "" || seen[l] || ex[l] || !freshKey(ph) {
+			if l == "" || seen[l] || ex.hit(ph) || !freshKey(ph) {
 				continue
 			}
 			seen[l] = true
