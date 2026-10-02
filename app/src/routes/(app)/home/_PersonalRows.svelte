@@ -134,7 +134,9 @@
 	async function openAlbumOfDayShortcut(a: AlbumOfDay) {
 		try {
 			await tick();
-			document.querySelector<HTMLElement>('[data-testid="album-of-day"]')?.scrollIntoView({ block: "center" });
+			// L15-4: no scrollIntoView before the goto: the page changes right
+			// away (the scroll was useless) and, reached by an internal
+			// navigation, it scrolled during the crossfade (c56a black screen).
 			await goto(albumOfDayHref(a));
 		} catch (err) {
 			console.error("album-of-day shortcut failed", err);
