@@ -33,6 +33,7 @@ import {
 	TODAY_ARTIST_KEY,
 	buildTodayGroup,
 	todaySubheading,
+	withoutCurrentTrack,
 	monthNameFr,
 	arrivedMonthTitle,
 	arrivedMonthFrom,
@@ -557,5 +558,34 @@ describe("Aujourd'hui (U13-4): one header for the album and the artist of the da
 		expect(todaySubheading({ album, artist: null })).toMatch(/^Un album .* le même pour tout le monde · demain un autre$/);
 		expect(todaySubheading({ album: null, artist }, artist)).toMatch(/^Un artiste .* le même pour tout le monde · demain un autre$/);
 		expect(todaySubheading({ album: null, artist }, { scope: "profile", reason: "" })).toMatch(/jamais écouté · demain un autre$/);
+	});
+});
+
+describe("withoutCurrentTrack (U13-5): Reprendre never proposes the playing track", () => {
+	const row = [song("v1", "Face to Face"), song("v2"), song("v3")];
+
+	it("drops the card of the current queue item while playback runs", () => {
+		expect(withoutCurrentTrack(row, { videoId: "v1" }, false).map(rowItemRef)).toEqual(["v2", "v3"]);
+		expect(withoutCurrentTrack(row, { videoId: "v2" }, false).map(rowItemRef)).toEqual(["v1", "v3"]);
+	});
+
+	it("keeps it while paused (same rule as the saved-queue pill), and with no current track", () => {
+		expect(withoutCurrentTrack(row, { videoId: "v1" }, true)).toBe(row);
+		expect(withoutCurrentTrack(row, null, false)).toBe(row);
+		expect(withoutCurrentTrack(row, undefined, false)).toBe(row);
+		expect(withoutCurrentTrack(row, {}, false)).toBe(row);
+	});
+
+	it("keeps the very array when nothing matches, empties a one-card row (then hidden by arrangeHomeRows)", () => {
+		expect(withoutCurrentTrack(row, { videoId: "zz" }, false)).toBe(row);
+		expect(withoutCurrentTrack([song("v1")], { videoId: "v1" }, false)).toEqual([]);
+		expect(withoutCurrentTrack(null, { videoId: "v1" }, false)).toEqual([]);
+		const out = arrangeHomeRows([{ key: "reprendre", items: withoutCurrentTrack([song("v1")], { videoId: "v1" }, false) }]);
+		expect(out.visible).toEqual([]);
+	});
+
+	it("matches a browse ref too (a local album card is not restarted either)", () => {
+		const albumsRow = [{ title: "A", browseId: "lb-1", thumbnails: [] }, song("v9")];
+		expect(withoutCurrentTrack(albumsRow, { browseId: "lb-1" }, false).map(rowItemRef)).toEqual(["v9"]);
 	});
 });

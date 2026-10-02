@@ -41,6 +41,7 @@
 		sanitizeCard,
 		shouldShowWeekCard,
 		thumbnailUrl,
+		withoutCurrentTrack,
 		TODAY_ROW,
 		buildTodayGroup,
 		todaySubheading,
@@ -61,7 +62,7 @@
 		wireProfileChannel,
 	} from "$lib/stores/nowPlayingSync";
 	import { AudioPlayer } from "$lib/player";
-	import list from "$lib/stores/list";
+	import list, { currentTrack } from "$lib/stores/list";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
 	import { ALBUM_OF_DAY_ROW, ALBUM_OF_DAY_URL, albumOfDayFrom, albumOfDayHref, albumOfDayLine, type AlbumOfDay } from "$lib/albumOfDay";
 	import {
@@ -614,8 +615,12 @@
 	// The Reprendre section also carries the pills and the week card, so it
 	// keeps its slot even with no card to show (keepEmpty).
 	$: reprendreHasExtras = showSavedPill || (!!remote && !!remoteTrack && $paused) || !!weekCard;
+	// U13-5: the track playing right now is not proposed again ("Reprendre :
+	// Face to Face" under a mini-bar playing Face to Face); paused, it stays.
+	// `resume` itself is kept whole for the home cache.
+	$: resumeShown = withoutCurrentTrack(resume, $currentTrack, $paused);
 	$: arranged = arrangeHomeRows([
-		{ key: "reprendre", items: resume, keepEmpty: reprendreHasExtras },
+		{ key: "reprendre", items: resumeShown, keepEmpty: reprendreHasExtras },
 		{ key: "pour-toi", items: forYou },
 		{ key: ALBUM_OF_DAY_ROW, items: albumDay ? [albumDay.album] : [], bonusSlot: true },
 		{ key: ARTIST_OF_DAY_ROW, items: artistDay ? [artistDay.artist] : [], bonusSlot: true },

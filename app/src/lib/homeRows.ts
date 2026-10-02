@@ -101,6 +101,22 @@ export function buildResumeRow(
 	return [...head, ...rest.filter((it) => rowItemRef(it) !== lastRef).slice(0, max)];
 }
 
+/**
+ * U13-5: "Reprendre" never proposes the track that is playing right now
+ * (the mini-bar already shows it, "Reprendre" would restart it). The card
+ * whose ref (videoId / lid) is the current queue item's is dropped while
+ * playback runs; paused, it stays (the same rule as the saved-queue pill,
+ * `showSavedPill`). A row left empty is hidden by arrangeHomeRows like any
+ * other. Items are not mutated; an untouched row keeps its very array.
+ */
+export function withoutCurrentTrack<T extends RowItem>(items: T[] | null | undefined, current: unknown, paused: boolean): T[] {
+	if (!Array.isArray(items)) return [];
+	const ref = rowItemRef(current);
+	if (!ref || paused) return items;
+	const out = items.filter((it) => rowItemRef(it) !== ref);
+	return out.length === items.length ? items : out;
+}
+
 /** Label shown when a card has no usable artist name (never the string "undefined"). */
 export const UNKNOWN_ARTIST = "Artiste inconnu";
 
