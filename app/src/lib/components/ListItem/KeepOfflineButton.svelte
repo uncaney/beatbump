@@ -8,10 +8,18 @@
 	// UX2 (cycle 35): `compact` renders a 44px corner .icon-btn (pin
 	// pictogram since U12-3, "9/14" while running, green when ready) for dense grids such
 	// as the Mixes cards; same testid / data-state / data-ready / data-total.
+	// c43d: the idle "Prêt hors-ligne" state used to be read ONCE from the
+	// localStorage list when the job ended (allPinned). Another tab of the same
+	// origin (a running pack on /library/downloads-offline, its reconcile after
+	// a cancel) rewrites that list concurrently and can drop this source's
+	// _cached / _pinned flags, so a complete batch showed "Garder hors-ligne"
+	// under its "N morceaux prêts hors-ligne" toast. The batch result now
+	// decides (keepDoneReady) and the list store is a dependency, so the state
+	// also follows a later reconcile (which restores the flags from the SW).
 	import { page } from "$app/stores";
 	import Icon from "$components/Icon/Icon.svelte";
-	import { getOfflineTracks } from "$lib/offline";
-	import { cancelKeepJob, compactKeepAriaLabel, findKeepJob, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepProgress } from "$lib/offlineBatch";
+	import { getOfflineTracks, offlineTracks } from "$lib/offline";
+	import { cancelKeepJob, compactKeepAriaLabel, findKeepJob, keepDoneReady, keepJobs, keepLabel, keepSummary, keepableTracks, startKeepJob, type KeepJob, type KeepProgress, type KeepResult } from "$lib/offlineBatch";
 	import { notify } from "$lib/utils";
 
 	/** Tracks of the source, or a loader (album pages resolve their queue lazily). */
@@ -41,6 +49,20 @@
 
 	let progress: KeepProgress | null = null;
 
+	// c43d: result of the last batch shown here (started from this button, the
+	// menu ⋮ or another page), remembered with the source key it was for.
+	let lastDone: KeepResult | null = null;
+	let lastDoneKey = "";
+	let seenJob: KeepJob | undefined;
+	$: if (job && job !== seenJob) {
+		seenJob = job;
+		const k = key;
+		void job.done.then((r) => {
+			lastDone = r;
+			lastDoneKey = k;
+		});
+	}
+
 	function allPinned(list: any[]): boolean {
 		const ks = keepableTracks(list);
 		if (!ks.length) return false;
@@ -54,8 +76,12 @@
 
 	$: if (job) progress = job.progress;
 	$: if (!running) {
+		void $offlineTracks; // c43d: re-evaluate when the shared list changes (another tab's writes / reconcile)
+		const done = lastDoneKey === key ? lastDone : null;
 		const n = keepableTracks(tracks).length;
-		progress = n && allPinned(tracks) ? { ready: n, failed: 0, refused: 0, total: n } : null;
+		// A lazily loaded source (album queue) has no tracks here: its batch result gives the count.
+		const total = n || (done && !done.cancelled ? done.total : 0);
+		progress = total && (keepDoneReady(done, total) || (n > 0 && allPinned(tracks))) ? { ready: total, failed: 0, refused: 0, total } : null;
 	}
 	$: label = keepLabel(progress, running);
 	$: state = running ? "running" : progress && progress.total && progress.ready === progress.total ? "ready" : "idle";
