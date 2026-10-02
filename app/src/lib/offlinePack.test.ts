@@ -15,8 +15,12 @@ vi.mock("$lib/offline", () => ({
 
 import {
 	LAST_PACK_KEY,
+	PACK_DEFAULT_BPS,
 	PACK_EST_BYTES,
 	PACK_EST_SECONDS,
+	averageBytesPerSecond,
+	estimatePackBytes,
+	guardPackSpace,
 	lastPackOf,
 	listenedPackIds,
 	packDurationText,
@@ -156,6 +160,79 @@ describe("packLabel", () => {
 	it("reads count + Mo in French", () => {
 		expect(packLabel(0, 0, 0, 100 * MB)).toBe("Aucun morceau à préparer");
 		expect(packLabel(3, 12, 12.4 * MB, 100 * MB)).toBe("3/12 · 12\u202fMo sur 100\u202fMo");
+	});
+});
+
+describe("B7-8 space guard (L12-14)", () => {
+	const NB = " ";
+	it("averageBytesPerSecond measures the cached entries with a known length, default under two", () => {
+		const secs = new Map([
+			["a", 100],
+			["b", 300],
+		]);
+		expect(averageBytesPerSecond([{ videoId: "a", bytes: 1_000_000 }, { videoId: "b", bytes: 3_000_000 }, { videoId: "c", bytes: 9 }], secs)).toBe(10_000);
+		expect(averageBytesPerSecond([{ videoId: "a", bytes: 1_000_000 }], secs)).toBe(PACK_DEFAULT_BPS);
+		expect(averageBytesPerSecond(null, null)).toBe(PACK_DEFAULT_BPS);
+		expect(PACK_DEFAULT_BPS).toBe(17476); // 1 Mo per minute
+	});
+
+	it("estimatePackBytes uses the known size, else the length at the bitrate", () => {
+		const p = planPack({ favorites: [tr("a", { _bytes: 10 * MB, duration: 600 }), tr("b", { duration: 120 })] }, 3600, "seconds");
+		expect(estimatePackBytes(p, 10_000)).toBe(10 * MB + 1_200_000);
+	});
+
+	it("fits: an unlimited quota never refuses, a quota keeps 10 % headroom above the pinned bytes", () => {
+		const p = planPack({ favorites: [tr("a", { duration: 600 }), tr("b", { duration: 600 })] }, 3600, "seconds");
+		const bps = 10_000; // 6 Mo per track
+		const free = guardPackSpace(p, { quota: 0, pinnedBytes: 5_000 * MB }, bps);
+		expect(free.fits).toBe(true);
+		expect(free.limit).toBe("none");
+		expect(free.available).toBe(Infinity);
+		expect(free.shrunk).toBe(p);
+		expect(free.message).toBe("");
+		// 100 Mo quota, 80 Mo pinned: 18 Mo usable, 12 Mo asked.
+		const ok = guardPackSpace(p, { quota: 100 * MB, pinnedBytes: 80 * MB }, bps);
+		expect(ok.fits).toBe(true);
+		expect(ok.available).toBe(Math.floor(20 * MB * 0.9));
+		expect(ok.limit).toBe("quota");
+	});
+
+	it("too big: cuts the plan to the head that fits and names the demand, what fits and why", () => {
+		const favs = Array.from({ length: 12 }, (_, i) => tr("t" + i, { duration: 600 }));
+		const p = planPack({ favorites: favs }, 7200, "seconds"); // 12 x 10 min = 2 h
+		const bps = Math.round(MB / 60); // 10 Mo per track, 120 Mo asked
+		const g = guardPackSpace(p, { quota: 500 * MB, pinnedBytes: 450 * MB }, bps); // 45 Mo usable
+		expect(g.fits).toBe(false);
+		expect(g.limit).toBe("quota");
+		expect(g.estimated).toBe(12 * 600 * bps);
+		expect(g.shrunk.count).toBe(4);
+		expect(g.shrunk.seconds).toBe(2400);
+		expect(g.shrunk.mode).toBe("seconds");
+		expect(g.shrunk.target).toBe(7200);
+		expect(g.shrunk.left).toBe(8);
+		expect(g.shrunk.items.map((i) => i.videoId)).toEqual(["t0", "t1", "t2", "t3"]);
+		expect(g.message).toBe(`Pas assez de place : 2 h demandées (≈ 120${NB}Mo), 40 min tiennent dans les 45${NB}Mo libres (quota 500${NB}Mo, 450${NB}Mo épinglés).`);
+	});
+
+	it("too big: nothing fits when the pinned bytes already reach the quota", () => {
+		const p = planPack({ favorites: [tr("a", { duration: 600 })] }, 1800, "seconds");
+		const g = guardPackSpace(p, { quota: 100 * MB, pinnedBytes: 100 * MB });
+		expect(g.fits).toBe(false);
+		expect(g.available).toBe(0);
+		expect(g.shrunk.count).toBe(0);
+		expect(g.message).toBe(`Pas assez de place : 30 min demandées (≈ 10${NB}Mo), rien ne tient dans les 0${NB}Mo libres (quota 100${NB}Mo, 100${NB}Mo épinglés).`);
+	});
+
+	it("the device free space bounds the pack when it is lower than the quota room", () => {
+		const p = planPack({ favorites: [tr("a", { duration: 600 }), tr("b", { duration: 600 })] }, 3600, "seconds");
+		const g = guardPackSpace(p, { quota: 0, pinnedBytes: 0, deviceFree: 12 * MB }, Math.round(MB / 60));
+		expect(g.fits).toBe(false);
+		expect(g.limit).toBe("device");
+		expect(g.available).toBe(Math.floor(12 * MB * 0.9));
+		expect(g.shrunk.count).toBe(1);
+		expect(g.message).toContain("l'appareil est presque plein");
+		// An unknown device estimate (null / NaN) bounds nothing.
+		expect(guardPackSpace(p, { quota: 0, pinnedBytes: 0, deviceFree: null }).fits).toBe(true);
 	});
 });
 

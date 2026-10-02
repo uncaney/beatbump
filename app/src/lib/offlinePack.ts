@@ -6,7 +6,7 @@
 // the items to keepOffline (downloaded + pinned, 2 at a time, cancellable).
 import { keepableTracks } from "$lib/offlineBatch";
 import { durationOf } from "$lib/offlineQueue";
-import { formatMoFr } from "$lib/utils/formatFr";
+import { formatBytesFr, formatMoFr } from "$lib/utils/formatFr";
 import { formatDuration } from "$lib/utils/releaseMeta";
 
 /** Size guess for a track never downloaded (a ~3-4 min Opus / AAC stream). */
@@ -142,6 +142,128 @@ export function packDurationText(done: number, total: number, doneSeconds: numbe
 	if (total <= 0) return "Aucun morceau à préparer";
 	const d = doneSeconds > 0 ? formatDuration(doneSeconds) : "0 min";
 	return `${done}/${total} · ${d} sur ${formatDuration(targetSeconds)}`;
+}
+
+// ---- B7-8 (L12-14): space guard for a pack by duration ----
+// planPack in "seconds" mode bounds listening time, not bytes: "4 h" can ask
+// 240 to 320 Mo (more in high quality) with no look at the quota. Before the
+// keep job starts, the card estimates the bytes (known size, else length x
+// average bitrate) and compares them to what the pinned total may still grow
+// by (quota minus pinned bytes, 10 % headroom), and to the device's free
+// storage when the browser tells it. Too big = refused, with the longest
+// head of the plan that fits offered instead ("1 h 20 tient").
+
+/** 1 Mo per minute of audio, the default bitrate guess (Opus / AAC streams). */
+export const PACK_DEFAULT_BPS = Math.round((1024 * 1024) / 60);
+/** Share of the free space the guard leaves untouched (metadata, API cache). */
+export const PACK_SPACE_HEADROOM = 0.1;
+
+/**
+ * Average bytes per second of listening, from the cached entries whose length
+ * is known (`seconds` by videoId: the local list `length` / `duration`), the
+ * default when fewer than two entries can be measured.
+ */
+export function averageBytesPerSecond(
+	entries: ReadonlyArray<{ videoId?: string; bytes?: number } | null | undefined> | null | undefined,
+	seconds: ReadonlyMap<string, number> | null | undefined,
+): number {
+	let bytes = 0;
+	let secs = 0;
+	let n = 0;
+	for (const e of entries ?? []) {
+		if (!e || !e.videoId) continue;
+		const b = Number(e.bytes);
+		const s = Number(seconds?.get(e.videoId));
+		if (!Number.isFinite(b) || b <= 0 || !Number.isFinite(s) || s <= 0) continue;
+		bytes += b;
+		secs += s;
+		n++;
+	}
+	if (n < 2 || secs <= 0) return PACK_DEFAULT_BPS;
+	const bps = Math.round(bytes / secs);
+	return bps > 0 ? bps : PACK_DEFAULT_BPS;
+}
+
+/** Bytes a planned item will take: its known size, else its length at `bps`. */
+export function packItemEstimate(item: Pick<PackItem, "bytes" | "estimated" | "seconds">, bps: number): number {
+	if (!item.estimated && item.bytes > 0) return item.bytes;
+	const b = Math.round(Math.max(0, item.seconds) * (bps > 0 ? bps : PACK_DEFAULT_BPS));
+	return b > 0 ? b : PACK_EST_BYTES;
+}
+
+/** Estimated bytes of a whole plan (see packItemEstimate). */
+export function estimatePackBytes(plan: Pick<PackPlan, "items">, bps: number): number {
+	return plan.items.reduce((s, i) => s + packItemEstimate(i, bps), 0);
+}
+
+export type PackSpace = {
+	/** SW audio quota (bytes), <= 0 = unlimited. */
+	quota: number;
+	/** Bytes already pinned (never evicted, so a pack can only add to them). */
+	pinnedBytes: number;
+	/** Free bytes on the device (navigator.storage.estimate quota - usage), null when unknown. */
+	deviceFree?: number | null;
+};
+
+export type PackGuard = {
+	/** true: the whole plan fits, start it as is. */
+	fits: boolean;
+	/** Estimated bytes of the plan. */
+	estimated: number;
+	/** Bytes the pack may take (Infinity when nothing bounds it). */
+	available: number;
+	/** What bounds `available`: the quota, the device, or nothing. */
+	limit: "none" | "quota" | "device";
+	/** The longest head of the plan that fits (the plan itself when it fits). */
+	shrunk: PackPlan;
+	/** "Pas assez de place : …" when it does not fit, "" otherwise. */
+	message: string;
+};
+
+/**
+ * Compare a plan to the space it may take. Not fitting = the plan is cut
+ * (same order, first fit on estimated bytes) and a French message names the
+ * demand, what fits and why ("quota 500 Mo, 400 Mo épinglés").
+ */
+export function guardPackSpace(plan: PackPlan, space: PackSpace, bps = PACK_DEFAULT_BPS): PackGuard {
+	const keep = 1 - PACK_SPACE_HEADROOM;
+	let available = Infinity;
+	let limit: PackGuard["limit"] = "none";
+	const quota = Number(space.quota) || 0;
+	const pinned = Math.max(0, Number(space.pinnedBytes) || 0);
+	if (quota > 0) {
+		available = Math.max(0, Math.floor((quota - pinned) * keep));
+		limit = "quota";
+	}
+	// null / undefined = the browser gave no estimate: nothing to bound.
+	const free = space.deviceFree == null ? NaN : Number(space.deviceFree);
+	if (Number.isFinite(free) && free >= 0) {
+		const dev = Math.floor(free * keep);
+		if (dev < available) {
+			available = dev;
+			limit = "device";
+		}
+	}
+	const estimated = estimatePackBytes(plan, bps);
+	if (estimated <= available) return { fits: true, estimated, available, limit, shrunk: plan, message: "" };
+	const items: PackItem[] = [];
+	let bytes = 0;
+	let seconds = 0;
+	let used = 0;
+	for (const i of plan.items) {
+		const e = packItemEstimate(i, bps);
+		if (used + e > available) continue;
+		items.push(i);
+		used += e;
+		bytes += i.bytes;
+		seconds += i.seconds;
+	}
+	const shrunk: PackPlan = { items, bytes, seconds, count: items.length, target: plan.target, mode: plan.mode, left: plan.left + plan.items.length - items.length, candidates: plan.candidates };
+	const asked = plan.mode === "seconds" ? `${formatDuration(plan.target)} demandées` : `${formatBytesFr(plan.target)} demandés`;
+	const fitsTxt = items.length ? `${plan.mode === "seconds" ? formatDuration(seconds) : formatBytesFr(used)} ${items.length > 1 ? "tiennent" : "tient"}` : "rien ne tient";
+	const why = limit === "device" ? "l'appareil est presque plein" : `quota ${formatBytesFr(quota)}, ${formatBytesFr(pinned)} épinglés`;
+	const message = `Pas assez de place : ${asked} (≈ ${formatBytesFr(estimated)}), ${fitsTxt} dans les ${formatBytesFr(available)} libres (${why}).`;
+	return { fits: false, estimated, available, limit, shrunk, message };
 }
 
 // ---- B7-7 "Rafraîchir mon pack" ----

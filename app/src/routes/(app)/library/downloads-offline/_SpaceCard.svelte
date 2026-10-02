@@ -25,6 +25,13 @@
 	// "Libérer" is disabled then (it frees by size only). `?pack=dur:7200` (the
 	// home weekend card) preselects the choice and unfolds the card.
 	//
+	// B7-8 (cycle 44, L12-14): a pack by duration is measured before it starts
+	// (guardPackSpace: known sizes else length x average bitrate of the cache,
+	// against quota - pinned bytes and the device's free storage). Too big =
+	// packState "too-big" ([data-testid=pack-progress][data-state=too-big],
+	// "Pas assez de place : …") with the head that fits offered behind
+	// [data-testid=pack-shrink]; nothing is downloaded until the user says so.
+	//
 	// B7-7 (cycle 44, "Rafraîchir mon pack"): the last pack is remembered
 	// (localStorage LAST_PACK_KEY); [data-testid=pack-refresh] replaces its
 	// tracks already listened to (a play since the pack began, or the SW
@@ -40,6 +47,7 @@
 		listCachedAudio,
 		requestPersistentStorage,
 		scheduleSwAudioRefresh,
+		storageStatus,
 		swRequest,
 		type AudioListEntry,
 	} from "$lib/offline";
@@ -47,6 +55,8 @@
 	import {
 		PACK_DURATIONS_SEC,
 		PACK_SIZES_MB,
+		averageBytesPerSecond,
+		guardPackSpace,
 		lastPackOf,
 		listenedPackIds,
 		packDurationLabel,
@@ -62,8 +72,10 @@
 		refreshedLastPack,
 		writeLastPack,
 		type LastPack,
+		type PackGuard,
 		type PackPlan,
 	} from "$lib/offlinePack";
+	import { durationOf } from "$lib/offlineQueue";
 	import { fmtBytesFr, spaceButtonLabels, spaceStatusLine } from "$lib/offlineSpace";
 	import { cancelKeepJob, defaultKeepDeps, keepDepsWithAbort, keepJobs, keepSummary, startKeepJob, type KeepProgress, type KeepResult } from "$lib/offlineBatch";
 	import { getFavorites, getMix, getRecent } from "$lib/me";
@@ -226,15 +238,18 @@
 	function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
 		return p.catch(() => fallback);
 	}
-	let packState: "" | "planning" | "running" | "done" | "cancelled" = "";
+	let packState: "" | "planning" | "running" | "done" | "cancelled" | "too-big" = "";
 	let packPlan: PackPlan | null = null;
 	let packProgress: KeepProgress | null = null;
 	let packDoneBytes = 0;
 	let packDoneSeconds = 0;
 	let packResult = "";
 	let packOwned = false; // started by this instance (its onDone writes the outcome)
+	/** B7-8: the refused plan and the head of it that fits ("Préparer 1 h 20 quand même"). */
+	let packGuard: PackGuard | null = null;
 	/** B7-7: the last pack this device prepared (null = no "Rafraîchir" button). */
 	let lastPack: LastPack | null = null;
+	let packStartButton: HTMLButtonElement | null = null;
 	function storage(): Storage | null {
 		try {
 			return typeof localStorage !== "undefined" ? localStorage : null;
@@ -281,6 +296,9 @@
 			state: packState,
 			doneBytes: packDoneBytes,
 			progress: packProgress,
+			guard: packGuard
+				? { fits: packGuard.fits, estimated: packGuard.estimated, available: packGuard.available, limit: packGuard.limit, shrunkCount: packGuard.shrunk.count, shrunkSeconds: packGuard.shrunk.seconds, message: packGuard.message }
+				: null,
 			...extra,
 		};
 	}
@@ -291,6 +309,7 @@
 		packDoneBytes = 0;
 		packDoneSeconds = 0;
 		packResult = "";
+		packGuard = null;
 		error = "";
 	}
 	type PackSources = { favorites: any[]; recent: any[]; plays: Array<{ videoId?: string; playedAt?: number }>; mix: any[]; cached: Set<string>; sizes: Map<string, number> };
@@ -322,6 +341,15 @@
 		const plays = recent.map((it, i) => ({ videoId: it?.videoId, playedAt: Number(playedAt[i]) || 0 }));
 		return { favorites, recent, plays, mix: Array.isArray(mix?.items) ? mix.items : [], cached, sizes };
 	}
+	/** B7-8: the average bitrate of what is cached (bytes / known length), 1 Mo/min by default. */
+	function cacheBytesPerSecond(): number {
+		const secs = new Map<string, number>();
+		for (const t of getOfflineTracks()) {
+			const d = durationOf(t);
+			if (t.videoId && d && d > 0) secs.set(t.videoId, d);
+		}
+		return averageBytesPerSecond(entries, secs);
+	}
 	async function startPack() {
 		if (packRunning || busy || loading) return;
 		packState = "planning";
@@ -335,11 +363,41 @@
 				exposePack();
 				return;
 			}
+			// B7-8 (L12-14): a duration bounds listening time, not bytes: measure
+			// the plan against the room left (quota - pinned, the device) first.
+			if (packPlan.mode === "seconds") {
+				const st = await safe(storageStatus(), { persisted: null, usage: 0, quota: 0 });
+				const deviceFree = st.quota > 0 ? Math.max(0, st.quota - st.usage) : null;
+				const guard = guardPackSpace(packPlan, { quota, pinnedBytes, deviceFree }, cacheBytesPerSecond());
+				if (!guard.fits) {
+					packGuard = guard;
+					packState = "too-big";
+					packResult = guard.message;
+					exposePack();
+					return;
+				}
+			}
 			runPack(packPlan, src.sizes);
 		} catch (e) {
 			packState = "";
 			error = `Impossible de préparer le pack : ${(e as Error)?.message ?? e}`;
 		}
+	}
+	/** B7-8: start the head of the refused plan that fits. */
+	function startShrunkPack() {
+		if (packState !== "too-big" || !packGuard || !packGuard.shrunk.count) return;
+		const plan = packGuard.shrunk;
+		packGuard = null;
+		const sizes = new Map<string, number>();
+		for (const i of plan.items) if (!i.estimated) sizes.set(i.videoId, i.bytes);
+		runPack(plan, sizes);
+	}
+	function dismissPackGuard() {
+		if (packState !== "too-big") return;
+		packState = "";
+		packGuard = null;
+		packResult = "";
+		exposePack();
 	}
 	/**
 	 * Run a plan as THE pack job (PACK_KEY): downloads + pins, 2 at a time,
@@ -589,6 +647,7 @@
 					aria-describedby="offline-space-desc"
 					disabled={loading || !!busy || packRunning || !!freePlan}
 					title="Télécharge et épingle tes favoris, puis tes écoutes récentes, puis ta sélection"
+					bind:this={packStartButton}
 					on:click={startPack}
 				>
 					{packState === "planning" ? "Préparation…" : labels.pack}
@@ -694,6 +753,36 @@
 					aria-label="Progression du pack"
 				/>
 				<span id="offline-pack-text">{packText}</span>
+				{#if packState === "too-big" && packGuard}
+					<!-- B7-8: nothing was downloaded; the head that fits is one tap away. -->
+					<div class="panel-actions">
+						{#if packGuard.shrunk.count}
+							<button
+								type="button"
+								id="offline-pack-shrink"
+								class="btn-reset btn-secondary"
+								data-testid="pack-shrink"
+								data-count={packGuard.shrunk.count}
+								data-seconds={packGuard.shrunk.seconds}
+								on:click={startShrunkPack}
+							>
+								Préparer {packDurationLabel(packGuard.shrunk.seconds) || "ce qui tient"} quand même
+							</button>
+						{/if}
+						<button
+							type="button"
+							id="offline-pack-dismiss"
+							class="btn-reset btn-ghost"
+							data-testid="pack-dismiss"
+							on:click={() => {
+								dismissPackGuard();
+								void tick().then(() => packStartButton?.focus());
+							}}
+						>
+							Fermer
+						</button>
+					</div>
+				{/if}
 			</div>
 		{/if}
 		{#if error}
