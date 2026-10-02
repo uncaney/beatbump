@@ -87,16 +87,25 @@
 	$: maxArtist = artists[0]?.count ?? 0;
 	$: maxAlbum = albums[0]?.count ?? 0;
 	$: maxHour = summary ? Math.max(0, ...summary.hours) : 0;
+	// B9-5 (U13-20): the page is "Tes stats" (the nav chip's name); the active
+	// period is the subtitle, so the title stops saying "mois" for 7 / 365 days.
+	$: periodSubtitle = `${days} derniers jours`;
 </script>
 
 <svelte:head>
-	<title>Ton mois</title>
+	<title>Tes stats</title>
 </svelte:head>
 
 <main class="resp-content-width">
 	<CollectionNav active="stats" />
 	<header class="head">
-		<h1>Ton mois</h1>
+		<h1>Tes stats</h1>
+		<p
+			class="head-sub"
+			data-testid="stats-period-sub"
+		>
+			{periodSubtitle}
+		</p>
 		<div
 			class="periods"
 			role="tablist"
@@ -326,6 +335,13 @@
 	}
 	h1 {
 		margin: 0;
+	}
+	// B9-5 (U13-20): the active period, on its own line under the title.
+	.head-sub {
+		width: 100%;
+		margin: -0.35rem 0 0;
+		color: rgba(255, 255, 255, 0.72);
+		font-size: max(0.85rem, 12px);
 	}
 	.periods {
 		display: flex;
