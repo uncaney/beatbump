@@ -535,6 +535,16 @@
 			...extra,
 		};
 	}
+	// B9-6 (L14-11): the listened set and the plan are recomputed from fresh
+	// sources both when the preview opens and when it is confirmed, so a track
+	// played between the two moments is reflected (currentTrack is protected).
+	async function computeRefreshPlan(prev: NonNullable<typeof lastPack>) {
+		const src = await packSources();
+		const listened = listenedPackIds(prev, { plays: src.plays });
+		const protect = [get(currentTrack)?.videoId, readLastTrack(storage() ?? undefined)?.videoId];
+		const plan = planPackRefresh(prev, listened, { favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes }, protect);
+		return { src, listened, plan };
+	}
 	async function refreshPack() {
 		if (packRunning || busy || loading || !lastPack || refreshPreview) return;
 		const prev = lastPack;
@@ -542,10 +552,7 @@
 		refreshPlanning = true;
 		resetPackRun();
 		try {
-			const src = await packSources();
-			const listened = listenedPackIds(prev, { plays: src.plays });
-			const protect = [get(currentTrack)?.videoId, readLastTrack(storage() ?? undefined)?.videoId];
-			const plan = planPackRefresh(prev, listened, { favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes }, protect);
+			const { src, listened, plan } = await computeRefreshPlan(prev);
 			if (!plan.drop.length || !plan.add.count) {
 				// U13-18: no job ran: a plain status line (no bar), the button
 				// stays disabled with the reason until the next gesture.
@@ -580,10 +587,21 @@
 	}
 	async function confirmRefresh() {
 		if (!refreshPreview || packRunning || busy) return;
-		const { prev, src, listened, plan } = refreshPreview;
+		const { prev } = refreshPreview;
 		refreshPreview = null;
 		packState = "planning";
 		try {
+			// B9-6 (L14-11): recompute from fresh sources at confirm time; a track
+			// heard between the preview and now changes what the refresh removes.
+			const { src, listened, plan } = await computeRefreshPlan(prev);
+			if (!plan.drop.length || !plan.add.count) {
+				packState = "done";
+				packResult = packRefreshSummary(plan);
+				refreshNothing = plan.drop.length ? "Pas de nouveau titre pour remplacer les titres écoutés" : "Aucun titre écouté depuis le pack";
+				exposeRefresh({ prev, listened, plan }, { applied: false, recomputed: true });
+				exposePack();
+				return;
+			}
 			const byId = new Map<string, AudioListEntry>();
 			for (const e of entries) if (e.videoId) byId.set(e.videoId, e);
 			const removed: string[] = [];
@@ -1070,8 +1088,12 @@
 			outline-offset: 2px;
 		}
 	}
+	// B9-3 (U13-15): "Annuler" read at 2.97 as red text on dark; a solid red
+	// fill with white text clears 4.5 (white on #c62828 ~= 5.9).
 	.danger {
-		border-color: rgba(220, 53, 69, 0.6);
+		background: #c62828;
+		color: #fff;
+		border-color: #c62828;
 	}
 	.space-desc {
 		margin: 0.5rem 0 0;
@@ -1116,6 +1138,11 @@
 		&::before {
 			content: " · ";
 		}
+	}
+	// B9-3 (U13-15): the progress line ("0/19 · 0 Mo sur 100 Mo") read at 11.25 px;
+	// floor it at 12 px.
+	.pack-progress {
+		font-size: max(0.85rem, 12px);
 	}
 	.pack-progress progress {
 		width: 100%;

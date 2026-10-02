@@ -102,6 +102,12 @@
 		const d = new Date(iso);
 		return isNaN(d.getTime()) ? iso : d.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 	};
+	// B9-12: the month (YYYY-MM) of the last addition, for the added-month deep link.
+	const monthOf = (iso: string): string => {
+		if (!iso) return "";
+		const d = new Date(iso);
+		return isNaN(d.getTime()) ? "" : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+	};
 
 	async function loadStats() {
 		try {
@@ -265,7 +271,14 @@
 				</div>
 				<dl class="facts">
 					<dt>Dernier ajout</dt>
-					<dd data-testid="about-last-added">{fmtDate(stats.lastAdded)}</dd>
+					<dd data-testid="about-last-added">
+						<!-- B9-12: the row opens that month's arrivals (added-month filter). -->
+						{#if monthOf(stats.lastAdded)}
+							<a href="/library/albums?filter=added-month&month={monthOf(stats.lastAdded)}">{fmtDate(stats.lastAdded)}</a>
+						{:else}
+							{fmtDate(stats.lastAdded)}
+						{/if}
+					</dd>
 				</dl>
 			{/if}
 			<!-- B8-22: LIBRARY-LINT's hygiene counters (read-only; a list for

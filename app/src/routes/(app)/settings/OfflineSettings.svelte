@@ -19,6 +19,9 @@
 	} from "$lib/offline";
 	import { notify } from "$lib/utils";
 	import { formatBytesFr, formatCountFr } from "$lib/utils/formatFr";
+	// B9-2 (U13-14): when data saver holds back automatic caching, the "Garder
+	// hors-ligne chaque morceau écouté" switch says it is suspended.
+	import { dataSaverReason, readConnection } from "$lib/dataSaver";
 
 	const MB = 1024 * 1024;
 	const GB = 1024 * MB;
@@ -35,6 +38,9 @@
 	let loading = true;
 	let error = "";
 	let message = "";
+	// B9-2 (U13-14): the live data-saver reason (person's switch, OS switch or slow link).
+	let dataSaverConn = readConnection();
+	$: dataSaverWhy = dataSaverReason({ setting: $settings?.playback?.["Data Saver"], ...dataSaverConn });
 	let busy: "" | "quota" | "clear" | "resync" = "";
 	let entries: AudioListEntry[] = [];
 	let total = 0;
@@ -205,6 +211,7 @@
 	}
 
 	onMount(() => {
+		dataSaverConn = readConnection();
 		void refresh();
 	});
 </script>
@@ -229,6 +236,16 @@
 				>Les morceaux que tu écoutes restent sur cet appareil et se jouent sans
 				connexion, dans la limite ci-dessous.</span
 			>
+			{#if dataSaverWhy}
+				<!-- B9-2 (U13-14): the switch stays on, but data saver suspends it. -->
+				<span
+					class="setting-suspended"
+					id="offline-autocache-suspended"
+					data-testid="offline-autocache-suspended"
+					data-reason={dataSaverWhy}
+					>Suspendu tant que l'économie de données est active.</span
+				>
+			{/if}
 		</label>
 		<span class="switch-wrap">
 			<input
@@ -480,6 +497,13 @@
 			color: hsla(0, 0%, 100%, 0.7);
 			line-height: 1.2;
 		}
+	}
+
+	// B9-2 (U13-14): the "suspended" note reads warmer than the plain
+	// description so the on-switch does not look like it is doing nothing
+	// (#ffcf8f on the dark panel clears 4.5).
+	.setting-suspended {
+		color: #ffcf8f;
 	}
 
 	/* "Stockage protégé : non · 2 Mo utilisés sur 10 Go" on one line beside

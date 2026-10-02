@@ -403,6 +403,25 @@ describe("B7-7 refresh my pack", () => {
 		expect(dry.add.count).toBe(0);
 		expect(packRefreshSummary(dry)).toBe("Rien à rafraîchir : pas de nouveau titre pour remplacer 1 titre écouté (5 min).");
 	});
+
+	it("B9-6 (L14-11): a listen between preview and confirm changes what the refresh removes", () => {
+		const p = pack(1_000_000); // p1 600 s, p2 300 s, p3 900 s
+		const cands = { favorites: [tr("n1", { duration: 600 }), tr("n2", { duration: 600 })] };
+		// Preview time: only p1 was listened since the pack began.
+		const atPreview = listenedPackIds(p, { plays: [{ videoId: "p1", playedAt: 1_000_001, seconds: 400 }] });
+		const previewPlan = planPackRefresh(p, atPreview, cands);
+		expect(previewPlan.drop.map((i) => i.videoId)).toEqual(["p1"]);
+		// Confirm time, recomputed from fresh sources: p3 was also heard in between.
+		const atConfirm = listenedPackIds(p, {
+			plays: [
+				{ videoId: "p1", playedAt: 1_000_001, seconds: 400 },
+				{ videoId: "p3", playedAt: 1_000_050, seconds: 500, duration: 900 },
+			],
+		});
+		const confirmPlan = planPackRefresh(p, atConfirm, cands);
+		expect(confirmPlan.drop.map((i) => i.videoId)).toEqual(["p1", "p3"]);
+		expect(confirmPlan.drop.length).toBeGreaterThan(previewPlan.drop.length);
+	});
 });
 
 describe("U13-2 size before the tap, progress of an adopted pack", () => {

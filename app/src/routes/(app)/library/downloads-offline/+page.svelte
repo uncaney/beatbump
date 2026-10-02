@@ -418,7 +418,12 @@
 			role="status"
 		>
 			{dataSaverLine}
-			{#if !dataSaverFromBrowser}<a href="/settings">Réglages</a>{/if}
+			{#if !dataSaverFromBrowser}<a
+					class="data-saver-link"
+					href="/settings"
+					data-testid="data-saver-modify"
+					aria-label="Modifier l'économie de données dans les Réglages">Modifier</a
+				>{/if}
 		</p>
 	{/if}
 	<!-- F7 + F15: "Libérer" / "Préparer un pack" are actions of this page (they
@@ -777,9 +782,17 @@
 		color: #b3b3b3;
 		font-size: var(--text-secondary-size);
 		line-height: 1.35;
+		// B9-2 (U13-14): "Modifier" was a 48x16 target on its own line; keep it
+		// in line but give it a 44 px tall, underlined hit box.
 		a {
-			color: inherit;
+			display: inline-flex;
+			align-items: center;
+			min-height: 44px;
+			padding: 0 0.5rem;
 			margin-left: 0.25rem;
+			color: inherit;
+			text-decoration: underline;
+			vertical-align: middle;
 		}
 	}
 	.failed-bar {
