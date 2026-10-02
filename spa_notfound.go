@@ -24,6 +24,7 @@ var spaRoots = map[string]bool{
 	"lyrics": true, "session": true, "favorites": true, "downloads": true,
 	"share-target": true, // HL5: manifest share_target action (Android "Partager vers")
 	"about":        true, // ST2: A propos / Etat
+	"bienvenue":    true, // B7-13: Installer chez toi (cycle 45)
 }
 
 // IsKnownSPAPath reports whether p starts with a known SvelteKit route root.
