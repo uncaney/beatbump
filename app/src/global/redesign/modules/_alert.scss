@@ -18,6 +18,7 @@
 	}
 	&-success {
 		@extend .m-alert;
-		background-color: #1d964b !important;
+		// U14-6: white text on #1d964b read 3.81:1; this green gives 5.4:1.
+		background-color: #167a3d !important;
 	}
 }

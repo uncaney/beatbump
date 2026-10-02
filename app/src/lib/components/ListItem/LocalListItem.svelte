@@ -278,17 +278,12 @@
 					aria-label="Prêt hors-ligne"
 					title="Prêt hors-ligne"
 					data-testid="offline-badge"
-					><svg
-						viewBox="0 0 24 24"
-						width="14"
-						height="14"
-						aria-hidden="true"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2.5"
-						stroke-linecap="round"
-						stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 7v9M8 12l4 4 4-4" /></svg
-					></span
+					><!-- U13-16: the pin of the "Garder" button (Listing.svelte B9-4), not a download arrow. -->
+					<Icon
+						name="pin"
+						size="14px"
+						strokeWidth={2}
+					/></span
 				>
 				{/if}
 				{#if item?.explicit}
