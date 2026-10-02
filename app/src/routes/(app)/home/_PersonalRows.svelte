@@ -11,6 +11,12 @@
 	// album per UTC day for every profile (anonymous included), painted right
 	// after Pour toi on a bonus slot: the 4-row cap stays 4 personal rows +
 	// this card.
+	// c44a B7-1: "Artiste du jour" ([data-testid=artist-of-day]), one local
+	// artist with >= 2 albums per UTC day, never played by a named profile
+	// (library-wide for a guest), a second bonus card after the album.
+	// c44a B7-2: "Arrivé en <mois>" ([data-testid=row-arrived-month]), the
+	// albums added during the month the server picks (>= 4 albums, never
+	// before July 2026), a normal discovery row under the 4-row cap.
 	import { NNBSP, formatCountFr } from "$lib/utils/formatFr";
 	import ShareWeek from "$lib/components/ShareWeek/ShareWeek.svelte";
 	import { onMount } from "svelte";
@@ -18,8 +24,11 @@
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
 	import {
 		ALBUM_ROW_MIN,
+		ARRIVED_MONTH_ROW,
 		HOME_MORE_ROWS_KEY,
 		arrangeHomeRows,
+		arrivedMonthFrom,
+		arrivedMonthTitle,
 		artistName,
 		buildForYouRow,
 		buildRediscoverRow,
@@ -51,6 +60,17 @@
 	import list from "$lib/stores/list";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
 	import { ALBUM_OF_DAY_ROW, ALBUM_OF_DAY_URL, albumOfDayFrom, albumOfDayHref, albumOfDayLine, type AlbumOfDay } from "$lib/albumOfDay";
+	import {
+		ARTIST_OF_DAY_ROW,
+		ARTIST_OF_DAY_URL,
+		artistOfDayFrom,
+		artistOfDayHref,
+		artistOfDayId,
+		artistOfDayLine,
+		artistOfDaySongsUrl,
+		artistOfDaySubheading,
+		type ArtistOfDay,
+	} from "$lib/artistOfDay";
 	import { get } from "svelte/store";
 
 	const MAX = 20;
@@ -110,6 +130,40 @@
 			console.error("album-of-day play failed", err);
 		} finally {
 			albumDayBusy = false;
+		}
+	}
+
+	// c44a B7-1: the artist of the day (GET local/artist-of-the-day), null = no
+	// card. Depends on the profile (never played by a named profile), so it
+	// is NOT written to the home cache: live only, reloaded on a profile change.
+	let artistDay: ArtistOfDay | null = null;
+	async function loadArtistOfDay() {
+		try {
+			const res = await APIClient.fetch(ARTIST_OF_DAY_URL);
+			if (!res.ok) return;
+			artistDay = artistOfDayFrom(await res.json());
+		} catch {
+			/* keep what is shown (nothing, or the previous answer) */
+		}
+	}
+	let artistDayBusy = false;
+	// "Écouter": a shuffled mix of the artist's local titles (up to 200), the
+	// artist page as the playback context ("Artiste : X", "Revenir").
+	async function playArtistOfDay() {
+		if (!artistDay || artistDayBusy) return;
+		artistDayBusy = true;
+		try {
+			const a = artistDay;
+			const res = await APIClient.fetch(artistOfDaySongsUrl(a));
+			if (!res.ok) return;
+			const r = await res.json();
+			const items = Array.isArray(r?.items) ? r.items : [];
+			if (!items.length) return;
+			await playTracks(items, { shuffle: true, context: { kind: "artist", title: a.name, href: artistOfDayHref(a) } });
+		} catch (err) {
+			console.error("artist-of-day play failed", err);
+		} finally {
+			artistDayBusy = false;
 		}
 	}
 
@@ -290,6 +344,7 @@
 		neverPlayedSource = "empty";
 		weekCard = null;
 		remote = null;
+		artistDay = null;
 		void refreshRemote(true);
 		void loadResume();
 		void loadForYou();
@@ -298,6 +353,7 @@
 		void loadRediscover();
 		void loadNewInLibrary();
 		void loadWeekCard();
+		void loadArtistOfDay();
 	}
 
 	// C1: the saved queue ("Remember Last Track"), resumed where it stopped.
@@ -434,6 +490,25 @@
 		homeCachePersist.schedule();
 	}
 
+	// c44a B7-2 "Arrivé en <mois>": the albums added during the month the
+	// server picks (GET local/albums?filter=added-month: the current month
+	// when it holds >= 4 albums, else the latest month that does, never
+	// before 2026-07). Library-wide, not profile-bound, not cached: hidden
+	// under 4 albums like the other album rows (arrivedMonthFrom).
+	let arrivedMonth: any[] = [];
+	let arrivedMonthKey = "";
+	async function loadArrivedMonth() {
+		try {
+			const res = await APIClient.fetch(`/api/v1/local/albums?filter=added-month&limit=${ACQUIRED_FETCH}`);
+			if (!res.ok) return;
+			const got = arrivedMonthFrom(await res.json());
+			arrivedMonth = got ? capItems(got.items, ACQUIRED_FETCH).map(sanitizeCard) : [];
+			arrivedMonthKey = got ? got.month : "";
+		} catch {
+			arrivedMonth = [];
+		}
+	}
+
 	const NEVER_PLAYED_MAX = 10;
 	async function loadNeverPlayed() {
 		try {
@@ -503,7 +578,9 @@
 		{ key: "reprendre", items: resume, keepEmpty: reprendreHasExtras },
 		{ key: "pour-toi", items: forYou },
 		{ key: ALBUM_OF_DAY_ROW, items: albumDay ? [albumDay.album] : [], bonusSlot: true },
+		{ key: ARTIST_OF_DAY_ROW, items: artistDay ? [artistDay.artist] : [], bonusSlot: true },
 		{ key: "recemment-acquis", items: acquired, max: MAX, minAfterDedupe: ALBUM_ROW_MIN },
+		{ key: ARRIVED_MONTH_ROW, items: arrivedMonth, max: MAX, minAfterDedupe: ALBUM_ROW_MIN },
 		{ key: "nouveautes-artistes", items: newInLibrary, minAfterDedupe: ALBUM_ROW_MIN },
 		{ key: "redecouvrir", items: rediscover },
 		{ key: "jamais-ecoute", items: neverPlayed, minAfterDedupe: ALBUM_ROW_MIN },
@@ -514,10 +591,11 @@
 	$: moreRows = arranged.more.filter((r) => r.key in DISCOVERY_ROWS);
 	$: moreCards = moreRows.reduce((n, r) => n + r.items.length, 0);
 
-	// The four discovery rows share one template; their copy, link and
-	// test ids live here. "Voir tout" lands on the list that shows the SAME
-	// thing as the row (F5 + BI4): the albums page with the row's filter and
-	// sort, the dedicated Redécouvrir list, the albums page newest first.
+	// The discovery rows share one template; their copy, link and test ids
+	// live here. "Voir tout" lands on the list that shows the SAME thing as
+	// the row (F5 + BI4): the albums page with the row's filter and sort,
+	// the dedicated Redécouvrir list, the albums page newest first. Reactive
+	// since c44a B7-2: the month row is titled after the month it shows.
 	interface DiscoveryRow {
 		title: string;
 		subheading: string;
@@ -525,12 +603,20 @@
 		testid: string;
 		isBrowseEndpoint: boolean;
 	}
-	const DISCOVERY_ROWS: Record<string, DiscoveryRow> = {
+	let DISCOVERY_ROWS: Record<string, DiscoveryRow>;
+	$: DISCOVERY_ROWS = {
 		"recemment-acquis": {
 			title: "Récemment acquis",
 			subheading: "Derniers albums ajoutés à la bibliothèque",
 			seeAllHref: "/library/albums?sort=dateAdded:desc",
 			testid: "row-recently-added",
+			isBrowseEndpoint: true,
+		},
+		[ARRIVED_MONTH_ROW]: {
+			title: arrivedMonthTitle(arrivedMonthKey) || "Arrivé ce mois-ci",
+			subheading: "Les albums entrés dans la bibliothèque ce mois-là",
+			seeAllHref: `/library/albums?filter=added-month&month=${encodeURIComponent(arrivedMonthKey)}&sort=dateAdded:desc`,
+			testid: "row-arrived-month",
 			isBrowseEndpoint: true,
 		},
 		"nouveautes-artistes": {
@@ -610,6 +696,8 @@
 		void loadNewInLibrary();
 		void loadWeekCard();
 		void loadAlbumOfDay();
+		void loadArtistOfDay();
+		void loadArrivedMonth();
 		let unwireProfile: (() => void) | undefined;
 		if (typeof BroadcastChannel !== "undefined") {
 			const channel = new BroadcastChannel(PROFILE_CHANNEL_NAME);
@@ -865,6 +953,78 @@
 					disabled={albumDayBusy}
 					on:click={playAlbumOfDay}>Écouter</button
 				>
+			</article>
+		</div>
+	</section>
+{/if}
+
+<!-- c44a B7-1: the artist of the day, a bonus card after the album of the day. -->
+{#if visibleKeys.has(ARTIST_OF_DAY_ROW) && artistDay}
+	<section
+		class="home-row"
+		data-row={ARTIST_OF_DAY_ROW}
+	>
+		<div
+			class="row-fade"
+			data-testid="artist-of-day"
+			data-artist={artistOfDayId(artistDay)}
+			data-date={artistDay.date}
+			data-scope={artistDay.scope}
+			data-reason={artistDay.reason}
+		>
+			<div class="header resp-content-width">
+				<p class="subheading">{artistOfDaySubheading(artistDay)}</p>
+				<span class="h2">Artiste du jour</span>
+			</div>
+			<article class="resume-card aod-card">
+				<a
+					class="aod-cover-link"
+					href={artistOfDayHref(artistDay)}
+					aria-label="Voir l'artiste {artistDay.name}"
+				>
+					{#if thumbnailUrl(artistDay.artist)}
+						<img
+							class="resume-card-cover aotd-cover"
+							src={thumbnailUrl(artistDay.artist)}
+							width="64"
+							height="64"
+							loading="lazy"
+							decoding="async"
+							alt=""
+						/>
+					{:else}
+						<span
+							class="resume-card-cover aotd-cover placeholder"
+							aria-hidden="true"
+						/>
+					{/if}
+				</a>
+				<div class="resume-card-text">
+					<a
+						class="resume-card-title aod-title"
+						href={artistOfDayHref(artistDay)}
+						title={artistDay.name}>{artistDay.name}</a
+					>
+					{#if artistOfDayLine(artistDay.albumCount, artistDay.trackCount)}
+						<p class="resume-card-artist">{artistOfDayLine(artistDay.albumCount, artistDay.trackCount)}</p>
+					{/if}
+					<p class="aod-next">Demain un autre</p>
+				</div>
+				<div class="aotd-actions">
+					<a
+						class="btn-secondary resume-card-play aotd-open"
+						data-testid="artist-of-day-open"
+						href={artistOfDayHref(artistDay)}>Voir</a
+					>
+					<button
+						type="button"
+						class="btn-reset btn-primary resume-card-play"
+						data-testid="artist-of-day-play"
+						aria-label="Écouter un mix de {artistDay.name}"
+						disabled={artistDayBusy}
+						on:click={playArtistOfDay}>Écouter</button
+					>
+				</div>
 			</article>
 		</div>
 	</section>
@@ -1127,5 +1287,21 @@
 	}
 	.resume-card-play:disabled {
 		cursor: progress;
+	}
+	/* c44a B7-1: the artist-of-day card, same compact layout; a round cover
+	   like the artist grids, "Voir" (link) beside "Écouter" (button). */
+	.aotd-cover {
+		border-radius: 50%;
+	}
+	.aotd-actions {
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+	.aotd-open {
+		display: inline-flex;
+		align-items: center;
+		text-decoration: none;
 	}
 </style>

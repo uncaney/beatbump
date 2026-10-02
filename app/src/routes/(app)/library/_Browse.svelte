@@ -16,6 +16,7 @@
 	import { onMount, tick } from "svelte";
 	import CollectionNav from "./_CollectionNav.svelte";
 	import { formatCountFr, formatIntFr } from "$lib/utils/formatFr";
+	import { arrivedMonthTitle } from "$lib/homeRows";
 
 	export let kind: "artists" | "albums" | "songs"; // backend endpoint
 	export let title: string;
@@ -47,7 +48,13 @@
 	const FILTER_LABELS: Record<string, string> = {
 		"never-played": "Jamais écouté",
 		"added-30d": "Ajoutés ces 30 derniers jours",
+		// c44a B7-2: ?filter=added-month&month=YYYY-MM ("Voir tout" of Arrivé en <mois>).
+		"added-month": "Arrivés dans le mois",
 	};
+	// c44a B7-2: the month of the added-month filter, forwarded to the API
+	// and named on the chip ("Arrivé en septembre").
+	$: urlMonth = /^\d{4}-\d{2}$/.test($page.url.searchParams.get("month") || "") ? ($page.url.searchParams.get("month") as string) : "";
+	$: filterLabel = filter === "added-month" && arrivedMonthTitle(urlMonth) ? arrivedMonthTitle(urlMonth) : FILTER_LABELS[filter] || "";
 	let filter = "";
 	/**
 	 * U12-12: the server answers never-played with `reason: "anonymous"` for a
@@ -109,6 +116,7 @@
 				`&offset=${offset}&limit=${pageSize}` +
 				(q ? `&q=${encodeURIComponent(q)}` : "") +
 				(filter ? `&filter=${encodeURIComponent(filter)}` : "") +
+				(filter === "added-month" && urlMonth ? `&month=${encodeURIComponent(urlMonth)}` : "") +
 				extraParams;
 			const res = await APIClient.fetch(url);
 			const data = await res.json();
@@ -257,11 +265,11 @@
 			data-testid="browse-filter-chip"
 			data-filter={filter}
 		>
-			<span class="chip-label">{FILTER_LABELS[filter]}</span>
+			<span class="chip-label">{filterLabel}</span>
 			<button
 				type="button"
 				class="btn-reset chip-remove"
-				aria-label="Retirer le filtre {FILTER_LABELS[filter]}"
+				aria-label="Retirer le filtre {filterLabel}"
 				on:click={clearFilter}>✕</button
 			>
 		</div>

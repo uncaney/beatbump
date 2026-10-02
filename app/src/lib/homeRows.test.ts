@@ -24,6 +24,13 @@ import {
 	HOME_MAX_VISIBLE_ROWS,
 	HOME_MORE_ROWS_KEY,
 	ALBUM_ROW_MIN,
+	ARRIVED_MONTH_ROW,
+	ARRIVED_MONTH_MIN_ALBUMS,
+	HOME_ROW_PRIORITY,
+	HOME_ROW_ORDER,
+	monthNameFr,
+	arrivedMonthTitle,
+	arrivedMonthFrom,
 } from "./homeRows";
 
 const song = (id: string, title = id) => ({ videoId: id, title, thumbnails: [] });
@@ -445,5 +452,66 @@ describe("arrangeHomeRows bonus slot (c39b Album du jour)", () => {
 		const anon = arrangeHomeRows([{ key: "album-du-jour", items: albums("z"), bonusSlot: true }]);
 		expect(keys(anon.visible)).toEqual(["album-du-jour"]);
 		expect(keys(arrangeHomeRows([{ key: "album-du-jour", items: [], bonusSlot: true }]).visible)).toEqual([]);
+	});
+});
+
+describe("Arrivé en <mois> (c44a B7-2)", () => {
+	const album = (id: string) => ({ browseId: `lb-${id}`, title: `Album ${id}`, thumbnails: [], type: "album" });
+	const albums = (...ids: string[]) => ids.map(album);
+	const keys = (rows: { key: string }[]) => rows.map((r) => r.key);
+	const now = new Date("2026-10-02T10:00:00Z");
+
+	it("names the month in French, with the year only when it is not the current one", () => {
+		expect(monthNameFr("2026-09")).toBe("septembre");
+		expect(monthNameFr("2026-08")).toBe("août");
+		expect(monthNameFr("2026-13")).toBe("");
+		expect(monthNameFr("sept")).toBe("");
+		expect(arrivedMonthTitle("2026-09", now)).toBe("Arrivé en septembre");
+		expect(arrivedMonthTitle("2026-07", now)).toBe("Arrivé en juillet");
+		expect(arrivedMonthTitle("2025-12", now)).toBe("Arrivé en décembre 2025");
+		expect(arrivedMonthTitle("", now)).toBe("");
+	});
+
+	it("keeps the server's month only when it is after the migration and full enough", () => {
+		const items = albums("a", "b", "c", "d");
+		expect(arrivedMonthFrom({ month: "2026-09", items, total: 4 })).toEqual({ month: "2026-09", items, total: 4 });
+		expect(arrivedMonthFrom({ month: "2026-09", items: albums("a", "b"), total: 9 })?.total).toBe(9);
+		expect(arrivedMonthFrom({ month: "2026-09", items: albums("a", "b", "c"), total: 3 })).toBeNull();
+		expect(arrivedMonthFrom({ month: "2026-06", items, total: 40 })).toBeNull();
+		expect(arrivedMonthFrom({ month: "2026-09", items: [], total: 12 })).toBeNull();
+		expect(arrivedMonthFrom({ month: "nope", items, total: 4 })).toBeNull();
+		expect(arrivedMonthFrom(null)).toBeNull();
+		expect(ARRIVED_MONTH_MIN_ALBUMS).toBe(ALBUM_ROW_MIN);
+	});
+
+	it("takes a normal slot under the 4-row cap, ranks above Récemment acquis in the dedupe and is painted after it", () => {
+		expect(HOME_ROW_PRIORITY.indexOf(ARRIVED_MONTH_ROW)).toBe(HOME_ROW_PRIORITY.indexOf("recemment-acquis") - 1);
+		expect(HOME_ROW_ORDER.indexOf(ARRIVED_MONTH_ROW)).toBe(HOME_ROW_ORDER.indexOf("recemment-acquis") + 1);
+		// The month holds the 4 newest albums: Récemment acquis loses them and, under ALBUM_ROW_MIN, is hidden.
+		const out = arrangeHomeRows([
+			{ key: "reprendre", items: [song("v1")] },
+			{ key: "pour-toi", items: [song("v2")] },
+			{ key: "recemment-acquis", items: albums("a", "b", "c", "d", "e", "f"), minAfterDedupe: ALBUM_ROW_MIN },
+			{ key: ARRIVED_MONTH_ROW, items: albums("a", "b", "c", "d"), minAfterDedupe: ALBUM_ROW_MIN },
+		]);
+		expect(keys(out.visible)).toEqual(["reprendre", "pour-toi", ARRIVED_MONTH_ROW]);
+		expect(out.visible.find((r) => r.key === ARRIVED_MONTH_ROW)?.items.map(rowItemRef)).toEqual(["lb-a", "lb-b", "lb-c", "lb-d"]);
+		// A bigger backlog keeps both rows: the month first in the dedupe, painted right after Récemment acquis.
+		const both = arrangeHomeRows([
+			{ key: "recemment-acquis", items: albums("a", "b", "c", "d", "e", "f", "g", "h", "i"), minAfterDedupe: ALBUM_ROW_MIN },
+			{ key: ARRIVED_MONTH_ROW, items: albums("a", "b", "c", "d"), minAfterDedupe: ALBUM_ROW_MIN },
+		]);
+		expect(keys(both.visible)).toEqual(["recemment-acquis", ARRIVED_MONTH_ROW]);
+		expect(both.visible[0].items.map(rowItemRef)).toEqual(["lb-e", "lb-f", "lb-g", "lb-h", "lb-i"]);
+		// It takes a real slot: with the 4 others full it folds behind "Plus pour toi" like any discovery row.
+		const capped = arrangeHomeRows([
+			{ key: "reprendre", items: [song("v1")] },
+			{ key: "pour-toi", items: [song("v2")] },
+			{ key: "nouveautes-artistes", items: albums("n1", "n2", "n3", "n4", "n5") },
+			{ key: "jamais-ecoute", items: albums("j1", "j2", "j3", "j4", "j5", "j6") },
+			{ key: ARRIVED_MONTH_ROW, items: albums("m1", "m2", "m3", "m4") },
+		]);
+		expect(keys(capped.visible)).toEqual(["reprendre", "pour-toi", "nouveautes-artistes", "jamais-ecoute"]);
+		expect(keys(capped.more)).toEqual([ARRIVED_MONTH_ROW]);
 	});
 });

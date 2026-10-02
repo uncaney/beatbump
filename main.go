@@ -165,6 +165,8 @@ func newServer() *echo.Echo {
 	// c39b B6-1: album of the day (same for every profile, memoised per UTC date).
 	e.GET("/api/v1/local/album-of-day", api.LocalAlbumOfDayHandler)
 	e.GET("/api/v1/local/album-of-the-day", api.LocalAlbumOfDayHandler)
+	// c44a B7-1: artist of the day (never played by a named profile, memoised per UTC date + profile).
+	e.GET("/api/v1/local/artist-of-the-day", api.LocalArtistOfDayHandler)
 	// c41b B6-19: possible duplicate albums (read-only report, memoised 10 min).
 	e.GET("/api/v1/local/duplicates", api.LocalDuplicatesHandler)
 
