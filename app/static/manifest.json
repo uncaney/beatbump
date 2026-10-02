@@ -50,6 +50,20 @@
 			"url": "/library/for-you",
 			"description": "Ta sélection d'après ta bibliothèque.",
 			"icons": [{ "src": "android/android-launchericon-96-96.png", "sizes": "96x96" }]
+		},
+		{
+			"name": "Album du jour",
+			"short_name": "Album du jour",
+			"url": "/home?album-of-day=1",
+			"description": "L'album de ta bibliothèque du jour, le même pour tout le monde.",
+			"icons": [{ "src": "android/android-launchericon-96-96.png", "sizes": "96x96" }]
+		},
+		{
+			"name": "Pack trajet",
+			"short_name": "Pack trajet",
+			"url": "/library/downloads-offline?pack=1",
+			"description": "Prépare un pack hors-ligne pour la durée de ton trajet.",
+			"icons": [{ "src": "android/android-launchericon-96-96.png", "sizes": "96x96" }]
 		}
 	],
 	"icons": [

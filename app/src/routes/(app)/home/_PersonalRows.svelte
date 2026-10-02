@@ -13,7 +13,8 @@
 	// this card.
 	import { NNBSP, formatCountFr } from "$lib/utils/formatFr";
 	import ShareWeek from "$lib/components/ShareWeek/ShareWeek.svelte";
-	import { onMount } from "svelte";
+	import { onMount, tick } from "svelte";
+	import { goto } from "$app/navigation";
 	import { APIClient } from "$lib/api";
 	import Carousel from "$lib/components/Carousel/Carousel.svelte";
 	import {
@@ -94,6 +95,41 @@
 			}
 		} catch {
 			/* keep what is shown (cache paint or nothing) */
+		}
+	}
+	// B7-12 (cycle 44): the manifest shortcut "Album du jour" lands on
+	// /home?album-of-day=1 (also album-du-jour=1): once the card is known, it
+	// is brought into view and its release page opened. The parameter is
+	// dropped from the URL first so a reload does not replay it.
+	let wantAlbumOfDay = false;
+	$: if (wantAlbumOfDay && albumDay) {
+		wantAlbumOfDay = false;
+		void openAlbumOfDayShortcut(albumDay);
+	}
+	async function openAlbumOfDayShortcut(a: AlbumOfDay) {
+		try {
+			await tick();
+			document.querySelector<HTMLElement>('[data-testid="album-of-day"]')?.scrollIntoView({ block: "center" });
+			await goto(albumOfDayHref(a));
+		} catch (err) {
+			console.error("album-of-day shortcut failed", err);
+		}
+	}
+	function claimAlbumOfDayShortcut(): boolean {
+		try {
+			const url = new URL(window.location.href);
+			const asked = url.searchParams.get("album-of-day") === "1" || url.searchParams.get("album-du-jour") === "1";
+			if (!asked) return false;
+			url.searchParams.delete("album-of-day");
+			url.searchParams.delete("album-du-jour");
+			try {
+				history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+			} catch {
+				/* keep the parameter: harmless */
+			}
+			return true;
+		} catch {
+			return false;
 		}
 	}
 	let albumDayBusy = false;
@@ -609,6 +645,8 @@
 		void loadRediscover();
 		void loadNewInLibrary();
 		void loadWeekCard();
+		// B7-12: the shortcut is claimed before the card loads (cache paint or live).
+		wantAlbumOfDay = claimAlbumOfDayShortcut();
 		void loadAlbumOfDay();
 		let unwireProfile: (() => void) | undefined;
 		if (typeof BroadcastChannel !== "undefined") {

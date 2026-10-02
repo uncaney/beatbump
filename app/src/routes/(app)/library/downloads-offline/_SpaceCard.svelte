@@ -38,6 +38,9 @@
 	// lastAccess moved) by new ones of the same listening time, run as a pack
 	// (same job key, same "Annuler"). Pinned entries outside the pack are never
 	// touched. window.__ytmPackRefresh carries the outcome for the harness.
+	//
+	// B7-12: `?pack=1` (manifest shortcut "Pack trajet") unfolds the card and
+	// focuses the size / duration selector.
 	import { createEventDispatcher, onMount, tick } from "svelte";
 	import { get } from "svelte/store";
 	import {
@@ -250,6 +253,7 @@
 	/** B7-7: the last pack this device prepared (null = no "Rafraîchir" button). */
 	let lastPack: LastPack | null = null;
 	let packStartButton: HTMLButtonElement | null = null;
+	let sizeSelect: HTMLSelectElement | null = null;
 	function storage(): Storage | null {
 		try {
 			return typeof localStorage !== "undefined" ? localStorage : null;
@@ -514,9 +518,26 @@
 		lastPack = readLastPack(storage());
 		// B6-17: /library/downloads-offline?pack=dur:7200 (home weekend card)
 		// preselects the pack and unfolds the card, without storing a preference.
+		// B7-12: ?pack=1 (manifest shortcut "Pack trajet") unfolds it and
+		// focuses the selector, the duration list first; the parameter is then
+		// dropped so a reload does not replay it.
 		try {
-			const wanted = new URL(window.location.href).searchParams.get("pack");
-			if (wanted && parsePackChoice(wanted)) {
+			const url = new URL(window.location.href);
+			const wanted = url.searchParams.get("pack");
+			if (wanted === "1") {
+				open = true;
+				if (!parsePackChoice(choice) || parsedChoice.kind !== "seconds") choice = `dur:${PACK_DURATIONS_SEC[1]}`;
+				url.searchParams.delete("pack");
+				try {
+					history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+				} catch {
+					/* keep the parameter: harmless */
+				}
+				void tick().then(() => {
+					sizeSelect?.scrollIntoView({ block: "center" });
+					sizeSelect?.focus();
+				});
+			} else if (wanted && parsePackChoice(wanted)) {
 				choice = wanted;
 				open = true;
 				void tick().then(() => document.getElementById("offline-pack-start")?.scrollIntoView({ block: "center" }));
@@ -596,6 +617,7 @@
 					aria-describedby="offline-space-desc"
 					disabled={packRunning || !!busy || !!freePlan}
 					bind:value={choice}
+					bind:this={sizeSelect}
 				>
 					<optgroup label="Taille">
 						{#each PACK_SIZES_MB as mb}
