@@ -350,6 +350,11 @@ describe("B7-7 refresh my pack", () => {
 		expect(next.at).toBe(5);
 		expect(next.target).toBe(3600);
 		expect(next.items.map((i) => i.videoId)).toEqual(["p2", "n1", "n3"]);
+		// L13-16: a drop the SW did not uncache stays in the remembered pack (it is still pinned).
+		const partial = refreshedLastPack(p, r, 5, ["p3", "not-in-pack", null, ""]);
+		expect(partial.items.map((i) => i.videoId)).toEqual(["p2", "p3", "n1", "n3"]);
+		expect(partial.items.find((i) => i.videoId === "p3")?.seconds).toBe(900);
+		expect(refreshedLastPack(p, r, 5, []).items.map((i) => i.videoId)).toEqual(["p2", "n1", "n3"]);
 	});
 
 	it("planPackRefresh: the track playing / restored is never dropped (L13-1)", () => {

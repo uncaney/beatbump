@@ -437,9 +437,23 @@ export function planPackRefresh(
 	return { drop, keep, seconds, add };
 }
 
-/** The pack remembered after a refresh: what stayed plus what was added, dated now. */
-export function refreshedLastPack(prev: Pick<LastPack, "mode" | "target">, plan: PackRefreshPlan, at = Date.now()): LastPack {
-	return { at, mode: prev.mode, target: prev.target, items: [...plan.keep, ...lastPackOf(plan.add, at).items] };
+/**
+ * The pack remembered after a refresh: what stayed plus what was added, dated
+ * now. L13-16: `stillCached` = the `drop` ids the service worker did NOT
+ * uncache (uncache-audio failed / unanswered): they are still pinned, so they
+ * stay in the remembered pack (in their old place) instead of silently leaving
+ * it while occupying the quota.
+ */
+export function refreshedLastPack(
+	prev: Pick<LastPack, "mode" | "target">,
+	plan: PackRefreshPlan,
+	at = Date.now(),
+	stillCached?: Iterable<string | null | undefined> | null,
+): LastPack {
+	const still = new Set<string>();
+	for (const id of stillCached ?? []) if (typeof id === "string" && id) still.add(id);
+	const kept = still.size ? [...plan.keep, ...plan.drop.filter((i) => still.has(i.videoId))] : plan.keep;
+	return { at, mode: prev.mode, target: prev.target, items: [...kept, ...lastPackOf(plan.add, at).items] };
 }
 
 /** "3 titres écoutés remplacés par 4 nouveaux (42 min)" / "Rien à rafraîchir : …". */

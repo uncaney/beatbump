@@ -505,7 +505,10 @@
 			scheduleSwAudioRefresh();
 			expose({ applied: true, removed, failed });
 			notify(packRefreshSummary(plan), "success");
-			runPack(plan.add, src.sizes, refreshedLastPack(prev, plan));
+			// L13-16: a drop the SW did not uncache stays pinned: keep it in the
+			// remembered pack rather than forgetting it while it holds its bytes.
+			const stillCached = plan.drop.map((d) => d.videoId).filter((id) => !removed.includes(id));
+			runPack(plan.add, src.sizes, refreshedLastPack(prev, plan, Date.now(), stillCached));
 		} catch (e) {
 			packState = "";
 			error = `Impossible de rafraîchir le pack : ${(e as Error)?.message ?? e}`;

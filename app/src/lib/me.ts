@@ -220,12 +220,15 @@ export async function login(name: string): Promise<{ id: string; name: string; m
 	});
 	loginGate = gate;
 	try {
+		const res = await APIClient.post(`/api/v1/me/login`, prevAnon ? { name, prevAnon } : { name });
+		if (res && typeof res.ok === "boolean" && !res.ok) throw new Error(`login ${res.status}`);
+		// L13-16: only once the server accepted the login (a 400 empty name or a
+		// 500 used to leave the home cache empty and the whoami memo lost while
+		// the profile had not changed). The gate above already holds the writes.
 		forgetWhoami();
 		// L8-5: the instant-home cache belongs to the previous profile; drop it so the
 		// next /home never paints another profile's rows (listener lives on /home only).
 		clearHomeCache(typeof localStorage === "undefined" ? undefined : localStorage);
-		const res = await APIClient.post(`/api/v1/me/login`, prevAnon ? { name, prevAnon } : { name });
-		if (res && typeof res.ok === "boolean" && !res.ok) throw new Error(`login ${res.status}`);
 		const r = await res.json();
 		if (r && typeof r === "object" && typeof r.id === "string") writeWhoamiMemo({ id: r.id, name: typeof r.name === "string" ? r.name : "" });
 		const migrated = parseMigrated(r?.migrated);
