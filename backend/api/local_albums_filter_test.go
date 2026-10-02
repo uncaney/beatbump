@@ -327,3 +327,47 @@ func TestLocalAlbumsNeverPlayedBatchedConfirmation(t *testing.T) {
 		t.Fatalf("200-album page cost %d tracks queries, want <= 3", n)
 	}
 }
+
+// B8-19: GET /local/albums?filter=no-year, LIBRARY-LINT's 148 albums without
+// a year. The albums index has no "year" filterable attribute, so the
+// listing is materialised from the same bounded newest-first scan as
+// added-30d/never-played: an empty year, a garbage one ("Unknown") and one
+// out of yearOf's accepted range are all "no year"; a real 4-digit year is
+// kept out.
+func TestLocalAlbumsFilterNoYear(t *testing.T) {
+	useTestDB(t)
+	stub := &neverPlayedStub{
+		albums: []map[string]interface{}{
+			{"id": "lb-y1", "album": "Zeta", "albumArtist": "Artist A", "coverLid": "lidy1000000", "dateAdded": 5000.0, "year": "2024", "trackCount": 12.0},
+			{"id": "lb-y2", "album": "Blank", "albumArtist": "Artist B", "coverLid": "lidy1000010", "dateAdded": 4000.0, "year": "", "trackCount": 8.0},
+			{"id": "lb-y3", "album": "Garbage", "albumArtist": "Artist C", "coverLid": "lidy1000029", "dateAdded": 3000.0, "year": "Unknown", "trackCount": 10.0},
+			{"id": "lb-y4", "album": "Missing", "albumArtist": "Artist D", "coverLid": "lidy1000031", "dateAdded": 2000.0, "trackCount": 9.0},
+			{"id": "lb-y5", "album": "Alpha", "albumArtist": "Artist E", "coverLid": "lidy1000100", "dateAdded": 1000.0, "year": "2010", "trackCount": 5.0},
+		},
+	}
+	for _, a := range stub.albums {
+		stub.tracks = append(stub.tracks, map[string]interface{}{
+			"lid": mstr(a, "coverLid"), "title": mstr(a, "album") + " 1", "album": mstr(a, "album"), "albumArtist": mstr(a, "albumArtist"), "artist": mstr(a, "albumArtist"), "track": 1.0,
+		})
+	}
+	srv := httptest.NewServer(stub.handler())
+	t.Cleanup(srv.Close)
+	t.Setenv("MEILI_URL", srv.URL)
+
+	resp := getJSON(t, LocalAlbumsHandler, "/api/v1/local/albums?filter=no-year")
+	got := albumTitles(resp)
+	if len(got) != 3 || got[0] != "Blank" || got[1] != "Garbage" || got[2] != "Missing" {
+		t.Fatalf("no-year: got %v", got)
+	}
+	if resp["total"].(float64) != 3 || resp["filter"] != "no-year" || resp["sort"] != "dateAdded:desc" {
+		t.Fatalf("no-year envelope: %v", resp)
+	}
+	page := getJSON(t, LocalAlbumsHandler, "/api/v1/local/albums?filter=no-year&offset=1&limit=1")
+	if got := albumTitles(page); len(got) != 1 || got[0] != "Garbage" || page["total"].(float64) != 3 {
+		t.Fatalf("no-year offset=1 limit=1: got %v total %v", got, page["total"])
+	}
+	sorted := getJSON(t, LocalAlbumsHandler, "/api/v1/local/albums?filter=no-year&sort=album:asc")
+	if got := albumTitles(sorted); len(got) != 3 || got[0] != "Blank" || got[1] != "Garbage" || got[2] != "Missing" {
+		t.Fatalf("no-year sort=album:asc: got %v", got)
+	}
+}

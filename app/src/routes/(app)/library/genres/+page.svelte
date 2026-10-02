@@ -11,10 +11,16 @@
 	let q = "";
 	/** Name of the genre currently loading its queue (disables its own buttons only). */
 	let busyGenre = "";
+	// B8-21: a genre with a single album is rare noise in the main list (37
+	// of them on the library at hand); folded into a collapsed section at the
+	// end instead, open on demand.
+	let rareOpen = false;
 
 	$: filtered = q
 		? genres.filter((g) => g.name.toLowerCase().includes(q.toLowerCase()))
 		: genres;
+	$: commonGenres = filtered.filter((g) => g.count > 1);
+	$: rareGenres = filtered.filter((g) => g.count <= 1);
 
 	onMount(async () => {
 		try {
@@ -76,7 +82,7 @@
 			class="genre-list"
 			data-testid="genre-list"
 		>
-			{#each filtered as g (g.name)}
+			{#each commonGenres as g (g.name)}
 				<li class="chip-row">
 					<a
 						class="chip"
@@ -114,6 +120,72 @@
 				</li>
 			{/each}
 		</ul>
+
+		{#if rareGenres.length}
+			<!-- B8-21: folded by default, 44px tap target, count in the label. -->
+			<button
+				type="button"
+				class="btn-reset rare-toggle"
+				data-testid="genres-rare-toggle"
+				aria-expanded={rareOpen}
+				on:click={() => (rareOpen = !rareOpen)}
+			>
+				<span
+					class="rare-icon"
+					class:open={rareOpen}
+				>
+					<Icon
+						name="chevron-right"
+						size="1em"
+					/>
+				</span>
+				{`Genres rares (${rareGenres.length})`}
+			</button>
+			{#if rareOpen}
+				<ul
+					class="genre-list rare-list"
+					data-testid="genre-list-rare"
+				>
+					{#each rareGenres as g (g.name)}
+						<li class="chip-row">
+							<a
+								class="chip"
+								href={genreHref(g.name)}
+							>
+								<span class="name">{g.name}</span>
+								<span class="count">{g.count}</span>
+							</a>
+							<button
+								type="button"
+								class="btn-reset btn-primary genre-btn"
+								data-testid="genre-play"
+								disabled={busyGenre === g.name}
+								aria-label={`Lire ${g.name}`}
+								on:click={() => playGenre(g.name, false)}
+							>
+								<Icon
+									name="play"
+									size="1em"
+								/>
+							</button>
+							<button
+								type="button"
+								class="btn-reset btn-secondary genre-btn"
+								data-testid="genre-shuffle"
+								disabled={busyGenre === g.name}
+								aria-label={`Lecture aléatoire ${g.name}`}
+								on:click={() => playGenre(g.name, true)}
+							>
+								<Icon
+									name="shuffle"
+									size="1em"
+								/>
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		{/if}
 	{/if}
 </main>
 
@@ -209,5 +281,31 @@
 		text-align: center;
 		color: #999;
 		margin: 2rem 0;
+	}
+	// B8-21: the rare-genres fold toggle, 44px tap target like the other rows.
+	.rare-toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		min-height: max(2.75rem, 44px);
+		padding: 0.4rem 0.9rem;
+		margin-top: 0.75rem;
+		border-radius: 999px;
+		color: inherit;
+		background: rgba(255, 255, 255, 0.07);
+		font-weight: 600;
+	}
+	.rare-toggle:hover {
+		background: rgba(255, 255, 255, 0.16);
+	}
+	.rare-icon {
+		display: inline-flex;
+		transition: transform 0.15s ease;
+	}
+	.rare-icon.open {
+		transform: rotate(90deg);
+	}
+	.rare-list {
+		margin-top: 0.75rem;
 	}
 </style>

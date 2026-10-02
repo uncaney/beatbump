@@ -169,6 +169,8 @@ func newServer() *echo.Echo {
 	e.GET("/api/v1/local/artist-of-the-day", api.LocalArtistOfDayHandler)
 	// c41b B6-19: possible duplicate albums (read-only report, memoised 10 min).
 	e.GET("/api/v1/local/duplicates", api.LocalDuplicatesHandler)
+	// B8-22: /about "Bibliothèque" card counters (read-only, memoised 10 min).
+	e.GET("/api/v1/local/lint", api.LocalLintHandler)
 
 	// Per-profile server state: favorites, follows, playlists (named or anonymous cookie)
 	me := e.Group("/api/v1/me")

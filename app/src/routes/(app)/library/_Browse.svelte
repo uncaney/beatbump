@@ -51,6 +51,8 @@
 		"added-30d": "Ajoutés ces 30 derniers jours",
 		// c44a B7-2: ?filter=added-month&month=YYYY-MM ("Voir tout" of Arrivé en <mois>).
 		"added-month": "Arrivés dans le mois",
+		// B8-19: ?filter=no-year, LIBRARY-LINT's albums without a usable year.
+		"no-year": "Sans année",
 	};
 	// c44a B7-2: the month of the added-month filter, forwarded to the API
 	// and named on the chip ("Arrivé en septembre").

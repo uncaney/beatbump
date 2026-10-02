@@ -20,8 +20,19 @@
 		reportEmail?: string;
 	}
 
+	// B8-22: LIBRARY-LINT's three counters (GET local/lint, memoised 10 min
+	// server side), shown as plain lines under the library tiles: nothing
+	// decided here, just a read.
+	interface LibraryLint {
+		albumsNoYear: number;
+		genresRare: number;
+		artistGroups: number;
+	}
+
 	let stats: LibraryStats | null = null;
 	let statsError = false;
+	let lint: LibraryLint | null = null;
+	let lintError = false;
 	let servedVersion = "";
 	let swSupported = false;
 	let swController = false;
@@ -99,6 +110,16 @@
 			stats = await res.json();
 		} catch {
 			statsError = true;
+		}
+	}
+
+	async function loadLint() {
+		try {
+			const res = await APIClient.fetch("/api/v1/local/lint");
+			if (!res.ok) throw new Error(String(res.status));
+			lint = await res.json();
+		} catch {
+			lintError = true;
 		}
 	}
 
@@ -199,6 +220,7 @@
 
 	onMount(async () => {
 		void loadDuplicates();
+		void loadLint();
 		await Promise.all([loadStats(), loadServedVersion(), probeServiceWorker(), probeStorage()]);
 		probing = false;
 	});
@@ -245,6 +267,26 @@
 					<dt>Dernier ajout</dt>
 					<dd data-testid="about-last-added">{fmtDate(stats.lastAdded)}</dd>
 				</dl>
+			{/if}
+			<!-- B8-22: LIBRARY-LINT's hygiene counters (read-only; a list for
+			     Camille, not a decision made here). -->
+			{#if lintError}
+				<p class="state lint-hint">Impossible de lire les indicateurs de bibliothèque.</p>
+			{:else if lint}
+				<ul
+					class="lint"
+					data-testid="about-library-lint"
+				>
+					<li data-testid="about-lint-no-year">
+						{fmtInt(lint.albumsNoYear)} {lint.albumsNoYear > 1 ? "albums sans année" : "album sans année"}
+					</li>
+					<li data-testid="about-lint-genres-rare">
+						{fmtInt(lint.genresRare)} {lint.genresRare > 1 ? "genres rares" : "genre rare"}
+					</li>
+					<li data-testid="about-lint-artist-groups">
+						{fmtInt(lint.artistGroups)} {lint.artistGroups > 1 ? "groupes d'artistes proches" : "groupe d'artistes proches"}
+					</li>
+				</ul>
 			{/if}
 		</section>
 
@@ -494,6 +536,21 @@
 		grid-template-columns: max-content minmax(0, 1fr);
 		gap: 0.4rem 1rem;
 		margin: 0.75rem 0 0;
+	}
+	// B8-22: the lint counters read like the other /about facts (muted,
+	// --text-secondary-size floor), not an alert.
+	.lint {
+		list-style: none;
+		margin: 0.6rem 0 0;
+		padding: 0;
+		color: #999;
+		font-size: var(--text-secondary-size);
+	}
+	.lint li {
+		margin: 0.2rem 0;
+	}
+	.lint-hint {
+		font-size: var(--text-secondary-size);
 	}
 	dt {
 		color: #999;
