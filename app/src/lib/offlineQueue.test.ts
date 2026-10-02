@@ -3,12 +3,17 @@ import {
 	albumInfo,
 	artistName,
 	durationOf,
+	explainUnplayable,
 	formatBytes,
 	formatDuration,
 	groupByAlbum,
 	groupByArtist,
 	mixtape,
 	notPlayedSince,
+	OFFLINE_PLAY_MESSAGES,
+	offlinePlayErrorMessage,
+	play,
+	playWithReason,
 	recentlyCached,
 	shuffle,
 	toPlayableItems,
@@ -255,5 +260,43 @@ describe("sizes", () => {
 		expect(formatBytes(512)).toBe("512\u202fo");
 		expect(formatBytes(3.5 * 1024 * 1024)).toBe("3,5\u202fMo");
 		expect(formatBytes(200 * 1024 * 1024)).toBe("200\u202fMo");
+	});
+});
+
+describe("c56a: why a selection cannot start offline", () => {
+	it("names the missing service worker controller first", () => {
+		const r = explainUnplayable([track("915b65e583b", "Daft", { _cached: true })], 0, { confirmed: new Map(), swController: false });
+		expect(r.reason).toBe("no_sw");
+		expect(r.message).toMatch(/service worker/);
+		expect(r.message).toMatch(/Recharge/);
+	});
+	it("says 'à retélécharger' when every candidate was evicted", () => {
+		const r = explainUnplayable(
+			[track("915b65e583b", "Daft", { _offlineUrl: "/localf?p=a", _cached: false, _evicted: true }), track("9ff82877810", "Daft", { _offlineUrl: "/aud/9ff82877810", _cached: false })],
+			0,
+			{ confirmed: new Map(), swController: true },
+		);
+		expect(r.reason).toBe("evicted");
+		expect(r.message).toMatch(/retélécharger/);
+	});
+	it("says 'introuvable' for a local id the service worker does not hold", () => {
+		const r = explainUnplayable([track("19d6b21c8ae", "Sasha", { _cached: true })], 0, { confirmed: new Map([["other000000", "/localf?p=x"]]), swController: true });
+		expect(r.reason).toBe("unknown");
+		expect(r.message).toBe("Titre local introuvable dans le cache hors-ligne.");
+	});
+	it("falls back to the empty-selection line", () => {
+		expect(explainUnplayable([], 0, { swController: true }).reason).toBe("empty");
+		expect(explainUnplayable([track("vid", "A", { _cached: false })], 0, { swController: true }).reason).toBe("empty");
+	});
+	it("playWithReason carries the reason instead of a bare false, and play() stays boolean", async () => {
+		// `_cached: false` and not confirmed by the SW: nothing playable, so the reason is explained without touching the player.
+		const r = await playWithReason([track("19d6b21c8ae", "Sasha", { _cached: false })], 0, { confirmed: new Map(), swController: false });
+		expect(r).toEqual({ ok: false, reason: "no_sw", message: OFFLINE_PLAY_MESSAGES.no_sw });
+		expect(await play([], 0, { confirmed: new Map() })).toBe(false);
+	});
+	it("offlinePlayErrorMessage names a stale chunk after a deploy, else keeps the error text", () => {
+		expect(offlinePlayErrorMessage(new TypeError("Failed to fetch dynamically imported module: /_app/immutable/chunks/index.x.js"))).toMatch(/Nouvelle version/);
+		expect(offlinePlayErrorMessage(new Error("boom"))).toBe("Lecture hors-ligne impossible : boom");
+		expect(offlinePlayErrorMessage(undefined)).toBe("Lecture hors-ligne impossible.");
 	});
 });

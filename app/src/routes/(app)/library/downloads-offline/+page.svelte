@@ -30,7 +30,8 @@
 		formatBytes,
 		groupByAlbum,
 		groupByArtist,
-		play,
+		offlinePlayErrorMessage,
+		playWithReason,
 		recentlyCached,
 		totalBytes,
 		type AlbumGroup,
@@ -186,11 +187,14 @@
 		if (starting) return;
 		starting = true;
 		try {
-			const ok = await play(items, index, opts);
-			if (!ok) notify("Aucun morceau lisible hors-ligne dans cette sélection.", "error");
+			// c56a: the toast names the cause (no service worker controlling
+			// the window, evicted entries, unknown local title) instead of one
+			// generic line, so a report from the phone says what to do.
+			const r = await playWithReason(items, index, opts);
+			if (!r.ok) notify(r.message || "Aucun morceau lisible hors-ligne dans cette sélection.", "error");
 		} catch (err) {
 			console.error("offline play failed", err);
-			notify("Lecture hors-ligne impossible.", "error");
+			notify(offlinePlayErrorMessage(err), "error");
 		} finally {
 			starting = false;
 		}

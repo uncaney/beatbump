@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-inferrable-types */
 import { browser } from "$app/environment";
-import { SessionListService } from "$stores/list/sessionList";
+import { SessionListService, isLocalTrackId } from "$stores/list/sessionList";
 import type { UserSettings } from "$stores/settings";
 import type HlsType from "hls.js";
 import type { HlsConfig } from "hls.js";
@@ -1171,7 +1171,13 @@ export const getSrc = async (
 	const cached = opts?.bypassCache ? null : await offlineFormats(videoId);
 	if (cached) return setTrack(cached, shouldAutoplay, currentTrack || (videoId ? { videoId } : undefined));
 
-	const res = await fetchPlayerJson(videoId, playlistId, params, 0, prefetch);
+	// c56a: an owned-library id (lid) is not a YouTube videoId. A row that
+	// lost its `localUrl` (queue restored from another device, evicted cache
+	// entry, SW not controlling this window) is resolved through the local
+	// library endpoint, never through the YouTube resolver path with
+	// `playlistId=undefined&playerParams=undefined`; offline, no request at
+	// all: the toast says the local title is not cached.
+	const res = videoId && isLocalTrackId(videoId) ? await fetchLocalPlayer(videoId, prefetch) : await fetchPlayerJson(videoId, playlistId, params, 0, prefetch);
 	if (res instanceof PlayerRequestError) {
 		return handleError(res);
 	}
@@ -1256,6 +1262,43 @@ export class PlayerRequestError extends Error {
 }
 
 const PLAYER_RETRY_DELAY_MS = 1500;
+
+/** French messages of the local-library player errors (c56a). */
+export const LOCAL_PLAYER_MESSAGES = {
+	not_found: "Titre local introuvable",
+	offline: "Titre local non disponible hors-ligne (pas en cache)",
+} as const;
+
+/**
+ * c56a: resolve an owned-library track (lid) through the local library
+ * player (`player.json?videoId=<lid>`: the backend answers from its index
+ * and never asks YouTube for a lid). Offline, nothing is requested: the
+ * track is not in the SW cache (getSrc tried that first) so it cannot play.
+ * Errors come back as PlayerRequestError (kind `local_not_found` /
+ * `local_offline` / `network` / `upstream`), never thrown.
+ */
+export async function fetchLocalPlayer(lid: string, prefetch = false): Promise<any> {
+	if (browser && typeof navigator !== "undefined" && navigator.onLine === false) {
+		return new PlayerRequestError(0, "local_offline", "LOCAL_OFFLINE", LOCAL_PLAYER_MESSAGES.offline);
+	}
+	let response: Response;
+	try {
+		response = await APIClient.fetch(`/api/v1/player.json?videoId=${encodeURIComponent(lid)}`, prefetch ? PREFETCH_INIT : undefined);
+	} catch (e) {
+		return new PlayerRequestError(0, "network", "NETWORK", String((e as Error)?.message || e));
+	}
+	if (response.ok) {
+		try {
+			const body = await response.json();
+			if (body?.streamingData?.adaptiveFormats?.length || body?.streamingData?.formats?.length) return body;
+		} catch {
+			/* fall through: no usable body */
+		}
+		return new PlayerRequestError(404, "local_not_found", "LOCAL_NOT_FOUND", LOCAL_PLAYER_MESSAGES.not_found);
+	}
+	if (response.status === 404) return new PlayerRequestError(404, "local_not_found", "LOCAL_NOT_FOUND", LOCAL_PLAYER_MESSAGES.not_found);
+	return new PlayerRequestError(response.status, "upstream", String(response.status), "");
+}
 
 async function fetchPlayerJson(videoId?: string, playlistId?: string, params?: string, attempt = 0, prefetch = false): Promise<any> {
 	let response: Response;
@@ -1380,6 +1423,13 @@ function handleError(err: PlayerRequestError | string | undefined) {
 		case "unplayable":
 			message = "Morceau indisponible" + (e.reason ? " : " + e.reason : "");
 			break;
+		// c56a: owned-library track (lid) that could not be resolved locally.
+		case "local_not_found":
+			message = LOCAL_PLAYER_MESSAGES.not_found;
+			break;
+		case "local_offline":
+			message = LOCAL_PLAYER_MESSAGES.offline;
+			break;
 		case "bad_request":
 			message = "Morceau invalide" + (e.reason ? " : " + e.reason : "");
 			break;
@@ -1395,7 +1445,7 @@ function handleError(err: PlayerRequestError | string | undefined) {
 	}
 	playerFailStreak += 1;
 	const canSkip = playerFailStreak <= 1 && SessionListService.value.mix.length > 1;
-	if (canSkip && (e.kind === "unplayable" || e.kind === "bad_request" || e.kind === "upstream" || e.kind === "timeout")) {
+	if (canSkip && (e.kind === "unplayable" || e.kind === "bad_request" || e.kind === "upstream" || e.kind === "timeout" || e.kind === "local_not_found" || e.kind === "local_offline")) {
 		notify(message + " · passage au suivant", "error", "getNextTrack");
 		setTimeout(() => {
 			void Promise.resolve(SessionListService.next()).catch(() => {});

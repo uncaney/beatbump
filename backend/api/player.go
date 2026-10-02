@@ -125,9 +125,15 @@ func PlayerEndpointHandler(c echo.Context) error {
 		return playerErrorResponse(c, http.StatusBadRequest, PlayerErrBadRequest, "BAD_REQUEST", "Malformed videoId", videoId)
 	}
 	if isLid(videoId) {
+		// c56a: an owned-library id (11 lowercase hex chars) is never a
+		// YouTube videoId. It is answered from the local index, or 404 at
+		// once: falling through used to hand the lid to the YouTube resolver,
+		// which answered "Video unavailable" after a companion round trip,
+		// and the client took that for a YouTube failure.
 		if r := LocalPlayer(videoId); r != nil {
 			return c.JSON(http.StatusOK, r)
 		}
+		return playerErrorResponse(c, http.StatusNotFound, PlayerErrUnplayable, "LOCAL_NOT_FOUND", "Titre local introuvable", videoId)
 	}
 
 	// One call: the bridge already runs the logged-in iv-vp fallback whenever

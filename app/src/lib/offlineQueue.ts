@@ -445,6 +445,75 @@ export function toPlayableItems(tracks: OfflineTrack[], confirmed?: Map<string, 
 	return out;
 }
 
+/** c56a: why nothing of a selection could start offline (toast wording below). */
+export type OfflinePlayFailure = "no_sw" | "evicted" | "unknown" | "empty";
+export interface OfflinePlayResult {
+	ok: boolean;
+	reason?: OfflinePlayFailure;
+	/** French, ready for the toast. */
+	message?: string;
+}
+
+export const OFFLINE_PLAY_MESSAGES: Record<OfflinePlayFailure, string> = {
+	no_sw: "Lecture hors-ligne impossible : le service worker ne contrôle pas cette fenêtre. Recharge l'application.",
+	evicted: "Lecture hors-ligne impossible : ces titres ont été évincés du cache, ils sont à retélécharger.",
+	unknown: "Titre local introuvable dans le cache hors-ligne.",
+	empty: "Aucun morceau lisible hors-ligne dans cette sélection.",
+};
+
+function swControls(): boolean {
+	try {
+		return typeof navigator !== "undefined" && "serviceWorker" in navigator ? !!navigator.serviceWorker.controller : true;
+	} catch {
+		return true;
+	}
+}
+
+/**
+ * c56a: the reason a selection has no playable track. Checked in this order:
+ * no service worker controlling the window (nothing can be served from the
+ * cache: the list may still say "prêt"), every candidate evicted ("à
+ * retélécharger"), the clicked track unknown to the cache (a lid the SW does
+ * not hold), else just an empty selection.
+ */
+export function explainUnplayable(
+	items: OfflineTrack[],
+	startIndex: number,
+	opts: { confirmed?: Map<string, string> | Set<string>; swController?: boolean } = {},
+): { reason: OfflinePlayFailure; message: string } {
+	const list = (items || []).filter((t) => t && t.videoId);
+	const controller = opts.swController ?? swControls();
+	let reason: OfflinePlayFailure = "empty";
+	if (!controller && list.length) reason = "no_sw";
+	else if (list.length && list.every((t) => t._evicted === true || (t._cached === false && isStableUrl(t._offlineUrl)))) reason = "evicted";
+	else if (list.length) {
+		const wanted = items?.[startIndex] ?? list[0];
+		const id = wanted?.videoId;
+		const confirmed = opts.confirmed;
+		const known = !confirmed || (confirmed instanceof Map ? confirmed.has(id) : confirmed.has(id));
+		if (id && /^[0-9a-f]{11}$/.test(id) && !known) reason = "unknown";
+	}
+	return { reason, message: OFFLINE_PLAY_MESSAGES[reason] };
+}
+
+function isStableUrl(url: unknown): boolean {
+	return typeof url === "string" && /\/(localf|aud)\b/.test(url);
+}
+
+/**
+ * c56a: the toast for an exception thrown by play() (the page's catch). A
+ * stale chunk after a deploy and a window the SW does not control are named
+ * as such; anything else keeps the generic line plus the error's text.
+ */
+export function offlinePlayErrorMessage(err: unknown): string {
+	const m = String((err as Error)?.message ?? err ?? "").trim();
+	if (/dynamically imported module|Importing a module script failed|error loading dynamically imported module/i.test(m)) {
+		return "Nouvelle version de l'application : recharge la page pour lire hors-ligne.";
+	}
+	if (!swControls()) return OFFLINE_PLAY_MESSAGES.no_sw;
+	return m ? `Lecture hors-ligne impossible : ${m.slice(0, 140)}` : "Lecture hors-ligne impossible.";
+}
+
 /**
  * Start playback of `items` at `startIndex` through the app's session list:
  * SessionListService.setMix(items, "local") + updatePosition + getSrc, i.e. the
@@ -465,6 +534,26 @@ export async function play(
 		context?: import("$lib/stores/list/playbackContext").PlaybackContextInput;
 	} = {},
 ): Promise<boolean> {
+	return (await playWithReason(items, startIndex, opts)).ok;
+}
+
+/**
+ * c56a: play(), with the reason when nothing starts (`ok: false`): the page
+ * tells the user WHY ("service worker", "à retélécharger", "introuvable")
+ * instead of one generic line. Same contract otherwise; still never throws
+ * for an unplayable selection (exceptions from the player itself propagate).
+ */
+export async function playWithReason(
+	items: OfflineTrack[],
+	startIndex = 0,
+	opts: {
+		shuffle?: boolean;
+		confirmed?: Map<string, string>;
+		context?: import("$lib/stores/list/playbackContext").PlaybackContextInput;
+		/** Tests: whether a service worker controls the window (default: navigator). */
+		swController?: boolean;
+	} = {},
+): Promise<OfflinePlayResult> {
 	let confirmed = opts.confirmed;
 	if (!confirmed) {
 		try {
@@ -479,7 +568,7 @@ export async function play(
 		}
 	}
 	let list = toPlayableItems(items, confirmed);
-	if (!list.length) return false;
+	if (!list.length) return { ok: false, ...explainUnplayable(items, startIndex, { confirmed, swController: opts.swController }) };
 	// The clicked track must stay the start; map startIndex through the filter.
 	const wanted = items?.[startIndex]?.videoId;
 	const mapped = wanted ? list.findIndex((t) => t.videoId === wanted) : -1;
@@ -502,5 +591,5 @@ export async function play(
 	await SessionListService.updatePosition(idx);
 	const t = list[idx];
 	await getSrc(t.videoId, t.playlistId, undefined, true);
-	return true;
+	return { ok: true };
 }
