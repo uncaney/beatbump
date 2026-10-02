@@ -221,7 +221,14 @@ function _settings() {
 			list = settings;
 			save(settings);
 
-			set(settings);
+			// c55a: `bind:checked={$settings.playback["Data Saver"]}` mutates the
+			// object in place then calls set() with the SAME reference, which
+			// WritableStore.set treats as unchanged (no notification): every other
+			// subscriber (OfflineSettings' "Suspendu..." note, the derived stores of
+			// stores.ts) kept the stale value until a reload. Notify on every set,
+			// as a plain svelte/store writable does for objects (fresh reference;
+			// the categories stay shared, so `list` and the store agree).
+			set({ ...settings });
 		},
 	};
 }

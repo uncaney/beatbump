@@ -30,6 +30,7 @@ import { objectKeys } from "./utils/collections/objects";
 import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from "./utils/mediaRetry";
 import { reportClientError } from "./clientLog";
 import { isDataSaver } from "./dataSaver";
+import { knownTrackDuration, shouldAdvanceAtTrackEnd } from "./trackEnd";
 import { setWorkerInterval } from "./utils/workerTimeout";
 import { resumeKeptFor } from "./stores/resumeState";
 import { recordSkip } from "./me";
@@ -492,6 +493,19 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 	}
 
 	public play() {
+		// c55a: the sleep timer paused this track at its very end (the `ended`
+		// path of atTrackEnd): a new play continues with the queue instead of
+		// replaying the track (HTMLMediaElement.play() on an ended element seeks
+		// back to 0). The timeupdate path (paused inside the last 150 ms) keeps
+		// the old behaviour: the tail plays, then `ended` advances.
+		if (this._sleepHold && this.player?.ended && !this.player.loop) {
+			this._sleepHold = false;
+			this.paused.set(false);
+			void SessionListService.next(undefined).catch(() => {
+				/* the regular error path (player.json / toast) already reported it */
+			});
+			return;
+		}
 		this._sleepHold = false;
 		const deferred = this._onFirstPlay;
 		this._onFirstPlay = null;
@@ -899,71 +913,90 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 			this.updatePositionState();
 		});
 
+		// c55a (probe-gap v2, GAP-MEASURE v2): the end-of-track work, shared by
+		// `timeupdate` and `ended`. Until cycle 54 only timeupdate ran it, on the
+		// first tick past `duration - 1.0 s`: the last ~0.95 s of every track was
+		// cut ($lib/trackEnd). `locked` keeps one advance at a time (a timeupdate
+		// inside the margin followed by `ended`).
+		const atTrackEnd = async () => {
+			if (locked) return;
+			// Sleep timer "fin du morceau" (P4): this track is the last one. Pause
+			// instead of advancing; repeat / shuffle state is left untouched and the
+			// normal auto-advance resumes on the next play().
+			if (this._sleepHold) return;
+			// c39c B6-9: "album" / "tracks" modes stop after a queue index.
+			if (shouldStopAtTrackEnd(SessionListService.position, SessionListService.value)) {
+				this._sleepHold = true;
+				this.nextSrc.url = undefined;
+				this.pause();
+				sleepTimerTrackEnded();
+				return;
+			}
+			try {
+				if (this._repeat !== "off") {
+					const allowContinuation = await this.handleRepeat();
+					if (allowContinuation === false) {
+						return;
+					}
+				}
+				if (!locked) locked = true;
+
+				if (groupSession.initialized) {
+					return await Promise.resolve(
+						updateGroupState({
+							client: groupSession.client.clientId,
+							state: {
+								finished: true,
+								paused: true,
+								playing: false,
+								pos: SessionListService.position,
+								stalled: !!this.player.error,
+							} as ConnectionState,
+						}),
+					).then(() => {
+						const [allCanPlay, fn] = groupSession.allCanPlay();
+						if (allCanPlay) {
+							fn();
+							locked = false;
+						}
+					});
+				}
+				if (groupSession.hasActiveSession && !groupSession.allCanPlay) return;
+				return await SessionListService.next(this.nextSrc.url).finally(() => {
+					locked = false; // Unlock this 'if' block when finished
+					this.nextSrc.url = undefined; // Set to undefined since e 'used' the value
+				});
+			} finally {
+				locked = false;
+				this.nextSrc.url = undefined; // Set to undefined since e 'used' the value
+			}
+		};
+		// The media element's own duration once known (exact), else the one
+		// declared by player.json (the store); 0 right after a source swap
+		// (prefetched / cached sources carry no duration): then only `ended` advances.
+		const trackEndInput = (ended: boolean) => ({
+			currentTime: this.player.currentTime,
+			duration: knownTrackDuration(this.duration, this.player.duration),
+			ended,
+		});
+
 		this.onEvent("timeupdate", async () => {
 			this._currentTimeStore.set(this.player.currentTime);
 			// L12-16: the sleep timer re-checks its absolute deadline here; its
 			// 1 s interval is throttled in the background / on a locked iPhone.
 			sleepTimeUpdate();
-			/*const duration = isAppleMobileDevice
-				? this.player.duration / 2
-				: this.player.duration;*/
+			// Within the last 150 ms of a known duration: advance (the element may
+			// never fire `ended` when the declared duration exceeds the media's).
+			if (shouldAdvanceAtTrackEnd(trackEndInput(false))) await atTrackEnd();
+		});
 
-			// We're at the end - get the next track!
-			// Only auto-advance against a KNOWN duration: right after a source swap the store is 0
-			// (prefetched / cached sources carry no duration) and `currentTime >= -1` would skip tracks.
-			const knownDuration = this.duration > 0 ? this.duration : (isFinite(this.player.duration) ? this.player.duration : 0);
-			if (knownDuration > 0 && this.player.currentTime >= knownDuration - 1.0 && !locked) {
-				// Sleep timer "fin du morceau" (P4): this track is the last one. Pause
-				// instead of advancing; repeat / shuffle state is left untouched and the
-				// normal auto-advance resumes on the next play().
-				if (this._sleepHold) return;
-				// c39c B6-9: "album" / "tracks" modes stop after a queue index.
-				if (shouldStopAtTrackEnd(SessionListService.position, SessionListService.value)) {
-					this._sleepHold = true;
-					this.nextSrc.url = undefined;
-					this.pause();
-					sleepTimerTrackEnded();
-					return;
-				}
-				try {
-					if (this._repeat !== "off") {
-						const allowContinuation = await this.handleRepeat();
-						if (allowContinuation === false) {
-							return;
-						}
-					}
-					if (!locked) locked = true;
-
-					if (groupSession.initialized) {
-						return await Promise.resolve(
-							updateGroupState({
-								client: groupSession.client.clientId,
-								state: {
-									finished: true,
-									paused: true,
-									playing: false,
-									pos: SessionListService.position,
-									stalled: !!this.player.error,
-								} as ConnectionState,
-							}),
-						).then(() => {
-							const [allCanPlay, fn] = groupSession.allCanPlay();
-							if (allCanPlay) {
-								fn();
-								locked = false;
-							}
-						});
-					}
-					if (groupSession.hasActiveSession && !groupSession.allCanPlay) return;
-					return await SessionListService.next(this.nextSrc.url).finally(() => {
-						locked = false; // Unlock this 'if' block when finished
-						this.nextSrc.url = undefined; // Set to undefined since e 'used' the value
-					});
-				} finally {
-					locked = false;
-					this.nextSrc.url = undefined; // Set to undefined since e 'used' the value
-				}
-			}
+		// The element played to its end: the regular transition now (timeupdate
+		// fires every ~250 ms and rarely lands inside the 150 ms margin).
+		this.onEvent("ended", () => {
+			// repeat "track": the element loops by itself (no `ended` is expected).
+			if (this.player.loop) return;
+			if (!shouldAdvanceAtTrackEnd(trackEndInput(this.player.ended))) return;
+			void atTrackEnd();
 		});
 
 		this.onEvent("error", () => {
