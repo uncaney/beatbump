@@ -286,6 +286,73 @@ func TestLocalSongsGroupUnion(t *testing.T) {
 	}
 }
 
+// local/artists?collapse=1 hides the alias rows, badges the primary and
+// says where to continue; a filtered list (?q=) is never collapsed.
+func TestLocalArtistsCollapsed(t *testing.T) {
+	startAliasStub(t, edSheeranStub())
+	artistAliasGroups()
+	get := func(q string) map[string]interface{} {
+		c, rec := ctxFor(http.MethodGet, "/api/v1/local/artists?"+q, "", nil)
+		if err := LocalArtistsHandler(c); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != 200 {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var out map[string]interface{}
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	titles := func(out map[string]interface{}) ([]string, []string) {
+		items, _ := out["items"].([]interface{})
+		var ts, subs []string
+		for _, it := range items {
+			m, _ := it.(map[string]interface{})
+			ts = append(ts, mstr(m, "title"))
+			runs, _ := m["subtitle"].([]interface{})
+			sub := ""
+			for _, r := range runs {
+				rm, _ := r.(map[string]interface{})
+				sub += mstr(rm, "text")
+			}
+			subs = append(subs, sub)
+		}
+		return ts, subs
+	}
+	// name:asc raw order: AC-DC, AC/DC, Daft Punk, Ed Sheeran, Ed Sheeran feat. C…, Ed Sheeran feat. K…, Ed Shéeran
+	out := get("collapse=1&limit=3&sort=name:asc")
+	ts, subs := titles(out)
+	if strings.Join(ts, "|") != "AC/DC|Daft Punk|Ed Sheeran" {
+		t.Fatalf("collapsed page: %v", ts)
+	}
+	if !strings.Contains(subs[0], "+1 variante") || strings.Contains(subs[0], "variantes") {
+		t.Errorf("AC/DC badge: %q", subs[0])
+	}
+	if strings.Contains(subs[1], "variante") {
+		t.Errorf("Daft Punk has no badge: %q", subs[1])
+	}
+	if !strings.Contains(subs[2], "+3 variantes") {
+		t.Errorf("Ed Sheeran badge: %q", subs[2])
+	}
+	if mint(out, "nextOffset") != 4 || mint(out, "total") != 7 || out["collapsed"] != true {
+		t.Errorf("paging: nextOffset %v total %v collapsed %v", out["nextOffset"], out["total"], out["collapsed"])
+	}
+	// The next page from nextOffset holds the three remaining aliases only: nothing.
+	out = get("collapse=1&limit=3&sort=name:asc&offset=4")
+	if ts, _ := titles(out); len(ts) != 0 || mint(out, "nextOffset") != 7 {
+		t.Errorf("tail page: %v nextOffset %v", ts, out["nextOffset"])
+	}
+	// Filtered: every credit shows, no badge, no nextOffset.
+	out = get("collapse=1&limit=3&sort=name:asc&q=ed")
+	ts, subs = titles(out)
+	if len(ts) != 3 || strings.Join(subs, "") != "AC-DCAC/DCDaft Punk" {
+		t.Errorf("filtered list must not collapse: %v %v", ts, subs)
+	}
+	if _, ok := out["nextOffset"]; ok {
+		t.Errorf("filtered list pages by row count: %v", out["nextOffset"])
+	}
+}
+
 // The local artist page carries its group's other credits and a seeAll
 // link over the union (?group=1, union total).
 func TestLocalArtistPageAliasesAndGroupSeeAll(t *testing.T) {
