@@ -213,12 +213,19 @@ func scanArtistAliases() (groups []aliasGroup, truncated bool, ok bool) {
 }
 
 var (
+	// aliasMu guards the memo fields only: it is held to copy or to swap
+	// them, never during a scan (L14-1: artistAliasCached used to wait on
+	// it while a scan held it for up to 4 Meili pages x 6 s, so every artist
+	// page, "Tout lire" and the collapsed artists list waited on a rescan).
 	aliasMu        sync.Mutex
 	aliasMemo      []aliasGroup
 	aliasMemoIndex map[string]int
 	aliasMemoTrunc bool
 	aliasMemoAt    time.Time
 	aliasMemoNow   = time.Now // swapped by tests
+	// aliasScanMu serialises the scans: concurrent artistAliasGroups
+	// callers share one scan (the ones queued behind it read its result).
+	aliasScanMu sync.Mutex
 	// aliasAutoRefresh is set by WarmArtistAliases (main): a stale memo read
 	// by a page then triggers one background rescan. Tests leave it off, so
 	// a page never starts a scan behind their back.
@@ -226,19 +233,40 @@ var (
 	aliasRefreshing  atomic.Bool
 )
 
-// artistAliasGroups is scanArtistAliases behind an aliasMemoTTL memo. The
-// lock is held during a recompute so concurrent callers share one scan.
-func artistAliasGroups() (groups []aliasGroup, index map[string]int, truncated bool) {
+// artistAliasSnapshot copies the memo under the lock (a few words: the
+// slices and the map are never mutated after they are stored, so sharing
+// them with the caller is safe).
+func artistAliasSnapshot() (groups []aliasGroup, index map[string]int, truncated bool, at time.Time) {
 	aliasMu.Lock()
 	defer aliasMu.Unlock()
+	return aliasMemo, aliasMemoIndex, aliasMemoTrunc, aliasMemoAt
+}
+
+func aliasMemoFresh(groups []aliasGroup, at, now time.Time) bool {
+	return groups != nil && now.Sub(at) < aliasMemoTTL
+}
+
+// artistAliasGroups is scanArtistAliases behind an aliasMemoTTL memo.
+// Concurrent callers share one scan (aliasScanMu); the memo lock itself is
+// never held during a scan, so artistAliasCached keeps answering the
+// previous snapshot meanwhile.
+func artistAliasGroups() (groups []aliasGroup, index map[string]int, truncated bool) {
+	if g, i, tr, at := artistAliasSnapshot(); aliasMemoFresh(g, at, aliasMemoNow()) {
+		return g, i, tr
+	}
+	aliasScanMu.Lock()
+	defer aliasScanMu.Unlock()
+	// A scan that finished while this caller waited serves it too.
 	now := aliasMemoNow()
-	if aliasMemo != nil && now.Sub(aliasMemoAt) < aliasMemoTTL {
-		return aliasMemo, aliasMemoIndex, aliasMemoTrunc
+	if g, i, tr, at := artistAliasSnapshot(); aliasMemoFresh(g, at, now) {
+		return g, i, tr
 	}
 	groups, truncated, ok := scanArtistAliases()
 	index = aliasIndexOf(groups)
 	if ok {
+		aliasMu.Lock()
 		aliasMemo, aliasMemoIndex, aliasMemoTrunc, aliasMemoAt = groups, index, truncated, now
+		aliasMu.Unlock()
 	}
 	return groups, index, truncated
 }
@@ -273,13 +301,12 @@ func refreshArtistAliasesAsync() {
 }
 
 // artistAliasCached never blocks a page on a scan: it answers the last
-// known groups (possibly stale, nil before the first scan) and, when auto
-// refresh is on and the memo is stale, starts one rescan.
+// known groups (possibly stale, nil before the first scan; the memo lock is
+// only ever held to copy or swap, see aliasMu) and, when auto refresh is on
+// and the memo is stale, starts one rescan.
 func artistAliasCached() ([]aliasGroup, map[string]int) {
-	aliasMu.Lock()
-	groups, index, at := aliasMemo, aliasMemoIndex, aliasMemoAt
-	aliasMu.Unlock()
-	if aliasAutoRefresh.Load() && (groups == nil || aliasMemoNow().Sub(at) >= aliasMemoTTL) {
+	groups, index, _, at := artistAliasSnapshot()
+	if aliasAutoRefresh.Load() && !aliasMemoFresh(groups, at, aliasMemoNow()) {
 		refreshArtistAliasesAsync()
 	}
 	return groups, index

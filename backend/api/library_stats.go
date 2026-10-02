@@ -141,7 +141,11 @@ type libraryLint struct {
 }
 
 var (
+	// lintMu guards the memo fields only (held to copy or swap, never during
+	// a scan, L14-1); lintScanMu serialises the scans so concurrent /about
+	// callers share one.
 	lintMu      sync.Mutex
+	lintScanMu  sync.Mutex
 	lintMemo    *libraryLint
 	lintMemoAt  time.Time
 	lintMemoNow = time.Now // swapped by tests
@@ -270,15 +274,39 @@ func scanLibraryLint() (out libraryLint, ok bool) {
 	return libraryLint{AlbumsNoYear: noYear, GenresRare: scanGenresRare(), ArtistGroups: groups}, true
 }
 
-// libraryLintCached is scanLibraryLint behind a lintMemoTTL memo.
-func libraryLintCached() libraryLint {
+// lintSnapshot copies the memo under the lock.
+func lintSnapshot() (*libraryLint, time.Time) {
 	lintMu.Lock()
 	defer lintMu.Unlock()
+	return lintMemo, lintMemoAt
+}
+
+// libraryLintCached is scanLibraryLint behind a lintMemoTTL memo. Without
+// a memo, concurrent callers wait for one shared scan; with a stale one, the
+// first caller rescans and the others are served the previous counters at
+// once (L14-1: the memo lock is never held during a scan).
+func libraryLintCached() libraryLint {
 	now := lintMemoNow()
-	if lintMemo != nil && now.Sub(lintMemoAt) < lintMemoTTL {
-		return *lintMemo
+	memo, at := lintSnapshot()
+	if memo != nil && now.Sub(at) < lintMemoTTL {
+		return *memo
+	}
+	if memo != nil {
+		if !lintScanMu.TryLock() {
+			return *memo // a rescan is running: the previous snapshot meanwhile
+		}
+	} else {
+		lintScanMu.Lock()
+	}
+	defer lintScanMu.Unlock()
+	// A scan that finished while this caller waited serves it too.
+	now = lintMemoNow()
+	if memo, at = lintSnapshot(); memo != nil && now.Sub(at) < lintMemoTTL {
+		return *memo
 	}
 	out, ok := scanLibraryLint()
+	lintMu.Lock()
+	defer lintMu.Unlock()
 	if ok {
 		lintMemo, lintMemoAt = &out, now
 	}
