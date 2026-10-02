@@ -27,6 +27,7 @@
 	import { APIClient } from "$lib/api";
 	import { playTracks } from "../PlayAllBar/PlayAllBar.svelte";
 	import ShareLinkButton from "../ShareLinkButton/ShareLinkButton.svelte";
+	import { hueFor, initials } from "$lib/utils/initials";
 
 	type Button<
 		Type extends string = string,
@@ -43,6 +44,13 @@
 
 	/** Thumbnail to display*/
 	export let thumbnail: string | undefined = undefined;
+	// U14-4: a release without a cover (404 /cover) showed the broken-image
+	// icon and "album" above the title: the lists' initials placeholder instead.
+	let brokenCover = "";
+	$: coverBroken = !thumbnail || (brokenCover !== "" && brokenCover === thumbnail);
+	$: coverInitials = initials(title);
+	$: coverHue = hueFor(title);
+	$: showCoverInitials = coverBroken && !!coverInitials;
 	/** Title of the playlist/album */
 	export let title = "";
 	/** Description for the playlist/album */
@@ -163,11 +171,21 @@
 			loading="lazy"
 			width="512"
 			height="512"
+			class:cover-broken={showCoverInitials}
 			style="
 
 --img-height: 512;"
 			alt="album"
+			on:error={() => (brokenCover = thumbnail ?? "")}
 		/>
+		{#if showCoverInitials}
+			<span
+				class="cover-initials"
+				aria-hidden="true"
+				data-testid="release-cover-initials"
+				style="--cover-hue: {coverHue};">{coverInitials}</span
+			>
+		{/if}
 	</div>
 	<div class="metadata">
 		<div class="info-title">
@@ -342,6 +360,16 @@
 
 <style lang="scss">
 	@import "../../shared/listPages.scss";
+
+	// U14-4: the broken cover stays in flow (its square keeps the layout), the
+	// initials fill the .img box (position: relative, aspect-ratio 1 in listPages).
+	.img img.cover-broken {
+		opacity: 0;
+	}
+	.img .cover-initials {
+		border-radius: 2%;
+		font-size: clamp(2.5rem, 20vw, 5rem);
+	}
 
 	p {
 		margin-top: 0;

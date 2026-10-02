@@ -145,6 +145,7 @@
 	import { SITE_ORIGIN_URL } from "$stores/url";
 	import PlayerButton from "./PlayerButton.svelte";
 	import { describeContext } from "$lib/stores/list/playbackContext";
+	import { coverLabel, hueFor, initials } from "$lib/utils/initials";
 	const { paused, volume: AudioPlayerVolume } = AudioPlayer;
 
 	$: volume = $AudioPlayerVolume;
@@ -223,6 +224,13 @@
 	function handleImageError(event: Event) {
 		(event.target as HTMLImageElement).src = IMAGE_NOT_FOUND;
 	}
+	// U14-4: a track without a cover showed the grey "?" image in the mini-bar:
+	// the lists' initials placeholder (lib/utils/initials) on the track's own hue.
+	let miniBrokenId = "";
+	$: miniCoverName = coverLabel($currentTrack);
+	$: miniInitials = initials(miniCoverName);
+	$: miniHue = hueFor(miniCoverName);
+	$: miniCoverMissing = !!$currentTrack && !!miniInitials && (!$currentTrack?.thumbnails?.[0]?.url || miniBrokenId === ($currentTrack?.videoId ?? ""));
 
 	async function dlDevice() {
 		if (!$currentTrack) return;
@@ -362,13 +370,24 @@
 		style="align-items:center;"
 	>
 		{#if $queue.length !== 0}
-			<img
-				width="64"
-				height="64"
-				on:error|capture={handleImageError}
-				src={$currentTrack?.thumbnails?.[0]?.url ?? IMAGE_NOT_FOUND}
-				alt="{$currentTrack?.title} thumbnail image"
-			/>
+			<span class="now-playing-cover">
+				<img
+					width="64"
+					height="64"
+					class:cover-broken={miniCoverMissing}
+					on:error|capture={() => (miniBrokenId = $currentTrack?.videoId ?? "")}
+					src={$currentTrack?.thumbnails?.[0]?.url ?? IMAGE_NOT_FOUND}
+					alt="{$currentTrack?.title} thumbnail image"
+				/>
+				{#if miniCoverMissing}
+					<span
+						class="cover-initials"
+						aria-hidden="true"
+						data-testid="mini-cover-initials"
+						style="--cover-hue: {miniHue};">{miniInitials}</span
+					>
+				{/if}
+			</span>
 			<div
 				class="container"
 				style="
@@ -726,6 +745,28 @@
 		max-height: 4.25rem;
 		max-width: 4.25rem;
 		width: 100%;
+	}
+	// U14-4: the cover box (same footprint as the bare <img> before: 64px
+	// capped at 4.25rem) positions the initials placeholder.
+	.now-playing-cover {
+		position: relative;
+		flex: 0 0 auto;
+		display: block;
+		width: min(4.25rem, 64px);
+		height: min(4.25rem, 64px);
+		border-radius: 4px;
+		overflow: hidden;
+		img {
+			display: block;
+			width: 100%;
+			height: 100%;
+		}
+		img.cover-broken {
+			opacity: 0;
+		}
+		.cover-initials {
+			font-size: 1.25em;
+		}
 	}
 	.player-controls {
 		width: 100%;

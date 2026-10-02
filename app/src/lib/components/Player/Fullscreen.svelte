@@ -56,6 +56,7 @@
 	import { describeContext } from "$lib/stores/list/playbackContext";
 	import ShareLinkButton from "$components/ShareLinkButton/ShareLinkButton.svelte";
 	import { formatCountFr } from "$lib/utils/formatFr";
+	import { coverLabel, hueFor, initials } from "$lib/utils/initials";
 	import { queueDrawerHiddenFallback, queueDrawerInert, supportsInert } from "./queueDrawer";
 	export let state: "open" | "closed";
 
@@ -336,6 +337,15 @@
 	}
 
 	let thumbnail: Thumbnail = { height: 0, url: "", width: 0 };
+	// U14-4: a missing cover (404 /cover, no thumbnail) used to leave the
+	// browser's broken-image icon and the word "thumbnail" over 55 % of the
+	// screen: the lists' initials placeholder (lib/utils/initials) instead.
+	let coverBroken = false;
+	$: if (thumbnail) coverBroken = false;
+	$: coverName = coverLabel($currentTrack);
+	$: coverInitials = initials(coverName);
+	$: coverHue = hueFor(coverName);
+	$: showCoverInitials = (coverBroken || !thumbnail?.url) && !!coverInitials;
 
 	$: {
 		if ($isMobileMQ) {
@@ -702,12 +712,22 @@
 							<img
 								id="img"
 								loading="lazy"
+								class:cover-broken={showCoverInitials}
 								style="aspect-ratio: {thumbnail?.width} / {thumbnail?.height};"
 								width={thumbnail?.width}
 								height={thumbnail?.height}
 								src={thumbnail?.url ?? ""}
 								alt="thumbnail"
+								on:error={() => (coverBroken = true)}
 							/>
+							{#if showCoverInitials}
+								<span
+									class="cover-initials cover-initials-fs"
+									aria-hidden="true"
+									data-testid="player-cover-initials"
+									style="--cover-hue: {coverHue};">{coverInitials}</span
+								>
+							{/if}
                             </div>
 						{:else}
                             <div class="thumbnail" id="vid">
@@ -2018,6 +2038,25 @@
 			}
 			&:not(img) {
 				background: var(--poster-url);
+			}
+		}
+		// U14-4: the broken <img> stays in flow (same box, no layout shift) but
+		// invisible; the initials square sits centred over it.
+		img.cover-broken {
+			opacity: 0;
+		}
+		.cover-initials-fs {
+			inset: auto;
+			top: 50%;
+			left: 50%;
+			transform: translate(-50%, -50%);
+			width: min(100%, 44vh);
+			height: auto;
+			aspect-ratio: 1;
+			border-radius: 4px;
+			font-size: clamp(2.5rem, 12vh, 6rem);
+			@media screen and (min-width: 720px) {
+				width: 100%;
 			}
 		}
 	}
