@@ -394,3 +394,25 @@ func TestPlayerNonLocalAudioGoesThroughIVVP(t *testing.T) {
 	af = got["streamingData"].(map[string]interface{})["adaptiveFormats"].([]interface{})
 	assert.Equal(t, "/localf?p=ytm%2Fx.opus", af[0].(map[string]interface{})["url"])
 }
+
+// c56a: an owned-library id (11 lowercase hex chars) unknown to the local
+// index is answered 404 LOCAL_NOT_FOUND at once; the YouTube companion is
+// never asked for a lid (it used to answer "Video unavailable" after a round
+// trip, which the client took for a YouTube failure).
+func TestPlayerUnknownLidNeverReachesYouTube(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(companionJSON(t, playerFixture("UNPLAYABLE", "Video unavailable", false), func(*http.Request) { atomic.AddInt32(&hits, 1) }))
+	t.Cleanup(srv.Close)
+	t.Setenv("COMPANION_URL", srv.URL)
+	t.Setenv("MEILI_URL", "") // no local index at all: every lid is unknown
+	calls := stubAutoCache(t)
+
+	const lid = "19d6b21c8ae"
+	rec, err := callPlayer(t, "videoId="+lid+"&playlistId=undefined&playerParams=undefined", nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	pe := decodeErr(t, rec)
+	assert.Equal(t, PlayerError{Error: "unplayable", Status: "LOCAL_NOT_FOUND", Reason: "Titre local introuvable", VideoID: lid}, pe)
+	assert.Equal(t, int32(0), atomic.LoadInt32(&hits), "a lid must never be sent to the YouTube resolver")
+	assert.Equal(t, int32(0), atomic.LoadInt32(calls), "no auto-cache on an unknown lid")
+}
