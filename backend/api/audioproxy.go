@@ -15,6 +15,7 @@ package api
 //     buffering, no global client timeout.
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"log"
@@ -157,6 +158,102 @@ const (
 	coverMissCacheControl = "public, max-age=3600"
 )
 
+// PF5-7: a /cover 404 (lid without embedded art) costs the bridge a full
+// audio file open every time (p50 917 ms, p90 8 s in the audit v5 journal)
+// and the browser's max-age=3600 above only spares the one device that
+// already paid it. The proxy now remembers each 404 lid for coverMissTTL
+// and answers the next clients itself (X-Ytm-Cache: HIT, no bridge call);
+// a 200 for the lid (file retagged) or InvalidateCoverMiss forgets it at
+// once. Bounded LRU, so a lid enumeration cannot grow it.
+const (
+	coverMissTTL        = time.Hour
+	coverMissMaxEntries = 4096
+)
+
+// missMemo remembers keys for a TTL, LRU-bounded.
+type missMemo struct {
+	mu   sync.Mutex
+	ttl  time.Duration
+	max  int
+	now  func() time.Time
+	seen map[string]*list.Element // key -> element holding *missEntry
+	lru  *list.List               // front = most recently added
+}
+
+type missEntry struct {
+	key   string
+	until time.Time
+}
+
+func newMissMemo(max int, ttl time.Duration) *missMemo {
+	return &missMemo{ttl: ttl, max: max, now: time.Now, seen: map[string]*list.Element{}, lru: list.New()}
+}
+
+// has reports whether key is memoised and not expired (an expired key is
+// dropped on the way).
+func (m *missMemo) has(key string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	el, ok := m.seen[key]
+	if !ok {
+		return false
+	}
+	if m.now().After(el.Value.(*missEntry).until) {
+		m.lru.Remove(el)
+		delete(m.seen, key)
+		return false
+	}
+	return true
+}
+
+// add memoises key for the TTL (re-adding refreshes it), evicting the
+// oldest keys past max.
+func (m *missMemo) add(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	until := m.now().Add(m.ttl)
+	if el, ok := m.seen[key]; ok {
+		el.Value.(*missEntry).until = until
+		m.lru.MoveToFront(el)
+		return
+	}
+	m.seen[key] = m.lru.PushFront(&missEntry{key: key, until: until})
+	for m.lru.Len() > m.max {
+		last := m.lru.Back()
+		m.lru.Remove(last)
+		delete(m.seen, last.Value.(*missEntry).key)
+	}
+}
+
+func (m *missMemo) forget(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if el, ok := m.seen[key]; ok {
+		m.lru.Remove(el)
+		delete(m.seen, key)
+	}
+}
+
+func (m *missMemo) len() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.seen)
+}
+
+var coverMisses = newMissMemo(coverMissMaxEntries, coverMissTTL)
+
+// InvalidateCoverMiss forgets a memoised /cover 404 for lid (the track was
+// retagged or replaced), so the next request asks the bridge again.
+func InvalidateCoverMiss(lid string) { coverMisses.forget(lid) }
+
+// coverMissAnswer answers a memoised /cover 404 without the bridge.
+func coverMissAnswer(c echo.Context) error {
+	h := c.Response().Header()
+	h.Set("Cache-Control", coverMissCacheControl)
+	h.Set("X-Ytm-Cache", "HIT")
+	return c.NoContent(http.StatusNotFound)
+}
+
 // audioProxyFor returns a (cached) streaming reverse proxy for an upstream
 // base URL such as "http://ytm-cache:8789" or "http://iv-vp:5007". The
 // incoming request path is appended to the base path; query and Range are
@@ -205,15 +302,24 @@ func audioProxyFor(base string) (*httputil.ReverseProxy, error) {
 		},
 		// K2: a cover is addressed by a stable lid, so a 200 can live a week in
 		// the browser / SW cache (22 x ~500 ms per home load before), a 404
-		// one hour (PF3-1). Audio
+		// one hour (PF3-1) and, PF5-7, is memoised here so the next client
+		// never reaches the bridge for it (a 200 forgets the memo). Audio
 		// streams keep the upstream headers untouched (signed URLs, Range).
 		ModifyResponse: func(resp *http.Response) error {
 			if resp.Request != nil && resp.Request.URL.Path == basePath+coverProxyPath {
+				lid := resp.Request.URL.Query().Get("lid")
 				switch resp.StatusCode {
 				case http.StatusOK:
 					resp.Header.Set("Cache-Control", coverCacheControl)
+					if lid != "" {
+						coverMisses.forget(lid)
+					}
 				case http.StatusNotFound:
 					resp.Header.Set("Cache-Control", coverMissCacheControl)
+					resp.Header.Set("X-Ytm-Cache", "MISS")
+					if lid != "" {
+						coverMisses.add(lid)
+					}
 				}
 			}
 			return nil
@@ -250,6 +356,12 @@ func serveAudioProxy(c echo.Context, upstream string) error {
 func AudioCompanionProxyHandler(c echo.Context) error {
 	if err := validateAudioProxyRequest(c.Request().URL.Path, c.Request().URL.Query()); err != nil {
 		return c.String(http.StatusBadRequest, "bad request: "+err.Error())
+	}
+	// PF5-7: a lid known to have no art is answered here, GET and HEAD alike.
+	if c.Request().URL.Path == coverProxyPath {
+		if lid := c.QueryParam("lid"); lid != "" && coverMisses.has(lid) {
+			return coverMissAnswer(c)
+		}
 	}
 	return serveAudioProxy(c, os.Getenv("COMPANION_URL"))
 }
