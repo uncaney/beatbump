@@ -4,6 +4,7 @@
 // at its known size (`_bytes`, or `sizes`) else PACK_EST_BYTES. Pure (no SW /
 // network): the settings page fetches the three sources, plans, then hands
 // the items to keepOffline (downloaded + pinned, 2 at a time, cancellable).
+import { isListened } from "$lib/listenLog";
 import { keepableTracks } from "$lib/offlineBatch";
 import { durationOf } from "$lib/offlineQueue";
 import { formatBytesFr, formatMoFr } from "$lib/utils/formatFr";
@@ -269,12 +270,14 @@ export function guardPackSpace(plan: PackPlan, space: PackSpace, bps = PACK_DEFA
 // ---- B7-7 "Rafraîchir mon pack" ----
 // The last pack the card prepared is remembered (localStorage LAST_PACK_KEY:
 // when it started, its mode / target, its tracks with their length). A
-// refresh drops the pack tracks already listened to (a play event since the
-// pack began: me/stats/recent `playedAt`, or the SW `lastAccess` of the entry
-// moved after it was cached) and fills the same listening time with new
-// tracks (planPack by seconds, the pack's own tracks excluded). Pinned
-// entries outside the pack are never touched: only the dropped pack tracks
-// are uncached.
+// refresh drops the pack tracks really listened to since the pack began
+// (L13-1: a play event dated after `pack.at` with >= 50 % of the track or
+// >= 2 min listened, listenLog.ts; never the SW `lastAccess`, which moves
+// whenever the SW merely SERVES the audio: startup restore, a 2 s skip, a
+// seek) and fills the same listening time with new tracks (planPack by
+// seconds, the pack's own tracks excluded). Pinned entries outside the pack
+// are never touched: only the dropped pack tracks are uncached, and never
+// the track playing / restored.
 
 export const LAST_PACK_KEY = "ytm-offline-pack-last";
 export type LastPackItem = { videoId: string; seconds: number; bytes: number };
@@ -325,34 +328,44 @@ export function writeLastPack(store: KV | null | undefined, pack: LastPack | nul
 	}
 }
 
-export type PlayEvent = { videoId?: string | null; playedAt?: number | null };
+export type PlayEvent = {
+	videoId?: string | null;
+	playedAt?: number | null;
+	/** Seconds really listened (the device's listen log); absent on a me/stats/recent play. */
+	seconds?: number | null;
+	/** The track's length (seconds); the pack item's own length when absent. */
+	duration?: number | null;
+};
 export type ListenedSources = {
-	/** SW list-audio entries (lastAccess moves when the SW serves the track). */
+	/**
+	 * SW list-audio entries. L13-1: ignored (kept for callers): `lastAccess`
+	 * moves whenever the SW serves the audio, listened or not.
+	 */
 	entries?: ReadonlyArray<{ videoId?: string; at?: number; lastAccess?: number } | null | undefined> | null;
-	/** Play events (me/stats/recent items zipped with `playedAt`, the local outbox). */
+	/** Play events: the local listen log (`seconds`), me/stats/recent items zipped with `playedAt`. */
 	plays?: Iterable<PlayEvent | null | undefined> | null;
 };
 
 /**
- * The pack tracks listened to since the pack began: a play event dated after
- * `pack.at`, or an SW entry served (lastAccess) after it was cached (and after
- * the pack began). Tracks outside the pack are never reported.
+ * The pack tracks listened to since the pack began (L13-1): a play event
+ * dated after `pack.at` whose listened `seconds` reach the listenLog rule
+ * (>= 50 % of the track, or >= 2 min). A play without `seconds` (the server
+ * history, 30 s rule) and an SW entry served after the pack began are never
+ * enough. Tracks outside the pack are never reported.
  */
 export function listenedPackIds(pack: Pick<LastPack, "at" | "items">, src: ListenedSources): Set<string> {
-	const inPack = new Set(pack.items.map((i) => i.videoId));
+	const length = new Map<string, number>();
+	for (const i of pack.items) if (!length.has(i.videoId)) length.set(i.videoId, i.seconds);
 	const out = new Set<string>();
 	const since = Math.max(0, Number(pack.at) || 0);
 	for (const p of src.plays ?? []) {
 		const id = typeof p?.videoId === "string" ? p.videoId : "";
+		if (!id || !length.has(id) || out.has(id)) continue;
 		const at = Number(p?.playedAt);
-		if (id && inPack.has(id) && Number.isFinite(at) && at > since) out.add(id);
-	}
-	for (const e of src.entries ?? []) {
-		const id = typeof e?.videoId === "string" ? e.videoId : "";
-		if (!id || !inPack.has(id)) continue;
-		const cachedAt = Number(e?.at) || 0;
-		const la = Number(e?.lastAccess) || 0;
-		if (la > cachedAt && la > since) out.add(id);
+		if (!Number.isFinite(at) || at <= since) continue;
+		const own = Number(p?.duration);
+		const duration = Number.isFinite(own) && own > 0 ? own : length.get(id) || 0;
+		if (isListened(p?.seconds, duration)) out.add(id);
 	}
 	return out;
 }
@@ -371,12 +384,19 @@ export type PackRefreshPlan = {
 /**
  * The refresh: drop the listened pack tracks, plan as many seconds of new
  * tracks (favourites, recent plays, mix: same order as a pack, cached ones and
- * the pack's own tracks excluded). Pure: the card uncaches `drop`, then runs
- * `add` as a pack.
+ * the pack's own tracks excluded). `protect` (L13-1: the track playing, the
+ * restored last track) is never dropped, listened or not. Pure: the card
+ * uncaches `drop`, then runs `add` as a pack.
  */
-export function planPackRefresh(pack: Pick<LastPack, "items">, listened: Iterable<string>, candidates: PackCandidates | null | undefined): PackRefreshPlan {
+export function planPackRefresh(
+	pack: Pick<LastPack, "items">,
+	listened: Iterable<string>,
+	candidates: PackCandidates | null | undefined,
+	protect?: Iterable<string | null | undefined> | null,
+): PackRefreshPlan {
 	const gone = new Set<string>();
 	for (const id of listened) if (typeof id === "string" && id) gone.add(id);
+	for (const id of protect ?? []) if (typeof id === "string" && id) gone.delete(id);
 	const drop: LastPackItem[] = [];
 	const keep: LastPackItem[] = [];
 	for (const i of pack.items) (gone.has(i.videoId) ? drop : keep).push(i);
