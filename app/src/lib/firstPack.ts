@@ -26,8 +26,8 @@ export const LOCAL_MIXES_URL = "/api/v1/local/mixes";
 export type FirstPackState = {
 	/** The stored memo (localStorage FIRST_PACK_KEY), null when absent or unreadable. */
 	stored: string | null | undefined;
-	/** Plays recorded for the profile (me/stats/recent); 0 = no history. */
-	recentCount: number;
+	/** Plays recorded for the profile (me/stats/recent); 0 = no history; null = unknown (the call failed: L14-5, never assumed empty). */
+	recentCount: number | null;
 	/** The service worker is active (the pack needs its cache-audio). */
 	swActive: boolean;
 };
@@ -35,10 +35,13 @@ export type FirstPackState = {
 /**
  * The card shows for a profile without history (no play recorded), once the
  * service worker is active, and never again once dismissed or used (memo "1").
+ * An unknown history (me/stats/recent failed) hides it: a profile with plays
+ * on another device must not be offered a day-one pack.
  */
 export function shouldShowFirstPackCard(s: FirstPackState): boolean {
 	if (s.stored === "1") return false;
 	if (!s.swActive) return false;
+	if (s.recentCount === null) return false;
 	return !(Number.isFinite(s.recentCount) && s.recentCount > 0);
 }
 

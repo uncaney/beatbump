@@ -17,7 +17,7 @@
 	import { FIRST_PACK_HREF, FIRST_PACK_JOB_KEY, FIRST_PACK_KEY, firstPackSources, hasFirstPackMaterial, planFirstPack, shouldShowFirstPackCard } from "$lib/firstPack";
 	import { getRecent } from "$lib/me";
 	import { cachedIds, getOfflineTracks, listCachedAudio, requestPersistentStorage, storageStatus } from "$lib/offline";
-	import { defaultKeepDeps, keepDepsWithAbort, keepSummary, startKeepJob, type KeepResult } from "$lib/offlineBatch";
+	import { defaultKeepDeps, keepDepsWithAbort, keepJobs, keepSummary, startKeepJob, type KeepResult } from "$lib/offlineBatch";
 	import { averageBytesPerSecond, guardPackSpace, lastPackOf, originRoom, writeLastPack, type PackPlan } from "$lib/offlinePack";
 	import { durationOf } from "$lib/offlineQueue";
 	import { notify } from "$lib/utils";
@@ -60,15 +60,17 @@
 				stored = null;
 			}
 			if (stored === "1") return;
-			let recentCount = 0;
+			let recentCount: number | null = 0;
 			try {
 				// Shares PersonalRows' / FirstRun's me/stats/recent call (getRecent memo).
 				const r = await getRecent(1);
 				recentCount = Array.isArray(r?.items) ? r.items.length : 0;
 			} catch {
-				recentCount = 0; // anonymous profile or a failed call both read as "no history"
+				// L14-5: a failed call (offline, 500) is "unknown", not "no history":
+				// a named profile with plays elsewhere is not offered a day-one pack.
+				recentCount = null;
 			}
-			if (recentCount > 0) return;
+			if (recentCount === null || recentCount > 0) return;
 			const sw = await swActive();
 			if (alive) show = shouldShowFirstPackCard({ stored, recentCount, swActive: sw });
 		})();
@@ -97,6 +99,16 @@
 		if (busy) return;
 		busy = true;
 		try {
+			if (get(keepJobs).has(FIRST_PACK_JOB_KEY)) {
+				// L14-5: the Espace card's pack runs under the same key: starting
+				// here would overwrite its memo (writeLastPack) with a plan that
+				// never downloads (startKeepJob returns the running job). Say so,
+				// show that pack; the card stays (no memo) for a later trip.
+				notify("Un pack est déjà en cours de préparation : retrouve-le sur la page Hors-ligne.", "success");
+				expose({ started: false, reason: "pack_running" });
+				await goto(FIRST_PACK_HREF);
+				return;
+			}
 			const [src, l, st] = await Promise.all([
 				firstPackSources(getJson),
 				listCachedAudio().catch(() => null),
