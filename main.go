@@ -29,6 +29,9 @@ func main() {
 	// c41b B6-19: first duplicate-albums scan in the background, so mixes
 	// know the suggested copies (refreshed every 10 min on demand).
 	api.WarmDuplicates()
+	// c48b B8-20: first artist-aliases scan in the background (the artist
+	// page chips, the songs union and the folded Artists list read the memo).
+	api.WarmArtistAliases()
 
 	e := newServer()
 	e.Logger.Fatal(e.Start(":8080"))
@@ -152,6 +155,8 @@ func newServer() *echo.Echo {
 
 	// Local collection browse (whole self-hosted library, paginated + sorted)
 	e.GET("/api/v1/local/artists", api.LocalArtistsHandler)
+	// c48b B8-20: artists whose names normalise to the same one ("feat." credits), display only.
+	e.GET("/api/v1/local/artists/aliases", api.LocalArtistAliasesHandler)
 	e.GET("/api/v1/local/albums", api.LocalAlbumsHandler)
 	// c31b D5: strict local twin of a YouTube album ("Tu l as deja" banner).
 	e.GET("/api/v1/local/albums/match", api.CacheResponse(2*time.Minute, api.LocalAlbumMatchHandler))

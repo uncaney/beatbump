@@ -125,6 +125,9 @@ func LocalArtistsHandler(c echo.Context) error {
 	if !ok {
 		return badSort(c, c.QueryParam("sort"))
 	}
+	if c.QueryParam("collapse") == "1" && strings.TrimSpace(c.QueryParam("q")) == "" {
+		return localArtistsCollapsed(c, off, lim, sortBy)
+	}
 	hits, total := meiliBrowse("artists", map[string]interface{}{
 		"q": c.QueryParam("q"), "offset": off, "limit": lim, "sort": []string{sortBy},
 		"attributesToRetrieve": []string{"id", "name", "albumCount", "trackCount"},
@@ -136,6 +139,63 @@ func LocalArtistsHandler(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"items": items, "total": total, "offset": off, "limit": lim, "sort": sortBy,
+	})
+}
+
+// localArtistsCollapsed (B8-20 c48b, ?collapse=1) is the Artists list with
+// the alias credits folded under their primary (local_artist_alias.go): a
+// row that is an alias of a group is dropped, the primary's subtitle gets a
+// "+N variantes" badge. Display only: the Meili offsets are untouched (the
+// page refills the hidden rows from the next raw rows, at most
+// aliasCollapseRounds extra pages, and tells the client where to continue
+// with `nextOffset`, which _Browse honours); `total` stays the index's, so
+// the client's end-of-list test keeps working. Every credit stays
+// reachable through the "Aussi sous" chips of the artist page. A filtered
+// list (?q=) is never collapsed: a search for "Camila" must still find
+// "Ed Sheeran feat. Camila Cabello". The groups come from the memo (never
+// a scan here): before the first scan the list is simply not folded.
+func localArtistsCollapsed(c echo.Context, off, lim int, sortBy string) error {
+	groups, index := artistAliasCached()
+	isAlias := func(id string) bool {
+		i, ok := index[id]
+		return ok && i < len(groups) && groups[i].ID != id
+	}
+	kept := make([]map[string]interface{}, 0, lim)
+	total, next := 0, off
+	for round := 0; round <= aliasCollapseRounds && len(kept) < lim; round++ {
+		hits, n := meiliBrowse("artists", map[string]interface{}{
+			"q": "", "offset": next, "limit": lim, "sort": []string{sortBy},
+			"attributesToRetrieve": []string{"id", "name", "albumCount", "trackCount"},
+		})
+		if n > total {
+			total = n
+		}
+		for _, a := range hits {
+			if len(kept) >= lim {
+				break
+			}
+			next++
+			if isAlias(mstr(a, "id")) {
+				continue
+			}
+			kept = append(kept, a)
+		}
+		if len(hits) < lim {
+			break
+		}
+	}
+	covers := artistCovers(kept)
+	items := make([]IListItemRenderer, 0, len(kept))
+	for _, a := range kept {
+		id := mstr(a, "id")
+		item := localArtistItem(a, covers[id])
+		if i, ok := index[id]; ok && i < len(groups) && groups[i].ID == id {
+			item.Subtitle = append(item.Subtitle, Artist{Text: " · " + aliasBadge(groups[i].Size-1)})
+		}
+		items = append(items, item)
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"items": items, "total": total, "offset": off, "nextOffset": next, "limit": lim, "sort": sortBy, "collapsed": true,
 	})
 }
 
@@ -757,8 +817,19 @@ func LocalSongsHandler(c echo.Context) error {
 		// U12-5: a clean genre name also matches the raw multi-valued tags holding it.
 		filters = append(filters, genreSongsFilter(g))
 	}
+	groupNames := 0
 	if ar := c.QueryParam("artist"); ar != "" {
-		filters = append(filters, "albumArtist = \""+escapeMeili(ar)+"\"")
+		if c.QueryParam("group") == "1" {
+			// B8-20 (c48b): the union of the artist's credits ("Ed Sheeran"
+			// and its "feat." variants, local_artist_alias.go), resolved
+			// server side from the aliases memo; the artist alone when it
+			// has none (or before the first scan). Bounded by aliasGroupCap.
+			names := artistAliasNames(ar)
+			groupNames = len(names)
+			filters = append(filters, aliasSongsFilter(names))
+		} else {
+			filters = append(filters, "albumArtist = \""+escapeMeili(ar)+"\"")
+		}
 	}
 	payload := map[string]interface{}{
 		"q": c.QueryParam("q"), "offset": off, "limit": lim, "sort": []string{sortBy},
@@ -769,9 +840,13 @@ func LocalSongsHandler(c echo.Context) error {
 	}
 	hits, total := meiliBrowse("tracks", payload)
 	items := localSongItemsWithCovers(hits)
-	return c.JSON(http.StatusOK, map[string]interface{}{
+	out := map[string]interface{}{
 		"items": items, "total": total, "offset": off, "limit": lim, "sort": sortBy,
-	})
+	}
+	if groupNames > 0 {
+		out["group"] = groupNames // credits unioned (1 = the artist alone)
+	}
+	return c.JSON(http.StatusOK, out)
 }
 
 // LocalGenresHandler returns genre values by track count (best-effort: the genre
