@@ -254,7 +254,7 @@ func MeYearHandler(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad_request", "reason": err.Error()})
 	}
-	out := statsTimeCached(pid, statsTimeKey("year", pid, loc, strconv.Itoa(year)), func() interface{} {
+	out := statsTimeCached(pid, statsTimeKey("year", pid, loc, strconv.Itoa(year)), hasProfileCookie(c), func() interface{} {
 		evs := profileEvents(pid, time.Time{}) // all time: "new artists" needs each first play
 		return computeYear(evs, windowRows(pid, 0), year, loc)
 	})

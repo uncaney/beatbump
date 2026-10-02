@@ -178,6 +178,88 @@ const (
 // addedMonthNow is swapped by tests.
 var addedMonthNow = time.Now
 
+// L13-15: the added-month scan (recentAlbumDocs since addedMonthMin: up to
+// five Meili pages, then a count per month) does not depend on the profile
+// and the home row asks for it on every visit. It is memoised 5 minutes per
+// (q, artistId) in a small LRU, least recently used evicted first, so a
+// /home costs one map lookup instead of a scan; the month pick and the
+// paging still run per request (they depend on `now` and the query).
+const (
+	addedMonthMemoTTL = 5 * time.Minute
+	addedMonthMemoMax = 32
+)
+
+type addedMonthScan struct {
+	docs   []map[string]interface{} // dateAdded:desc, since addedMonthMin
+	counts map[string]int           // "YYYY-MM" -> albums
+	at     time.Time
+}
+
+var (
+	addedMonthMu    sync.Mutex
+	addedMonthMemo  = map[string]*addedMonthScan{}
+	addedMonthOrder []string // least recently used first
+	// addedMonthMemoNow is swapped by tests (the TTL clock).
+	addedMonthMemoNow = time.Now
+)
+
+// addedMonthTouch moves key to the recent end (addedMonthMu held).
+func addedMonthTouch(key string) {
+	for i, k := range addedMonthOrder {
+		if k == key {
+			addedMonthOrder = append(addedMonthOrder[:i], addedMonthOrder[i+1:]...)
+			break
+		}
+	}
+	addedMonthOrder = append(addedMonthOrder, key)
+}
+
+// resetAddedMonthMemo empties the memo (tests).
+func resetAddedMonthMemo() {
+	addedMonthMu.Lock()
+	addedMonthMemo = map[string]*addedMonthScan{}
+	addedMonthOrder = nil
+	addedMonthMu.Unlock()
+}
+
+// addedMonthMemoLen is the number of memoised scans (tests).
+func addedMonthMemoLen() int {
+	addedMonthMu.Lock()
+	defer addedMonthMu.Unlock()
+	return len(addedMonthMemo)
+}
+
+// addedMonthScanFor returns the memoised scan of (q, artistId), computing
+// it on a miss or after addedMonthMemoTTL. The docs are shared: callers
+// must not reorder or mutate them.
+func addedMonthScanFor(q, artistId string) *addedMonthScan {
+	key := q + "\x00" + artistId
+	now := addedMonthMemoNow()
+	addedMonthMu.Lock()
+	if s, ok := addedMonthMemo[key]; ok && now.Sub(s.at) < addedMonthMemoTTL {
+		addedMonthTouch(key)
+		addedMonthMu.Unlock()
+		return s
+	}
+	addedMonthMu.Unlock()
+	minStart, _ := parseMonth(addedMonthMin)
+	docs := recentAlbumDocs(q, artistId, minStart.Unix())
+	counts := map[string]int{}
+	for _, a := range docs {
+		counts[monthOf(albumDateAdded(a))]++
+	}
+	s := &addedMonthScan{docs: docs, counts: counts, at: now}
+	addedMonthMu.Lock()
+	defer addedMonthMu.Unlock()
+	addedMonthMemo[key] = s
+	addedMonthTouch(key)
+	for len(addedMonthOrder) > addedMonthMemoMax {
+		delete(addedMonthMemo, addedMonthOrder[0])
+		addedMonthOrder = addedMonthOrder[1:]
+	}
+	return s
+}
+
 // parseMonth reads "YYYY-MM" as the first instant of that UTC month.
 func parseMonth(raw string) (time.Time, bool) {
 	if len(raw) != 7 || raw[4] != '-' {
@@ -232,12 +314,8 @@ func localAlbumsAddedMonth(c echo.Context, off, lim int, sortBy string) error {
 			return bad("month in the future: " + month)
 		}
 	}
-	minStart, _ := parseMonth(addedMonthMin)
-	docs := recentAlbumDocs(c.QueryParam("q"), c.QueryParam("artistId"), minStart.Unix())
-	counts := map[string]int{}
-	for _, a := range docs {
-		counts[monthOf(albumDateAdded(a))]++
-	}
+	scan := addedMonthScanFor(c.QueryParam("q"), c.QueryParam("artistId"))
+	docs, counts := scan.docs, scan.counts
 	reason := ""
 	if month == "" {
 		month, reason = addedMonthPick(counts, current)

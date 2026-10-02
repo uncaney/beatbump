@@ -163,40 +163,86 @@ type statsTimeEntry struct {
 var (
 	statsTimeMu   sync.Mutex
 	statsTimeMemo = map[string]statsTimeEntry{}
+	// statsTimeOrder lists the memoised keys, least recently used first
+	// (L13-10: eviction is LRU, never a full reset).
+	statsTimeOrder []string
 	// statsTimeNow is swapped by tests.
 	statsTimeNow = time.Now
 )
 
+// statsTimeTouch moves key to the recent end (statsTimeMu held).
+func statsTimeTouch(key string) {
+	for i, k := range statsTimeOrder {
+		if k == key {
+			statsTimeOrder = append(statsTimeOrder[:i], statsTimeOrder[i+1:]...)
+			break
+		}
+	}
+	statsTimeOrder = append(statsTimeOrder, key)
+}
+
+// statsTimeDrop forgets key (statsTimeMu held).
+func statsTimeDrop(key string) {
+	delete(statsTimeMemo, key)
+	for i, k := range statsTimeOrder {
+		if k == key {
+			statsTimeOrder = append(statsTimeOrder[:i], statsTimeOrder[i+1:]...)
+			return
+		}
+	}
+}
+
 // statsTimeCached answers key from the memo, else computes and stores it.
-func statsTimeCached(pid, key string, compute func() interface{}) interface{} {
+// memo=false (L13-10: a request without the bbp cookie gets a fresh random
+// profile id from profileID, so its answer is never asked again) computes
+// without reading or storing the memo, so cookieless visitors neither fill
+// the map nor evict the named profiles' entries. When the map is full the
+// expired entries go first, then the least recently used one.
+func statsTimeCached(pid, key string, memo bool, compute func() interface{}) interface{} {
+	if !memo {
+		return compute()
+	}
 	now := statsTimeNow()
 	statsTimeMu.Lock()
-	if e, ok := statsTimeMemo[key]; ok && now.Sub(e.at) < statsTimeMemoTTL {
-		statsTimeMu.Unlock()
-		return e.val
+	if e, ok := statsTimeMemo[key]; ok {
+		if now.Sub(e.at) < statsTimeMemoTTL {
+			statsTimeTouch(key)
+			statsTimeMu.Unlock()
+			return e.val
+		}
+		statsTimeDrop(key)
 	}
 	statsTimeMu.Unlock()
 	val := compute()
 	statsTimeMu.Lock()
 	defer statsTimeMu.Unlock()
-	if len(statsTimeMemo) >= statsTimeMemoMax {
-		for k, e := range statsTimeMemo {
-			if now.Sub(e.at) >= statsTimeMemoTTL {
-				delete(statsTimeMemo, k)
+	if _, ok := statsTimeMemo[key]; !ok && len(statsTimeMemo) >= statsTimeMemoMax {
+		for _, k := range append([]string(nil), statsTimeOrder...) {
+			if now.Sub(statsTimeMemo[k].at) >= statsTimeMemoTTL {
+				statsTimeDrop(k)
 			}
 		}
-		if len(statsTimeMemo) >= statsTimeMemoMax {
-			statsTimeMemo = map[string]statsTimeEntry{}
+		for len(statsTimeMemo) >= statsTimeMemoMax && len(statsTimeOrder) > 0 {
+			statsTimeDrop(statsTimeOrder[0])
 		}
 	}
 	statsTimeMemo[key] = statsTimeEntry{pid: pid, at: now, val: val}
+	statsTimeTouch(key)
 	return val
+}
+
+// statsTimeMemoLen is the number of memoised keys (tests).
+func statsTimeMemoLen() int {
+	statsTimeMu.Lock()
+	defer statsTimeMu.Unlock()
+	return len(statsTimeMemo)
 }
 
 // resetStatsTimeMemo empties the memo (tests).
 func resetStatsTimeMemo() {
 	statsTimeMu.Lock()
 	statsTimeMemo = map[string]statsTimeEntry{}
+	statsTimeOrder = nil
 	statsTimeMu.Unlock()
 }
 
@@ -206,7 +252,7 @@ func invalidateStatsTimeMemo(pid string) {
 	defer statsTimeMu.Unlock()
 	for k, e := range statsTimeMemo {
 		if e.pid == pid {
-			delete(statsTimeMemo, k)
+			statsTimeDrop(k)
 		}
 	}
 }
@@ -228,10 +274,10 @@ type streakDay struct {
 type streaksResp struct {
 	Current int         `json:"current"`
 	Longest int         `json:"longest"`
-	LastDay string      `json:"lastDay"` // "" when the profile never played
+	LastDay string      `json:"lastDay"`        // "" when the profile never played
 	TZ      int         `json:"tz"`             // offset now, minutes east of UTC
 	Zone    string      `json:"zone,omitempty"` // IANA name when ?tz= gave one
-	Days    []streakDay `json:"days"` // streakWindowDays entries, oldest first, ending today
+	Days    []streakDay `json:"days"`           // streakWindowDays entries, oldest first, ending today
 }
 
 const dayLayout = "2006-01-02"
@@ -297,7 +343,7 @@ func computeStreaks(evs []statEvent, mins map[string]float64, now time.Time, loc
 func MeStreaksHandler(c echo.Context) error {
 	pid := profileID(c)
 	loc := statsZone(c)
-	out := statsTimeCached(pid, statsTimeKey("streaks", pid, loc, ""), func() interface{} {
+	out := statsTimeCached(pid, statsTimeKey("streaks", pid, loc, ""), hasProfileCookie(c), func() interface{} {
 		evs := profileEvents(pid, time.Time{}) // all time: the record needs the whole history
 		mins := refMinutes(windowRows(pid, streakWindowDays+1))
 		return computeStreaks(evs, mins, time.Now(), loc)
@@ -364,7 +410,7 @@ func MeClockHandler(c echo.Context) error {
 			days = 365
 		}
 	}
-	out := statsTimeCached(pid, statsTimeKey("clock", pid, loc, strconv.Itoa(days)), func() interface{} {
+	out := statsTimeCached(pid, statsTimeKey("clock", pid, loc, strconv.Itoa(days)), hasProfileCookie(c), func() interface{} {
 		evs := profileEvents(pid, time.Now().Add(-time.Duration(days)*24*time.Hour))
 		r := computeClock(evs, refMinutes(windowRows(pid, days)), loc)
 		r.Days = days

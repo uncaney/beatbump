@@ -2,10 +2,15 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
 	"beatbump-server/backend/db"
+
+	"github.com/labstack/echo/v4"
 )
 
 // ev builds a synthetic play event at t.
@@ -255,5 +260,80 @@ func TestMeStreaksHandler_ZoneNameAndMemo(t *testing.T) {
 	statsTimeMu.Unlock()
 	if n != 0 {
 		t.Fatalf("invalidate left %d entries", n)
+	}
+}
+
+// L13-10: a request without the bbp cookie gets a fresh random profile id,
+// so its time views are computed but never memoised: 600 such requests
+// leave the memo empty, a named profile's entry is kept.
+func TestStatsTimeMemoSkipsCookieless(t *testing.T) {
+	useTestDB(t)
+	seedPlays(t)
+	if out := getJSON(t, MeStreaksHandler, "/api/v1/me/stats/streaks?tzo=120"); out["longest"] == nil {
+		t.Fatalf("named answer: %v", out)
+	}
+	if n := statsTimeMemoLen(); n != 1 {
+		t.Fatalf("named profile memo: %d entries, want 1", n)
+	}
+	for i := 0; i < 600; i++ {
+		for _, h := range []echo.HandlerFunc{MeStreaksHandler, MeClockHandler, MeYearHandler} {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/me/stats/x?tzo=120", nil)
+			rec := httptest.NewRecorder()
+			if err := h(echo.New().NewContext(req, rec)); err != nil || rec.Code != http.StatusOK {
+				t.Fatalf("cookieless %d: %v %d", i, err, rec.Code)
+			}
+		}
+	}
+	if n := statsTimeMemoLen(); n != 1 {
+		t.Fatalf("cookieless visitors changed the memo: %d entries, want 1", n)
+	}
+	// The named entry is still served from the memo.
+	before := getJSON(t, MeStreaksHandler, "/api/v1/me/stats/streaks?tzo=120")["longest"]
+	db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: "Z", Title: "Z", Data: `{"videoId":"Z"}`, PlayedAt: time.Now().AddDate(0, 0, -2)})
+	db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: "Z", Title: "Z", Data: `{"videoId":"Z"}`, PlayedAt: time.Now().AddDate(0, 0, -3)})
+	if again := getJSON(t, MeStreaksHandler, "/api/v1/me/stats/streaks?tzo=120")["longest"]; again != before {
+		t.Fatalf("named memo evicted by cookieless traffic: %v -> %v", before, again)
+	}
+}
+
+// L13-10: a full memo evicts its expired entries, then the least recently
+// used one; the hot entries survive (no full reset).
+func TestStatsTimeMemoLRU(t *testing.T) {
+	resetStatsTimeMemo()
+	t.Cleanup(resetStatsTimeMemo)
+	base := time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)
+	statsTimeNow = func() time.Time { return base }
+	t.Cleanup(func() { statsTimeNow = time.Now })
+	computed := 0
+	get := func(i int) interface{} {
+		return statsTimeCached("p"+strconv.Itoa(i), "k"+strconv.Itoa(i), true, func() interface{} { computed++; return i })
+	}
+	for i := 0; i < statsTimeMemoMax; i++ {
+		get(i)
+	}
+	if computed != statsTimeMemoMax || statsTimeMemoLen() != statsTimeMemoMax {
+		t.Fatalf("fill: computed %d len %d", computed, statsTimeMemoLen())
+	}
+	get(0)                // k0 becomes the most recently used
+	get(statsTimeMemoMax) // full: k1 (least recently used) goes, nothing else
+	if statsTimeMemoLen() != statsTimeMemoMax {
+		t.Fatalf("len after overflow: %d", statsTimeMemoLen())
+	}
+	computed = 0
+	get(0)
+	get(2)
+	if computed != 0 {
+		t.Fatalf("hot entries were reset: %d recomputed", computed)
+	}
+	get(1)
+	if computed != 1 {
+		t.Fatalf("the least recently used entry should have been evicted")
+	}
+	// Expired entries go first when the map is full.
+	statsTimeNow = func() time.Time { return base.Add(statsTimeMemoTTL + time.Second) }
+	computed = 0
+	get(statsTimeMemoMax + 1)
+	if computed != 1 || statsTimeMemoLen() != 1 {
+		t.Fatalf("expired sweep: computed %d len %d (want 1, 1)", computed, statsTimeMemoLen())
 	}
 }
