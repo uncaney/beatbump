@@ -14,6 +14,10 @@ describe("shouldShowFirstPackCard", () => {
 		expect(shouldShowFirstPackCard({ stored: null, recentCount: 1, swActive: true })).toBe(false);
 		expect(shouldShowFirstPackCard({ stored: null, recentCount: 12, swActive: true })).toBe(false);
 	});
+
+	it("L14-5: hides when the history is unknown (me/stats/recent failed) rather than assuming none", () => {
+		expect(shouldShowFirstPackCard({ stored: null, recentCount: null, swActive: true })).toBe(false);
+	});
 });
 
 const track = (videoId: string, length = "4:00") => ({ videoId, title: videoId, length });

@@ -217,12 +217,15 @@ func cacheResponseUnlessWith(rc *responseCache, ttl time.Duration, skip func(ech
 	}
 }
 
-// perProfileRelated reports whether a local/related request depends on the
-// caller's profile (favorites seed, or c40b personal=1: the profile's skip /
-// recent-play exclusions) and so must never be served from the shared cache.
-// exclude= needs no bypass: it is applied after the cache (relatedCacheWith).
+// perProfileRelated reports whether a local/related request BUILDS from the
+// caller's profile (the favorites seed) and so must never be served from
+// the shared cache. exclude= and personal=1 need no bypass: both are
+// exclusions, applied after the cache (relatedCacheWith). L14-3: personal=1
+// used to bypass too, and the only client sending exclude= (the
+// continuation, localContinuation.ts) always sends personal=1, so the L13-9
+// spare pool was never read by anyone.
 func perProfileRelated(c echo.Context) bool {
-	return c.QueryParam("seed") == "favorites" || personalRequest(c)
+	return c.QueryParam("seed") == "favorites"
 }
 
 // LocalRelatedCached is the registered handler for GET /api/v1/local/related.
@@ -248,7 +251,13 @@ type relatedAnswer struct {
 // base answer (no exclude=, with its spare candidates: relatedSpareHeader)
 // is cached once per seed; the request's exclusions are applied to the
 // cached items after the hit and the list is refilled from the spare up to
-// the cap. Per-profile requests (perProfileRelated) bypass as before.
+// the cap. L14-3: the profile exclusions of personal=1 (requestExclusions:
+// twice-skipped refs, plays of the last 3 h) take the same path: the inner
+// request carries neither exclude= nor personal= nor the cookie, so the
+// base answer is profile-free and one entry per seed serves every profile.
+// When the exclusions eat past the spare (a long listening session on one
+// radio), the answer is rebuilt live from the full pool (BYPASS) rather
+// than served short. The favorites seed (perProfileRelated) bypasses.
 func relatedCacheWith(rc *responseCache, ttl time.Duration, next echo.HandlerFunc) echo.HandlerFunc {
 	cached := cacheResponseUnlessWith(rc, ttl, perProfileRelated, next)
 	return func(c echo.Context) error {
@@ -260,10 +269,12 @@ func relatedCacheWith(rc *responseCache, ttl time.Duration, next echo.HandlerFun
 		u := *req.URL
 		q := u.Query()
 		q.Del("exclude")
+		q.Del("personal")
 		u.RawQuery = q.Encode()
 		r2 := req.Clone(req.Context())
 		r2.URL = &u
 		r2.RequestURI = u.RequestURI()
+		r2.Header.Del(echo.HeaderCookie) // the base answer never sees the profile
 		r2.Header.Set(relatedSpareHeader, "1")
 		e := c.Echo()
 		if e == nil {
@@ -287,8 +298,26 @@ func relatedCacheWith(rc *responseCache, ttl time.Duration, next echo.HandlerFun
 		if err := json.Unmarshal(bw.buf.Bytes(), &ans); err != nil {
 			return c.Blob(http.StatusOK, ct, bw.buf.Bytes())
 		}
-		return c.JSON(http.StatusOK, applyRelatedExclusions(ans, ex))
+		out := applyRelatedExclusions(ans, ex)
+		if relatedAnswerShort(ans, out) {
+			// The exclusions ate past the spare: the full pool minus the
+			// exclusions (the pre-L13-9 path) rather than a short list.
+			h.Set("X-Ytm-Cache", "BYPASS")
+			return next(c)
+		}
+		return c.JSON(http.StatusOK, out)
 	}
+}
+
+// relatedAnswerShort: the base answer held a full cap of candidates but
+// the exclusions left fewer than the cap. A base shorter than its cap is a
+// small pool, not a short answer.
+func relatedAnswerShort(base, out relatedAnswer) bool {
+	cap := base.Cap
+	if cap <= 0 {
+		cap = len(base.Items)
+	}
+	return len(base.Items) >= cap && len(out.Items) < cap
 }
 
 // applyRelatedExclusions drops the excluded songs from a base answer and

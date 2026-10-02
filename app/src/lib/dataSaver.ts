@@ -25,13 +25,25 @@ export type DataSaverInput = {
 
 const SLOW_TYPES = new Set(["2g", "slow-2g"]);
 
+/**
+ * L14-10: why data is being saved, the first source that applies: the
+ * person's switch ("setting"), the OS / browser data-saver switch
+ * ("save-data"), or a 2g-class link ("slow-link": Chrome's estimate from
+ * the round trips, which a degraded 4G reaches for a few minutes and which
+ * lifts by itself). null when nothing applies. Pure.
+ */
+export type DataSaverReason = "setting" | "save-data" | "slow-link";
+export function dataSaverReason(i: DataSaverInput | null | undefined): DataSaverReason | null {
+	if (!i) return null;
+	if (i.setting === true) return "setting";
+	if (i.saveData === true) return "save-data";
+	const t = typeof i.effectiveType === "string" ? i.effectiveType.trim().toLowerCase() : "";
+	return SLOW_TYPES.has(t) ? "slow-link" : null;
+}
+
 /** True when data must be saved: the person's switch, the OS switch, or a 2g-class link. Pure. */
 export function dataSaverActive(i: DataSaverInput | null | undefined): boolean {
-	if (!i) return false;
-	if (i.setting === true) return true;
-	if (i.saveData === true) return true;
-	const t = typeof i.effectiveType === "string" ? i.effectiveType.trim().toLowerCase() : "";
-	return SLOW_TYPES.has(t);
+	return dataSaverReason(i) !== null;
 }
 
 /** The next-track prefetch (and the auto-cache that rides on it) runs only off data saver. Pure. */
@@ -64,10 +76,22 @@ export function isDataSaver(): boolean {
 	return dataSaverActive({ setting: dataSaverSetting(), ...readConnection() });
 }
 
-/** The one-line notice of the offline page when data saver is on ("" otherwise). */
-export function dataSaverNotice(active: boolean, fromBrowser = false): string {
+/**
+ * The one-line notice of the offline page when data saver is on ("" otherwise).
+ * `from` names the source (dataSaverReason); the booleans of the first
+ * version still work (true = the OS switch, false = the person's switch).
+ * L14-10: a slow link is named as such, not as a phone setting nobody set.
+ */
+export function dataSaverNotice(active: boolean, from: boolean | DataSaverReason | null = false): string {
 	if (!active) return "";
-	return fromBrowser
-		? "Économie de données (réglage du téléphone) : les titres écoutés ne sont pas gardés hors-ligne automatiquement et le titre suivant n'est pas préchargé."
-		: "Économie de données active : les titres écoutés ne sont pas gardés hors-ligne automatiquement et le titre suivant n'est pas préchargé.";
+	const reason: DataSaverReason = from === true ? "save-data" : from === false || from === null ? "setting" : from;
+	const effect = "les titres écoutés ne sont pas gardés hors-ligne automatiquement et le titre suivant n'est pas préchargé";
+	switch (reason) {
+		case "save-data":
+			return `Économie de données (réglage du téléphone) : ${effect}.`;
+		case "slow-link":
+			return `Économie de données (liaison lente détectée) : ${effect} ; tout reprend dès que la connexion s'améliore.`;
+		default:
+			return `Économie de données active : ${effect}.`;
+	}
 }

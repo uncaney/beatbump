@@ -25,17 +25,19 @@ import (
 // c40b B6-10: `exclude=<ref>,<ref>` (the queue the client just played) and
 // `personal=1` (the profile's twice-skipped refs, requestExclusions) are left
 // out of both answers, every copy of those songs included (c43b L12-18).
-// personal=1 is served uncached (perProfileRelated).
 //
-// L13-9: exclude= is NOT part of the shared cache key any more. The
-// registered handler (LocalRelatedCached, rescache.go) asks this handler
-// for the base answer without exclude= and with the relatedSpareHeader set:
-// the answer then carries, besides the `items` it would have returned, a
-// `spare` list (the next relatedSpareFactor-1 candidates in the same order)
-// and the `cap`; the wrapper caches that, applies the request's exclusions
-// after the cache hit and refills from `spare` up to the cap, so a
-// continuation request with a different queue is a HIT and still answers a
-// full list. Called directly (no header), the handler answers as before.
+// L13-9 / L14-3: neither exclude= nor personal= is part of the shared cache
+// key. The registered handler (LocalRelatedCached, rescache.go) asks this
+// handler for the base answer without exclude=, without personal= and
+// without the cookie, with the relatedSpareHeader set: the answer then
+// carries, besides the `items` it would have returned, a `spare` list (the
+// next relatedSpareFactor-1 candidates in the same order) and the `cap`;
+// the wrapper caches that once per seed, applies the request's exclusions
+// (queue and profile) after the cache hit and refills from `spare` up to
+// the cap, so a continuation request with a different queue or profile is
+// a HIT and still answers a full list (rebuilt live when the exclusions
+// eat past the spare). Called directly (no header), the handler answers as
+// before.
 func LocalRelatedHandler(c echo.Context) error {
 	if seed := strings.TrimSpace(c.QueryParam("seed")); seed != "" {
 		return localRelatedSeedHandler(c, seed)

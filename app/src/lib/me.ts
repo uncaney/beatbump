@@ -201,6 +201,26 @@ function writePrevAnon(id: string): void {
 		/* private mode */
 	}
 }
+/** L14-6: a 503 `busy` login (the same name is being merged from another tab or device, L13-6) is retried once after Retry-After. */
+export const LOGIN_RETRY_DEFAULT_MS = 2_000;
+export const LOGIN_RETRY_MAX_MS = 5_000;
+/** The retry delay of a 503 login: its Retry-After (seconds), LOGIN_RETRY_DEFAULT_MS without one, LOGIN_RETRY_MAX_MS at most. Pure. */
+export function loginRetryDelay(res: { headers?: { get?: (k: string) => string | null } } | null | undefined): number {
+	let raw: string | null = null;
+	try {
+		raw = res?.headers?.get?.("Retry-After") ?? null;
+	} catch {
+		raw = null;
+	}
+	const s = raw == null || raw.trim() === "" ? NaN : Number(raw);
+	if (!Number.isFinite(s) || s < 0) return LOGIN_RETRY_DEFAULT_MS;
+	return Math.min(LOGIN_RETRY_MAX_MS, Math.round(s * 1000));
+}
+/** The Compte page's line for a failed login: a 503 busy names the other tab, anything else is the generic line. Pure. */
+export function loginErrorText(e: unknown): string {
+	const m = e instanceof Error ? e.message : String(e ?? "");
+	return /\blogin 503\b/.test(m) ? "Connexion en cours sur un autre onglet, réessaie dans quelques secondes." : "Connexion impossible.";
+}
 /**
  * 39A: the server moves this device's anonymous history onto the named
  * profile; `migrated` says what moved (null when nothing was eligible: no
@@ -220,7 +240,15 @@ export async function login(name: string): Promise<{ id: string; name: string; m
 	});
 	loginGate = gate;
 	try {
-		const res = await APIClient.post(`/api/v1/me/login`, prevAnon ? { name, prevAnon } : { name });
+		const body = prevAnon ? { name, prevAnon } : { name };
+		let res = await APIClient.post(`/api/v1/me/login`, body);
+		if (res && res.status === 503) {
+			// L14-6: the server is merging this name from another tab or device
+			// (5 s lock, L13-6): one retry after Retry-After, then the caller
+			// tells the person (loginErrorText). The gate holds the writes meanwhile.
+			await new Promise<void>((r) => setTimeout(r, loginRetryDelay(res)));
+			res = await APIClient.post(`/api/v1/me/login`, body);
+		}
 		if (res && typeof res.ok === "boolean" && !res.ok) throw new Error(`login ${res.status}`);
 		// L13-16: only once the server accepted the login (a 400 empty name or a
 		// 500 used to leave the home cache empty and the whoami memo lost while

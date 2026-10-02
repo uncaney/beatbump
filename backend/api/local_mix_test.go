@@ -124,6 +124,8 @@ func newMixStub(t *testing.T) *mixStub {
 	resetAlbumCoverMemo()
 	resetMixSurveyMemo()
 	resetCrossoverMemo()
+	resetTrackKeyMemo() // L14-2: "%011x" lids are shared by every stub
+	t.Cleanup(resetTrackKeyMemo)
 	s := &mixStub{}
 	n := 0
 	add := func(album, artist, year, genre string, tracks int) {
@@ -283,6 +285,8 @@ func newMixStubGenres(t *testing.T) *mixStub {
 	resetAlbumCoverMemo()
 	resetMixSurveyMemo()
 	resetCrossoverMemo()
+	resetTrackKeyMemo()
+	t.Cleanup(resetTrackKeyMemo)
 	s := &mixStub{}
 	n := 0
 	add := func(album, artist, year, genre string, tracks int) {
@@ -378,6 +382,8 @@ func newMixStubCross(t *testing.T) *mixStub {
 	resetAlbumCoverMemo()
 	resetMixSurveyMemo()
 	resetCrossoverMemo()
+	resetTrackKeyMemo()
+	t.Cleanup(resetTrackKeyMemo)
 	s := &mixStub{}
 	n := 0
 	add := func(album, artist, year, genre string, tracks int) {

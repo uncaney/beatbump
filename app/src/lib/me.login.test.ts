@@ -147,11 +147,64 @@ describe("L12-8: login() holds the writes until the cookie switch is done", () =
 		const fav = me.addFavorite({ videoId: "v1" });
 		await tick();
 		expect(postMock).toHaveBeenCalledTimes(1);
-		loginAnswer.resolve({ ok: false, status: 503, json: async () => ({}) });
-		await expect(login).rejects.toThrow("login 503");
+		loginAnswer.resolve({ ok: false, status: 500, json: async () => ({}) });
+		await expect(login).rejects.toThrow("login 500");
 		await fav;
 		expect(postMock).toHaveBeenCalledTimes(2);
 		expect(me.loginInProgress()).toBe(false);
+	});
+
+	it("L14-6: a 503 busy login is retried once after Retry-After, the writes wait for the retry", async () => {
+		vi.useFakeTimers();
+		try {
+			const me = await import("./me");
+			let logins = 0;
+			postMock.mockImplementation(async (url: string) => {
+				if (!url.endsWith("/me/login")) return ok({ ok: true });
+				logins++;
+				if (logins === 1) return { ok: false, status: 503, headers: { get: (k: string) => (k === "Retry-After" ? "1" : null) }, json: async () => ({ error: "busy" }) };
+				return ok({ id: "u-1", name: "Bob", migrated: null });
+			});
+			const login = me.login("Bob");
+			const fav = me.addFavorite({ videoId: "v1" });
+			await vi.advanceTimersByTimeAsync(0);
+			expect(logins).toBe(1);
+			expect(postMock).toHaveBeenCalledTimes(1); // the favourite waits
+			await vi.advanceTimersByTimeAsync(999);
+			expect(logins).toBe(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(logins).toBe(2);
+			expect((await login).name).toBe("Bob");
+			await fav;
+			expect(postMock).toHaveBeenCalledTimes(3); // login, its retry, then the favourite
+			expect(me.loginInProgress()).toBe(false);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("L14-6: a second 503 is the error the Compte page names; other failures keep the generic line", async () => {
+		vi.useFakeTimers();
+		try {
+			const me = await import("./me");
+			postMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({ error: "busy" }) }));
+			const login = me.login("Bob");
+			login.catch(() => {});
+			await vi.advanceTimersByTimeAsync(me.LOGIN_RETRY_DEFAULT_MS); // no Retry-After: the default delay
+			await expect(login).rejects.toThrow("login 503");
+			expect(postMock).toHaveBeenCalledTimes(2);
+			expect(me.loginErrorText(new Error("login 503"))).toMatch(/autre onglet/);
+			expect(me.loginErrorText(new Error("login 500"))).toBe("Connexion impossible.");
+			expect(me.loginErrorText(new TypeError("Failed to fetch"))).toBe("Connexion impossible.");
+			expect(me.loginErrorText(undefined)).toBe("Connexion impossible.");
+			expect(me.loginRetryDelay({ headers: { get: () => "3" } })).toBe(3000);
+			expect(me.loginRetryDelay({ headers: { get: () => "60" } })).toBe(me.LOGIN_RETRY_MAX_MS);
+			expect(me.loginRetryDelay({ headers: { get: () => "soon" } })).toBe(me.LOGIN_RETRY_DEFAULT_MS);
+			expect(me.loginRetryDelay({})).toBe(me.LOGIN_RETRY_DEFAULT_MS);
+			expect(me.loginRetryDelay(null)).toBe(me.LOGIN_RETRY_DEFAULT_MS);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("a refused login keeps the whoami memo and the home cache; an accepted one drops both (L13-16)", async () => {

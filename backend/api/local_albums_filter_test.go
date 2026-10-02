@@ -336,6 +336,8 @@ func TestLocalAlbumsNeverPlayedBatchedConfirmation(t *testing.T) {
 // kept out.
 func TestLocalAlbumsFilterNoYear(t *testing.T) {
 	useTestDB(t)
+	resetNoYearAlbumsMemo() // L14-4: the list reads the memoised whole-library scan
+	t.Cleanup(resetNoYearAlbumsMemo)
 	stub := &neverPlayedStub{
 		albums: []map[string]interface{}{
 			{"id": "lb-y1", "album": "Zeta", "albumArtist": "Artist A", "coverLid": "lidy1000000", "dateAdded": 5000.0, "year": "2024", "trackCount": 12.0},

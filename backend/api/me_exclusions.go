@@ -333,8 +333,9 @@ func resolveExclusions(refs map[string]bool) *exclusions {
 // requestRefs: the refs a local/related or local/mix answer must leave
 // out. `exclude=a,b,c` (refs the client just played, at most
 // maxExcludeParam, a raw value of at most maxExcludeBytes) always applies;
-// `personal=1` with a bbp cookie adds the profile exclusions (such requests
-// bypass the shared cache, see perProfileRelated).
+// `personal=1` with a bbp cookie adds the profile exclusions (L14-3: on
+// local/related they are applied after the shared cache hit like exclude=,
+// see relatedCacheWith; local/mix is not cached).
 func requestRefs(c echo.Context) map[string]bool {
 	out := map[string]bool{}
 	n := 0

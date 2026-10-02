@@ -211,9 +211,12 @@ var albumDocAttrs = []string{"id", "album", "albumArtist", "artistId", "year", "
 //	              me/never-played logic, profile cookie), up to the scan cap
 //	added-30d     albums added in the last addedRecentlyDays days
 //	added-month   albums added during one calendar month (c44a B7-2, below)
-//	no-year       albums with a missing/empty/unparsable year (B8-19), up to
-//	              the scan cap; the albums index has no "year" filterable
-//	              attribute, so this is materialised like the other filters
+//	no-year       albums with a missing/empty/unparsable year (B8-19); the
+//	              albums index has no "year" filterable attribute, so this
+//	              is materialised too, L14-4: from the whole-library scan
+//	              /about counts on (noYearAlbumsCached, dupScanCap 8 000,
+//	              memoised), so the list and the counter agree; with q=
+//	              it falls back to the bounded search scan like the others
 var albumFilters = map[string]bool{"never-played": true, "added-30d": true, "added-month": true, "no-year": true}
 
 const (
@@ -446,6 +449,33 @@ func LocalAlbumsHandler(c echo.Context) error {
 	})
 }
 
+// noYearAlbumDocsFor is the ?filter=no-year list (L14-4): the memoised
+// whole-library no-year docs (noYearAlbumsCached, the ones /about counts),
+// narrowed to one artist in Go when artistId= is given; a copy, so the
+// caller may sort it. With q= (a search) the memo cannot answer and the
+// bounded newest-first search scan is used as before.
+func noYearAlbumDocsFor(q, artistId string) []map[string]interface{} {
+	if q != "" {
+		docs := recentAlbumDocs(q, artistId, 0)
+		out := make([]map[string]interface{}, 0, len(docs))
+		for _, a := range docs {
+			if yearOf(mnumStr(a, "year")) == 0 {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
+	memo, _ := noYearAlbumsCached()
+	out := make([]map[string]interface{}, 0, len(memo))
+	for _, a := range memo {
+		if artistId != "" && mstr(a, "artistId") != artistId {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // recentAlbumDocs scans the albums index newest first (dateAdded desc,
 // epoch seconds) and returns the docs added since `cutoff` (0: every doc,
 // up to the cap), honouring the listing's q and artistId. Bounded by
@@ -536,13 +566,7 @@ func localAlbumsFiltered(c echo.Context, filter string, off, lim int, sortBy str
 			items = append(items, localAlbumItem(a))
 		}
 	case "no-year":
-		docs := recentAlbumDocs(c.QueryParam("q"), c.QueryParam("artistId"), 0)
-		noYear := make([]map[string]interface{}, 0, len(docs))
-		for _, a := range docs {
-			if yearOf(mnumStr(a, "year")) == 0 {
-				noYear = append(noYear, a)
-			}
-		}
+		noYear := noYearAlbumDocsFor(c.QueryParam("q"), c.QueryParam("artistId"))
 		sortAlbumDocs(noYear, sortBy)
 		total = len(noYear)
 		start, end := off, off+lim

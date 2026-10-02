@@ -34,6 +34,11 @@ func useTestDB(t *testing.T) {
 	db.DB = d
 	resetNeverPlayedMemo()
 	resetStatsTimeMemo()
+	// L14-2: the lid -> key memo is global and keyed by lid only; the stubs
+	// reuse synthetic lids under different titles, so a test must never read
+	// the keys another one memoised.
+	resetTrackKeyMemo()
+	t.Cleanup(resetTrackKeyMemo)
 	t.Cleanup(func() { db.DB = prev; _ = sqlDB.Close() })
 }
 

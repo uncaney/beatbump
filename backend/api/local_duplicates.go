@@ -95,11 +95,13 @@ type dupGroup struct {
 }
 
 // dupAlbumScanFn reads one page of the albums index, newest first, and the
-// index's total (0 when unknown); a variable for tests.
+// index's total (0 when unknown); a variable for tests. The docs carry
+// albumDocAttrs too (L14-4: the same scan feeds ?filter=no-year, whose rows
+// localAlbumItem renders).
 var dupAlbumScanFn = func(off, lim int) ([]map[string]interface{}, int) {
 	return meiliBrowse("albums", map[string]interface{}{
 		"q": "", "offset": off, "limit": lim, "sort": []string{"dateAdded:desc"},
-		"attributesToRetrieve": []string{"id", "album", "albumArtist", "year", "trackCount", "source", "dateAdded"},
+		"attributesToRetrieve": []string{"id", "album", "albumArtist", "artistId", "year", "coverLid", "trackCount", "source", "dateAdded"},
 	})
 }
 
