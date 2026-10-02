@@ -8,6 +8,7 @@
 	export let title: string;
 	export let text = "";
 	export let href = "/home";
+	/** The one action; "" renders none (U13-8: a pack in progress has nothing to explore yet). */
 	export let cta = "Explorer";
 	export let icon: Icons | undefined = undefined;
 	/** data-testid of the block (UX3: "empty-state" on the library history pages). */
@@ -35,10 +36,12 @@
 	{#if text}
 		<p class="text">{text}</p>
 	{/if}
-	<a
-		class="action btn-secondary"
-		{href}>{cta}</a
-	>
+	{#if cta}
+		<a
+			class="action btn-secondary"
+			{href}>{cta}</a
+		>
+	{/if}
 </div>
 
 <style lang="scss">

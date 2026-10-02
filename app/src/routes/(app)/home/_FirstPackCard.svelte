@@ -14,16 +14,28 @@
 	import { get } from "svelte/store";
 	import { goto } from "$app/navigation";
 	import { APIClient } from "$lib/api";
-	import { FIRST_PACK_HREF, FIRST_PACK_JOB_KEY, FIRST_PACK_KEY, firstPackSources, hasFirstPackMaterial, planFirstPack, shouldShowFirstPackCard } from "$lib/firstPack";
+	import { isDataSaver } from "$lib/dataSaver";
+	import { FIRST_PACK_HREF, FIRST_PACK_JOB_KEY, FIRST_PACK_KEY, firstPackSizeText, firstPackSources, hasFirstPackMaterial, planFirstPack, shouldShowFirstPackCard, sizeFirstPack, type FirstPackEstimate } from "$lib/firstPack";
 	import { getRecent } from "$lib/me";
-	import { cachedIds, getOfflineTracks, listCachedAudio, requestPersistentStorage, storageStatus } from "$lib/offline";
+	import { cachedIds, getOfflineTracks, listCachedAudio, requestPersistentStorage, storageStatus, type AudioListEntry } from "$lib/offline";
 	import { defaultKeepDeps, keepDepsWithAbort, keepJobs, keepSummary, startKeepJob, type KeepResult } from "$lib/offlineBatch";
-	import { averageBytesPerSecond, guardPackSpace, lastPackOf, originRoom, writeLastPack, type PackPlan } from "$lib/offlinePack";
+	import { averageBytesPerSecond, estimatePackBytes, guardPackSpace, lastPackOf, originRoom, writeLastPack, type PackPlan } from "$lib/offlinePack";
 	import { durationOf } from "$lib/offlineQueue";
 	import { notify } from "$lib/utils";
 
 	let show = false;
 	let busy = false;
+	let alive = true;
+	// U13-2 (audit UX v13): the plan is computed as soon as the card shows, so
+	// the size is announced BEFORE the tap ("Environ 1,1 Go à télécharger"):
+	// the library keeps lossless files and "1 h" is no small download on a
+	// phone's data plan. Under data saver the plan is cut to PACK_DATA_SAVER_CAP
+	// and the line says so. The tap reuses this plan (no second round of calls).
+	let sizeText = "";
+	type Gathered =
+		| { ok: true; plan: PackPlan; estimate: FirstPackEstimate; bps: number; entries: AudioListEntry[]; quota: number; pinnedBytes: number; st: { persisted: boolean | null; usage: number; quota: number } }
+		| { ok: false; reason: "no_material" | "empty_plan"; candidates: number };
+	let prepared: Gathered | null = null;
 
 	function storage(): Storage | null {
 		try {
@@ -73,6 +85,7 @@
 			if (recentCount === null || recentCount > 0) return;
 			const sw = await swActive();
 			if (alive) show = shouldShowFirstPackCard({ stored, recentCount, swActive: sw });
+			if (alive && show) void announce();
 		})();
 		return () => {
 			alive = false;
@@ -95,6 +108,48 @@
 		return r.ok ? r.json() : null;
 	};
 
+	/** The sources, the cache and the sized plan (U13-2): shared by the announcement and the tap. */
+	async function gather(): Promise<Gathered> {
+		const [src, l, st] = await Promise.all([
+			firstPackSources(getJson),
+			listCachedAudio().catch(() => null),
+			storageStatus().catch(() => ({ persisted: null, usage: 0, quota: 0 })),
+		]);
+		if (!hasFirstPackMaterial(src)) return { ok: false, reason: "no_material", candidates: 0 };
+		const entries: AudioListEntry[] = l && Array.isArray(l.entries) ? l.entries : [];
+		const cached = new Set<string>(get(cachedIds));
+		const sizes = new Map<string, number>();
+		const secs = new Map<string, number>();
+		for (const t of getOfflineTracks()) {
+			if (t.videoId && Number(t._bytes) > 0) sizes.set(t.videoId, Number(t._bytes));
+			const d = durationOf(t);
+			if (t.videoId && d && d > 0) secs.set(t.videoId, d);
+		}
+		for (const e of entries) {
+			if (e.videoId) cached.add(e.videoId);
+			if (e.videoId && e.bytes > 0) sizes.set(e.videoId, e.bytes);
+		}
+		const plan = planFirstPack(src, cached, sizes);
+		if (!plan.count) return { ok: false, reason: "empty_plan", candidates: plan.candidates };
+		const bps = averageBytesPerSecond(entries, secs);
+		const sized = sizeFirstPack(plan, bps, isDataSaver());
+		return { ok: true, plan: sized.plan, estimate: sized.estimate, bps, entries, quota: typeof l?.quota === "number" ? l.quota : 0, pinnedBytes: Number(l?.pinnedBytes) || 0, st };
+	}
+
+	/** U13-2: announce the size on the card (nothing is downloaded; a failure leaves the line empty, the tap plans again). */
+	async function announce() {
+		try {
+			const g = await gather();
+			if (!alive) return;
+			prepared = g;
+			sizeText = g.ok ? firstPackSizeText(g.estimate) : "";
+			if (g.ok) expose({ estimate: { ...g.estimate } });
+		} catch {
+			prepared = null;
+			sizeText = "";
+		}
+	}
+
 	async function start() {
 		if (busy) return;
 		busy = true;
@@ -109,42 +164,18 @@
 				await goto(FIRST_PACK_HREF);
 				return;
 			}
-			const [src, l, st] = await Promise.all([
-				firstPackSources(getJson),
-				listCachedAudio().catch(() => null),
-				storageStatus().catch(() => ({ persisted: null, usage: 0, quota: 0 })),
-			]);
-			if (!hasFirstPackMaterial(src)) {
-				notify("Rien à emporter pour l'instant : la bibliothèque n'a pas encore d'album du jour.", "error");
-				expose({ started: false, reason: "no_material" });
+			const g = prepared && prepared.ok ? prepared : await gather();
+			if (!g.ok) {
+				if (g.reason === "no_material") notify("Rien à emporter pour l'instant : la bibliothèque n'a pas encore d'album du jour.", "error");
+				else notify(g.candidates ? "Rien ne rentre dans 1 h pour l'instant." : "Tout est déjà hors-ligne : rien à emporter de plus.", "success");
+				expose({ started: false, reason: g.reason, candidates: g.candidates });
 				dismiss();
 				return;
 			}
-			const entries = l && Array.isArray(l.entries) ? l.entries : [];
-			const cached = new Set<string>(get(cachedIds));
-			const sizes = new Map<string, number>();
-			const secs = new Map<string, number>();
-			for (const t of getOfflineTracks()) {
-				if (t.videoId && Number(t._bytes) > 0) sizes.set(t.videoId, Number(t._bytes));
-				const d = durationOf(t);
-				if (t.videoId && d && d > 0) secs.set(t.videoId, d);
-			}
-			for (const e of entries) {
-				if (e.videoId) cached.add(e.videoId);
-				if (e.videoId && e.bytes > 0) sizes.set(e.videoId, e.bytes);
-			}
-			let plan: PackPlan = planFirstPack(src, cached, sizes);
-			if (!plan.count) {
-				notify(plan.candidates ? "Rien ne rentre dans 1 h pour l'instant." : "Tout est déjà hors-ligne : rien à emporter de plus.", "success");
-				expose({ started: false, reason: "empty_plan", candidates: plan.candidates });
-				dismiss();
-				return;
-			}
+			let plan: PackPlan = g.plan;
 			// B7-8: measured against the room left before anything downloads; the
 			// head that fits is taken on its own (day one: no dialog to answer).
-			const quota = typeof l?.quota === "number" ? l.quota : 0;
-			const pinnedBytes = Number(l?.pinnedBytes) || 0;
-			const guard = guardPackSpace(plan, { quota, pinnedBytes, originFree: originRoom(st, entries) }, averageBytesPerSecond(entries, secs));
+			const guard = guardPackSpace(plan, { quota: g.quota, pinnedBytes: g.pinnedBytes, originFree: originRoom(g.st, g.entries) }, g.bps);
 			if (!guard.fits) {
 				if (!guard.shrunk.count) {
 					notify(guard.message, "error");
@@ -153,10 +184,13 @@
 				}
 				plan = guard.shrunk;
 			}
-			expose({ started: true, count: plan.count, seconds: plan.seconds, target: plan.target, items: plan.items.map((i) => i.videoId) });
+			const estimatedBytes = plan === g.plan ? g.estimate.bytes : estimatePackBytes(plan, g.bps);
+			expose({ started: true, count: plan.count, seconds: plan.seconds, target: plan.target, items: plan.items.map((i) => i.videoId), estimatedBytes, capped: g.estimate.capped, dataSaver: g.estimate.dataSaver });
 			// O10: a pack is an explicit "keep offline"; the Espace card's "Rafraîchir mon pack" remembers it.
 			void requestPersistentStorage();
-			writeLastPack(storage(), lastPackOf(plan));
+			// U13-2: the memo carries the estimate, so the Espace card's progress
+			// line reports THIS pack ("y Mo sur env. 1,1 Go"), not its selector.
+			writeLastPack(storage(), { ...lastPackOf(plan), estimatedBytes });
 			const items = plan.items.map((i) => i.item);
 			void startKeepJob(FIRST_PACK_JOB_KEY, () => items, {
 				deps: (signal) => keepDepsWithAbort(signal, defaultKeepDeps),
@@ -186,6 +220,14 @@
 		<div class="first-pack-card-body">
 			<p class="first-pack-card-title">Emporte 1 h de musique</p>
 			<p class="first-pack-card-text">L'album et l'artiste du jour, plus un mix, prêts sans réseau pour ton trajet.</p>
+			{#if sizeText}
+				<p
+					class="first-pack-card-size"
+					data-testid="first-pack-size"
+				>
+					{sizeText}
+				</p>
+			{/if}
 		</div>
 		<button
 			type="button"
@@ -228,6 +270,13 @@
 	.first-pack-card-text {
 		margin: 0;
 		opacity: 0.85;
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+	.first-pack-card-size {
+		margin: 0.25em 0 0;
+		font-size: var(--text-secondary-size);
+		color: #bbb;
 		white-space: normal;
 		overflow-wrap: anywhere;
 	}

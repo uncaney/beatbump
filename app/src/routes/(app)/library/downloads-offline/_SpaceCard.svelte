@@ -63,10 +63,12 @@
 		PACK_DURATIONS_SEC,
 		PACK_SIZES_MB,
 		averageBytesPerSecond,
+		estimatePackBytes,
 		guardPackSpace,
 		lastPackOf,
 		listenedPackIds,
 		originRoom,
+		packDoneOf,
 		packDurationLabel,
 		packDurationText,
 		packLabel,
@@ -257,6 +259,8 @@
 	let packProgress: KeepProgress | null = null;
 	let packDoneBytes = 0;
 	let packDoneSeconds = 0;
+	/** U13-2: estimated bytes of the running duration pack (the progress line's "sur env. 1,1 Go"). */
+	let packEstBytes = 0;
 	let packResult = "";
 	let packOwned = false; // started by this instance (its onDone writes the outcome)
 	/** B7-8: the refused plan and the head of it that fits ("Préparer 1 h 20 quand même"). */
@@ -285,15 +289,31 @@
 	// U12-9: a pack in progress (started here or found running on mount) unfolds
 	// the card once; only `packRunning` is read, so the user can still fold it.
 	$: if (packRunning) open = true;
-	$: packTarget = packPlan ? packPlan.target : durationSec || sizeMb * MB;
-	$: packMode = packPlan ? packPlan.mode : durationSec ? "seconds" : "bytes";
+	// U13-2 (audit UX v13): a pack started by another page (the home "Emporte
+	// 1 h" card) runs under PACK_KEY without a plan here. Its memo
+	// (LAST_PACK_KEY, written before the job starts) carries its mode, target,
+	// tracks and estimate, so the progress line reports THAT pack ("3/19 ·
+	// 12 min sur 1 h · 180 Mo sur env. 1,1 Go", done = its tracks now cached)
+	// and the disabled selector shows its duration, never the selector's own
+	// "100 Mo" (which used to read "0/19 · 0 Mo sur 100 Mo").
+	$: adopted = packJob && !packPlan && lastPack ? lastPack : null;
+	$: adoptedDone = adopted ? packDoneOf(adopted, $cachedIds, packProgress?.ready ?? 0) : null;
+	$: if (adopted && packState === "running") {
+		const want = adopted.mode === "seconds" ? `dur:${adopted.target}` : String(Math.round(adopted.target / MB));
+		if (parsePackChoice(want) && choice !== want) choice = want;
+	}
+	$: packTarget = packPlan ? packPlan.target : adopted ? adopted.target : durationSec || sizeMb * MB;
+	$: packMode = packPlan ? packPlan.mode : adopted ? adopted.mode : durationSec ? "seconds" : "bytes";
+	$: shownDoneSeconds = adoptedDone ? adoptedDone.seconds : packDoneSeconds;
+	$: shownDoneBytes = adoptedDone ? adoptedDone.bytes : packDoneBytes;
+	$: shownEstBytes = adopted ? (adopted.estimatedBytes ?? 0) : packEstBytes;
 	$: packText =
 		packState === "planning"
 			? "Préparation…"
 			: packState === "running"
 				? packMode === "seconds"
-					? packDurationText(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, packDoneSeconds, packTarget)
-					: packLabel(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, packDoneBytes, packTarget)
+					? packDurationText(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, shownDoneSeconds, packTarget, shownDoneBytes, shownEstBytes)
+					: packLabel(packProgress?.ready ?? 0, packProgress?.total ?? packPlan?.count ?? 0, shownDoneBytes, packTarget)
 				: packResult;
 	type PackWindow = Window & { __ytmPackPlan?: Record<string, unknown>; __ytmPackRefresh?: Record<string, unknown> };
 	function exposePack(extra: Record<string, unknown> = {}) {
@@ -310,6 +330,7 @@
 			videoIds: packPlan ? packPlan.items.map((i) => i.videoId) : [],
 			state: packState,
 			doneBytes: packDoneBytes,
+			estimatedBytes: packEstBytes,
 			progress: packProgress,
 			guard: packGuard
 				? { fits: packGuard.fits, estimated: packGuard.estimated, available: packGuard.available, limit: packGuard.limit, shrunkCount: packGuard.shrunk.count, shrunkSeconds: packGuard.shrunk.seconds, message: packGuard.message }
@@ -323,9 +344,24 @@
 		packProgress = null;
 		packDoneBytes = 0;
 		packDoneSeconds = 0;
+		packEstBytes = 0;
 		packResult = "";
 		packGuard = null;
+		refreshNothing = "";
 		error = "";
+	}
+	// U13-18 (audit UX v13): "Rien à rafraîchir" / "Rien à préparer" answered
+	// in the progress box with an empty bar, like a stuck job. A status that
+	// no job produced (packProgress null) is a plain line, no <progress>, and
+	// goes at the next gesture (the selector).
+	$: packHasBar = packState === "planning" || packState === "running" || !!packProgress;
+	function dismissStatusLine() {
+		if (packState === "done" && !packProgress) {
+			packState = "";
+			packResult = "";
+			refreshNothing = "";
+			exposePack();
+		}
 	}
 	type PackSources = { favorites: any[]; recent: any[]; plays: Array<{ videoId?: string; playedAt?: number }>; mix: any[]; cached: Set<string>; sizes: Map<string, number> };
 	/** The three sources of a pack plus the cache (fresh SW listing, local sizes). */
@@ -430,11 +466,14 @@
 		packPlan = plan;
 		packState = "running";
 		packProgress = { ready: 0, failed: 0, refused: 0, total: plan.count };
+		// U13-2: a duration pack says what it costs in bytes ("y Mo sur env. 1,1 Go").
+		packEstBytes = plan.mode === "seconds" ? estimatePackBytes(plan, cacheBytesPerSecond()) : 0;
 		exposePack();
 		// O10: a pack is an explicit "keep offline".
 		void requestPersistentStorage();
-		lastPack = lastPackNext;
-		writeLastPack(storage(), lastPackNext);
+		const memo: LastPack = packEstBytes > 0 && !lastPackNext.estimatedBytes ? { ...lastPackNext, estimatedBytes: packEstBytes } : lastPackNext;
+		lastPack = memo;
+		writeLastPack(storage(), memo);
 		void startKeepJob(PACK_KEY, () => plan.items.map((i) => i.item), {
 			deps: (signal) =>
 				keepDepsWithAbort(signal, {
@@ -478,6 +517,8 @@
 	let refreshPreview: RefreshPreview | null = null;
 	/** The refresh plan is being computed (the "Rafraîchir" button says so, not "Préparer un pack"). */
 	let refreshPlanning = false;
+	/** U13-18: why the last refresh had nothing to do ("" = it had): the button's title while it stays disabled. */
+	let refreshNothing = "";
 	let refreshButton: HTMLButtonElement | null = null;
 	let refreshConfirmButton: HTMLButtonElement | null = null;
 	function exposeRefresh(p: Pick<RefreshPreview, "prev" | "listened" | "plan">, extra: Record<string, unknown> = {}) {
@@ -506,8 +547,11 @@
 			const protect = [get(currentTrack)?.videoId, readLastTrack(storage() ?? undefined)?.videoId];
 			const plan = planPackRefresh(prev, listened, { favorites: src.favorites, recent: src.recent, mix: src.mix, cached: src.cached, sizes: src.sizes }, protect);
 			if (!plan.drop.length || !plan.add.count) {
+				// U13-18: no job ran: a plain status line (no bar), the button
+				// stays disabled with the reason until the next gesture.
 				packState = "done";
 				packResult = packRefreshSummary(plan);
+				refreshNothing = plan.drop.length ? "Pas de nouveau titre pour remplacer les titres écoutés" : "Aucun titre écouté depuis le pack";
 				exposeRefresh({ prev, listened, plan }, { applied: false });
 				exposePack();
 				return;
@@ -685,6 +729,7 @@
 					disabled={packRunning || !!busy || !!freePlan}
 					bind:value={choice}
 					bind:this={sizeSelect}
+					on:change={dismissStatusLine}
 				>
 					<optgroup label="Taille">
 						{#each PACK_SIZES_MB as mb}
@@ -750,8 +795,8 @@
 						data-testid="pack-refresh"
 						data-pack-count={lastPack.items.length}
 						aria-describedby="offline-space-desc"
-						disabled={loading || !!busy || packRunning || !!freePlan || !!refreshPreview}
-						title="Montre d'abord les titres du pack déjà écoutés qui seraient remplacés par de nouveaux, même durée d'écoute ; les épinglés hors du pack ne bougent pas"
+						disabled={loading || !!busy || packRunning || !!freePlan || !!refreshPreview || !!refreshNothing}
+						title={refreshNothing || "Montre d'abord les titres du pack déjà écoutés qui seraient remplacés par de nouveaux, même durée d'écoute ; les épinglés hors du pack ne bougent pas"}
 						bind:this={refreshButton}
 						on:click={refreshPack}
 					>
@@ -874,21 +919,27 @@
 		{#if packState}
 			<div
 				class="panel pack-progress"
+				class:pack-status={!packHasBar}
 				data-testid="pack-progress"
 				data-state={packState}
+				data-bar={packHasBar ? "1" : "0"}
 				data-ready={packProgress?.ready ?? 0}
 				data-total={packProgress?.total ?? packPlan?.count ?? 0}
-				data-bytes={packDoneBytes}
-				data-seconds={packDoneSeconds}
+				data-bytes={shownDoneBytes}
+				data-seconds={shownDoneSeconds}
+				data-estimated={shownEstBytes}
 				data-mode={packMode}
 				role="status"
 				aria-live="polite"
 			>
-				<progress
-					max={Math.max(1, packProgress?.total ?? packPlan?.count ?? 1)}
-					value={packProgress?.ready ?? 0}
-					aria-label="Progression du pack"
-				/>
+				{#if packHasBar}
+					<!-- Planning: no value = indeterminate, not a bar stuck at 0. -->
+					<progress
+						max={Math.max(1, packProgress?.total ?? packPlan?.count ?? 1)}
+						value={packState === "planning" ? undefined : (packProgress?.ready ?? 0)}
+						aria-label="Progression du pack"
+					/>
+				{/if}
 				<span id="offline-pack-text">{packText}</span>
 				{#if packState === "too-big" && packGuard}
 					<!-- B7-8: nothing was downloaded; the head that fits is one tap away. -->
@@ -1070,6 +1121,13 @@
 		width: 100%;
 		height: 0.5rem;
 		accent-color: $accent;
+	}
+	// U13-18: a status no job produced is one line, not a boxed progress panel.
+	.pack-progress.pack-status {
+		background: none;
+		border: 0;
+		padding: 0.25rem 0;
+		color: rgba(255, 255, 255, 0.85);
 	}
 	.space-result {
 		margin: 0.5rem 0 0;
