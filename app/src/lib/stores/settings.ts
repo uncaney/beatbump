@@ -24,6 +24,12 @@ interface Playback {
 	Stream?: StreamType;
 	/** No consumer any more; kept so stored settings keep deserialising (audit F20). */
 	"Playback Updates URL"?: boolean;
+	/**
+	 * B8-1 "Économie de données": no next-track prefetch, no automatic offline
+	 * caching of played tracks ($lib/dataSaver). Off by default; the browser's
+	 * own saveData switch counts too, whatever this says.
+	 */
+	"Data Saver"?: boolean;
 }
 interface Network {
 	"Stream Proxy Server": string;
@@ -62,6 +68,7 @@ let list: UserSettings = {
 		"Prefer WebM Audio": false,
 		Stream: "HTTP",
 		"Playback Updates URL": false,
+		"Data Saver": false,
 	},
 	appinfo: {
 		Donate: ENV_DONATION_URL,

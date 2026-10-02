@@ -37,6 +37,8 @@
 		type ArtistGroup,
 	} from "$lib/offlineQueue";
 	import { currentTrack } from "$lib/stores/list";
+	import { settings } from "$lib/stores/settings";
+	import { dataSaverActive, dataSaverNotice, readConnection } from "$lib/dataSaver";
 	import { markOfflineSuccess } from "$lib/stores/pwa";
 	import { notify } from "$lib/utils";
 	import { formatCountFr } from "$lib/utils/formatFr";
@@ -47,6 +49,13 @@
 	import SpaceCard from "./_SpaceCard.svelte";
 
 	type View = "albums" | "artists" | "recent";
+
+	// B8-1: data saver (the switch in Réglages > Lecture or the browser's own
+	// saveData / 2g) holds the automatic caching back: one line says so.
+	$: dataSaverConn = readConnection();
+	$: dataSaverFromBrowser = dataSaverActive(dataSaverConn);
+	$: dataSaverOn = dataSaverActive({ setting: $settings?.playback?.["Data Saver"], ...dataSaverConn });
+	$: dataSaverLine = dataSaverNotice(dataSaverOn, dataSaverFromBrowser);
 
 	let tracks: any[] = [];
 	let online = true;
@@ -376,6 +385,18 @@
 			<span class="status off">● Hors-ligne</span>
 		{/if}
 	</header>
+	{#if dataSaverLine}
+		<!-- B8-1: one line when data saver holds the automatic caching back. -->
+		<p
+			class="data-saver"
+			data-testid="data-saver-notice"
+			data-source={dataSaverFromBrowser ? "browser" : "setting"}
+			role="status"
+		>
+			{dataSaverLine}
+			{#if !dataSaverFromBrowser}<a href="/settings">Réglages</a>{/if}
+		</p>
+	{/if}
 	<!-- F7 + F15: "Libérer" / "Préparer un pack" are actions of this page (they
 	     used to sit in Settings > Offline); one size selector for both. Always
 	     rendered: a pack is the way to fill an empty cache before a trip. -->
@@ -716,6 +737,17 @@
 	}
 	.recache-bar {
 		margin: 0 0 1rem;
+	}
+	// B8-1: the data-saver line, muted (nothing to fix, just the state).
+	.data-saver {
+		margin: 0 0 0.75rem;
+		color: #b3b3b3;
+		font-size: var(--text-secondary-size);
+		line-height: 1.35;
+		a {
+			color: inherit;
+			margin-left: 0.25rem;
+		}
 	}
 	.failed-bar {
 		display: flex;

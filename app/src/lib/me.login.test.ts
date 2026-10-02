@@ -154,6 +154,22 @@ describe("L12-8: login() holds the writes until the cookie switch is done", () =
 		expect(me.loginInProgress()).toBe(false);
 	});
 
+	it("a refused login keeps the whoami memo and the home cache; an accepted one drops both (L13-16)", async () => {
+		const me = await import("./me");
+		const { clearHomeCache } = await import("$lib/homeCache");
+		vi.mocked(clearHomeCache).mockClear(); // the mock spy outlives resetModules
+		const memo = JSON.stringify({ id: "anon-keep", name: "", at: Date.now() });
+		session.set("ytm-whoami", memo);
+		postMock.mockImplementation(async () => ({ ok: false, status: 400, json: async () => ({ error: "bad_request" }) }));
+		await expect(me.login("")).rejects.toThrow("login 400");
+		expect(session.get("ytm-whoami")).toBe(memo);
+		expect(clearHomeCache).not.toHaveBeenCalled();
+		postMock.mockImplementation(async () => ok({ id: "u-9", name: "Dan", migrated: null }));
+		await me.login("Dan");
+		expect(JSON.parse(session.get("ytm-whoami") || "{}").id).toBe("u-9");
+		expect(clearHomeCache).toHaveBeenCalledTimes(1);
+	});
+
 	it("remembers the anonymous id, sends it as prevAnon on the next login, forgets it on logout", async () => {
 		const me = await import("./me");
 		session.set("ytm-whoami", JSON.stringify({ id: "anon-abc", name: "", at: Date.now() }));

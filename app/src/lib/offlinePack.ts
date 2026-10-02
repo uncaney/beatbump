@@ -6,7 +6,7 @@
 // the items to keepOffline (downloaded + pinned, 2 at a time, cancellable).
 import { isListened } from "$lib/listenLog";
 import { keepableTracks } from "$lib/offlineBatch";
-import { durationOf } from "$lib/offlineQueue";
+import { artistName, durationOf } from "$lib/offlineQueue";
 import { formatBytesFr, formatMoFr } from "$lib/utils/formatFr";
 import { formatDuration } from "$lib/utils/releaseMeta";
 
@@ -202,9 +202,33 @@ export type PackSpace = {
 	quota: number;
 	/** Bytes already pinned (never evicted, so a pack can only add to them). */
 	pinnedBytes: number;
-	/** Free bytes on the device (navigator.storage.estimate quota - usage), null when unknown. */
-	deviceFree?: number | null;
+	/**
+	 * L13-4: the room left in the storage the browser grants this ORIGIN
+	 * (originRoom: estimate quota - usage, plus the unpinned audio the SW
+	 * would evict by itself), null when the browser gave no estimate. Never
+	 * the device's free space: Safari / private windows report a small
+	 * origin quota on a nearly empty phone.
+	 */
+	originFree?: number | null;
 };
+
+/**
+ * L13-4: what `navigator.storage.estimate()` leaves this origin: quota - usage,
+ * plus the bytes of the cached audio entries that are NOT pinned (the service
+ * worker evicts them on its own under its quota, so a pack may take their
+ * place). null when the browser gave no usable estimate (quota 0 / absent).
+ */
+export function originRoom(
+	estimate: { quota?: number | null; usage?: number | null } | null | undefined,
+	entries?: ReadonlyArray<{ bytes?: number; pinned?: boolean } | null | undefined> | null,
+): number | null {
+	const quota = Number(estimate?.quota);
+	if (!estimate || !Number.isFinite(quota) || quota <= 0) return null;
+	const usage = Math.max(0, Number(estimate.usage) || 0);
+	let evictable = 0;
+	for (const e of entries ?? []) if (e && !e.pinned) evictable += Math.max(0, Number(e.bytes) || 0);
+	return Math.max(0, quota - usage + evictable);
+}
 
 export type PackGuard = {
 	/** true: the whole plan fits, start it as is. */
@@ -213,9 +237,13 @@ export type PackGuard = {
 	estimated: number;
 	/** Bytes the pack may take (Infinity when nothing bounds it). */
 	available: number;
-	/** What bounds `available`: the quota, the device, or nothing. */
-	limit: "none" | "quota" | "device";
-	/** The longest head of the plan that fits (the plan itself when it fits). */
+	/** What bounds `available`: the SW quota, the room the browser grants the origin, or nothing. */
+	limit: "none" | "quota" | "origin";
+	/**
+	 * The plan cut to what fits (the plan itself when it fits): first fit in
+	 * plan order, an item too big is skipped and a smaller one further down may
+	 * still enter (not strictly the longest head).
+	 */
 	shrunk: PackPlan;
 	/** "Pas assez de place : …" when it does not fit, "" otherwise. */
 	message: string;
@@ -237,12 +265,12 @@ export function guardPackSpace(plan: PackPlan, space: PackSpace, bps = PACK_DEFA
 		limit = "quota";
 	}
 	// null / undefined = the browser gave no estimate: nothing to bound.
-	const free = space.deviceFree == null ? NaN : Number(space.deviceFree);
+	const free = space.originFree == null ? NaN : Number(space.originFree);
 	if (Number.isFinite(free) && free >= 0) {
-		const dev = Math.floor(free * keep);
-		if (dev < available) {
-			available = dev;
-			limit = "device";
+		const room = Math.floor(free * keep);
+		if (room < available) {
+			available = room;
+			limit = "origin";
 		}
 	}
 	const estimated = estimatePackBytes(plan, bps);
@@ -262,7 +290,8 @@ export function guardPackSpace(plan: PackPlan, space: PackSpace, bps = PACK_DEFA
 	const shrunk: PackPlan = { items, bytes, seconds, count: items.length, target: plan.target, mode: plan.mode, left: plan.left + plan.items.length - items.length, candidates: plan.candidates };
 	const asked = plan.mode === "seconds" ? `${formatDuration(plan.target)} demandées` : `${formatBytesFr(plan.target)} demandés`;
 	const fitsTxt = items.length ? `${plan.mode === "seconds" ? formatDuration(seconds) : formatBytesFr(used)} ${items.length > 1 ? "tiennent" : "tient"}` : "rien ne tient";
-	const why = limit === "device" ? "l'appareil est presque plein" : `quota ${formatBytesFr(quota)}, ${formatBytesFr(pinned)} épinglés`;
+	// L13-4: the bound is the storage the browser grants this site, not the phone.
+	const why = limit === "origin" ? "l'espace accordé au site est presque plein" : `quota ${formatBytesFr(quota)}, ${formatBytesFr(pinned)} épinglés`;
 	const message = `Pas assez de place : ${asked} (≈ ${formatBytesFr(estimated)}), ${fitsTxt} dans les ${formatBytesFr(available)} libres (${why}).`;
 	return { fits: false, estimated, available, limit, shrunk, message };
 }
@@ -408,9 +437,60 @@ export function planPackRefresh(
 	return { drop, keep, seconds, add };
 }
 
-/** The pack remembered after a refresh: what stayed plus what was added, dated now. */
-export function refreshedLastPack(prev: Pick<LastPack, "mode" | "target">, plan: PackRefreshPlan, at = Date.now()): LastPack {
-	return { at, mode: prev.mode, target: prev.target, items: [...plan.keep, ...lastPackOf(plan.add, at).items] };
+/**
+ * The pack remembered after a refresh: what stayed plus what was added, dated
+ * now. L13-16: `stillCached` = the `drop` ids the service worker did NOT
+ * uncache (uncache-audio failed / unanswered): they are still pinned, so they
+ * stay in the remembered pack (in their old place) instead of silently leaving
+ * it while occupying the quota.
+ */
+export function refreshedLastPack(
+	prev: Pick<LastPack, "mode" | "target">,
+	plan: PackRefreshPlan,
+	at = Date.now(),
+	stillCached?: Iterable<string | null | undefined> | null,
+): LastPack {
+	const still = new Set<string>();
+	for (const id of stillCached ?? []) if (typeof id === "string" && id) still.add(id);
+	const kept = still.size ? [...plan.keep, ...plan.drop.filter((i) => still.has(i.videoId))] : plan.keep;
+	return { at, mode: prev.mode, target: prev.target, items: [...kept, ...lastPackOf(plan.add, at).items] };
+}
+
+// ---- B8-11 preview before "Rafraîchir mon pack" ----
+// The refresh uncaches tracks that may be unreachable offline afterwards: the
+// card lists what would go (title, artist) and waits for a confirmation. The
+// rows are pure: the pack only remembers ids and lengths, the names come from
+// whatever the card has at hand (the local offline list, the pack sources).
+
+export type PackRefreshRow = { videoId: string; title: string; artist: string; seconds: number };
+export const UNKNOWN_TITLE = "Titre inconnu";
+
+/**
+ * The tracks `drop` names, with their title and artist looked up in `lookup`
+ * (first match per id wins; any item shape artistName accepts). An id nobody
+ * knows still gets a row ("Titre inconnu", no artist): the list never hides a
+ * track that is about to be removed.
+ */
+export function packRefreshRows(drop: ReadonlyArray<Pick<LastPackItem, "videoId" | "seconds">>, lookup?: Iterable<Record<string, any> | null | undefined> | null): PackRefreshRow[] {
+	const byId = new Map<string, Record<string, any>>();
+	for (const t of lookup ?? []) {
+		const id = t?.videoId;
+		if (typeof id === "string" && id && !byId.has(id)) byId.set(id, t as Record<string, any>);
+	}
+	return drop.map((d) => {
+		const t = byId.get(d.videoId);
+		const title = typeof t?.title === "string" && t.title.trim() ? t.title.trim() : typeof t?.name === "string" && t.name.trim() ? t.name.trim() : UNKNOWN_TITLE;
+		const artist = t ? artistName(t as any) : "";
+		return { videoId: d.videoId, title, artist, seconds: Math.max(0, Number(d.seconds) || 0) };
+	});
+}
+
+/** "2 titres écoutés seront retirés du pack (15 min) et remplacés par 3 nouveaux (14 min) :". */
+export function packRefreshPreviewTitle(plan: Pick<PackRefreshPlan, "drop" | "seconds" | "add">): string {
+	const n = plan.drop.length;
+	const dropped = `${n} titre${n > 1 ? "s" : ""} écouté${n > 1 ? "s" : ""} ${n > 1 ? "seront retirés" : "sera retiré"} du pack (${formatDuration(plan.seconds)})`;
+	const add = plan.add.count;
+	return `${dropped} et remplacé${n > 1 ? "s" : ""} par ${add} nouveau${add > 1 ? "x" : ""} (${formatDuration(plan.add.seconds)}) :`;
 }
 
 /** "3 titres écoutés remplacés par 4 nouveaux (42 min)" / "Rien à rafraîchir : …". */

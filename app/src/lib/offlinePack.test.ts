@@ -23,9 +23,13 @@ import {
 	guardPackSpace,
 	lastPackOf,
 	listenedPackIds,
+	originRoom,
 	packDurationText,
 	packLabel,
+	packRefreshPreviewTitle,
+	packRefreshRows,
 	packRefreshSummary,
+	UNKNOWN_TITLE,
 	packSecondsOf,
 	packSizeOf,
 	parsePackChoice,
@@ -223,16 +227,35 @@ describe("B7-8 space guard (L12-14)", () => {
 		expect(g.message).toBe(`Pas assez de place : 30 min demandées (≈ 10${NB}Mo), rien ne tient dans les 0${NB}Mo libres (quota 100${NB}Mo, 100${NB}Mo épinglés).`);
 	});
 
-	it("the device free space bounds the pack when it is lower than the quota room", () => {
+	it("L13-4: the room the browser grants the origin bounds the pack when it is lower than the quota room", () => {
 		const p = planPack({ favorites: [tr("a", { duration: 600 }), tr("b", { duration: 600 })] }, 3600, "seconds");
-		const g = guardPackSpace(p, { quota: 0, pinnedBytes: 0, deviceFree: 12 * MB }, Math.round(MB / 60));
+		const g = guardPackSpace(p, { quota: 0, pinnedBytes: 0, originFree: 12 * MB }, Math.round(MB / 60));
 		expect(g.fits).toBe(false);
-		expect(g.limit).toBe("device");
+		expect(g.limit).toBe("origin");
 		expect(g.available).toBe(Math.floor(12 * MB * 0.9));
 		expect(g.shrunk.count).toBe(1);
-		expect(g.message).toContain("l'appareil est presque plein");
-		// An unknown device estimate (null / NaN) bounds nothing.
-		expect(guardPackSpace(p, { quota: 0, pinnedBytes: 0, deviceFree: null }).fits).toBe(true);
+		// Named for what it is (the site's storage), never "the device is full".
+		expect(g.message).toContain("l'espace accordé au site est presque plein");
+		expect(g.message).not.toContain("appareil");
+		// An unknown estimate (null / NaN) bounds nothing.
+		expect(guardPackSpace(p, { quota: 0, pinnedBytes: 0, originFree: null }).fits).toBe(true);
+	});
+
+	it("L13-4: originRoom = quota - usage + the unpinned (evictable) audio bytes, null without an estimate", () => {
+		expect(originRoom(null)).toBeNull();
+		expect(originRoom({ quota: 0, usage: 0 })).toBeNull();
+		expect(originRoom({ quota: NaN, usage: 5 })).toBeNull();
+		expect(originRoom({ quota: 100 * MB, usage: 90 * MB })).toBe(10 * MB);
+		// 30 Mo cached of which 20 Mo pinned: the 10 Mo unpinned may be evicted for the pack.
+		const entries = [
+			{ bytes: 20 * MB, pinned: true },
+			{ bytes: 6 * MB },
+			{ bytes: 4 * MB, pinned: false },
+			null,
+		];
+		expect(originRoom({ quota: 100 * MB, usage: 90 * MB }, entries)).toBe(20 * MB);
+		// Never negative.
+		expect(originRoom({ quota: 10 * MB, usage: 50 * MB })).toBe(0);
 	});
 });
 
@@ -330,6 +353,32 @@ describe("B7-7 refresh my pack", () => {
 		expect(next.at).toBe(5);
 		expect(next.target).toBe(3600);
 		expect(next.items.map((i) => i.videoId)).toEqual(["p2", "n1", "n3"]);
+		// L13-16: a drop the SW did not uncache stays in the remembered pack (it is still pinned).
+		const partial = refreshedLastPack(p, r, 5, ["p3", "not-in-pack", null, ""]);
+		expect(partial.items.map((i) => i.videoId)).toEqual(["p2", "p3", "n1", "n3"]);
+		expect(partial.items.find((i) => i.videoId === "p3")?.seconds).toBe(900);
+		expect(refreshedLastPack(p, r, 5, []).items.map((i) => i.videoId)).toEqual(["p2", "n1", "n3"]);
+	});
+
+	it("B8-11: packRefreshRows names the tracks to drop from any source at hand, never hides an unknown one", () => {
+		const p = pack();
+		const r = planPackRefresh(p, ["p1", "p3"], { favorites: [tr("n1", { duration: 600 })] });
+		const rows = packRefreshRows(r.drop, [
+			null,
+			{ videoId: "p1", title: "  Around the World ", artistInfo: { artist: [{ text: "Daft Punk" }] } },
+			{ videoId: "p1", title: "duplicate later: ignored", artist: "Nobody" },
+			{ videoId: "n1", title: "not dropped" },
+		]);
+		expect(rows).toEqual([
+			{ videoId: "p1", title: "Around the World", artist: "Daft Punk", seconds: 600 },
+			{ videoId: "p3", title: UNKNOWN_TITLE, artist: "", seconds: 900 },
+		]);
+		// `name` is accepted as a title, a known item without an artist says so
+		expect(packRefreshRows([{ videoId: "x", seconds: 0 }], [{ videoId: "x", name: "Nom" }])).toEqual([{ videoId: "x", title: "Nom", artist: "Artiste inconnu", seconds: 0 }]);
+		expect(packRefreshRows([], null)).toEqual([]);
+		expect(packRefreshPreviewTitle(r)).toBe("2 titres écoutés seront retirés du pack (25 min) et remplacés par 1 nouveau (10 min) :");
+		const one = planPackRefresh(p, ["p1"], { favorites: [tr("n1", { duration: 300 }), tr("n2", { duration: 300 })] });
+		expect(packRefreshPreviewTitle(one)).toBe("1 titre écouté sera retiré du pack (10 min) et remplacé par 2 nouveaux (10 min) :");
 	});
 
 	it("planPackRefresh: the track playing / restored is never dropped (L13-1)", () => {

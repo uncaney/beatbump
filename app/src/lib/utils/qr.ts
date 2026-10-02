@@ -200,7 +200,9 @@ export function versionBits(version: number): number {
 	return (version << 12) | rem;
 }
 
-class Symbol {
+// L13-12: "QrSymbol", not "Symbol": a class named Symbol shadows the global in this
+// module (any Symbol.iterator helper a lower build target emits would resolve to it).
+class QrSymbol {
 	readonly size: number;
 	readonly modules: boolean[][];
 	readonly isFunction: boolean[][];
@@ -346,7 +348,7 @@ export function encodeQr(text: string): QrMatrix {
 	const version = versionFor(bytes.length);
 	if (!version) throw new Error(`qr: ${bytes.length} octets, trop long (213 max)`);
 	const codewords = addEccAndInterleave(dataCodewordsFor(bytes, version), version);
-	const sym = new Symbol(version);
+	const sym = new QrSymbol(version);
 	sym.drawFunctionPatterns();
 	sym.drawCodewords(codewords);
 	let best = 0;

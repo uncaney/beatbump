@@ -238,8 +238,11 @@
 			class="button-group release-actions"
 			data-testid="release-actions"
 		>
-			<!-- U12-4: one order for YouTube and local albums: play, keep (slot),
-			     radio (YouTube "album-radio" or local "radio-seed"), share, ⋮. -->
+			<!-- U12-4: one order for YouTube and local albums: play, radio
+			     (YouTube "album-radio" or local "radio-seed"), keep (slot), share,
+			     ⋮. The slot used to render before the radio buttons, so a local
+			     album read "lecture, garder, radio" and a YouTube one "lecture,
+			     radio, garder" (the YouTube radio only exists with an autoMixId). -->
 			{#each buttons as { type, icon, text, action, label }, i}
 				{@const name = iconName(icon)}
 				{#if i === 0 && type !== "icon"}
@@ -261,7 +264,6 @@
 					</button>
 				{/if}
 			{/each}
-			<slot name="actions" />
 			{#each buttons as { type, icon, text, action, label }, i}
 				{@const name = iconName(icon)}
 				{#if i > 0 && type !== "icon"}
@@ -300,6 +302,7 @@
 					<span class="ra-lbl">Radio</span>
 				</button>
 			{/if}
+			<slot name="actions" />
 			{#if releaseId}
 				<!-- c31b: "Partager" the album (/release?id=…), YouTube or local. -->
 				<ShareLinkButton

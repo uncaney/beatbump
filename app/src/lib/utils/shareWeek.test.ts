@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("$lib/utils", () => ({ notify: vi.fn() }));
 
 import { shareLink } from "./shareLink";
-import { weekShareCopy, weekShareData, weekShareText, yearShareData, yearShareFrom, yearShareText } from "./shareWeek";
+import { shareableMinutes, weekShareCopy, weekShareData, weekShareText, yearShareData, yearShareFrom, yearShareText } from "./shareWeek";
 
 const NNBSP = " ";
 const NBSP = " ";
@@ -65,6 +65,19 @@ describe("yearShareText", () => {
 		expect(d.text).toContain("min");
 		expect(yearShareData({ ...full, topAlbumId: undefined }, "https://music.ekaii.fr/").url).toBe("https://music.ekaii.fr/");
 		expect(weekShareCopy(d)).toBe(`${d.text}\nhttps://music.ekaii.fr/release?id=lb-disc`);
+	});
+});
+
+describe("B8-5 shareableMinutes: no Partager at zero", () => {
+	it("needs at least one rounded minute", () => {
+		expect(shareableMinutes(null)).toBe(false);
+		expect(shareableMinutes(undefined)).toBe(false);
+		expect(shareableMinutes({})).toBe(false);
+		expect(shareableMinutes({ minutes: 0 })).toBe(false);
+		expect(shareableMinutes({ minutes: 0.4 })).toBe(false);
+		expect(shareableMinutes({ minutes: NaN })).toBe(false);
+		expect(shareableMinutes({ minutes: 0.5 })).toBe(true);
+		expect(shareableMinutes({ minutes: 212.4 })).toBe(true);
 	});
 });
 

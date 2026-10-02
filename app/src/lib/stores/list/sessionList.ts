@@ -41,6 +41,8 @@ import { continueAfterQueue, nextContinuationRequest, pickLocalContinuation } fr
 import { fetchNext } from "./utils.list";
 import { APIClient } from "$lib/api";
 import { SERVER_DOMAIN } from "../../../env";
+// B8-1: read inside prefetchTrackAtIndex only (settings store = import cycle A).
+import { isDataSaver } from "$lib/dataSaver";
 
 const mutex = new Mutex();
 
@@ -891,6 +893,10 @@ export class ListService {
      */
     public async prefetchTrackAtIndex(index: number) {
         try {
+            // B8-1: data saver (Réglages > Lecture, or the browser's own switch /
+            // a 2g link) = nothing is fetched ahead; next() resolves the track
+            // when it starts, as it does after a failed prefetch.
+            if (isDataSaver()) return;
             const track = this._$.value.mix?.[index];
             const vid = track?.videoId;
             if (!vid || this._prefetchInflight.has(vid)) return;

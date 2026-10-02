@@ -9,6 +9,7 @@
 //   -> cacheTrackOffline(item, url)
 import { APIClient, PREFETCH_INIT } from "$lib/api";
 import { settings } from "$lib/stores/settings";
+import { isDataSaver } from "$lib/dataSaver";
 import { derived, get, readable, writable, type Readable } from "svelte/store";
 
 const KEY = "ytm-offline-tracks";
@@ -244,10 +245,11 @@ export function isStableAudioUrl(url: string | undefined): boolean {
 /**
  * settings.offline.autoCache: default on, only an explicit `false` disables
  * automatic offline caching (played tracks in player.ts, prefetched +1/+2 here).
+ * B8-1: off under data saver too (Réglages > Lecture or the browser's switch).
  */
 export function autoCacheEnabled(): boolean {
 	try {
-		return get(settings)?.offline?.autoCache !== false;
+		return get(settings)?.offline?.autoCache !== false && !isDataSaver();
 	} catch {
 		return true;
 	}

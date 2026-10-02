@@ -68,10 +68,11 @@
 	};
 
 	// UX7: one action row (InfoBox release-actions): "Tout lire" (play icon),
-	// Garder hors-ligne (slot), then "Radio" (radio icon, aria-label "Radio de
-	// l'album" (L10-5); only when YouTube gave an autoMixId), Partager, ⋮
-	// (U12-4: same order as a local album). Short labels on desktop, icon-only
-	// with the aria-label on phones ("Garder" stays written).
+	// "Radio" (radio icon, aria-label "Radio de l'album" (L10-5); only when
+	// YouTube gave an autoMixId), then Garder hors-ligne (slot), Partager, ⋮
+	// (U12-4: the same order as a local album, whose radio is InfoBox's own
+	// radio-seed). Short labels on desktop, icon-only with the aria-label on
+	// phones ("Garder" stays written).
 	$: headerButtons = [
 		{ text: "Tout lire", label: "Tout lire", action: () => playAlbum(), icon: "play" },
 		...(hasAutoMix
@@ -128,7 +129,8 @@
 		on:shuffle={playShuffle}
 	>
 		<!-- O8: download the missing tracks then pin the whole album.
-		     UX7: on the single action row, after Tout lire / Radio. -->
+		     UX7 / U12-4: on the single action row, after Tout lire and Radio,
+		     before Partager (InfoBox renders the slot there). -->
 		<svelte:fragment slot="actions">
 			{#if !notFound && items.length}
 				<KeepOfflineButton
