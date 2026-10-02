@@ -200,7 +200,30 @@ func localArtistsCollapsed(c echo.Context, off, lim int, sortBy string) error {
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"items": items, "total": total, "offset": off, "nextOffset": next, "limit": lim, "sort": sortBy, "collapsed": true,
+		// L14-11: what the header may count. `total` stays the index's (the
+		// client pages by raw offset against it); `shown` is the number of
+		// rows the folded list ends with (credits minus the aliases folded
+		// under a group), so "1 936 artistes" no longer counts "Ed Sheeran
+		// feat. Camila Cabello" as a second Ed Sheeran.
+		"shown": aliasShownTotal(total, groups, index),
 	})
+}
+
+// aliasShownTotal (L14-11) is the row count of the folded artists list: the
+// index total minus every credit the memo folds under another group's id.
+// Before the first scan (empty memo) it is the index total; it never goes
+// under zero.
+func aliasShownTotal(total int, groups []aliasGroup, index map[string]int) int {
+	folded := 0
+	for id, i := range index {
+		if i >= 0 && i < len(groups) && groups[i].ID != id {
+			folded++
+		}
+	}
+	if folded > total {
+		return 0
+	}
+	return total - folded
 }
 
 // artistStatsText is the collapsed artists list's subtitle (B9-8): "N albums

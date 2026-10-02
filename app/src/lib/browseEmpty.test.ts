@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { emptyListText, monthFr, reasonFr } from "./browseEmpty";
+import { browseHeaderCount, emptyListText, monthFr, reasonFr } from "./browseEmpty";
+
+describe("L14-11 collection header count", () => {
+	it("prefers the folded row count of the artists list over the raw credits", () => {
+		expect(browseHeaderCount({ total: 1936, shown: 1934, collapsed: true } as any, 60)).toBe(1934);
+	});
+	it("falls back to total, then to the rows on screen", () => {
+		expect(browseHeaderCount({ total: 412 }, 60)).toBe(412);
+		expect(browseHeaderCount({ total: "412" } as any, 60)).toBe(60);
+		expect(browseHeaderCount({ total: 412, shown: -1 }, 60)).toBe(412);
+		expect(browseHeaderCount({}, 7)).toBe(7);
+		expect(browseHeaderCount(null, 0)).toBe(0);
+	});
+});
 
 describe("L13-13 empty collection list", () => {
 	it("monthFr names the month in French", () => {
