@@ -13,7 +13,7 @@ vi.mock("$lib/offline", () => ({
 	abortCacheAudio: vi.fn(),
 }));
 
-import { compactKeepAriaLabel, CANCELLED_REASON, keepDepsWithAbort, keepDoneReady, cancelKeepJob, findKeepJob, jobMatchesKey, keepAliases, keepItemOfflineWith, keepMenuKey, KEEP_OFFLINE_MSG, KEEP_RUNNING_MSG, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
+import { compactKeepAriaLabel, CANCELLED_REASON, keepDepsWithAbort, keepDoneReady, keepIdleTotal, cancelKeepJob, findKeepJob, jobMatchesKey, keepAliases, keepItemOfflineWith, keepMenuKey, KEEP_OFFLINE_MSG, KEEP_RUNNING_MSG, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
 import { get } from "svelte/store";
 
 const MB = 1024 * 1024;
@@ -417,6 +417,30 @@ describe("compactKeepAriaLabel (L10-13)", () => {
 	it("falls back to the state alone without a title", () => {
 		expect(compactKeepAriaLabel("Garder hors-ligne", "")).toBe("Garder hors-ligne");
 		expect(compactKeepAriaLabel("Garder hors-ligne", undefined)).toBe("Garder hors-ligne");
+	});
+});
+describe("keepIdleTotal (L13-16)", () => {
+	const res = (ready: number, total: number, cancelled = false): KeepResult => ({ ready, failed: total - ready, refused: 0, total, cancelled });
+	it("counts the tracks at hand first", () => {
+		expect(keepIdleTotal(14, 9, res(9, 9))).toBe(14);
+		expect(keepIdleTotal(3, null, null)).toBe(3);
+	});
+	it("a lazy source with a known size: a batch shorter than the source is not ready", () => {
+		// Album of 14 titles, the loader returned 9 (truncated queue), all 9 pinned.
+		const total = keepIdleTotal(0, 14, res(9, 9));
+		expect(total).toBe(14);
+		expect(keepDoneReady(res(9, 9), total)).toBe(false);
+		// Same album, the full queue: ready.
+		expect(keepDoneReady(res(14, 14), keepIdleTotal(0, 14, res(14, 14)))).toBe(true);
+		expect(keepIdleTotal(0, 14.7, null)).toBe(14);
+	});
+	it("without a size, the batch total remains the fallback (never a cancelled one)", () => {
+		expect(keepIdleTotal(0, null, res(9, 9))).toBe(9);
+		expect(keepIdleTotal(0, undefined, res(9, 9))).toBe(9);
+		expect(keepIdleTotal(0, 0, res(9, 9))).toBe(9);
+		expect(keepIdleTotal(0, NaN, res(9, 9))).toBe(9);
+		expect(keepIdleTotal(0, null, res(9, 9, true))).toBe(0);
+		expect(keepIdleTotal(0, null, null)).toBe(0);
 	});
 });
 describe("keepDoneReady (c43d)", () => {
