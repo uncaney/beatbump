@@ -208,6 +208,20 @@
 			Ce nom s'affiche sur tes autres appareils : « Reprendre depuis {savedDeviceName || guessedName || "cet appareil"} ».
 		</p>
 	</section>
+
+	<!-- B7-13: the install page, for a second phone or a friend (bare link, no PIN). -->
+	<section
+		class="device"
+		aria-labelledby="bienvenue-title"
+	>
+		<h2 id="bienvenue-title">Chez un ami</h2>
+		<p class="note">Les étapes d'installation sur iPhone et Android, un QR code et un bouton pour envoyer le lien.</p>
+		<a
+			class="btn-secondary bienvenue"
+			href="/bienvenue"
+			data-testid="account-bienvenue">Installer chez toi</a
+		>
+	</section>
 </main>
 
 <style lang="scss">
@@ -296,5 +310,11 @@
 	}
 	.device .note {
 		margin-top: 0.5rem;
+	}
+	a.bienvenue {
+		display: inline-flex;
+		align-items: center;
+		margin-top: 0.5rem;
+		text-decoration: none;
 	}
 </style>

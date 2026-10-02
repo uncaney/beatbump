@@ -117,6 +117,13 @@
 			{:else}
 				Installe l'application pour l'écouter sans réseau.
 			{/if}
+			<!-- B7-13: the steps page, for whoever does not know the gesture. -->
+			<a
+				class="how"
+				href="/bienvenue"
+				data-testid="install-hint-how"
+				on:click={() => (dismissed = true)}>Comment installer ?</a
+			>
 		</p>
 		{#if !$isIOS}
 			<button
@@ -179,6 +186,22 @@
 		flex: 1 1 auto;
 		min-width: 0;
 		margin: 0;
+	}
+	// 44px tap target without inflating the strip: the negative block margin
+	// keeps the line box at the text height while the box stays 44px tall.
+	.how {
+		display: inline-flex;
+		align-items: center;
+		min-height: 44px;
+		margin-block: -14px;
+		margin-inline-start: 0.35em;
+		color: #fff;
+		text-decoration: underline;
+		white-space: nowrap;
+		&:focus-visible {
+			outline: 2px solid #fff;
+			outline-offset: 2px;
+		}
 	}
 	// Compact primary: the system class gives the pill, 44px floor and plain
 	// case; only the bar-friendly geometry lives here.
