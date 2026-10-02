@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { TRACK_END_MARGIN_S, knownTrackDuration, shouldAdvanceAtTrackEnd } from "./trackEnd";
+import { TRACK_END_MARGIN_S, knownTrackDuration, repeatActionAtTrackEnd, shouldAdvanceAtTrackEnd } from "./trackEnd";
+
+describe("L15-2 repeat rule at the end of a track", () => {
+	it("repeat off: advance, whatever the position", () => {
+		expect(repeatActionAtTrackEnd("off", 0, 3)).toBe("advance");
+		expect(repeatActionAtTrackEnd("off", 2, 3)).toBe("advance");
+	});
+	it("repeat track: the element loops by itself, the queue holds", () => {
+		expect(repeatActionAtTrackEnd("track", 0, 3)).toBe("hold");
+		expect(repeatActionAtTrackEnd("track", 2, 3)).toBe("hold");
+	});
+	it("repeat playlist: advance inside the queue, restart at 0 on the last row (not index 1)", () => {
+		expect(repeatActionAtTrackEnd("playlist", 0, 3)).toBe("advance");
+		expect(repeatActionAtTrackEnd("playlist", 1, 3)).toBe("advance");
+		expect(repeatActionAtTrackEnd("playlist", 2, 3)).toBe("restart");
+		expect(repeatActionAtTrackEnd("playlist", 5, 3)).toBe("restart");
+		expect(repeatActionAtTrackEnd("playlist", 0, 1)).toBe("restart");
+	});
+	it("unknown mode or empty queue: advance", () => {
+		expect(repeatActionAtTrackEnd(undefined, 0, 3)).toBe("advance");
+		expect(repeatActionAtTrackEnd("playlist", 0, 0)).toBe("advance");
+		expect(repeatActionAtTrackEnd("playlist", NaN, NaN)).toBe("advance");
+	});
+});
 
 describe("c55a end-of-track rule (probe-gap v2: the last second was never played)", () => {
 	it("advances on `ended`, whatever the position or the duration", () => {

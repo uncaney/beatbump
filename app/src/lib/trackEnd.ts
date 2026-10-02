@@ -46,3 +46,25 @@ export function shouldAdvanceAtTrackEnd(i: TrackEndInput | null | undefined): bo
 	const t = typeof i.currentTime === "number" && Number.isFinite(i.currentTime) ? i.currentTime : 0;
 	return t >= i.duration - TRACK_END_MARGIN_S;
 }
+
+/**
+ * L15-2: what the end of a track does under the repeat mode, once the rule
+ * above said "advance":
+ * - "hold": repeat "track", the media element loops by itself (`loop`), the
+ *   queue does not move;
+ * - "restart": repeat "playlist" on the LAST row, the queue goes back to its
+ *   first row (index 0) and nothing else (no next() after it: the loop used
+ *   to restart on the second track);
+ * - "advance": the regular next().
+ * Pure: an unknown mode or an empty queue advances.
+ */
+export type RepeatAction = "advance" | "restart" | "hold";
+export function repeatActionAtTrackEnd(repeat: unknown, position: number, length: number): RepeatAction {
+	if (repeat === "track") return "hold";
+	if (repeat === "playlist") {
+		const n = typeof length === "number" && Number.isFinite(length) ? length : 0;
+		const p = typeof position === "number" && Number.isFinite(position) ? position : 0;
+		if (n > 0 && p >= n - 1) return "restart";
+	}
+	return "advance";
+}

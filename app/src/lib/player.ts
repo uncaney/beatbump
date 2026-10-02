@@ -30,7 +30,7 @@ import { objectKeys } from "./utils/collections/objects";
 import { claimMediaRetryAttempt, planMediaRetry, type MediaRetryRecord } from "./utils/mediaRetry";
 import { reportClientError } from "./clientLog";
 import { isDataSaver } from "./dataSaver";
-import { knownTrackDuration, shouldAdvanceAtTrackEnd } from "./trackEnd";
+import { knownTrackDuration, repeatActionAtTrackEnd, shouldAdvanceAtTrackEnd } from "./trackEnd";
 import { setWorkerInterval } from "./utils/workerTimeout";
 import { resumeKeptFor } from "./stores/resumeState";
 import { recordSkip } from "./me";
@@ -773,18 +773,15 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 		}
 	}
 
-	private async handleRepeat() {
-		if (
-			this._repeat === "playlist" &&
-			SessionListService.$.value.position >=
-			SessionListService.$.value.mix.length - 1
-		) {
-			await SessionListService.updatePosition(1);
-			await SessionListService.previous();
-			return true;
-		} else if (this._repeat === "track") {
-			return false;
-		}
+	/**
+	 * L15-2: repeat "playlist" on the last row: back to the first row through
+	 * the regular previous() path (updatePosition(1) then "back" = index 0,
+	 * local queue or YouTube continuation alike). The caller does NOT chain a
+	 * next() after it: that is what restarted the loop on the second track.
+	 */
+	private async restartQueue() {
+		await SessionListService.updatePosition(1);
+		await SessionListService.previous();
 	}
 
 	private createAudioNode() {
@@ -932,14 +929,19 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 				sleepTimerTrackEnded();
 				return;
 			}
+			// L15-2: taken BEFORE the first await. `timeupdate` (inside the margin)
+			// and `ended` fire in the same end-of-media task; the lock used to be
+			// set only after `await handleRepeat()`, so in repeat "playlist" on
+			// the last row the re-entering `ended` ran a second advance in
+			// parallel (index 2 instead of 0). The finally below releases it.
+			locked = true;
 			try {
-				if (this._repeat !== "off") {
-					const allowContinuation = await this.handleRepeat();
-					if (allowContinuation === false) {
-						return;
-					}
+				const action = repeatActionAtTrackEnd(this._repeat, SessionListService.position, SessionListService.value.mix.length);
+				if (action === "hold") return;
+				if (action === "restart") {
+					await this.restartQueue();
+					return;
 				}
-				if (!locked) locked = true;
 
 				if (groupSession.initialized) {
 					return await Promise.resolve(
