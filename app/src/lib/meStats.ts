@@ -151,6 +151,8 @@ export interface YearView {
 	distinctAlbums: number;
 	topArtist: YearTop | null;
 	topAlbum: YearTop | null;
+	/** c45b (B7-11): the top 3 of the artist ranking, for "Partager mon année" (absent on an older server). */
+	topArtists?: YearTop[];
 	newArtists: number;
 	newArtistNames: string[];
 }
