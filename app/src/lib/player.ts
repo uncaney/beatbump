@@ -23,7 +23,7 @@ import { sort, type PlayerFormats } from "./parsers/player";
 import { settings, type ISessionListProvider } from "./stores";
 import { groupSession, type ConnectionState } from "./stores/sessions";
 import { markMediaSessionGesture } from "./stores/nowPlayingSync";
-import { shouldStopAtTrackEnd, sleepTimeUpdate, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
+import { shouldStopAtTrackEnd, sleepTimeUpdate, sleepTrackSkipped, trackEnded as sleepTimerTrackEnded } from "./stores/sleepTimer";
 import { syncTabs } from "./tabSync";
 import { WritableStore, notify, type ResponseBody } from "./utils";
 import { objectKeys } from "./utils/collections/objects";
@@ -597,6 +597,15 @@ class AudioPlayerImpl extends EventEmitter<AudioPlayerEvents> {
 			recordSkip(track, t, d, source);
 		} catch {
 			/* never block "next" on the skip log */
+		}
+		// L13-3: "Dans 3 titres" counts a user "next" as one title; the last
+		// counted one pauses here (no advance), like the track-end path.
+		if (sleepTrackSkipped(SessionListService.position, SessionListService.value)) {
+			this._sleepHold = true;
+			this.nextSrc.url = undefined;
+			this.pause();
+			sleepTimerTrackEnded();
+			return Promise.resolve();
 		}
 		return SessionListService.next(undefined, update);
 	}

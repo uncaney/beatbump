@@ -39,6 +39,7 @@ import {
 	sleepQueueAction,
 	sleepQueueChanged,
 	sleepRemaining,
+	sleepTrackSkipped,
 	sleepTracksLeft,
 	startSleepTimer,
 	trackEndStep,
@@ -95,6 +96,15 @@ describe("trackEndStep", () => {
 		expect(r2).toEqual({ stop: false, next: r1.next });
 		// repeat-one: the same track ending again later is a new end
 		expect(trackEndStep(r1.next, { position: 0, mix, now: 1_000 + TRACK_END_DEDUPE_MS + 1 }).stop).toBe(true);
+		// L13-3: a user "next" on the same track right after is a distinct action, never deduped
+		expect(trackEndStep(r1.next, { position: 0, mix, now: 1_000 + 10, skip: true }).stop).toBe(true);
+	});
+	it("a user 'next' consumes a title like an end (L13-3)", () => {
+		const r1 = trackEndStep(tracks(3), { position: 0, mix: [], now: 1_000, skip: true });
+		expect(r1).toMatchObject({ stop: false, next: { left: 2 } });
+		const r2 = trackEndStep(r1.next, { position: 1, mix: [], now: 2_000, skip: true });
+		expect(r2).toMatchObject({ stop: false, next: { left: 1 } });
+		expect(trackEndStep(r2.next, { position: 2, mix: [], now: 200_000 })).toEqual({ stop: true, next: null });
 	});
 	it("'Fin de l'album' stops when the next row leaves the album or the queue ends", () => {
 		const d = sleepDeadline("album", { now: 0, position: 0, mix: [A("a0")] });
@@ -185,6 +195,31 @@ describe("runtime", () => {
 		expect(get(sleepLabel)).toBe("1 titre");
 		vi.advanceTimersByTime(60_000);
 		expect(shouldStopAtTrackEnd(4)).toBe(true);
+	});
+
+	it("'Dans 3 titres': two user 'next' then one end = pause (L13-3)", () => {
+		startSleepTimer("tracks", { position: 2, mix: [] });
+		expect(sleepTrackSkipped(2)).toBe(false);
+		expect(get(sleepTracksLeft)).toBe(2);
+		expect(sleepTrackSkipped(3)).toBe(false);
+		expect(get(sleepLabel)).toBe("1 titre");
+		expect(shouldStopAtTrackEnd(4)).toBe(true);
+		// the last counted title skipped: stop now (the player pauses in place)
+		startSleepTimer("tracks", { position: 0, mix: [] });
+		expect(sleepTrackSkipped(0)).toBe(false);
+		expect(sleepTrackSkipped(1)).toBe(false);
+		expect(sleepTrackSkipped(2)).toBe(true);
+		// minute / album / track modes: a skip changes nothing
+		startSleepTimer(15);
+		expect(sleepTrackSkipped(0)).toBe(false);
+		expect(get(sleepMode)).toBe(15);
+		startSleepTimer("album", { position: 0, mix: [B("b0"), B("b1")] });
+		expect(sleepTrackSkipped(0)).toBe(false);
+		expect(get(sleepMode)).toBe("album");
+		expect(shouldStopAtTrackEnd(0, { mix: [B("b0"), B("b1")] })).toBe(false);
+		// idle: nothing
+		cancelSleepTimer(true);
+		expect(sleepTrackSkipped(0)).toBe(false);
 	});
 
 	it("'Dans 3 titres' started at index 10 survives a queue replacement (L12-1)", () => {
