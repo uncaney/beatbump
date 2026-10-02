@@ -261,14 +261,19 @@ func resetNoYearAlbumsMemo() {
 	noYearMu.Unlock()
 }
 
+// genreRareMax is the "rare" threshold of the Genres page's fold (U13-11:
+// RARE_MAX in routes/(app)/library/genres/+page.svelte, 3 and no longer 1);
+// the /about counter links to that fold, so both count the same genres.
+const genreRareMax = 3
+
 // scanGenresRare reuses LocalGenresHandler's own facet + normalizeGenres
-// (local_genres.go): a genre with at most one track is the "rare" noise the
-// Genres page folds away (B8-21's same count<=1 test).
+// (local_genres.go): a genre with at most genreRareMax tracks is the "rare"
+// noise the Genres page folds away.
 func scanGenresRare() int {
 	entries := normalizeGenres(genreTrackCounts())
 	n := 0
 	for _, e := range entries {
-		if e.Count <= 1 {
+		if e.Count <= genreRareMax {
 			n++
 		}
 	}

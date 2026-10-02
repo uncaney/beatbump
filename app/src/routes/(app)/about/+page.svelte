@@ -277,14 +277,15 @@
 					class="lint"
 					data-testid="about-library-lint"
 				>
+					<!-- U13-10: each counter leads to its list (the three exist). -->
 					<li data-testid="about-lint-no-year">
-						{fmtInt(lint.albumsNoYear)} {lint.albumsNoYear > 1 ? "albums sans année" : "album sans année"}
+						<a href="/library/albums?filter=no-year">{fmtInt(lint.albumsNoYear)} {lint.albumsNoYear > 1 ? "albums sans année" : "album sans année"}</a>
 					</li>
 					<li data-testid="about-lint-genres-rare">
-						{fmtInt(lint.genresRare)} {lint.genresRare > 1 ? "genres rares" : "genre rare"}
+						<a href="/library/genres#rares">{fmtInt(lint.genresRare)} {lint.genresRare > 1 ? "genres rares" : "genre rare"}</a>
 					</li>
 					<li data-testid="about-lint-artist-groups">
-						{fmtInt(lint.artistGroups)} {lint.artistGroups > 1 ? "groupes d'artistes proches" : "groupe d'artistes proches"}
+						<a href="/library/artists?collapse=1">{fmtInt(lint.artistGroups)} {lint.artistGroups > 1 ? "groupes d'artistes proches" : "groupe d'artistes proches"}</a>
 					</li>
 				</ul>
 			{/if}
@@ -548,6 +549,20 @@
 	}
 	.lint li {
 		margin: 0.2rem 0;
+	}
+	// U13-10: the counters are links (44px tall, underlined, the muted colour
+	// of the list; white on hover / focus).
+	.lint a {
+		display: inline-flex;
+		align-items: center;
+		min-height: max(2.75rem, 44px);
+		color: inherit;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+	.lint a:hover,
+	.lint a:focus-visible {
+		color: #fff;
 	}
 	.lint-hint {
 		font-size: var(--text-secondary-size);

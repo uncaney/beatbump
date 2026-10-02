@@ -3,7 +3,7 @@
 	import { genreHref, normalizeGenreList } from "$lib/localGenres";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { playTracks } from "$components/PlayAllBar/PlayAllBar.svelte";
-	import { onMount } from "svelte";
+	import { onMount, tick } from "svelte";
 	import CollectionNav from "../_CollectionNav.svelte";
 
 	let genres: { name: string; count: number }[] = [];
@@ -11,18 +11,36 @@
 	let q = "";
 	/** Name of the genre currently loading its queue (disables its own buttons only). */
 	let busyGenre = "";
-	// B8-21: a genre with a single album is rare noise in the main list (37
-	// of them on the library at hand); folded into a collapsed section at the
-	// end instead, open on demand.
+	// B8-21: a genre with (almost) nothing behind it is rare noise in the main
+	// list; folded into a collapsed section at the end instead, open on
+	// demand. U13-11: the threshold is RARE_MAX (3) and no longer 1: "Bop 3",
+	// "90s 2" sat in the main list while the fold held only raw tags. The
+	// label's "(N)" is the fold's own length, so it follows the threshold.
+	// /library/genres#rares (the /about counter, the header link) opens the
+	// fold and scrolls to it.
+	const RARE_MAX = 3;
 	let rareOpen = false;
+	let rareToggle: HTMLButtonElement | null = null;
 
 	$: filtered = q
 		? genres.filter((g) => g.name.toLowerCase().includes(q.toLowerCase()))
 		: genres;
-	$: commonGenres = filtered.filter((g) => g.count > 1);
-	$: rareGenres = filtered.filter((g) => g.count <= 1);
+	$: commonGenres = filtered.filter((g) => g.count > RARE_MAX);
+	$: rareGenres = filtered.filter((g) => g.count <= RARE_MAX);
+
+	async function openRare() {
+		rareOpen = true;
+		await tick();
+		rareToggle?.scrollIntoView({ block: "start", behavior: "smooth" });
+	}
 
 	onMount(async () => {
+		let wantRare = false;
+		try {
+			wantRare = window.location.hash === "#rares";
+		} catch {
+			wantRare = false;
+		}
 		try {
 			const res = await APIClient.fetch("/api/v1/local/genres");
 			const data = await res.json();
@@ -32,6 +50,7 @@
 			console.error("genres load failed", err);
 		}
 		loading = false;
+		if (wantRare) void openRare();
 	});
 
 	// D4: "Lire" / "Aléatoire" on a genre row load up to 200 of its tracks
@@ -69,6 +88,15 @@
 			aria-label="Filtrer les genres"
 			bind:value={q}
 		/>
+		{#if !loading && rareGenres.length}
+			<!-- U13-11: the fold sits after the whole list; a link at the top jumps to it. -->
+			<a
+				class="rare-link"
+				href="#rares"
+				data-testid="genres-rare-link"
+				on:click|preventDefault={openRare}>{`Genres rares (${rareGenres.length})`}</a
+			>
+		{/if}
 	</header>
 
 	{#if loading}
@@ -125,9 +153,11 @@
 			<!-- B8-21: folded by default, 44px tap target, count in the label. -->
 			<button
 				type="button"
+				id="rares"
 				class="btn-reset rare-toggle"
 				data-testid="genres-rare-toggle"
 				aria-expanded={rareOpen}
+				bind:this={rareToggle}
 				on:click={() => (rareOpen = !rareOpen)}
 			>
 				<span
@@ -297,6 +327,20 @@
 	}
 	.rare-toggle:hover {
 		background: rgba(255, 255, 255, 0.16);
+	}
+	// U13-11: the header shortcut to the fold, a 44px inline link.
+	.rare-link {
+		display: inline-flex;
+		align-items: center;
+		min-height: max(2.75rem, 44px);
+		color: #b3b3b3;
+		font-size: var(--text-secondary-size);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+	.rare-link:hover,
+	.rare-link:focus-visible {
+		color: #fff;
 	}
 	.rare-icon {
 		display: inline-flex;
