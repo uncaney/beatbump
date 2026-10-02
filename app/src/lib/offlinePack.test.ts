@@ -30,7 +30,10 @@ import {
 	packDoneOf,
 	packDurationText,
 	packLabel,
+	packRefreshChangedNote,
+	packRefreshNothingReason,
 	packRefreshPreviewTitle,
+	samePackRefreshPlan,
 	packRefreshRows,
 	packRefreshSummary,
 	UNKNOWN_TITLE,
@@ -383,6 +386,25 @@ describe("B7-7 refresh my pack", () => {
 		expect(packRefreshPreviewTitle(r)).toBe("2 titres écoutés seront retirés du pack (25 min) et remplacés par 1 nouveau (10 min) :");
 		const one = planPackRefresh(p, ["p1"], { favorites: [tr("n1", { duration: 300 }), tr("n2", { duration: 300 })] });
 		expect(packRefreshPreviewTitle(one)).toBe("1 titre écouté sera retiré du pack (10 min) et remplacé par 2 nouveaux (10 min) :");
+	});
+
+	it("L15-7: the recomputed plan is compared with the preview's by ids, and the 'nothing to do' reason tells a protected drop apart", () => {
+		const p = pack();
+		const cands = { favorites: [tr("n1", { duration: 600 }), tr("n2", { duration: 300 })] };
+		const a = planPackRefresh(p, ["p1", "p3"], cands);
+		expect(samePackRefreshPlan(a, planPackRefresh(p, ["p3", "p1"], cands))).toBe(true);
+		// A pack track heard in between: one more drop.
+		expect(samePackRefreshPlan(a, planPackRefresh(p, ["p1", "p2", "p3"], cands))).toBe(false);
+		// The same drops, another candidate set: different adds.
+		expect(samePackRefreshPlan(a, planPackRefresh(p, ["p1", "p3"], { favorites: [tr("n9", { duration: 600 })] }))).toBe(false);
+		expect(packRefreshChangedNote(a)).toBe("Le plan a changé : 2 titres à retirer, 2 nouveaux. Vérifie la liste avant de confirmer.");
+		expect(packRefreshChangedNote(planPackRefresh(p, ["p1"], cands))).toBe("Le plan a changé : 1 titre à retirer, 1 nouveau. Vérifie la liste avant de confirmer.");
+		// The only listened pack track became the one playing: protected, nothing to drop.
+		const protectedOnly = planPackRefresh(p, ["p1"], cands, ["p1"]);
+		expect(protectedOnly.drop).toEqual([]);
+		expect(packRefreshNothingReason(protectedOnly, p, ["p1"])).toBe("Le titre en cours est gardé : rien à retirer du pack");
+		expect(packRefreshNothingReason(planPackRefresh(p, [], cands), p, [])).toBe("Aucun titre écouté depuis le pack");
+		expect(packRefreshNothingReason(planPackRefresh(p, ["p1"], { favorites: [] }), p, ["p1"])).toBe("Pas de nouveau titre pour remplacer les titres écoutés");
 	});
 
 	it("planPackRefresh: the track playing / restored is never dropped (L13-1)", () => {
