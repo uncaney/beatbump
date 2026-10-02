@@ -44,6 +44,7 @@
 	// focuses the size / duration selector.
 	import { createEventDispatcher, onMount, tick } from "svelte";
 	import { get } from "svelte/store";
+	import { goto } from "$app/navigation";
 	import {
 		applySwEviction,
 		cachedIds,
@@ -542,11 +543,11 @@
 				open = true;
 				if (!parsePackChoice(choice) || parsedChoice.kind !== "seconds") choice = `dur:${PACK_DURATIONS_SEC[1]}`;
 				url.searchParams.delete("pack");
-				try {
-					history.replaceState(history.state, "", url.pathname + url.search + url.hash);
-				} catch {
+				// L13-14: through the router, so $page.url forgets the parameter
+				// too and a "back" to this entry does not unfold the card again.
+				void goto(url.pathname + url.search + url.hash, { replaceState: true, noScroll: true, keepFocus: true }).catch(() => {
 					/* keep the parameter: harmless */
-				}
+				});
 				void tick().then(() => {
 					sizeSelect?.scrollIntoView({ block: "center" });
 					sizeSelect?.focus();

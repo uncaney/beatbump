@@ -142,11 +142,13 @@
 			if (!asked) return false;
 			url.searchParams.delete("album-of-day");
 			url.searchParams.delete("album-du-jour");
-			try {
-				history.replaceState(history.state, "", url.pathname + url.search + url.hash);
-			} catch {
+			// L13-14: through the router (SvelteKit 1 has no $app/navigation
+			// replaceState): a raw history.replaceState left $page.url with the
+			// parameter and a "back" to this entry replayed the shortcut. The
+			// home load only tracks ?params, so it does not rerun.
+			void goto(url.pathname + url.search + url.hash, { replaceState: true, noScroll: true, keepFocus: true }).catch(() => {
 				/* keep the parameter: harmless */
-			}
+			});
 			return true;
 		} catch {
 			return false;
