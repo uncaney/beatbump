@@ -10,6 +10,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -93,6 +94,13 @@ func MeLoginHandler(c echo.Context) error {
 	// `migrated` is null when nothing moved (no eligible source, second
 	// concurrent login, stale cookie): the client shows no "0 écoute" line.
 	moved, err := loginAndMerge(from, prevAnon, id, name, merge)
+	if errors.Is(err, errLoginBusy) {
+		// L13-6: another login of the same profile holds the lock for too
+		// long (slow database): bounded wait, then "retry" instead of a
+		// goroutine pile-up.
+		c.Response().Header().Set("Retry-After", "2")
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "busy", "reason": "login in progress for this profile, retry"})
+	}
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "login failed"})
 	}

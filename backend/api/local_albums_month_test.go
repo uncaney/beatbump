@@ -18,6 +18,8 @@ func newMonthStub(t *testing.T) *neverPlayedStub {
 	at := func(y int, m time.Month, d int) float64 {
 		return float64(time.Date(y, m, d, 12, 0, 0, 0, time.UTC).Unix())
 	}
+	resetAddedMonthMemo()
+	t.Cleanup(resetAddedMonthMemo)
 	stub := &neverPlayedStub{}
 	add := func(month string, y int, m time.Month, days ...int) {
 		for i, d := range days {
@@ -142,5 +144,58 @@ func TestLocalAlbumsFilterAddedMonthPickAndPaging(t *testing.T) {
 	}
 	if m, r := addedMonthPick(map[string]int{"2026-08": 4, "2026-09": 9}, "2026-08"); m != "2026-08" || r != "" {
 		t.Fatalf("pick current = %s %s", m, r)
+	}
+}
+
+// L13-15: the added-month scan is memoised 5 minutes per (q, artistId) in a
+// bounded LRU: the second /home costs no Meili page, another query or an
+// expired entry rescans, and the map never grows past addedMonthMemoMax.
+func TestLocalAlbumsFilterAddedMonthMemo(t *testing.T) {
+	stub := newMonthStub(t)
+	addedMonthNow = func() time.Time { return time.Date(2026, 10, 2, 8, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { addedMonthNow = time.Now })
+	base := time.Date(2026, 10, 2, 8, 0, 0, 0, time.UTC)
+	addedMonthMemoNow = func() time.Time { return base }
+	t.Cleanup(func() { addedMonthMemoNow = time.Now })
+	code, first := monthStatus(t, "/api/v1/local/albums?filter=added-month")
+	if code != http.StatusOK || mstr(first, "month") != "2026-09" {
+		t.Fatalf("first: %d %v", code, first)
+	}
+	calls := stub.albumCalls
+	if calls == 0 {
+		t.Fatalf("first call did not scan")
+	}
+	for i := 0; i < 5; i++ {
+		code, again := monthStatus(t, "/api/v1/local/albums?filter=added-month&month=2026-07&limit=2")
+		if code != http.StatusOK || mstr(again, "month") != "2026-07" || mint(again, "total") != 4 || len(again["items"].([]interface{})) != 2 {
+			t.Fatalf("memoised call %d: %d %v", i, code, again)
+		}
+	}
+	if stub.albumCalls != calls {
+		t.Fatalf("memoised calls rescanned: %d -> %d", calls, stub.albumCalls)
+	}
+	// The month chosen follows the clock, not the memo.
+	addedMonthNow = func() time.Time { return time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC) }
+	if _, out := monthStatus(t, "/api/v1/local/albums?filter=added-month"); mstr(out, "month") != "2026-09" || stub.albumCalls != calls {
+		t.Fatalf("pick with the memo: %v (calls %d)", out, stub.albumCalls)
+	}
+	// Another query is another scan.
+	monthStatus(t, "/api/v1/local/albums?filter=added-month&q=x")
+	if stub.albumCalls == calls || addedMonthMemoLen() != 2 {
+		t.Fatalf("q=x: calls %d len %d", stub.albumCalls, addedMonthMemoLen())
+	}
+	// Past the TTL the scan runs again.
+	calls = stub.albumCalls
+	addedMonthMemoNow = func() time.Time { return base.Add(addedMonthMemoTTL + time.Second) }
+	monthStatus(t, "/api/v1/local/albums?filter=added-month")
+	if stub.albumCalls == calls {
+		t.Fatalf("expired memo served")
+	}
+	// Bounded.
+	for i := 0; i < addedMonthMemoMax+10; i++ {
+		monthStatus(t, fmt.Sprintf("/api/v1/local/albums?filter=added-month&q=q%d", i))
+	}
+	if n := addedMonthMemoLen(); n != addedMonthMemoMax {
+		t.Fatalf("memo size %d, want %d", n, addedMonthMemoMax)
 	}
 }

@@ -7,6 +7,7 @@ package api
 
 import (
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -156,8 +157,9 @@ func mergeNowPlaying(tx *gorm.DB, from, to string) error {
 // anonymous profile mergeable, the second answered `migrated: {plays: 0}`
 // ("0 écoute rattachée"); (3) `profileAnonymous(from)` ran outside the
 // transaction. Now:
-//   - logins are serialised (loginMu): one transaction at a time, the second
-//     concurrent login sees the rows already moved and adopts nothing;
+//   - logins of the same profiles are serialised (loginLocks, L13-6: per
+//     profile, bounded wait): the second concurrent login sees the rows
+//     already moved and adopts nothing;
 //   - the anonymous check runs inside the transaction (txProfileAnonymous);
 //   - an adopted anonymous id gets a Profile row {Name: "", AdoptedBy: to}:
 //     still anonymous for every other reader, but the next login of the SAME
@@ -170,9 +172,121 @@ func mergeNowPlaying(tx *gorm.DB, from, to string) error {
 //   - `migrated` is null when nothing moved (all counters zero), so the
 //     client never shows "0 écoute rattachée".
 
-// loginMu serialises POST me/login: logins are rare, and the merge must not
-// run twice for the same anonymous source.
-var loginMu sync.Mutex
+// ---- c47b L13-6: bounded per-profile login lock ----
+//
+// A single global mutex serialised every login for the whole transaction;
+// Echo has no request timeout, so with a slow SQLite (a big anonymous
+// profile, busy_timeout 5 s) the next logins piled up in goroutines without
+// bound. Now a login locks only the profiles it touches (the target, the
+// device's anonymous id, the remembered prevAnon), waits at most
+// loginLockTimeout for them and answers 503 "retry" past that. Two logins
+// of unrelated profiles run in parallel; two logins of the same source or
+// target are still serialised, so the merge never runs twice.
+
+// loginLockTimeout bounds the wait for the profile locks (a variable for
+// tests).
+var loginLockTimeout = 5 * time.Second
+
+// errLoginBusy: the locks could not be taken within loginLockTimeout.
+var errLoginBusy = errors.New("login in progress for this profile")
+
+// keyedLocks is a set of mutexes by key with a bounded acquire; a key's
+// entry exists only while someone holds or waits for it.
+type keyedLocks struct {
+	mu   sync.Mutex
+	held map[string]*keyedLock
+}
+
+type keyedLock struct {
+	ch   chan struct{} // 1-slot semaphore: full = held
+	refs int           // holders + waiters
+}
+
+// acquire takes key, waiting at most `timeout`; false when it timed out.
+func (k *keyedLocks) acquire(key string, timeout time.Duration) bool {
+	k.mu.Lock()
+	if k.held == nil {
+		k.held = map[string]*keyedLock{}
+	}
+	l := k.held[key]
+	if l == nil {
+		l = &keyedLock{ch: make(chan struct{}, 1)}
+		k.held[key] = l
+	}
+	l.refs++
+	k.mu.Unlock()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case l.ch <- struct{}{}:
+		return true
+	case <-timer.C:
+		k.mu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(k.held, key)
+		}
+		k.mu.Unlock()
+		return false
+	}
+}
+
+// release gives key back (the caller holds it).
+func (k *keyedLocks) release(key string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	l := k.held[key]
+	if l == nil {
+		return
+	}
+	<-l.ch
+	l.refs--
+	if l.refs == 0 {
+		delete(k.held, key)
+	}
+}
+
+// loginLocks: the per-profile login locks.
+var loginLocks = &keyedLocks{}
+
+// loginLockKeys lists the distinct non-empty ids a login touches, sorted
+// (every login takes them in the same order: no deadlock).
+func loginLockKeys(ids ...string) []string {
+	seen := map[string]bool{}
+	keys := []string{}
+	for _, id := range ids {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			keys = append(keys, id)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// acquireLoginLocks takes every key within loginLockTimeout overall and
+// returns the release; errLoginBusy (nothing held) when it could not.
+func acquireLoginLocks(keys []string) (func(), error) {
+	deadline := time.Now().Add(loginLockTimeout)
+	held := []string{}
+	release := func() {
+		for i := len(held) - 1; i >= 0; i-- {
+			loginLocks.release(held[i])
+		}
+	}
+	for _, k := range keys {
+		if !loginLocks.acquire(k, time.Until(deadline)) {
+			release()
+			return nil, errLoginBusy
+		}
+		held = append(held, k)
+	}
+	return release, nil
+}
+
+// loginLockedHook runs once the locks are held, before the transaction (a
+// test hook: nil in production).
+var loginLockedHook func(to string)
 
 // adoptionGrace: how long a request with an adopted anonymous cookie is still
 // served as the named profile it was moved onto.
@@ -181,6 +295,13 @@ const adoptionGrace = 15 * time.Minute
 // adoptionMemoMax bounds the in-memory map (a login per entry).
 const adoptionMemoMax = 5000
 
+// adoptionNegativeTTL: how long "this id was not adopted" (a database
+// lookup that found nothing, L13-6) is remembered, so a plain anonymous
+// cookie does not cost one profiles read per request.
+const adoptionNegativeTTL = time.Minute
+
+// adoption is a memo entry: to == "" is a negative entry (not adopted as of
+// `at`).
 type adoption struct {
 	to string
 	at time.Time
@@ -192,13 +313,27 @@ var (
 	adoptionNow  = time.Now
 )
 
+// stale reports whether the entry is past its life (grace or negative TTL).
+func (a adoption) stale(now time.Time) bool {
+	if a.to == "" {
+		return now.Sub(a.at) >= adoptionNegativeTTL
+	}
+	return now.Sub(a.at) > adoptionGrace
+}
+
 func rememberAdoption(from, to string) {
+	rememberAdoptionAt(from, to, adoptionNow())
+}
+
+// rememberAdoptionAt stores (from -> to, at); to == "" is the negative
+// entry. The stale entries are purged when the map is full.
+func rememberAdoptionAt(from, to string, at time.Time) {
 	adoptionMu.Lock()
 	defer adoptionMu.Unlock()
-	if len(adoptionMemo) >= adoptionMemoMax {
+	if _, ok := adoptionMemo[from]; !ok && len(adoptionMemo) >= adoptionMemoMax {
 		now := adoptionNow()
 		for k, a := range adoptionMemo {
-			if now.Sub(a.at) > adoptionGrace {
+			if a.stale(now) {
 				delete(adoptionMemo, k)
 			}
 		}
@@ -206,27 +341,52 @@ func rememberAdoption(from, to string) {
 			adoptionMemo = map[string]adoption{}
 		}
 	}
-	adoptionMemo[from] = adoption{to: to, at: adoptionNow()}
+	adoptionMemo[from] = adoption{to: to, at: at}
+}
+
+// adoptedByRow reads AdoptedBy / AdoptedAt from pid's Profile row ("" and
+// zero without one, or without a database). A variable for tests.
+var adoptedByRow = func(pid string) (string, time.Time) {
+	if db.DB == nil {
+		return "", time.Time{}
+	}
+	var p db.Profile
+	if err := db.DB.Where("id = ?", pid).First(&p).Error; err != nil || p.AdoptedBy == "" || p.AdoptedAt == nil {
+		return "", time.Time{}
+	}
+	return p.AdoptedBy, *p.AdoptedAt
 }
 
 // resolveAdopted maps a recently adopted anonymous id onto its named
 // profile; any other id (or an adoption older than adoptionGrace) is
-// returned as is.
+// returned as is. An id the memory map does not know (restart, promotion
+// within the grace, L13-6) is looked up once in profiles.adopted_by /
+// adopted_at and the answer, positive or negative, is remembered.
 func resolveAdopted(pid string) string {
 	if pid == "" || namedProfileID(pid) {
 		return pid
 	}
+	now := adoptionNow()
 	adoptionMu.Lock()
-	defer adoptionMu.Unlock()
 	a, ok := adoptionMemo[pid]
-	if !ok {
-		return pid
+	if ok && !a.stale(now) {
+		adoptionMu.Unlock()
+		if a.to == "" {
+			return pid
+		}
+		return a.to
 	}
-	if adoptionNow().Sub(a.at) > adoptionGrace {
+	if ok {
 		delete(adoptionMemo, pid)
-		return pid
 	}
-	return a.to
+	adoptionMu.Unlock()
+	to, at := adoptedByRow(pid)
+	if to != "" && !at.IsZero() && now.Sub(at) <= adoptionGrace {
+		rememberAdoptionAt(pid, to, at)
+		return to
+	}
+	rememberAdoptionAt(pid, "", now)
+	return pid
 }
 
 // resetAdoptions forgets every remembered adoption (tests).
@@ -285,11 +445,17 @@ func (m migratedCounts) empty() bool {
 // are nil when nothing moved: no eligible source, or sources already empty
 // (a second concurrent login, a stale cookie).
 func loginAndMerge(from, prevAnon, to, name string, merge bool) (*migratedCounts, error) {
-	loginMu.Lock()
-	defer loginMu.Unlock()
+	release, err := acquireLoginLocks(loginLockKeys(to, from, prevAnon))
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if loginLockedHook != nil {
+		loginLockedHook(to)
+	}
 	var moved migratedCounts
 	var adopted []string
-	err := db.DB.Transaction(func(tx *gorm.DB) error {
+	err = db.DB.Transaction(func(tx *gorm.DB) error {
 		var p db.Profile
 		if err := tx.Where("id = ?", to).Assign(db.Profile{Name: name}).
 			Attrs(db.Profile{CreatedAt: time.Now()}).FirstOrCreate(&p, db.Profile{ID: to}).Error; err != nil {
@@ -323,8 +489,10 @@ func loginAndMerge(from, prevAnon, to, name string, merge bool) (*migratedCounts
 				return err
 			}
 			moved.add(m)
-			// Mark the source as adopted by `to` (empty name: still anonymous).
-			if err := tx.Where("id = ?", src).Assign(map[string]interface{}{"adopted_by": to}).
+			// Mark the source as adopted by `to` (empty name: still anonymous);
+			// adopted_at serves resolveAdopted after a restart (L13-6).
+			now := time.Now()
+			if err := tx.Where("id = ?", src).Assign(map[string]interface{}{"adopted_by": to, "adopted_at": &now}).
 				Attrs(db.Profile{CreatedAt: time.Now()}).FirstOrCreate(&db.Profile{}, db.Profile{ID: src}).Error; err != nil {
 				return err
 			}

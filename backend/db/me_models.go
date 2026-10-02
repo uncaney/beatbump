@@ -16,6 +16,12 @@ type Profile struct {
 	// landed on the old id after the merge, and nobody else. AutoMigrate adds
 	// the column (ALTER TABLE ADD COLUMN), older rows read "".
 	AdoptedBy string `json:"-"`
+	// AdoptedAt (c47b, L13-6): when AdoptedBy was set. Lets a request that
+	// still carries the adopted cookie be served as the named profile for
+	// the adoption grace even after a restart (the in-memory adoption map
+	// is lost). Nullable, so AutoMigrate adds it without a default; rows
+	// adopted before the column read nil (no grace: the old behaviour).
+	AdoptedAt *time.Time `json:"-"`
 }
 
 type Favorite struct {

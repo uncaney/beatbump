@@ -36,6 +36,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -108,10 +109,44 @@ func pickArtistOfDayOK(date string, total int, fetch func(off, lim int) []map[st
 }
 
 // playedArtists folds a profile's play history for the artist checks: every
-// distinct artist name (lower-cased) and artist id the play rows carry.
+// distinct artist credit the play rows carry, normalised (playedArtistNames),
+// and every artist id.
 type playedArtists struct {
 	names map[string]bool
 	ids   map[string]bool
+}
+
+// playedArtistSplitRe turns a "feat." / "ft." / "featuring" credit into a
+// plain separator so the featured artist counts as played too.
+var playedArtistSplitRe = regexp.MustCompile(`[\(\[]?\b(?:feat|ft|featuring)\b\.?\s*`)
+
+// playedArtistNames (L13-7) lists the normalised names a play row's artist
+// credit marks as played: the credit as a whole (matchNorm, which already
+// drops a "feat." tail), its primary artist (matchPrimaryArtist) and every
+// co-credited artist (matchArtistSep). "Daft Punk feat. Pharrell Williams"
+// and "Daft Punk & Pharrell Williams" both mark "daft punk" and "pharrell
+// williams"; the raw credit used to be compared lower-cased as one string,
+// so a featured play left the artist of the day "never played".
+func playedArtistNames(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(n string) {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	add(matchNorm(raw))
+	add(matchPrimaryArtist(raw))
+	s := playedArtistSplitRe.ReplaceAllString(matchAccents.Replace(strings.ToLower(raw)), " & ")
+	for _, part := range matchArtistSep.Split(s, -1) {
+		add(matchNorm(part))
+	}
+	return out
 }
 
 // loadPlayedArtists reads a profile's play_events in one aggregate query.
@@ -126,7 +161,7 @@ func loadPlayedArtists(pid string) playedArtists {
 	}
 	db.DB.Model(&db.PlayEvent{}).Select("artist, artist_id").Where("profile_id = ?", pid).Group("artist, artist_id").Scan(&rows)
 	for _, r := range rows {
-		if n := strings.ToLower(strings.TrimSpace(r.Artist)); n != "" {
+		for _, n := range playedArtistNames(r.Artist) {
 			p.names[n] = true
 		}
 		if r.ArtistID != "" {
@@ -136,9 +171,14 @@ func loadPlayedArtists(pid string) playedArtists {
 	return p
 }
 
-// has reports whether a play row names this artist (by name or id).
+// has reports whether a play row names this artist (by id, or by its
+// normalised name among the credits played).
 func (p playedArtists) has(doc map[string]interface{}) bool {
-	return p.ids[mstr(doc, "id")] || p.names[strings.ToLower(strings.TrimSpace(mstr(doc, "name")))]
+	if p.ids[mstr(doc, "id")] {
+		return true
+	}
+	n := matchNorm(mstr(doc, "name"))
+	return n != "" && p.names[n]
 }
 
 // dayMemo is a small LRU of answers keyed by (date, profile).

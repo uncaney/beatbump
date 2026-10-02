@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -418,5 +419,139 @@ func TestLoginInflightWriteFollowsAdoption(t *testing.T) {
 	// the adopted id stays anonymous for every other reader
 	if !profileAnonymous("anon-if") {
 		t.Fatalf("adopted anonymous id reads as named")
+	}
+}
+
+// L13-6: the adoption survives a restart. After the in-memory map is lost
+// (resetAdoptions), a write still carrying the adopted cookie is served as
+// the named profile from profiles.adopted_by / adopted_at, for the grace
+// only; an id never adopted costs one lookup, then a negative memo entry.
+func TestLoginAdoptionSurvivesRestart(t *testing.T) {
+	useMergeDB(t)
+	seedProfile(t, "anon-rs", 1, nil, nil, nil)
+	first, set := login(t, "anon-rs", "Rae", nil)
+	if first.Migrated == nil || first.Migrated.Plays != 1 {
+		t.Fatalf("first: %s", first.raw)
+	}
+	resetAdoptions() // simulated restart / promotion: the map is empty
+	post := func(cookie string) (int, string) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/me/history", strings.NewReader(`{"videoId":"late-rs","title":"Late"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0 Chrome/128")
+		req.AddCookie(&http.Cookie{Name: "bbp", Value: cookie})
+		rec := httptest.NewRecorder()
+		if err := MeRecordPlayHandler(echo.New().NewContext(req, rec)); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("history: %v %d %s", err, rec.Code, rec.Body.String())
+		}
+		switched := ""
+		for _, ck := range rec.Result().Cookies() {
+			if ck.Name == "bbp" {
+				switched = ck.Value
+			}
+		}
+		return rec.Code, switched
+	}
+	if _, switched := post("anon-rs"); switched != set {
+		t.Fatalf("after the restart the cookie was not switched: %q", switched)
+	}
+	if countWhere(t, &db.PlayEvent{}, first.ID) != 2 || countWhere(t, &db.PlayEvent{}, "anon-rs") != 0 {
+		t.Fatalf("late play orphaned after restart: named %d anon %d", countWhere(t, &db.PlayEvent{}, first.ID), countWhere(t, &db.PlayEvent{}, "anon-rs"))
+	}
+	// Warm now: the database is not read again for this id.
+	reads := 0
+	prev := adoptedByRow
+	adoptedByRow = func(pid string) (string, time.Time) { reads++; return prev(pid) }
+	t.Cleanup(func() { adoptedByRow = prev })
+	if got := resolveAdopted("anon-rs"); got != first.ID || reads != 0 {
+		t.Fatalf("memo after the fallback: %q (%d reads)", got, reads)
+	}
+	// An id never adopted: one read, then the negative entry answers.
+	for i := 0; i < 5; i++ {
+		if got := resolveAdopted("anon-never"); got != "anon-never" {
+			t.Fatalf("never adopted: %q", got)
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("negative memo: %d reads, want 1", reads)
+	}
+	// A login of that id turns the negative entry positive at once.
+	_, set2 := login(t, "anon-never", "Noa", nil)
+	if got := resolveAdopted("anon-never"); got != set2 {
+		t.Fatalf("after login: %q want %q", got, set2)
+	}
+	// Past the grace the row no longer redirects, with or without the map.
+	resetAdoptions()
+	adoptionNow = func() time.Time { return time.Now().Add(adoptionGrace + time.Minute) }
+	t.Cleanup(func() { adoptionNow = time.Now })
+	if got := resolveAdopted("anon-rs"); got != "anon-rs" {
+		t.Fatalf("grace not honoured from the database: %q", got)
+	}
+	// A row adopted before the column existed (adopted_at NULL): no grace.
+	db.DB.Create(&db.Profile{ID: "anon-old", AdoptedBy: first.ID, CreatedAt: time.Now()})
+	adoptionNow = time.Now
+	if got := resolveAdopted("anon-old"); got != "anon-old" {
+		t.Fatalf("adopted_at NULL redirected: %q", got)
+	}
+}
+
+// L13-6: two concurrent logins, one slow: the second waits at most
+// loginLockTimeout and answers 503 (no unbounded pile-up); a login of
+// unrelated profiles is not blocked; the slow one still completes.
+func TestLoginConcurrentSlowBounded(t *testing.T) {
+	useMergeDB(t)
+	seedProfile(t, "anon-slow", 3, nil, nil, nil)
+	seedProfile(t, "anon-free", 2, nil, nil, nil)
+	loginLockTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { loginLockTimeout = 5 * time.Second })
+	gate := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	var first int32
+	loginLockedHook = func(to string) {
+		if atomic.CompareAndSwapInt32(&first, 0, 1) {
+			entered <- struct{}{}
+			<-gate // the slow login holds its locks until the test opens the gate
+		}
+	}
+	t.Cleanup(func() { loginLockedHook = nil })
+	type res struct {
+		code int
+		out  loginOut
+	}
+	slow := make(chan res, 1)
+	go func() {
+		code, out := loginRaw("anon-slow", "Sam")
+		slow <- res{code, out}
+	}()
+	<-entered
+	// Unrelated profiles: served at once.
+	start := time.Now()
+	if code, out := loginRaw("anon-free", "Fay"); code != http.StatusOK || out.Migrated == nil || out.Migrated.Plays != 2 || time.Since(start) > loginLockTimeout {
+		t.Fatalf("unrelated login blocked: %d %s (%s)", code, out.raw, time.Since(start))
+	}
+	// Same source (double tap, second tab): bounded wait, then 503.
+	start = time.Now()
+	code, out := loginRaw("anon-slow", "Sam")
+	if el := time.Since(start); code != http.StatusServiceUnavailable || !strings.Contains(out.raw, "busy") || el < loginLockTimeout || el > 6*time.Second {
+		t.Fatalf("second login: %d %s after %s", code, out.raw, el)
+	}
+	// Same target from another device: bounded too.
+	if code, out := loginRaw("anon-other", "Sam"); code != http.StatusServiceUnavailable {
+		t.Fatalf("same name login: %d %s", code, out.raw)
+	}
+	close(gate)
+	r := <-slow
+	if r.code != http.StatusOK || r.out.Migrated == nil || r.out.Migrated.Plays != 3 {
+		t.Fatalf("slow login: %d %s", r.code, r.out.raw)
+	}
+	// Nothing left held: the next login of the same profile runs at once.
+	start = time.Now()
+	if code, out := loginRaw("anon-slow", "Sam"); code != http.StatusOK || time.Since(start) > loginLockTimeout {
+		t.Fatalf("after release: %d %s (%s)", code, out.raw, time.Since(start))
+	}
+	loginLocks.mu.Lock()
+	left := len(loginLocks.held)
+	loginLocks.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d lock entries left", left)
 	}
 }
