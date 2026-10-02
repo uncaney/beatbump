@@ -326,6 +326,13 @@
 				</div>
 			{/if}
 			<p class="hint">Le stockage hors-ligne se règle dans <a href="/settings">Réglages</a>.</p>
+			<!-- B7-13: the page to send a friend (steps, QR code, share). -->
+			<p class="hint">Pour l'installer sur un autre téléphone, ou chez un ami :</p>
+			<a
+				class="btn-secondary"
+				href="/bienvenue"
+				data-testid="about-bienvenue">Installer chez toi</a
+			>
 		</section>
 
 		<section aria-labelledby="about-help">
