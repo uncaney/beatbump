@@ -107,6 +107,7 @@
 					type="button"
 					role="tab"
 					aria-selected={p.days === days}
+					class="btn-reset"
 					class:active={p.days === days}
 					data-testid="stats-period-{p.days}"
 					on:click={() => pick(p.days)}>{p.label}</button
@@ -331,27 +332,42 @@
 		gap: 0.4rem;
 		flex-wrap: wrap;
 	}
+	// U13-1 (audit UX v13): `.btn-reset` escapes the global `button:not(.icon-btn)`
+	// rule (`color: #0f0f0f !important`, _button.scss) that painted "7 jours" /
+	// "365 jours" black on the dark pill (ratio 1,01); the colours are explicit
+	// here (no `inherit`, no opacity on the text): #e6e6e6 on the dark pill
+	// (>= 11:1), #000 on the green active pill (>= 12:1).
 	.periods button {
-		min-height: 44px;
-		min-width: 44px;
+		min-height: max(2.75rem, 44px);
+		min-width: max(2.75rem, 44px);
 		padding: 0.35rem 0.9rem;
 		border-radius: 1rem;
-		border: 1px solid rgba(255, 255, 255, 0.2);
-		background: rgba(255, 255, 255, 0.06);
-		color: inherit;
+		border: 1px solid rgba(255, 255, 255, 0.35);
+		background: rgba(255, 255, 255, 0.08);
+		color: #e6e6e6;
 		font: inherit;
+		font-size: var(--text-secondary-size);
 		font-weight: 500;
+		line-height: 1.2;
 		cursor: pointer;
-		opacity: 0.75;
+		text-transform: none;
 	}
-	.periods button:hover {
-		opacity: 1;
+	.periods button:hover,
+	.periods button:focus-visible {
+		color: #fff;
+		background: rgba(255, 255, 255, 0.14);
+		border-color: rgba(255, 255, 255, 0.55);
+	}
+	.periods button:focus-visible {
+		outline: 2px solid var(--accent, #1ed760);
+		outline-offset: 2px;
 	}
 	a.export {
 		text-decoration: none;
 	}
-	.periods button.active {
-		opacity: 1;
+	.periods button.active,
+	.periods button.active:hover,
+	.periods button.active:focus-visible {
 		background: var(--accent, #1ed760);
 		color: #000;
 		border-color: transparent;

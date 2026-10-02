@@ -57,7 +57,6 @@ const LEGACY: Record<string, number> = {
 	"routes/(app)/library/_components/Popup.svelte": 1,
 	"routes/(app)/library/downloads-offline/+page.svelte": 6,
 	"routes/(app)/library/for-you/+page.svelte": 0,
-	"routes/(app)/library/stats/+page.svelte": 1,
 	"routes/(app)/library/_Sync.svelte": 5,
 	"routes/(app)/lyrics/+page.svelte": 4,
 	"routes/(app)/trending/+page.svelte": 1,
