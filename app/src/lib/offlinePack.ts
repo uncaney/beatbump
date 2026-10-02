@@ -163,18 +163,72 @@ export function packDurationText(done: number, total: number, doneSeconds: numbe
 
 /** 1 Mo per minute of audio, the default bitrate guess (Opus / AAC streams). */
 export const PACK_DEFAULT_BPS = Math.round((1024 * 1024) / 60);
+/**
+ * U14-1: the owned library keeps lossless files. A 4 min FLAC weighs about
+ * 25 Mo (audit-perf-v5 PF5-4: median 25 Mo over 111 whole /localf downloads),
+ * six times an Opus stream: the default for a plan drawn from the library
+ * (the day-one "Emporte 1 h" card announced 60 Mo for 2 Go before this).
+ */
+export const PACK_LOSSLESS_BPS = Math.round((25 * 1024 * 1024) / 240);
 /** Share of the free space the guard leaves untouched (metadata, API cache). */
 export const PACK_SPACE_HEADROOM = 0.1;
+
+/** A /localf URL: the owned library, served as the file is (lossless). */
+export function isLosslessUrl(url: unknown): boolean {
+	return typeof url === "string" && /\/localf\b/.test(url);
+}
+
+/**
+ * U14-1: an item of the owned library: a lid (11 lowercase hex chars, the
+ * backend's `isLid()`, never a YouTube videoId) or a /localf URL on the item.
+ */
+export function isLosslessItem(item: any, videoId?: string): boolean {
+	const id = String(videoId ?? item?.videoId ?? "");
+	if (/^[0-9a-f]{11}$/.test(id)) return true;
+	return isLosslessUrl(item?.localUrl) || isLosslessUrl(item?._offlineUrl);
+}
+
+/** True when at least half of the plan's items are library files (the pack downloads lossless). */
+export function packIsLossless(items: ReadonlyArray<Pick<PackItem, "item" | "videoId">> | null | undefined): boolean {
+	const list = items ?? [];
+	if (!list.length) return false;
+	let n = 0;
+	for (const i of list) if (isLosslessItem(i.item, i.videoId)) n++;
+	return n * 2 >= list.length;
+}
+
+/** The default bitrate of a plan: lossless for a library pack, streams otherwise. */
+export function packDefaultBps(items: ReadonlyArray<Pick<PackItem, "item" | "videoId">> | null | undefined): number {
+	return packIsLossless(items) ? PACK_LOSSLESS_BPS : PACK_DEFAULT_BPS;
+}
+
+/**
+ * U14-1: the cache entries of the plan's own source, so a library pack is
+ * never measured on two Opus streams (nor a stream pack on three FLAC): the
+ * /localf entries for a lossless plan, the others otherwise. Entries without
+ * a URL are kept (nothing says which side they are on).
+ */
+export function packSourceEntries<T extends { url?: string } | null | undefined>(entries: ReadonlyArray<T> | null | undefined, lossless: boolean): T[] {
+	const out: T[] = [];
+	for (const e of entries ?? []) {
+		if (!e) continue;
+		if (typeof e.url !== "string" || !e.url || isLosslessUrl(e.url) === lossless) out.push(e);
+	}
+	return out;
+}
 
 /**
  * Average bytes per second of listening, from the cached entries whose length
  * is known (`seconds` by videoId: the local list `length` / `duration`), the
- * default when fewer than two entries can be measured.
+ * `fallback` (PACK_DEFAULT_BPS: streams; PACK_LOSSLESS_BPS for a library
+ * plan, U14-1) when fewer than two entries can be measured.
  */
 export function averageBytesPerSecond(
 	entries: ReadonlyArray<{ videoId?: string; bytes?: number } | null | undefined> | null | undefined,
 	seconds: ReadonlyMap<string, number> | null | undefined,
+	fallback: number = PACK_DEFAULT_BPS,
 ): number {
+	const dflt = Number.isFinite(fallback) && fallback > 0 ? Math.round(fallback) : PACK_DEFAULT_BPS;
 	let bytes = 0;
 	let secs = 0;
 	let n = 0;
@@ -187,9 +241,9 @@ export function averageBytesPerSecond(
 		secs += s;
 		n++;
 	}
-	if (n < 2 || secs <= 0) return PACK_DEFAULT_BPS;
+	if (n < 2 || secs <= 0) return dflt;
 	const bps = Math.round(bytes / secs);
-	return bps > 0 ? bps : PACK_DEFAULT_BPS;
+	return bps > 0 ? bps : dflt;
 }
 
 /** Bytes a planned item will take: its known size, else its length at `bps`. */

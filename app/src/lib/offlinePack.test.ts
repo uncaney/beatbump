@@ -19,8 +19,13 @@ import {
 	PACK_DATA_SAVER_CAP,
 	PACK_DEFAULT_BPS,
 	PACK_EST_BYTES,
+	PACK_LOSSLESS_BPS,
 	PACK_EST_SECONDS,
 	averageBytesPerSecond,
+	isLosslessItem,
+	packDefaultBps,
+	packIsLossless,
+	packSourceEntries,
 	cutPackToBytes,
 	estimatePackBytes,
 	guardPackSpace,
@@ -480,5 +485,56 @@ describe("U13-2 size before the tap, progress of an adopted pack", () => {
 		const back = readLastPack(kv);
 		expect(back?.items.length).toBe(1);
 		expect(back?.estimatedBytes).toBeUndefined();
+	});
+});
+
+describe("U14-1 default bitrate per source", () => {
+	it("PACK_LOSSLESS_BPS is 25 Mo per 4 min (audit-perf-v5 median FLAC), six times a stream", () => {
+		expect(PACK_LOSSLESS_BPS).toBe(Math.round((25 * MB) / 240));
+		expect(PACK_LOSSLESS_BPS / PACK_DEFAULT_BPS).toBeGreaterThan(6);
+	});
+
+	it("isLosslessItem: a lid (11 lowercase hex), a /localf URL; never a YouTube id", () => {
+		expect(isLosslessItem(tr("6300e80e2e2"))).toBe(true);
+		expect(isLosslessItem(tr("fa5IWHDbftI"))).toBe(false);
+		expect(isLosslessItem(tr("fa5IWHDbftI", { localUrl: "/localf?p=a.flac" }))).toBe(true);
+		expect(isLosslessItem(tr("fa5IWHDbftI", { _offlineUrl: "https://x/aud/fa5IWHDbftI" }))).toBe(false);
+		expect(isLosslessItem(null, "6300e80e2e2")).toBe(true);
+		expect(isLosslessItem(null)).toBe(false);
+	});
+
+	it("packIsLossless / packDefaultBps: at least half the plan from the library", () => {
+		const local = planPack({ favorites: [tr("6300e80e2e1"), tr("6300e80e2e2"), tr("fa5IWHDbftI")] }, 3600, "seconds");
+		expect(packIsLossless(local.items)).toBe(true);
+		expect(packDefaultBps(local.items)).toBe(PACK_LOSSLESS_BPS);
+		const streams = planPack({ favorites: [tr("fa5IWHDbftI"), tr("dQw4w9WgXcQ"), tr("6300e80e2e2")] }, 3600, "seconds");
+		expect(packIsLossless(streams.items)).toBe(false);
+		expect(packDefaultBps(streams.items)).toBe(PACK_DEFAULT_BPS);
+		expect(packIsLossless([])).toBe(false);
+		expect(packDefaultBps(null)).toBe(PACK_DEFAULT_BPS);
+	});
+
+	it("averageBytesPerSecond: the fallback is the source's default under two measured entries", () => {
+		const secs = new Map([["a", 240]]);
+		expect(averageBytesPerSecond([{ videoId: "a", bytes: 25 * MB }], secs, PACK_LOSSLESS_BPS)).toBe(PACK_LOSSLESS_BPS);
+		expect(averageBytesPerSecond(null, null, PACK_LOSSLESS_BPS)).toBe(PACK_LOSSLESS_BPS);
+		expect(averageBytesPerSecond(null, null, 0)).toBe(PACK_DEFAULT_BPS);
+		expect(averageBytesPerSecond(null, null, NaN)).toBe(PACK_DEFAULT_BPS);
+		// Two measured entries still win over the fallback.
+		const two = new Map([["a", 100], ["b", 100]]);
+		expect(averageBytesPerSecond([{ videoId: "a", bytes: 1_000_000 }, { videoId: "b", bytes: 1_000_000 }], two, PACK_LOSSLESS_BPS)).toBe(10_000);
+	});
+
+	it("packSourceEntries keeps the entries of the plan's own source (a FLAC pack is never measured on Opus streams)", () => {
+		const entries = [
+			{ videoId: "a", bytes: 1, url: "https://x/localf?p=a.flac" },
+			{ videoId: "b", bytes: 1, url: "https://x/aud/b" },
+			{ videoId: "c", bytes: 1, url: "https://x/vp?id=c" },
+			{ videoId: "d", bytes: 1 },
+			null,
+		];
+		expect(packSourceEntries(entries, true).map((e) => e?.videoId)).toEqual(["a", "d"]);
+		expect(packSourceEntries(entries, false).map((e) => e?.videoId)).toEqual(["b", "c", "d"]);
+		expect(packSourceEntries(null, true)).toEqual([]);
 	});
 });

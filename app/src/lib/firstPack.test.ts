@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { FIRST_PACK_SECONDS, firstPackSizeText, firstPackSources, hasFirstPackMaterial, planFirstPack, shouldShowFirstPackCard, sizeFirstPack } from "./firstPack";
+import { FIRST_PACK_ESTIMATE_KEY, FIRST_PACK_SECONDS, firstPackSizeText, firstPackSources, freezeFirstPack, frozenEstimateFor, hasFirstPackMaterial, planFirstPack, readFrozenFirstPack, shouldShowFirstPackCard, sizeFirstPack } from "./firstPack";
+import { PACK_DEFAULT_BPS, PACK_LOSSLESS_BPS, averageBytesPerSecond, packDefaultBps, packIsLossless } from "./offlinePack";
 import { NNBSP } from "./utils/formatFr";
 
 describe("shouldShowFirstPackCard", () => {
@@ -101,5 +102,59 @@ describe("U13-2 size announced before the tap", () => {
 	it("firstPackSizeText: nothing without a plan", () => {
 		expect(firstPackSizeText(null)).toBe("");
 		expect(firstPackSizeText({ bytes: 0, dataSaver: false, capped: false, count: 0, seconds: 0 })).toBe("");
+	});
+});
+
+describe("U14-1 one number per pack", () => {
+	const MB = 1024 * 1024;
+	// Library tracks (lids): the day-one sources are all /localf.
+	const lid = (n: number, length = "4:00") => track(`6300e80e2e${n}`, length);
+	const localPlan = planFirstPack({ album: [lid(1), lid(2), lid(3)], artist: [lid(4)], mix: [] });
+
+	it("sizeFirstPack with an empty cache (n = 0) and a library source: the lossless default, never 1 Mo/min", () => {
+		const bps = averageBytesPerSecond([], null, packDefaultBps(localPlan.items));
+		expect(packIsLossless(localPlan.items)).toBe(true);
+		expect(bps).toBe(PACK_LOSSLESS_BPS);
+		const r = sizeFirstPack(localPlan, bps, false);
+		// 4 x 4 min at 25 Mo per 4 min = 100 Mo (16 min of listening), not 16 Mo.
+		expect(r.estimate.bytes).toBe(4 * 240 * PACK_LOSSLESS_BPS);
+		expect(r.estimate.bytes).toBeGreaterThan(99 * MB);
+		expect(firstPackSizeText(r.estimate)).toBe(`Environ 100${NNBSP}Mo à télécharger (qualité d'origine).`);
+		// The stream default would have said 16 Mo for the same pack.
+		expect(sizeFirstPack(localPlan, PACK_DEFAULT_BPS, false).estimate.bytes).toBeLessThan(17 * MB);
+	});
+
+	it("the first estimate is frozen for the day and reused for the same tracks, before and after the tap", () => {
+		const kv = new Map<string, string>();
+		const store = { getItem: (k: string) => kv.get(k) ?? null, setItem: (k: string, v: string) => void kv.set(k, v) };
+		const first = sizeFirstPack(localPlan, PACK_LOSSLESS_BPS, false).estimate;
+		expect(readFrozenFirstPack(store, "2026-10-02")).toBeNull();
+		freezeFirstPack(store, "2026-10-02", localPlan, first);
+		const frozen = readFrozenFirstPack(store, "2026-10-02");
+		expect(frozen?.ids).toEqual(["6300e80e2e1", "6300e80e2e2", "6300e80e2e3", "6300e80e2e4"]);
+		// Three FLAC landed in the cache meanwhile: the measured bitrate says 2,2 Go, the card keeps its number.
+		const later = sizeFirstPack(localPlan, 10 * PACK_LOSSLESS_BPS, false);
+		expect(later.estimate.bytes).not.toBe(first.bytes);
+		expect(frozenEstimateFor(frozen, later.plan)).toEqual(first);
+		expect(firstPackSizeText(frozenEstimateFor(frozen, later.plan))).toBe(firstPackSizeText(first));
+		// Same tracks in another order: still the same pack.
+		const reordered = { items: [...localPlan.items].reverse() };
+		expect(frozenEstimateFor(frozen, reordered)?.bytes).toBe(first.bytes);
+	});
+
+	it("another day or another set of tracks gets a fresh estimate", () => {
+		const kv = new Map<string, string>();
+		const store = { getItem: (k: string) => kv.get(k) ?? null, setItem: (k: string, v: string) => void kv.set(k, v) };
+		const first = sizeFirstPack(localPlan, PACK_LOSSLESS_BPS, false).estimate;
+		freezeFirstPack(store, "2026-10-02", localPlan, first);
+		expect(readFrozenFirstPack(store, "2026-10-03")).toBeNull();
+		const frozen = readFrozenFirstPack(store, "2026-10-02");
+		const other = planFirstPack({ album: [lid(1), lid(2)], artist: [], mix: [] });
+		expect(frozenEstimateFor(frozen, other)).toBeNull();
+		// Garbage in storage: ignored, no throw.
+		store.setItem(FIRST_PACK_ESTIMATE_KEY, "{not json");
+		expect(readFrozenFirstPack(store, "2026-10-02")).toBeNull();
+		expect(readFrozenFirstPack(null, "2026-10-02")).toBeNull();
+		expect(() => freezeFirstPack(null, "2026-10-02", localPlan, first)).not.toThrow();
 	});
 });

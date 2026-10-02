@@ -20,11 +20,12 @@
 	import { APIClient } from "$lib/api";
 	import { heardFirstSound } from "$lib/components/InstallHint/gate";
 	import { isDataSaver } from "$lib/dataSaver";
-	import { FIRST_PACK_HREF, FIRST_PACK_JOB_KEY, FIRST_PACK_KEY, firstPackSizeText, firstPackSources, hasFirstPackMaterial, planFirstPack, shouldShowFirstPackCard, sizeFirstPack, type FirstPackEstimate } from "$lib/firstPack";
+	import { utcDay } from "$lib/albumOfDay";
+	import { FIRST_PACK_HREF, FIRST_PACK_JOB_KEY, FIRST_PACK_KEY, firstPackSizeText, firstPackSources, freezeFirstPack, frozenEstimateFor, hasFirstPackMaterial, planFirstPack, readFrozenFirstPack, shouldShowFirstPackCard, sizeFirstPack, type FirstPackEstimate } from "$lib/firstPack";
 	import { getRecent } from "$lib/me";
 	import { cachedIds, getOfflineTracks, listCachedAudio, requestPersistentStorage, storageStatus, type AudioListEntry } from "$lib/offline";
 	import { defaultKeepDeps, keepDepsWithAbort, keepJobs, keepSummary, startKeepJob, type KeepResult } from "$lib/offlineBatch";
-	import { averageBytesPerSecond, estimatePackBytes, guardPackSpace, lastPackOf, originRoom, writeLastPack, type PackPlan } from "$lib/offlinePack";
+	import { averageBytesPerSecond, estimatePackBytes, guardPackSpace, lastPackOf, originRoom, packDefaultBps, packIsLossless, packSourceEntries, writeLastPack, type PackPlan } from "$lib/offlinePack";
 	import { durationOf } from "$lib/offlineQueue";
 	import { AudioPlayer } from "$lib/player";
 	import { notify } from "$lib/utils";
@@ -156,8 +157,20 @@
 		}
 		const plan = planFirstPack(src, cached, sizes);
 		if (!plan.count) return { ok: false, reason: "empty_plan", candidates: plan.candidates };
-		const bps = averageBytesPerSecond(entries, secs);
-		const sized = sizeFirstPack(plan, bps, isDataSaver());
+		// U14-1: a library pack downloads lossless files: its default is
+		// PACK_LOSSLESS_BPS (25 Mo per 4 min), never the 1 Mo/min of a stream,
+		// and the measured bitrate only comes from cache entries of its own
+		// source (two Opus streams said 60 Mo for 2 Go of FLAC).
+		const lossless = packIsLossless(plan.items);
+		const bps = averageBytesPerSecond(packSourceEntries(entries, lossless), secs, packDefaultBps(plan.items));
+		let sized = sizeFirstPack(plan, bps, isDataSaver());
+		// U14-1: one number per pack: the first estimate announced for these
+		// tracks is reused (same figure before and after the tap, on every
+		// return to the home), a new plan gets a new one.
+		const day = utcDay();
+		const frozen = frozenEstimateFor(readFrozenFirstPack(storage(), day), sized.plan);
+		if (frozen) sized = { plan: sized.plan, estimate: frozen };
+		else freezeFirstPack(storage(), day, sized.plan, sized.estimate);
 		return { ok: true, plan: sized.plan, estimate: sized.estimate, bps, entries, quota: typeof l?.quota === "number" ? l.quota : 0, pinnedBytes: Number(l?.pinnedBytes) || 0, st };
 	}
 

@@ -132,6 +132,55 @@ export function sizeFirstPack(plan: PackPlan, bps: number, dataSaver: boolean): 
 	return { plan: cut.plan, estimate: { bytes: cut.estimated, dataSaver, capped: cut.cut, count: cut.plan.count, seconds: cut.plan.seconds } };
 }
 
+// ---- U14-1: one number per pack ----
+// The card used to re-estimate the same pack on every return to the home
+// (60 Mo on an empty cache, 2,2 Go once three FLAC were auto-cached, 822 Mo
+// a minute later): the first estimate announced for a plan is remembered
+// (localStorage, keyed by the UTC day of the sources) and reused as long as
+// the plan holds the same tracks, before and after the tap.
+
+export const FIRST_PACK_ESTIMATE_KEY = "ytm-first-pack-estimate";
+export type FrozenFirstPack = { day: string; ids: string[]; estimate: FirstPackEstimate };
+type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void };
+
+/** The remembered estimate of `day` (null when absent, malformed or from another day). */
+export function readFrozenFirstPack(store: KV | null | undefined, day: string): FrozenFirstPack | null {
+	try {
+		const raw = store?.getItem(FIRST_PACK_ESTIMATE_KEY);
+		if (!raw) return null;
+		const v = JSON.parse(raw);
+		if (!v || typeof v !== "object" || v.day !== day || !Array.isArray(v.ids)) return null;
+		const ids = v.ids.filter((x: unknown) => typeof x === "string" && x !== "");
+		const e = v.estimate;
+		const bytes = Number(e?.bytes);
+		const count = Number(e?.count);
+		const seconds = Number(e?.seconds);
+		if (!ids.length || !Number.isFinite(bytes) || bytes <= 0 || !Number.isFinite(count) || count <= 0) return null;
+		return { day, ids, estimate: { bytes: Math.floor(bytes), dataSaver: e.dataSaver === true, capped: e.capped === true, count: Math.floor(count), seconds: Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0 } };
+	} catch {
+		return null;
+	}
+}
+
+/** Remember the estimate announced for `plan` on `day`. Never throws. */
+export function freezeFirstPack(store: KV | null | undefined, day: string, plan: Pick<PackPlan, "items">, estimate: FirstPackEstimate): void {
+	try {
+		if (!store || !plan.items.length || !(estimate.bytes > 0)) return;
+		const frozen: FrozenFirstPack = { day, ids: plan.items.map((i) => i.videoId), estimate: { ...estimate } };
+		store.setItem(FIRST_PACK_ESTIMATE_KEY, JSON.stringify(frozen));
+	} catch {
+		/* private mode / full storage: the next visit estimates again */
+	}
+}
+
+/** The frozen estimate when it was made for exactly the tracks of `plan` (same ids, any order), else null. */
+export function frozenEstimateFor(frozen: FrozenFirstPack | null | undefined, plan: Pick<PackPlan, "items">): FirstPackEstimate | null {
+	if (!frozen || frozen.ids.length !== plan.items.length) return null;
+	const want = new Set(frozen.ids);
+	for (const i of plan.items) if (!want.has(i.videoId)) return null;
+	return { ...frozen.estimate, count: plan.items.length };
+}
+
 /**
  * The size line of the card: "Environ 1,1 Go à télécharger (qualité
  * d'origine)."; under data saver the cap is named with what it holds
