@@ -32,6 +32,8 @@ func main() {
 	// c48b B8-20: first artist-aliases scan in the background (the artist
 	// page chips, the songs union and the folded Artists list read the memo).
 	api.WarmArtistAliases()
+	// PF5-2: prime home.json so the first visitor after a deploy gets a HIT.
+	api.WarmHome()
 
 	e := newServer()
 	e.Logger.Fatal(e.Start(":8080"))
@@ -142,7 +144,8 @@ func newServer() *echo.Echo {
 	// K5: one YouTube round trip (~200 ms) per keystroke; the answer only depends on q.
 	e.GET("/api/v1/get_search_suggestions.json", api.CacheResponse(10*time.Minute, api.GetSearchSuggstionsHandler))
 
-	e.GET("/api/v1/home.json", api.CacheResponseSWR(2*time.Minute, 30*time.Minute, api.HomeEndpointHandler))
+	// PF5-2: 2 min TTL + 24 h stale-while-revalidate grace, primed at boot (api.WarmHome).
+	e.GET("/api/v1/home.json", api.HomeCached())
 	e.GET("/api/v1/explore/:category", api.CacheResponse(5*time.Minute, api.ExploreEndpointHandler))
 	e.GET("/api/v1/explore", api.CacheResponse(5*time.Minute, api.ExploreEndpointHandler))
 	e.GET("/api/v1/trending", api.CacheResponse(5*time.Minute, api.TrendingEndpointHandler))
