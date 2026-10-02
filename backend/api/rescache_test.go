@@ -142,3 +142,35 @@ func TestCacheResponseUnlessSkipsPerProfile(t *testing.T) {
 		t.Fatalf("handler calls = %d, want 3", calls)
 	}
 }
+
+// L14-11: the related wrapper computes a profile-free base answer on an inner
+// context; a cookie set there is not replayed to the client (documented in
+// relatedCacheWith), while the cache status and the body still cross.
+func TestRelatedCacheDropsInnerSetCookie(t *testing.T) {
+	t.Setenv("YTM_API_CACHE", "")
+	e := echo.New()
+	h := relatedCacheWith(newResponseCache(10), time.Minute, func(c echo.Context) error {
+		c.SetCookie(&http.Cookie{Name: "ytm_inner", Value: "leak", Path: "/"})
+		c.Response().Header().Set("X-Inner-Only", "1")
+		return c.JSON(http.StatusOK, relatedAnswer{Items: []Item{{Title: "a"}, {Title: "b"}}, Cap: 2})
+	})
+	for i, want := range []string{"MISS", "HIT"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/local/related?seed=album:x", nil)
+		rec := httptest.NewRecorder()
+		if err := h(e.NewContext(req, rec)); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusOK || len(rec.Body.Bytes()) == 0 {
+			t.Fatalf("call %d: status %d body %q", i, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get("X-Ytm-Cache"); got != want {
+			t.Fatalf("call %d: X-Ytm-Cache = %q, want %q", i, got, want)
+		}
+		if sc := rec.Header().Values("Set-Cookie"); len(sc) != 0 {
+			t.Fatalf("call %d: inner Set-Cookie replayed to the client: %v", i, sc)
+		}
+		if rec.Header().Get("X-Inner-Only") != "" {
+			t.Fatalf("call %d: inner headers other than X-Ytm-Cache crossed", i)
+		}
+	}
+}
