@@ -1,12 +1,16 @@
 <script lang="ts">
-	// HL4: contextual install prompt. Shown above the mini-bar once eligible
-	// (3rd visit or the first successful "Garder hors-ligne", see
-	// `installHintEligible` in $lib/stores/pwa) AND the browser can actually
+	// HL4: contextual install prompt. Shown above the mini-bar once the
+	// session heard its first sound (c48c B8-4: `installHintGate` in ./gate,
+	// AudioPlayer.paused true -> false once; /bienvenue, the install page, is
+	// the one page whose first paint may carry it; the HL4 3rd-visit /
+	// first-keep eligibility of $lib/stores/pwa no longer shows it on first
+	// paint) AND the browser can actually
 	// install the app (Chromium's captured `beforeinstallprompt`, or iOS where
 	// the event never fires and we show the Share instructions instead) AND
 	// it is not already installed, not snoozed (14 days, "Plus tard") and was
 	// not shown yet this session. Never pops up right as a track starts
-	// playing (a 2 s window after `AudioPlayer.paused` goes false).
+	// playing (a 2 s window after `AudioPlayer.paused` goes false: the first
+	// sound shows the bar 2 s later, not on the beat).
 	// Audit UX v11 U11-3: one full-width compact bar docked on the mini-bar
 	// instead of a floating card
 	// with two dismiss affordances; a single "Installer" + a single close
@@ -19,7 +23,6 @@
 	import { page } from "$app/stores";
 	import Icon from "$components/Icon/Icon.svelte";
 	import {
-		installHintEligible,
 		installPrompt,
 		isInstalled,
 		isIOS,
@@ -31,19 +34,23 @@
 	import { queue } from "$lib/stores/list";
 	import { fullscreenStore } from "$components/Player/channel";
 	import { installHintDock, installHintGeometry, installHintReserve } from "./dock";
+	import { heardFirstSound, installHintGate } from "./gate";
 
 	// Shown at most once per session: once true, stays true for the rest of
 	// this component's (= the app's) lifetime, whatever triggers next.
 	let dismissed = false;
 	let snoozed = true;
 	let justStartedPlaying = false;
+	// c48c B8-4: a track started playing in this session (never reset).
+	let heardSound = false;
 	let startTimer: ReturnType<typeof setTimeout> | undefined;
 
 	onMount(() => {
 		snoozed = isInstallHintSnoozed();
 		let prevPaused = true;
 		const unsubPaused = AudioPlayer.paused.subscribe((paused) => {
-			if (prevPaused && !paused) {
+			if (heardFirstSound(prevPaused, paused)) {
+				heardSound = true;
 				justStartedPlaying = true;
 				clearTimeout(startTimer);
 				startTimer = setTimeout(() => (justStartedPlaying = false), 2000);
@@ -61,13 +68,15 @@
 	$: hasPlayer = $queue.length > 0;
 	$: dock = installHintDock(hasPlayer);
 	$: geometry = installHintGeometry(dock);
+	// c48c B8-4: after the first sound of the session, or on /bienvenue; never on first paint.
+	$: allowed = installHintGate({ heardSound, pathname: $page?.url?.pathname ?? "" });
 	$: show =
 		!dismissed &&
 		!snoozed &&
 		!justStartedPlaying &&
 		!onPlaybackSurface &&
 		!$isInstalled &&
-		$installHintEligible &&
+		allowed &&
 		canOffer;
 
 	// L10-14: while shown, the page's main keeps the strip's height free at its
