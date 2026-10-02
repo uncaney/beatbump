@@ -36,6 +36,13 @@ func hasProfileCookie(c echo.Context) bool {
 
 func profileID(c echo.Context) string {
 	if ck, err := c.Cookie("bbp"); err == nil && ck.Value != "" {
+		// c45b (L12-8): a write that left with the anonymous cookie while
+		// the login was merging it lands on the named profile, not on the
+		// abandoned anonymous id; the cookie is switched on the way back.
+		if to := resolveAdopted(ck.Value); to != ck.Value {
+			setProfileCookie(c, to)
+			return to
+		}
 		return ck.Value
 	}
 	id := randID()
@@ -54,6 +61,10 @@ func setProfileCookie(c echo.Context, id string) {
 func MeLoginHandler(c echo.Context) error {
 	var b struct {
 		Name string `json:"name"`
+		// PrevAnon (c45b, L12-8): the anonymous id the client remembers from
+		// its previous login (`ytm-prev-anon`); re-adopted only when this
+		// same name adopted it before (profile_merge.go loginAndMerge).
+		PrevAnon string `json:"prevAnon"`
 	}
 	_ = decodeBody(c, &b)
 	name := strings.TrimSpace(b.Name)
@@ -65,12 +76,23 @@ func MeLoginHandler(c echo.Context) error {
 	// 39A: the anonymous profile this device used so far (if any) is moved
 	// onto the named one. Never from a named profile (two people), never for
 	// the e2e harness (unless YTM_STATS_INCLUDE_HARNESS=1).
+	// c45b: a cookie adopted moments ago (double login) already IS the named
+	// profile: nothing to merge, same answer.
 	from := ""
 	if ck, err := c.Cookie("bbp"); err == nil {
-		from = ck.Value
+		from = resolveAdopted(ck.Value)
 	}
-	merge := !harnessRequest(c.Request()) && mergeableSource(from, id)
-	moved, err := loginAndMerge(from, id, name, merge)
+	prevAnon := strings.TrimSpace(b.PrevAnon)
+	if len(prevAnon) > 64 {
+		prevAnon = ""
+	}
+	merge := !harnessRequest(c.Request())
+	if from != "" && from != id && namedProfileID(from) {
+		merge = false // two people: never mix, not even a remembered anonymous id
+	}
+	// `migrated` is null when nothing moved (no eligible source, second
+	// concurrent login, stale cookie): the client shows no "0 écoute" line.
+	moved, err := loginAndMerge(from, prevAnon, id, name, merge)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "login failed"})
 	}

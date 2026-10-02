@@ -145,25 +145,78 @@ export async function isAnonymousProfile(): Promise<boolean> {
 		return false;
 	}
 }
+// ---- c45b B7-17 (L12-8): clean login ----
+// A write (play, skip, favourite, follow, playlist, now_playing) that leaves
+// while POST me/login is on the wire still carries the anonymous cookie: it
+// lands on the abandoned anonymous profile after the merge (orphaned; the
+// server also redirects it for a while, profile_merge.go). Every write path
+// below first awaits `loginSettled()`: during a login it is held, and sent
+// with the named cookie once the server answered (success or failure). The
+// anonymous id of the previous login is kept in localStorage (`ytm-prev-anon`)
+// and sent as `prevAnon`: the server re-adopts what still landed on it, and
+// only for the same name. Logout forgets it (a new person on the device).
+export const PREV_ANON_KEY = "ytm-prev-anon";
+let loginGate: Promise<void> | null = null;
+/** Resolves when no login is in progress (immediately outside a login). */
+export function loginSettled(): Promise<void> {
+	return loginGate ?? Promise.resolve();
+}
+/** true while POST me/login is on the wire. */
+export function loginInProgress(): boolean {
+	return loginGate !== null;
+}
+function readPrevAnon(): string {
+	try {
+		const v = localStorage.getItem(PREV_ANON_KEY);
+		return typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v) ? v : "";
+	} catch {
+		return "";
+	}
+}
+function writePrevAnon(id: string): void {
+	try {
+		if (id) localStorage.setItem(PREV_ANON_KEY, id);
+		else localStorage.removeItem(PREV_ANON_KEY);
+	} catch {
+		/* private mode */
+	}
+}
 /**
  * 39A: the server moves this device's anonymous history onto the named
  * profile; `migrated` says what moved (null when nothing was eligible: no
- * anonymous profile, or switching between two named profiles). The last
+ * anonymous profile, or switching between two named profiles; c45b: or
+ * nothing left to move, e.g. a second login racing the first). The last
  * non-empty migration is kept for the Compte page.
  */
 export async function login(name: string): Promise<{ id: string; name: string; migrated: MigratedCounts | null }> {
-	forgetWhoami();
-	// L8-5: the instant-home cache belongs to the previous profile; drop it so the
-	// next /home never paints another profile's rows (listener lives on /home only).
-	clearHomeCache(typeof localStorage === "undefined" ? undefined : localStorage);
-	const res = await APIClient.post(`/api/v1/me/login`, { name });
-	if (res && typeof res.ok === "boolean" && !res.ok) throw new Error(`login ${res.status}`);
-	const r = await res.json();
-	if (r && typeof r === "object" && typeof r.id === "string") writeWhoamiMemo({ id: r.id, name: typeof r.name === "string" ? r.name : "" });
-	const migrated = parseMigrated(r?.migrated);
-	if (r && typeof r.name === "string") rememberMigration(r.name, migrated);
-	announceProfileChange();
-	return { ...r, migrated };
+	// The anonymous id this device used until now (memo; no request when it
+	// is missing: the cookie is what the server merges anyway).
+	const before = readWhoamiMemo();
+	const anonBefore = before && !before.name && !/^u-/.test(before.id) ? before.id : "";
+	const prevAnon = readPrevAnon();
+	let release: () => void = () => {};
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	loginGate = gate;
+	try {
+		forgetWhoami();
+		// L8-5: the instant-home cache belongs to the previous profile; drop it so the
+		// next /home never paints another profile's rows (listener lives on /home only).
+		clearHomeCache(typeof localStorage === "undefined" ? undefined : localStorage);
+		const res = await APIClient.post(`/api/v1/me/login`, prevAnon ? { name, prevAnon } : { name });
+		if (res && typeof res.ok === "boolean" && !res.ok) throw new Error(`login ${res.status}`);
+		const r = await res.json();
+		if (r && typeof r === "object" && typeof r.id === "string") writeWhoamiMemo({ id: r.id, name: typeof r.name === "string" ? r.name : "" });
+		const migrated = parseMigrated(r?.migrated);
+		if (r && typeof r.name === "string") rememberMigration(r.name, migrated);
+		if (anonBefore) writePrevAnon(anonBefore);
+		announceProfileChange();
+		return { ...r, migrated };
+	} finally {
+		if (loginGate === gate) loginGate = null;
+		release();
+	}
 }
 /**
  * L10-8: the server call first, then the local purge and the announcement to
@@ -172,9 +225,11 @@ export async function login(name: string): Promise<{ id: string; name: string; m
  * the session as it was; the caller tells the user.
  */
 export async function logout(): Promise<Response> {
+	await loginSettled();
 	const r: Response = await APIClient.post(`/api/v1/me/logout`, {});
 	if (!r || !r.ok) throw new Error(`logout ${r ? r.status : "failed"}`);
 	forgetWhoami();
+	writePrevAnon(""); // c45b: the next name on this device is someone else
 	clearHomeCache(typeof localStorage === "undefined" ? undefined : localStorage);
 	announceProfileChange();
 	return r;
@@ -186,11 +241,13 @@ export async function getFavorites(kind?: string): Promise<{ favorites: any[]; i
 	return res.json();
 }
 export async function addFavorite(item: any) {
+	await loginSettled();
 	return APIClient.post(`/api/v1/me/favorites`, item);
 }
 export async function removeFavoriteItem(item: any) {
 	const ref = itemRef(item);
 	if (!ref) return;
+	await loginSettled();
 	return APIClient.del(`/api/v1/me/favorites?ref=${encodeURIComponent(ref)}`);
 }
 
@@ -208,9 +265,11 @@ export async function isFollowing(artistId: string): Promise<boolean> {
 	}
 }
 export async function follow(artistId: string, name = "", thumbnail = "") {
+	await loginSettled();
 	return APIClient.post(`/api/v1/me/follows`, { artistId, name, thumbnail });
 }
 export async function unfollow(artistId: string) {
+	await loginSettled();
 	return APIClient.del(`/api/v1/me/follows?artistId=${encodeURIComponent(artistId)}`);
 }
 
@@ -224,6 +283,7 @@ export async function unfollow(artistId: string) {
 // POST me/skips with their press time `at`.
 async function postPlay(item: any, playedAt?: number): Promise<SendResult> {
 	try {
+		await loginSettled(); // c45b: never with the cookie a login is replacing
 		if (isSkipItem(item)) {
 			const r = await APIClient.post(`/api/v1/me/skips`, skipBody(item as any, playedAt));
 			return statusResult(Number(r?.status) || 0);
@@ -339,20 +399,24 @@ export async function getPlaylists(): Promise<{ playlists: any[] }> {
 	return (await APIClient.fetch(`/api/v1/me/playlists`)).json();
 }
 export async function createPlaylist(name: string, description = "") {
+	await loginSettled();
 	return (await APIClient.post(`/api/v1/me/playlists`, { name, description })).json();
 }
 export async function getPlaylist(id: number | string): Promise<{ playlist: any; tracks: any[] }> {
 	return (await APIClient.fetch(`/api/v1/me/playlists/${id}`)).json();
 }
 export async function addToPlaylist(id: number | string, item: any) {
+	await loginSettled();
 	return APIClient.post(`/api/v1/me/playlists/${id}/items`, item);
 }
 export async function deletePlaylist(id: number | string) {
+	await loginSettled();
 	return APIClient.del(`/api/v1/me/playlists/${id}`);
 }
 export async function removeFromPlaylist(id: number | string, item: any) {
 	const ref = itemRef(item);
 	if (!ref) return;
+	await loginSettled();
 	return APIClient.del(`/api/v1/me/playlists/${id}/items?ref=${encodeURIComponent(ref)}`);
 }
 
@@ -378,6 +442,7 @@ export async function putNowPlaying(
 	keepalive = false,
 ): Promise<{ status: number; takenBy?: string; deviceName?: string }> {
 	try {
+		await loginSettled(); // c45b: the resume state follows the named profile
 		const r = await APIClient.fetch(`/api/v1/me/nowplaying`, {
 			method: "PUT",
 			headers: { "Content-Type": "application/json" },
