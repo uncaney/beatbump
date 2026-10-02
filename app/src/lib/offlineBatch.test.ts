@@ -13,7 +13,7 @@ vi.mock("$lib/offline", () => ({
 	abortCacheAudio: vi.fn(),
 }));
 
-import { compactKeepAriaLabel, CANCELLED_REASON, keepDepsWithAbort, cancelKeepJob, findKeepJob, jobMatchesKey, keepAliases, keepItemOfflineWith, keepMenuKey, KEEP_OFFLINE_MSG, KEEP_RUNNING_MSG, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
+import { compactKeepAriaLabel, CANCELLED_REASON, keepDepsWithAbort, keepDoneReady, cancelKeepJob, findKeepJob, jobMatchesKey, keepAliases, keepItemOfflineWith, keepMenuKey, KEEP_OFFLINE_MSG, KEEP_RUNNING_MSG, keepJobs, keepLabel, keepOffline, keepSummary, keepableTracks, QUOTA_MSG, rowOfflineState, startKeepJob, type KeepDeps, type KeepResult } from "./offlineBatch";
 import { get } from "svelte/store";
 
 const MB = 1024 * 1024;
@@ -417,5 +417,40 @@ describe("compactKeepAriaLabel (L10-13)", () => {
 	it("falls back to the state alone without a title", () => {
 		expect(compactKeepAriaLabel("Garder hors-ligne", "")).toBe("Garder hors-ligne");
 		expect(compactKeepAriaLabel("Garder hors-ligne", undefined)).toBe("Garder hors-ligne");
+	});
+});
+describe("keepDoneReady (c43d)", () => {
+	const res = (ready: number, total: number, cancelled = false): KeepResult => ({ ready, failed: total - ready, refused: 0, total, cancelled });
+	it("a complete batch of the source's tracks leaves it ready", () => {
+		expect(keepDoneReady(res(4, 4), 4)).toBe(true);
+		expect(keepDoneReady(res(1, 1), 1)).toBe(true);
+	});
+	it("not when cut short, cancelled, empty, of another size or absent", () => {
+		expect(keepDoneReady(res(3, 4), 4)).toBe(false);
+		expect(keepDoneReady(res(4, 4, true), 4)).toBe(false);
+		expect(keepDoneReady(res(0, 0), 0)).toBe(false);
+		expect(keepDoneReady(res(4, 4), 5)).toBe(false);
+		expect(keepDoneReady(res(4, 4), 0)).toBe(false);
+		expect(keepDoneReady(null, 4)).toBe(false);
+		expect(keepDoneReady(undefined, 4)).toBe(false);
+	});
+	it("the result a keep job resolves with is enough: no localStorage flag is read", async () => {
+		const deps: KeepDeps = { pin: async () => ({ ok: true }), download: async () => ({ ok: true }), cacheInfo: async () => null };
+		const r = await startKeepJob("keep:c43d-done", () => [tr("a"), tr("b"), tr("c")], { deps });
+		expect(r && r.ready).toBe(3);
+		expect(keepDoneReady(r, 3)).toBe(true);
+		expect(keepDoneReady(r, 4)).toBe(false);
+	});
+	it("a cancelled job never reads as ready even when every started track landed", async () => {
+		let release: () => void = () => {};
+		const gate = new Promise<void>((r) => (release = r));
+		const deps: KeepDeps = { pin: async () => ({ ok: false, reason: "not_cached" }), download: async () => { await gate; return { ok: true }; }, cacheInfo: async () => null };
+		const p = startKeepJob("keep:c43d-cancel", () => [tr("a"), tr("b"), tr("c"), tr("d")], { deps });
+		await new Promise((r) => setTimeout(r, 0));
+		cancelKeepJob("keep:c43d-cancel");
+		release();
+		const r = await p;
+		expect(r && r.cancelled).toBe(true);
+		expect(keepDoneReady(r, 4)).toBe(false);
 	});
 });

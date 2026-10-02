@@ -256,6 +256,20 @@ export function keepLabel(p: KeepProgress | null, running: boolean): string {
 }
 
 /**
+ * c43d: whether a finished batch leaves its source "Prêt hors-ligne": every one
+ * of its tracks is ready, nothing was cancelled, and it covered the `expected`
+ * tracks of the button's source. KeepOfflineButton used to read that state
+ * ONCE from the localStorage list when the job ended; another tab (a running
+ * pack, its reconcile after a cancel) rewrites that list concurrently and can
+ * drop the flags, so a complete batch showed "Garder hors-ligne" under its
+ * success toast. The batch result decides first, the list is the fallback.
+ */
+export function keepDoneReady(r: KeepResult | null | undefined, expected: number): boolean {
+	if (!r || r.cancelled || !r.total || !(expected > 0)) return false;
+	return r.ready === r.total && r.total === expected;
+}
+
+/**
  * L10-13: accessible name of the compact (icon-only) keep button: its state
  * AND the card it belongs to ("Garder hors-ligne : Années 1990", "Prêt
  * hors-ligne : Rock", "9/14 prêts : Daft Punk"); 20 identical names on
