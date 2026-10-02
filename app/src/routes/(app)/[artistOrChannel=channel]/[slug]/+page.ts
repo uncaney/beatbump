@@ -56,7 +56,7 @@ function parseResponse(data: {
             carousels: data?.carousels,
             songs: data?.songs,
             // B8-20 (c48b): the other credits of a local artist's group, for the "Aussi sous" chips.
-            aliases: data?.aliases ?? null,
+            aliases: (data as { aliases?: unknown } | undefined)?.aliases ?? null,
         },
         visitorData,
     };
