@@ -90,7 +90,12 @@ describe("getSrc local id guard (c56a)", () => {
 		onLine = true;
 		Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => onLine });
 	});
-	afterEach(() => {
+	afterEach(async () => {
+		// A test that toasted "passage au suivant" scheduled SessionListService.next()
+		// 600 ms later: let it fire here, not during the next test (L15-1 asserts no next()).
+		if (notify.mock.calls.some((c) => /passage au suivant/.test(String(c[0])))) {
+			await new Promise((r) => setTimeout(r, 700));
+		}
 		vi.restoreAllMocks();
 	});
 
@@ -128,6 +133,53 @@ describe("getSrc local id guard (c56a)", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(res?.error).toBe(true);
 		expect(String(notify.mock.calls[0]?.[0])).toMatch(/^Titre local introuvable/);
+	});
+
+	// L15-1: navigator.onLine true without a real network (one bar of 4G, a
+	// captive portal): the service worker answers {"offline":true} with a 200.
+	it("SW body {offline:true} on a lid: 'non disponible hors-ligne', never 'introuvable'", async () => {
+		const lid = "2c4ffc43b6e";
+		mixState.mix = [{ videoId: lid, title: "x" }, { videoId: "a9505c1dc34", title: "y" }];
+		fetchMock.mockResolvedValueOnce(jsonResponse(200, { offline: true }));
+		const { getSrc } = await loadPlayer();
+		const res = await getSrc(lid, undefined, undefined, true);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(res?.error).toBe(true);
+		expect(String(notify.mock.calls[0]?.[0])).toMatch(/^Titre local non disponible hors-ligne/);
+		expect(String(notify.mock.calls[0]?.[0])).not.toMatch(/introuvable/);
+	});
+
+	// L15-1: the paused startup restoration (+layout -> restoreResumeState ->
+	// getSrc(..., {prefetch, deferToPlay})) of a queue whose current title is
+	// not cached: no toast, no "passage au suivant", nothing plays by itself.
+	it("startup restore (deferToPlay) offline: no toast, no next(), error returned", async () => {
+		onLine = false;
+		const lid = "3d5ffc43b6e";
+		mixState.mix = [{ videoId: lid, title: "x" }, { videoId: "a9505c1dc34", title: "y" }];
+		const { getSrc } = await loadPlayer();
+		const { SessionListService } = await import("$stores/list/sessionList");
+		(SessionListService.next as ReturnType<typeof vi.fn>).mockClear();
+		const res = await getSrc(lid, undefined, undefined, true, { prefetch: true, deferToPlay: true });
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(res).toEqual({ body: null, error: true });
+		// handleError would schedule SessionListService.next() 600 ms later.
+		await new Promise((r) => setTimeout(r, 750));
+		expect(notify).not.toHaveBeenCalled();
+		expect(SessionListService.next).not.toHaveBeenCalled();
+	});
+
+	it("startup restore (deferToPlay) with the SW's {offline:true}: same, quiet", async () => {
+		const lid = "4e6ffc43b6e";
+		mixState.mix = [{ videoId: lid, title: "x" }, { videoId: "a9505c1dc34", title: "y" }];
+		fetchMock.mockResolvedValueOnce(jsonResponse(200, { offline: true }));
+		const { getSrc } = await loadPlayer();
+		const { SessionListService } = await import("$stores/list/sessionList");
+		(SessionListService.next as ReturnType<typeof vi.fn>).mockClear();
+		const res = await getSrc(lid, undefined, undefined, true, { prefetch: true, deferToPlay: true });
+		expect(res).toEqual({ body: null, error: true });
+		await new Promise((r) => setTimeout(r, 750));
+		expect(notify).not.toHaveBeenCalled();
+		expect(SessionListService.next).not.toHaveBeenCalled();
 	});
 
 	it("a YouTube id keeps the regular resolver path", async () => {

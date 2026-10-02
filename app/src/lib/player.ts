@@ -1178,11 +1178,17 @@ export const getSrc = async (
 	// `playlistId=undefined&playerParams=undefined`; offline, no request at
 	// all: the toast says the local title is not cached.
 	const res = videoId && isLocalTrackId(videoId) ? await fetchLocalPlayer(videoId, prefetch) : await fetchPlayerJson(videoId, playlistId, params, 0, prefetch);
+	// L15-1: a startup restoration (deferToPlay: +layout -> restoreResumeState)
+	// that cannot reach its source stays paused, queue and context shown: no
+	// toast, no "passage au suivant" and no play() without a gesture (the
+	// installed Android PWA would start the next track by itself at launch).
+	// resumeState clears the seek and the home "Reprendre la file" retries.
+	const fail = (err: PlayerRequestError) => (opts?.deferToPlay ? quietRestoreFailure(err) : handleError(err));
 	if (res instanceof PlayerRequestError) {
-		return handleError(res);
+		return fail(res);
 	}
 	if (!res || (!res?.streamingData && res?.playabilityStatus?.status === "UNPLAYABLE")) {
-		return handleError(new PlayerRequestError(404, "unplayable", "UNPLAYABLE", res?.playabilityStatus?.reason || ""));
+		return fail(new PlayerRequestError(404, "unplayable", "UNPLAYABLE", res?.playabilityStatus?.reason || ""));
 	}
 	const formats = sort({
 		data: res,
@@ -1290,6 +1296,13 @@ export async function fetchLocalPlayer(lid: string, prefetch = false): Promise<a
 	if (response.ok) {
 		try {
 			const body = await response.json();
+			// L15-1: `{"offline":true}` is the service worker's answer for an API
+			// call it could neither reach nor replay (navigator.onLine true with
+			// no real network: one bar of 4G, a captive portal): the title exists,
+			// it is "not available offline", not "introuvable".
+			if (body && body.offline === true) {
+				return new PlayerRequestError(0, "local_offline", "LOCAL_OFFLINE", LOCAL_PLAYER_MESSAGES.offline);
+			}
 			if (body?.streamingData?.adaptiveFormats?.length || body?.streamingData?.formats?.length) return body;
 		} catch {
 			/* fall through: no usable body */
@@ -1408,6 +1421,19 @@ async function retryMediaSource(videoId: string, playlistId: string | undefined,
 // (a dead backend would otherwise race through the whole queue). The streak is
 // reset by the next successful setTrack.
 let playerFailStreak = 0;
+
+/**
+ * L15-1: a source failure during the paused startup restoration. Logged, no
+ * toast, no auto-skip (handleError), no fail streak: nothing was asked for
+ * yet, the player simply stays paused on the restored row.
+ */
+function quietRestoreFailure(e: PlayerRequestError) {
+	console.warn("[player] startup restore: source unavailable", e.code, e.kind, e.status, e.reason);
+	return {
+		body: null,
+		error: true,
+	};
+}
 
 function handleError(err: PlayerRequestError | string | undefined) {
 	const e = typeof err === "string" || !err ? new PlayerRequestError(0, "unknown", "UNKNOWN", typeof err === "string" ? err : "") : err;
