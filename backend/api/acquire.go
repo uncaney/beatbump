@@ -86,28 +86,63 @@ func resolveYTArtistByName(name string) string {
 	return ""
 }
 
-// discographyVideoIds resolves a YT artist → albums → track videoIds (capped).
-func discographyVideoIds(artistID string, maxAlbums int) []string {
+// selfGetFn / acquireAlbumPause / acquireTrackPause are seams for tests
+// (no self-HTTP, no pauses).
+var (
+	selfGetFn         = selfGet
+	acquireAlbumPause = 250 * time.Millisecond // be gentle on companion
+	acquireTrackPause = 500 * time.Millisecond // slow, polite acquisition
+)
+
+// discographyAlbum is one album of a YT artist with its track videoIds.
+type discographyAlbum struct {
+	BrowseID string
+	VideoIDs []string
+}
+
+// discographyAlbums resolves a YT artist -> albums (MPREb..., capped) with
+// their tracks, plus the top-songs tracks that belong to none of them.
+func discographyAlbums(artistID string, maxAlbums int) (albums []discographyAlbum, singles []string) {
 	if maxAlbums <= 0 {
 		maxAlbums = 40
 	}
-	art := selfGet("/api/v1/artist/" + artistID)
+	art := selfGetFn("/api/v1/artist/" + artistID)
 	if art == nil {
-		return nil
+		return nil, nil
 	}
-	var browseIds, videoIds []string
+	isVid := func(s string) bool { return ytVideoRe.MatchString(s) }
+	var browseIds, topIds []string
 	collectKey(art, "browseId", &browseIds)
-	collectKey(art, "videoId", &videoIds) // top-songs shelf
-	albums := uniqStrings(browseIds, func(s string) bool { return len(s) > 5 && s[:5] == "MPREb" })
-	for i, alb := range albums {
+	collectKey(art, "videoId", &topIds) // top-songs shelf
+	seen := map[string]bool{}
+	ids := uniqStrings(browseIds, func(s string) bool { return len(s) > 5 && s[:5] == "MPREb" })
+	for i, alb := range ids {
 		if i >= maxAlbums {
 			break
 		}
-		a := selfGet("/api/v1/main.json?browseId=" + alb)
-		collectKey(a, "videoId", &videoIds)
-		time.Sleep(250 * time.Millisecond) // be gentle on companion
+		var vids []string
+		collectKey(selfGetFn("/api/v1/main.json?browseId="+alb), "videoId", &vids)
+		vids = uniqStrings(vids, func(s string) bool { return isVid(s) && !seen[s] })
+		for _, v := range vids {
+			seen[v] = true
+		}
+		if len(vids) > 0 {
+			albums = append(albums, discographyAlbum{BrowseID: alb, VideoIDs: vids})
+		}
+		time.Sleep(acquireAlbumPause)
 	}
-	return uniqStrings(videoIds, func(s string) bool { return ytVideoRe.MatchString(s) })
+	singles = uniqStrings(topIds, func(s string) bool { return isVid(s) && !seen[s] })
+	return albums, singles
+}
+
+// discographyVideoIds flattens discographyAlbums (albums first, then singles).
+func discographyVideoIds(artistID string, maxAlbums int) []string {
+	albums, singles := discographyAlbums(artistID, maxAlbums)
+	var out []string
+	for _, a := range albums {
+		out = append(out, a.VideoIDs...)
+	}
+	return append(out, singles...)
 }
 
 func enqueueYubal(vid string) bool {
@@ -141,22 +176,51 @@ func enqueueYubalURL(u string, maxItems int) bool {
 }
 
 // runAcquire enqueues a discography to Yubal (rate-limited) + records jobs.
+// Returns the number of tracks enqueued. Decision 8: the profile's daily cap
+// is charged one acquisition per album enqueued (status "album", the row's
+// videoId is the album browseId) and one per single track outside any album
+// (status "enqueued"); the pull stops for the day once the cap is reached.
 func runAcquire(profileID, artistID, name string, limit int) int {
 	if _, busy := acquiring.LoadOrStore(artistID, true); busy {
 		return 0
 	}
 	defer acquiring.Delete(artistID)
-	vids := discographyVideoIds(artistID, 40)
+	albums, singles := discographyAlbums(artistID, 40)
 	enq := 0
-	for _, vid := range vids {
+	enqueueTracks := func(vids []string) bool {
+		for _, vid := range vids {
+			if limit > 0 && enq >= limit {
+				return false
+			}
+			if enqueueYubal(vid) {
+				enq++
+			}
+			time.Sleep(acquireTrackPause)
+		}
+		return true
+	}
+	for _, alb := range albums {
+		if limit > 0 && enq >= limit {
+			return enq
+		}
+		if !acquireTryCharge(profileID, "album", artistID, name, alb.BrowseID) {
+			return enq
+		}
+		if !enqueueTracks(alb.VideoIDs) {
+			return enq
+		}
+	}
+	for _, vid := range singles {
 		if limit > 0 && enq >= limit {
 			break
 		}
+		if !acquireTryCharge(profileID, "enqueued", artistID, name, vid) {
+			break
+		}
 		if enqueueYubal(vid) {
-			db.DB.Create(&db.AcquireJob{ProfileID: profileID, ArtistID: artistID, ArtistName: name, VideoID: vid, Status: "enqueued", CreatedAt: time.Now()})
 			enq++
 		}
-		time.Sleep(500 * time.Millisecond) // slow, polite acquisition
+		time.Sleep(acquireTrackPause)
 	}
 	return enq
 }
@@ -180,6 +244,11 @@ func MeAcquireHandler(c echo.Context) error {
 		MaxAlbums int    `json:"maxAlbums"`
 	}
 	_ = decodeBody(c, &b)
+	// Decision 8: an explicit acquisition past the profile's daily cap is
+	// refused up front (a dry run only enumerates, it is not charged).
+	if !b.DryRun && acquireAllowance(pid) <= 0 {
+		return acquireQuotaResponse(c)
+	}
 	artistID := b.ArtistID
 	if artistID == "" || isLocalArtist(artistID) {
 		if b.Name == "" {
