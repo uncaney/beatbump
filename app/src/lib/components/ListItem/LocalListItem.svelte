@@ -4,6 +4,7 @@
 />
 
 <script lang="ts">
+	import { fr } from "$lib/configs/dropdowns.config";
 	import { groupSession, isPagePlaying } from "$lib/stores";
 	import { page as SPage } from "$app/stores";
 	import type { Item } from "$lib/types";
@@ -59,7 +60,8 @@
 	$: coverHue = hueFor(coverName);
 	let DropdownItems = [
 		{
-			text: "View Artist",
+			key: "View Artist",
+			text: fr("View Artist"),
 			icon: "artist",
 			action: async () => {
 				const __aid = await resolveArtistId(item);
@@ -73,7 +75,8 @@
 			},
 		},
 		{
-			text: "Remove from Playlist",
+			key: "Remove From Playlist",
+			text: fr("Remove From Playlist"),
 			icon: "x",
 			action: async () => {
 				await deleteSongFromPlaylist(parentPlaylistId, item.videoId);
@@ -82,14 +85,16 @@
 			},
 		},
 		{
-			text: "Favorite",
+			key: "Favorite",
+			text: fr("Favorite"),
 			icon: "heart",
 			action: () => {
 				saveFavourite(item);
 			},
 		},
 		{
-			text: "Share",
+			key: "Share",
+			text: fr("Share"),
 			icon: "share",
 			action: async () => {
 				let shareData = {
@@ -121,13 +126,13 @@
 				try {
 					if (!navigator.canShare) {
 						await navigator.clipboard.writeText(shareData.url);
-						notify("Link copied successfully", "success");
+						notify("Lien copié", "success");
 					} else {
 						const share = await navigator.share(shareData);
-						notify("Shared successfully", "success");
+						notify("Partagé", "success");
 					}
 				} catch (error) {
-					notify("Error: " + error, "error");
+					notify("Erreur : " + error, "error");
 				}
 			},
 		},

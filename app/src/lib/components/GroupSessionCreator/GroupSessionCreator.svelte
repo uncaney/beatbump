@@ -104,13 +104,13 @@
 			<div class="modal-container">
 				{#if step === 0}
 					<div class="modal-header">
-						<span class="h2">New Group Session</span>
+						<span class="h2">Nouvelle session de groupe</span>
 					</div>
 					<br />
 					<div class="modal-body">
 						<form on:submit={handleSubmit}>
 							<div class="container">
-								<p>Enter your display name:</p>
+								<p>Ton nom d'affichage :</p>
 								<div class="input">
 									<input
 										type=""
@@ -120,10 +120,10 @@
 								</div>
 							</div>
 							<div class="container">
-								<p class="h4 my-2">Settings</p>
+								<p class="h4 my-2">Options</p>
 								<div>
 									<p style="display:inline-block;">
-										Force Sync
+										Synchronisation forcée
 										<input
 											type="checkbox"
 											style="vertical-align: middle; margin-left: 1em;"
@@ -136,7 +136,7 @@
 									<Button
 										type="submit"
 										disabled={displayName ? false : true}
-										on:click={handleSubmit}>Create Group Session</Button
+										on:click={handleSubmit}>Créer la session</Button
 									>
 								</div>
 								<br />
@@ -145,15 +145,14 @@
 					</div>
 				{:else if step === 1}
 					<div class="modal-header">
-						<span class="h2">Created Group Session!</span>
+						<span class="h2">Session créée !</span>
 					</div>
 					<div class="modal-body">
 						<p>
-							Your group session has been created! You can invite anyone to join
-							your session by sending them the link found below!
+							Ta session de groupe est prête. Invite qui tu veux en lui envoyant le lien ci-dessous.
 						</p>
 						<p />
-						<p>Your Session URL:</p>
+						<p>Lien de ta session :</p>
 						<div class="url"><p>{sessionURL}</p></div>
 						<div class="container">
 							<span
@@ -162,13 +161,13 @@
 									if (!browser) return;
 									const target = event.currentTarget;
 									await navigator.clipboard.writeText(sessionURL);
-									target.innerText = "Copied!";
+									target.innerText = "Copié !";
 									setTimeout(() => {
-										target.innerText = "Copy";
+										target.innerText = "Copier";
 									}, 1500);
 								}}
 							>
-								Copy
+								Copier
 							</span>
 						</div>
 					</div>
@@ -178,7 +177,7 @@
 				class="danger"
 				on:click={() => {
 					showGroupSessionCreator.set(false);
-				}}>Close</Button
+				}}>Fermer</Button
 			>
 		</div>
 	</div>

@@ -152,8 +152,54 @@ const DROPDOWN_ICONS: ReadonlyArray<Icons> = [
 	"play-circle",
 ] as const;
 
-export type TypedDropdownItem<T extends Label, I extends Icons = Icons> = {
-	text: T;
+/** Libellés affichés, par identifiant de menu (decision 1 : tout en français, tutoiement). */
+export const DROPDOWN_LABELS_FR: Record<Label, string> = {
+	"View Artist": "Voir l'artiste",
+	"Add to Queue": "Ajouter à la file",
+	"Play Next": "Lire ensuite",
+	"Add to Playlist": "Ajouter à une playlist",
+	Favorite: "Favori",
+	"Start Group Session": "Lancer une session de groupe",
+	"Share Group Session": "Partager la session de groupe",
+	Share: "Partager",
+	"Shuffle Playlist": "Lecture aléatoire",
+	"Go to Album": "Voir l'album",
+	"Remove From Favorites": "Retirer des favoris",
+	"View Playlist": "Voir la playlist",
+	"Play Song Radio": "Radio du titre",
+	"Add to Favorites": "Ajouter aux favoris",
+	"Remove From Playlist": "Retirer de la playlist",
+	Shuffle: "Aléatoire",
+	"Up Next": "Suite",
+	Related: "Similaires",
+	"Start Playlist": "Lire la playlist",
+	"Edit Playlist": "Modifier la playlist",
+	"Start Radio": "Lancer la radio",
+	"Play Album": "Lire l'album",
+	Download: "Télécharger",
+	"Download to device": "Télécharger sur l'appareil",
+	"Garder hors-ligne": "Garder hors-ligne",
+	Lyrics: "Paroles",
+	"Invite Group Session": "Inviter à la session",
+	"Album Radio": "Radio de l'album",
+	"Remove from Queue": "Retirer de la file",
+	"Minuterie de sommeil": "Minuterie de sommeil",
+	"Raccourcis clavier": "Raccourcis clavier",
+	"Lire ensuite": "Lire ensuite",
+	"Ajouter à la file": "Ajouter à la file",
+	"Ajouter à une playlist": "Ajouter à une playlist",
+	"Lecture aléatoire": "Lecture aléatoire",
+};
+
+/** Texte affiché pour un identifiant de menu (l'identifiant lui-même si inconnu). */
+export function fr(label: Label): string {
+	return DROPDOWN_LABELS_FR[label] ?? label;
+}
+
+export type TypedDropdownItem<T extends Label = Label, I extends Icons = Icons> = {
+	/** Texte affiché (français). Le code filtre sur `key`, jamais sur `text`. */
+	text: string;
+	key?: T;
 	icon: I extends infer A ? A : I;
 	action: (...args: any[]) => Promise<void> | void;
 };
@@ -161,94 +207,94 @@ export type TypedDropdownItem<T extends Label, I extends Icons = Icons> = {
 export const DROPDOWN_ITEMS: Partial<{
 	[Key in Label]: Partial<TypedDropdownItem<Key, Icons>>;
 }> = {
-	"View Artist": { text: "View Artist", icon: "artist", action: () => { } },
-	"Add to Queue": { text: "Add to Queue", icon: "queue", action: () => { } },
-	"Play Next": { text: "Play Next", icon: "queue", action: () => { } },
-	Favorite: { text: "Favorite", icon: "heart", action: () => { } },
+	"View Artist": { text: fr("View Artist"), icon: "artist", action: () => { } },
+	"Add to Queue": { text: fr("Add to Queue"), icon: "queue", action: () => { } },
+	"Play Next": { text: fr("Play Next"), icon: "queue", action: () => { } },
+	Favorite: { text: fr("Favorite"), icon: "heart", action: () => { } },
 	"Start Group Session": {
-		text: "Start Group Session",
+		text: fr("Start Group Session"),
 		icon: "users",
 		action: () => { },
 	},
-	Share: { text: "Share", icon: "share", action: () => { } },
-	"Go to Album": { text: "Go to Album", icon: "album", action: () => { } },
+	Share: { text: fr("Share"), icon: "share", action: () => { } },
+	"Go to Album": { text: fr("Go to Album"), icon: "album", action: () => { } },
 	"Invite Group Session": {
-		text: "Invite Group Session",
+		text: fr("Invite Group Session"),
 		icon: "send",
 		action: () => { },
 	},
-	"View Playlist": { text: "View Playlist", icon: "list", action: () => { } },
+	"View Playlist": { text: fr("View Playlist"), icon: "list", action: () => { } },
 	"Play Song Radio": {
-		text: "Play Song Radio",
+		text: fr("Play Song Radio"),
 		icon: "radio",
 		action: () => { },
 	},
 	"Remove From Playlist": {
-		text: "Remove From Playlist",
+		text: fr("Remove From Playlist"),
 		icon: "x",
 		action: () => { },
 	},
 	"Add to Playlist": {
-		text: "Add to Playlist",
+		text: fr("Add to Playlist"),
 		icon: "list-plus",
 		action: () => { },
 	},
 	"Add to Favorites": {
-		text: "Add to Favorites",
+		text: fr("Add to Favorites"),
 		icon: "heart",
 		action: () => { },
 	},
 	"Download": {
-		text: "Download",
+		text: fr("Download"),
 		icon: "download",
 		action: () => { },
 	},
 	"Download to device": {
-		text: "Download to device",
+		text: fr("Download to device"),
 		icon: "download",
 		action: () => { },
 	},
 	// O8: download the track (or the album's tracks) then pin it.
 	"Garder hors-ligne": {
-		text: "Garder hors-ligne",
+		text: fr("Garder hors-ligne"),
 		icon: "pin",
 		action: () => { },
 	},
 	"Lyrics": {
-		text: "Lyrics",
+		text: fr("Lyrics"),
 		icon: "list-music",
 		action: () => { },
 	},
 	"Share Group Session": {
-		text: "Share Group Session",
+		text: fr("Share Group Session"),
 		icon: "share",
 		action: () => { },
 	},
-	Shuffle: { text: "Shuffle", icon: "shuffle", action: () => { } },
+	Shuffle: { text: fr("Shuffle"), icon: "shuffle", action: () => { } },
 	"Shuffle Playlist": {
-		text: "Shuffle Playlist",
+		text: fr("Shuffle Playlist"),
 		icon: "shuffle",
 		action: () => { },
 	},
-	"Album Radio": { text: "Album Radio", icon: "album", action: () => { } },
-	"Edit Playlist": { icon: "edit", text: "Edit Playlist", action: () => { } },
+	"Album Radio": { text: fr("Album Radio"), icon: "album", action: () => { } },
+	"Edit Playlist": { icon: "edit", text: fr("Edit Playlist"), action: () => { } },
 	"Remove from Queue": {
 		icon: "x",
-		text: "Remove from Queue",
+		text: fr("Remove from Queue"),
 		action: () => { },
 	},
 	"Minuterie de sommeil": {
 		icon: "clock",
-		text: "Minuterie de sommeil",
+		text: fr("Minuterie de sommeil"),
 		action: () => { },
 	},
 	"Raccourcis clavier": {
 		icon: "list",
-		text: "Raccourcis clavier",
+		text: fr("Raccourcis clavier"),
 		action: () => { },
 	},
-	"Lire ensuite": { icon: "play-circle", text: "Lire ensuite", action: () => { } },
-	"Ajouter à la file": { icon: "queue", text: "Ajouter à la file", action: () => { } },
+	"Lire ensuite": { icon: "play-circle", text: fr("Lire ensuite"), action: () => { } },
+	"Ajouter à la file": { icon: "queue", text: fr("Ajouter à la file"), action: () => { } },
 };
 
 export function buildDropdown() {
@@ -264,6 +310,8 @@ export function buildDropdown() {
 				DROPDOWN_ITEMS[label!],
 			) as TypedDropdownItem<Label, Icons>;
 			if (item) {
+				item.text = fr(label);
+				item.key = label;
 				item.action = action!;
 				menu.push(item);
 			}

@@ -38,7 +38,7 @@
 	import { keepItemOffline, rowOfflineState } from "$lib/offlineBatch";
 	import Icon from "$components/Icon/Icon.svelte";
 	import { mobileLongPress } from "$lib/actions/longtouch";
-	import type { Dropdown } from "$lib/configs/dropdowns.config";
+	import { fr, type Dropdown } from "$lib/configs/dropdowns.config";
 	import { groupSession } from "$lib/stores";
 	import list from "$lib/stores/list";
 	import { addToQueueEnd, playNext } from "$lib/queueActions";
@@ -81,7 +81,8 @@
 
 	let DropdownItems: Dropdown = [
 		{
-			text: "View Artist",
+			key: "View Artist",
+			text: fr("View Artist"),
 			icon: "artist",
 			action: async () => {
 				window.scrollTo({ behavior: "smooth", top: 0, left: 0 });
@@ -91,7 +92,8 @@
 			},
 		},
 		{
-			text: "Go to Album",
+			key: "Go to Album",
+			text: fr("Go to Album"),
 			icon: "album",
 			action: () => {
 				window.scrollTo({
@@ -114,7 +116,8 @@
 		},
 
 		{
-			text: "Add to Playlist",
+			key: "Add to Playlist",
+			text: fr("Add to Playlist"),
 			icon: "list-plus",
 			action: async () => {
 				if (data?.endpoint?.pageType.match(/PLAYLIST|ALBUM|SINGLE/)) {
@@ -131,7 +134,8 @@
 			},
 		},
 		{
-			text: !isLibrary ? "Favorite" : "Remove From Favorites",
+			key: !isLibrary ? "Favorite" : "Remove From Favorites",
+			text: !isLibrary ? fr("Favorite") : fr("Remove From Favorites"),
 			icon: !isLibrary ? "heart" : "x",
 			action: async () => {
 				if (!browser) return;
@@ -154,17 +158,19 @@
 			},
 		},
 		{
-			text: "Download to device",
+			key: "Download to device",
+			text: fr("Download to device"),
 			icon: "download",
 			action: async () => {
 				if (!browser) return;
 				const r = await downloadToDevice(data);
-				notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
+				notify(r.ok ? "Téléchargement…" : (r.reason || "Échec du téléchargement"), r.ok ? "success" : "error");
 			},
 		},
 		!groupSession.hasActiveSession
 			? {
-					text: "Start Group Session",
+					key: "Start Group Session",
+					text: fr("Start Group Session"),
 					icon: "users",
 					action: async () => {
 						if (!browser) return;
@@ -172,12 +178,13 @@
 					},
 			  }
 			: {
-					text: "Invite Group Session",
+					key: "Invite Group Session",
+					text: fr("Invite Group Session"),
 					icon: "send",
 					action: async () => {
 						if (!browser) return;
 						const shareData = {
-							title: `Join ${groupSession.client.displayName}'s Group Session on Beatbump!`,
+							title: `Rejoins la session de ${groupSession.client.displayName}`,
 
 							url: `${$SITE_ORIGIN_URL}/session?token=${IsoBase64.toBase64(
 								JSON.stringify({
@@ -189,18 +196,19 @@
 						try {
 							if (!navigator.canShare) {
 								await navigator.clipboard.writeText(shareData.url);
-								notify("Link copied successfully", "success");
+								notify("Lien copié", "success");
 							} else {
 								const share = await navigator.share(shareData);
-								notify("Shared successfully", "success");
+								notify("Partagé", "success");
 							}
 						} catch (error) {
-							notify("Error: " + error, "error");
+							notify("Erreur : " + error, "error");
 						}
 					},
 			  },
 		{
-			text: "Share",
+			key: "Share",
+			text: fr("Share"),
 			icon: "share",
 			action: async () => {
 				const shareData = {
@@ -211,25 +219,26 @@
 				try {
 					if (!navigator.canShare) {
 						await navigator.clipboard.writeText(shareData.url);
-						notify("Link copied successfully", "success");
+						notify("Lien copié", "success");
 					} else {
 						await navigator.share(shareData);
-						notify("Shared successfully", "success");
+						notify("Partagé", "success");
 					}
 				} catch (error) {
-					notify("Error: " + error, "error");
+					notify("Erreur : " + error, "error");
 				}
 			},
 		},
 	];
 	if (isArtist) {
 		DropdownItems = DropdownItems.filter(
-			(item) => !item.text?.includes("Add to Playlist"),
+			(item) => item.key !== "Add to Playlist",
 		);
 	}
 	if (data.type?.includes("playlist")) {
 		DropdownItems.splice(1, 1, {
-			text: "View Playlist",
+			key: "View Playlist",
+			text: fr("View Playlist"),
 			icon: "list",
 			action: () => {
 				window.scrollTo({
@@ -243,20 +252,20 @@
 		DropdownItems.shift();
 		DropdownItems.pop();
 		DropdownItems = DropdownItems.filter(
-			(item) => !item.text.includes("Favorite"),
+			(item) => item.key !== "Favorite" && item.key !== "Remove From Favorites",
 		);
 	}
 	if (data.type === "videos") {
 		DropdownItems = DropdownItems.filter((d) => {
-			if (d.text === "View Artist") return;
+			if (d.key === "View Artist") return;
 		});
 	}
 
 	if (data?.album?.browseId === undefined) {
-		DropdownItems = filter(DropdownItems, (d) => d.text !== "Go to Album");
+		DropdownItems = filter(DropdownItems, (d) => d.key !== "Go to Album");
 	}
 	if (isArtist) {
-		DropdownItems = filter(DropdownItems, (d) => d.text !== "View Artist");
+		DropdownItems = filter(DropdownItems, (d) => d.key !== "View Artist");
 	}
 	const clickHandler = async (event: { target: { nodeName: string } }) => {
 		if (

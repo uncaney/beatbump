@@ -250,7 +250,7 @@
 			)
 			.add("Download to device", async () => {
 				const r = await downloadToDevice(item);
-				notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
+				notify(r.ok ? "Téléchargement…" : (r.reason || "Échec du téléchargement"), r.ok ? "success" : "error");
 			})
 			.add("Garder hors-ligne", () => {
 				void keepItemOffline(item);
@@ -299,13 +299,13 @@
 				try {
 					if (!navigator.canShare) {
 						await navigator.clipboard.writeText(shareData.url);
-						notify("Link copied successfully", "success");
+						notify("Lien copié", "success");
 					} else {
 						await navigator.share(shareData);
-						notify("Shared successfully", "success");
+						notify("Partagé", "success");
 					}
 				} catch (error) {
-					notify("Error: " + error, "error");
+					notify("Erreur : " + error, "error");
 				}
 			})
 			.build();
