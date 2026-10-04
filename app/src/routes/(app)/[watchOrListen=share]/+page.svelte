@@ -40,11 +40,11 @@
 	/>
 	<meta
 		property="og:description"
-		content={`Listen to ${title} on Beatbump`}
+		content={`Écouter ${title} sur Musique`}
 	/>
 	<meta
 		property="og:site_name"
-		content="Beatbump"
+		content="Musique"
 	/>
 	{#if cover?.url}
 		<meta
