@@ -70,7 +70,7 @@
                     height="32"
                     src="/logo.svg"
                     alt="logo"
-                    title="Beatbump Home"
+                    title="Accueil"
                 />
             </a>
         {:else}
@@ -89,7 +89,7 @@
                     height="32"
                     src="/logo.svg"
                     alt="logo"
-                    title="Beatbump Home"
+                    title="Accueil"
                 />
             </a>
         {/if}
@@ -175,9 +175,9 @@
 					$fullscreenStore && fullscreenStore.set("closed");
 					goto("/library/account");
 				}}
-            data-tooltip="Account"
-            aria-label="Account"
-            title="Account"
+            data-tooltip="Compte"
+            aria-label="Compte"
+            title="Compte"
             class="nav-icon icon-btn no-style"
             class:active={key.includes("account")}
         >

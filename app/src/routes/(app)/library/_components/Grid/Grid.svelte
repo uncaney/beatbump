@@ -26,7 +26,7 @@
 			item={{
 				thumbnail:
 					"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHN0eWxlPSJpc29sYXRpb246aXNvbGF0ZSIgdmlld0JveD0iMCAwIDI1NiAyNTYiIHdpZHRoPSIyNTZwdCIgaGVpZ2h0PSIyNTZwdCI+PGRlZnM+PGNsaXBQYXRoIGlkPSJwcmVmaXhfX2EiPjxwYXRoIGQ9Ik0wIDBoMjU2djI1NkgweiIvPjwvY2xpcFBhdGg+PC9kZWZzPjxnIGNsaXAtcGF0aD0idXJsKCNwcmVmaXhfX2EpIj48cGF0aCBmaWxsPSIjNDI0MjQyIiBkPSJNMCAwaDI1NnYyNTZIMHoiLz48cGF0aCBkPSJNMTI0LjA0IDkyaDcuOTJ2MzIuMDRIMTY0djcuOTJoLTMyLjA0VjE2NGgtNy45MnYtMzIuMDRIOTJ2LTcuOTJoMzIuMDRWOTJ6IiBmaWxsPSIjZmFmYWZhIi8+PC9nPjwvc3ZnPg==",
-				name: "Add New Playlist",
+				name: "Nouvelle playlist",
 			}}
 			on:click={() => dispatch("new_playlist")}
 		/>

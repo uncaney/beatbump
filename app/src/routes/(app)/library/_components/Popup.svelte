@@ -62,14 +62,14 @@
 	<form
 		on:submit|preventDefault={() => {
 			alertHandler.set({
-				msg: "Testing -- currently unimplemented",
+				msg: "Pas encore disponible",
 				type: "error",
 			});
 			dispatch("close");
 		}}
 	>
 		<div class="input-row">
-			<label for="">Title</label>
+			<label for="">Titre</label>
 			<div class="input"><input type="text" /></div>
 		</div>
 		<div class="input-row">
@@ -79,11 +79,11 @@
 		<button
 			on:click|preventDefault={() => {
 				alertHandler.set({
-					msg: "Testing -- currently unimplemented",
+					msg: "Pas encore disponible",
 					type: "error",
 				});
 				dispatch("close");
-			}}>Submit</button
+			}}>Valider</button
 		>
 	</form>
 </section>

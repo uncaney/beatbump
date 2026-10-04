@@ -16,7 +16,7 @@
 
 	let options = [
 		{
-			label: "Unsorted",
+			label: "Sans tri",
 			params: "nosort",
 			action: async () => {
 				songs = await IDBService.sendMessage("get", "favorites");
@@ -40,11 +40,11 @@
 </script>
 
 <main>
-	<h1>Your Songs</h1>
+	<h1>Tes titres</h1>
 	<section>
 		<div class="filter">
 			<div class="ctx-item">
-				<label for="select">Sort</label>
+				<label for="select">Trier</label>
 				<div class="select">
 					<select
 						id="select"

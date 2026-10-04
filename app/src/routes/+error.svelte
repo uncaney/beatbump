@@ -48,7 +48,7 @@
 			/>
 		</div>
 	</a>
-	<h1>Uh-Oh!</h1>
+	<h1>Oups !</h1>
 	<h5>{message}</h5>
 
 	<p>Pas de panique, on te ramène au bon endroit.</p>

@@ -57,7 +57,7 @@
 		}}
 		bind:hasFocus
 	>
-		<h1 slot="header">Add to Playlist</h1>
+		<h1 slot="header">Ajouter à une playlist</h1>
 		<div class="list">
 			<List
 				on:click={async (e) => {
