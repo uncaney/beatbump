@@ -59,7 +59,7 @@
 			playlist ? `&list=${playlist}` : ""
 		}`}
 	/>
-	<title>{pageTitle} | Beatbump</title>
+	<title>{pageTitle} | Musique</title>
 </svelte:head>
 <main>
 	{#if error}

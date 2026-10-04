@@ -1,8 +1,8 @@
 {
 	"id": "/",
-	"name": "Beatbump",
-	"short_name": "Beatbump",
-	"description": "Votre musique, en ligne et hors ligne.",
+	"name": "Musique",
+	"short_name": "Musique",
+	"description": "Ta musique, en ligne et hors ligne.",
 	"lang": "fr",
 	"dir": "ltr",
 	"start_url": "/",

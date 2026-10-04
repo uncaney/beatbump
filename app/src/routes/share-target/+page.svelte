@@ -49,7 +49,7 @@
 </script>
 
 <svelte:head>
-	<title>{state === "unrecognized" ? "Lien non reconnu" : "Ouverture…"} | Beatbump</title>
+	<title>{state === "unrecognized" ? "Lien non reconnu" : "Ouverture…"} | Musique</title>
 	<meta
 		name="robots"
 		content="noindex"
