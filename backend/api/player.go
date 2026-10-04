@@ -195,7 +195,12 @@ func PlayerEndpointHandler(c echo.Context) error {
 	// Auto-cache on play: enqueue this track (+ its album + queue lookahead)
 	// into the owned library. Fire-and-forget; never delays the JSON response.
 	// Prefetch requests (next track warm-up) must not trigger server side acquisition.
-	if !isPrefetchRequest(c) {
+	// Neither must harness plays (decision 4: X-Ytm-Harness: 1 or a harness
+	// user agent, same rule as the stats; YTM_STATS_INCLUDE_HARNESS=1 on the
+	// staging lets them acquire). Note: the ytm-cache bridge enqueues the
+	// played track itself during resolution and does not see these headers;
+	// this gate covers the album and queue lookahead this server enqueues.
+	if !isPrefetchRequest(c) && !harnessRequest(c.Request()) {
 		autoCacheOnPlayFn(videoId, playlistId, playerResponse)
 	}
 

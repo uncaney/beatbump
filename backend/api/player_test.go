@@ -323,6 +323,47 @@ func TestPlayerPrefetchDoesNotAutoCache(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(calls), "a plain request is a play")
 }
 
+// Decision 4: a harness play (X-Ytm-Harness: 1 or a harness user agent, the
+// stats rule of harnessRequest) is served like a play but never triggers the
+// server side acquisition; YTM_STATS_INCLUDE_HARNESS=1 (staging) lifts it.
+func TestPlayerHarnessDoesNotAutoCache(t *testing.T) {
+	srv := httptest.NewServer(companionJSON(t, playerFixture("OK", "", true), nil))
+	t.Cleanup(srv.Close)
+	t.Setenv("COMPANION_URL", srv.URL)
+	t.Setenv("YTM_STATS_INCLUDE_HARNESS", "")
+	calls := stubAutoCache(t)
+
+	rec, err := callPlayer(t, "videoId="+testVideoId+"&playlistId=OLAK5uy_test", map[string]string{"X-Ytm-Harness": "1"})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code, "a harness play is served like a play")
+	assert.Equal(t, int32(0), atomic.LoadInt32(calls), "X-Ytm-Harness must not trigger acquisition")
+
+	rec, err = callPlayer(t, "videoId="+testVideoId, map[string]string{
+		"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/126.0.0.0 Safari/537.36",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(0), atomic.LoadInt32(calls), "a HeadlessChrome play must not trigger acquisition")
+
+	rec, err = callPlayer(t, "videoId="+testVideoId, map[string]string{"User-Agent": harnessHumanUserAgent})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(0), atomic.LoadInt32(calls), "the fixtures humanUserAgent is a harness play too")
+
+	rec, err = callPlayer(t, "videoId="+testVideoId, map[string]string{
+		"User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(1), atomic.LoadInt32(calls), "a real browser play still acquires")
+
+	t.Setenv("YTM_STATS_INCLUDE_HARNESS", "1")
+	rec, err = callPlayer(t, "videoId="+testVideoId, map[string]string{"X-Ytm-Harness": "1"})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(2), atomic.LoadInt32(calls), "YTM_STATS_INCLUDE_HARNESS=1 (staging) lets the harness acquire")
+}
+
 // TestPlayer is the historical end-to-end check against a live companion; it
 // stays skipped unless COMPANION_URL points at one.
 func TestPlayer(t *testing.T) {
