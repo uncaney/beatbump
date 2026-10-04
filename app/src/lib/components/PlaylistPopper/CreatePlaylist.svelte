@@ -103,7 +103,7 @@
 				Deleting this playlist will permanently delete all of its data from
 				your device (thumbnail, title, songs, etc.).
 			</p>
-			<p>This action is permanent and cannot be undone!</p>
+			<p>Cette action est définitive.</p>
 		</div>
 		<div class="body">
 			<div class="image">
@@ -131,7 +131,7 @@
 					class="button"
 					on:click|preventDefault={() => {
 						deletePlaylistRequest = false;
-					}}>Cancel</button
+					}}>Annuler</button
 				>
 				<button
 					class="outlined danger"
@@ -141,7 +141,7 @@
 
 						dispatch("close");
 						goto("/library");
-					}}>Delete Playlist</button
+					}}>Supprimer la playlist</button
 				>
 			</div>
 		</div>
@@ -183,7 +183,7 @@
 				</div>
 			</div>
 		</div>
-		<small><em>Upload Thumbnail</em></small>
+		<small><em>Choisir une pochette</em></small>
 	</div>
 	<form
 		on:submit|preventDefault={() => {
@@ -195,7 +195,7 @@
 		}}
 	>
 		<div class="input-row">
-			<label for="">Title</label>
+			<label for="">Titre</label>
 			<div class="input no-btn block">
 				<input
 					type="text"
@@ -214,12 +214,12 @@
 		</div>
 		{#if isLocalPlaylist}
 			<div class="input-row">
-				<!-- <p>Delete Playlist</p> -->
+				<!-- <p>Supprimer la playlist</p> -->
 				<button
 					class="danger"
 					on:click|preventDefault={() => {
 						deletePlaylistRequest = true;
-					}}>Delete Playlist</button
+					}}>Supprimer la playlist</button
 				>
 			</div>
 		{/if}
@@ -228,7 +228,7 @@
 				class="danger outlined"
 				on:click|preventDefault={() => {
 					dispatch("close");
-				}}>Cancel</button
+				}}>Annuler</button
 			>
 			<button
 				disabled={!titleValue && !descriptionValue}

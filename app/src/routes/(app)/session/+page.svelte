@@ -25,13 +25,13 @@
 </script>
 
 <Header
-	title={`${hostDisplayName}'s Beatbump Group Session`}
-	desc={`Join ${hostDisplayName}'s Group Session on Beatbump`}
+	title={`Session de groupe de ${hostDisplayName}`}
+	desc={`Rejoins la session de groupe de ${hostDisplayName}`}
 	{url}
 />
 <main>
-	<h2>Join {hostDisplayName}'s Group Session</h2>
-	<p>Please enter a display name below in order to continue with joining.</p>
+	<h2>Rejoindre la session de {hostDisplayName}</h2>
+	<p>Entre un nom d'affichage pour rejoindre la session.</p>
 	<br />
 	<div class="input">
 		<input
@@ -44,7 +44,7 @@
 
 	<Button
 		disabled={!clientDisplayName}
-		on:click={joinSession}>Join Session</Button
+		on:click={joinSession}>Rejoindre</Button
 	>
 </main>
 

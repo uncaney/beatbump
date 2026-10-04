@@ -20,7 +20,7 @@
 	export let nofollow = false;
 	// Optional explicit "see all" link (used by the personal rows on /home).
 	export let seeAllHref = "";
-	export let seeAllLabel = "See All";
+	export let seeAllLabel = "Voir tout";
 	// Optional card width (any CSS length, e.g. "160px"), for narrow hosts such
 	// as the 560px Related panel of the fullscreen player. The card is the
 	// thumbnail plus the item's 0.75em padding each side (CarouselItem), so the
@@ -151,11 +151,11 @@
 		</a>
 	{:else if !header.title.includes("Videos") && header.browseId}
 		<a href={href}>
-			<small>See All</small>
+			<small>Voir tout</small>
 		</a>
 	{:else if isArtistPage && header.title.includes("Videos")}
 		<a href={urls.playlist}>
-			<small>See All</small>
+			<small>Voir tout</small>
 		</a>
 	{/if}
 </div>

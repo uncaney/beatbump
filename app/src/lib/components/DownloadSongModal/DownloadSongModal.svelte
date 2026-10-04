@@ -26,14 +26,14 @@
 				`/api/v1/download/song?${params.toString()}`,
 			);
 			if (res.ok) {
-				notify("Download queued successfully", "success");
+				notify("Téléchargement mis en file", "success");
 				showDownloadSongPopper.set({ state: false, item: undefined });
 			} else {
 				const data = await res.json();
-				notify(data.message || "Failed to queue download", "error");
+				notify(data.message || "Téléchargement impossible", "error");
 			}
 		} catch (e) {
-			notify("Error queuing download", "error");
+			notify("Erreur lors du téléchargement", "error");
 			console.error(e);
 		}
 	}
@@ -48,7 +48,7 @@
 		}}
 		bind:hasFocus
 	>
-		<h1 slot="header">Download Song</h1>
+		<h1 slot="header">Télécharger le titre</h1>
 		<div class="content">
 			<div class="info">
 				<h3>{item?.title}</h3>
@@ -56,7 +56,7 @@
 			</div>
 
 			<div class="form-group">
-				<label for="limit">Related Songs to Download (0-500)</label>
+				<label for="limit">Titres similaires à télécharger (0-500)</label>
 				<input
 					type="number"
 					id="limit"
@@ -72,11 +72,11 @@
 					class="btn secondary"
 					on:click={() =>
 						showDownloadSongPopper.set({ state: false, item: undefined })}
-					>Cancel</button
+					>Annuler</button
 				>
 				<button
 					class="btn primary"
-					on:click={handleDownload}>Download</button
+					on:click={handleDownload}>Télécharger</button
 				>
 			</div>
 		</div>

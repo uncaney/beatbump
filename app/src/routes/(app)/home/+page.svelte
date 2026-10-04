@@ -144,9 +144,9 @@
 	{/if}
 </svelte:head>
 <Header
-	title="Home"
+	title="Accueil"
 	url={path}
-	desc="Listen to the hottest tracks from your favorite artists, and discover new playlists and mixes."
+	desc="Ta musique, en ligne et hors ligne."
 />
 
 <div class="immersive-thumbnail">

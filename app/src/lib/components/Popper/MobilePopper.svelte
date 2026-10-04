@@ -253,7 +253,7 @@
 								: $list.mix[$list.position].artistInfo.artist[0].text}
 						</span>
 						<span class="length">
-							<span class="subheading">Now playing</span>
+							<span class="subheading">En lecture</span>
 						</span>
 					</div>
 				</section>

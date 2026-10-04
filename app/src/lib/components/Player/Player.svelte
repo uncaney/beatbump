@@ -49,7 +49,7 @@
                     ? async () => {
                         if (!browser) return;
                         const shareData = {
-                            title: `Join ${groupSession.client.displayName}'s Beatbump Session`,
+                            title: `Rejoins la session de ${groupSession.client.displayName}`,
 
                             url: `${$SITE_ORIGIN_URL}/session?token=${IsoBase64.toBase64(
                                 JSON.stringify({
@@ -61,13 +61,13 @@
                         try {
                             if (!navigator.canShare) {
                                 await navigator.clipboard.writeText(shareData.url);
-                                notify("Link copied successfully", "success");
+                                notify("Lien copié", "success");
                             } else {
                                 const share = await navigator.share(shareData);
-                                notify("Shared successfully", "success");
+                                notify("Partagé", "success");
                             }
                         } catch (error) {
-                            notify("Error: " + error, "error");
+                            notify("Erreur : " + error, "error");
                         }
                     }
                     : async () => {
@@ -87,7 +87,7 @@
             })
             .add("Download to device", async () => {
                 const r = await downloadToDevice($currentTrack);
-                notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
+                notify(r.ok ? "Téléchargement…" : (r.reason || "Échec du téléchargement"), r.ok ? "success" : "error");
             })
             // P4 / T1 (lane c8b): both open a sheet portalled to <body>, so they
             // work from the mini-bar and from the mobile fullscreen ⋮ alike.
@@ -238,7 +238,7 @@
 	async function dlDevice() {
 		if (!$currentTrack) return;
 		const r = await downloadToDevice($currentTrack);
-		notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
+		notify(r.ok ? "Téléchargement…" : (r.reason || "Échec du téléchargement"), r.ok ? "success" : "error");
 	}
 
 	$: DropdownItems = createPlayerPopperMenu(
@@ -437,7 +437,7 @@
 				class="container"
 				style="gap:0.20125em;"
 			>
-				<span>Not Playing</span>
+				<span>Aucune lecture</span>
 				<div />
 			</div>
 		{/if}

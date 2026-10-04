@@ -92,9 +92,9 @@
 </script>
 
 <Header
-	title="Trending"
+	title="Tendances"
 	url={path}
-	desc="The latest trending songs and releases"
+	desc="Les titres et sorties du moment"
 />
 <main data-testid="trending">
 	{#each carousels as carousel (carousel)}
@@ -112,7 +112,7 @@
 					<span class="h2">{carousel.header.title}</span>
 					<a
 						class="link"
-						href="/explore"><small>See All</small></a
+						href="/explore"><small>Voir tout</small></a
 					>
 				</div>
 				<div

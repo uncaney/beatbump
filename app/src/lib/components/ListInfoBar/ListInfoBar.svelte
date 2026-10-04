@@ -26,7 +26,7 @@
 			size="1em"
 		/></span
 	>
-	<span class="title">Title</span>
+	<span class="title">Titre</span>
 	<span class="length">
 		<Icon
 			name="clock"

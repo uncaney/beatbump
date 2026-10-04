@@ -70,7 +70,7 @@
                     height="32"
                     src="/logo.svg"
                     alt="logo"
-                    title="Beatbump Home"
+                    title="Accueil"
                 />
             </a>
         {:else}
@@ -89,7 +89,7 @@
                     height="32"
                     src="/logo.svg"
                     alt="logo"
-                    title="Beatbump Home"
+                    title="Accueil"
                 />
             </a>
         {/if}
@@ -103,9 +103,9 @@
 			}}
             class="nav-icon icon-btn no-style"
             use:tooltip
-            data-tooltip="Home"
-            aria-label="Home"
-            title="Home"
+            data-tooltip="Accueil"
+            aria-label="Accueil"
+            title="Accueil"
             class:active={key.includes("home")}
         >
             <Icon
@@ -122,9 +122,9 @@
 			}}
             class="nav-icon icon-btn no-style"
             use:tooltip
-            data-tooltip="Trending"
-            aria-label="Trending"
-            title="Trending"
+            data-tooltip="Tendances"
+            aria-label="Tendances"
+            title="Tendances"
             class:active={key.includes("trending")}
         >
             <Icon
@@ -175,9 +175,9 @@
 					$fullscreenStore && fullscreenStore.set("closed");
 					goto("/library/account");
 				}}
-            data-tooltip="Account"
-            aria-label="Account"
-            title="Account"
+            data-tooltip="Compte"
+            aria-label="Compte"
+            title="Compte"
             class="nav-icon icon-btn no-style"
             class:active={key.includes("account")}
         >
@@ -199,8 +199,8 @@
 				// Audit v6 TOP 4: Tendances requested with the opening tap.
 				if (!hidden) void prefetchTrending();
 			}}
-            aria-label="Search"
-            title="Search"
+            aria-label="Rechercher"
+            title="Rechercher"
         >
             <Icon
                 name="search"
@@ -209,8 +209,8 @@
         </button>
 
         <button
-            aria-label="Settings"
-            title="Settings"
+            aria-label="Réglages"
+            title="Réglages"
             class="icon-btn btn-settings"
             on:click={() => {
 				$fullscreenStore && fullscreenStore.set("closed");

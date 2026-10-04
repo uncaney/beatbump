@@ -62,7 +62,7 @@
 					left: 0,
 				});
 			} catch (e) {
-				notify(`Error: ${e}`, "error");
+				notify(`Erreur : ${e}`, "error");
 			}
 		},
 		addToQueue: (ctx: BuildMenuParams) => addToQueueEnd(ctx.item),
@@ -72,7 +72,7 @@
 			if (!browser) return;
 			const { SITE_ORIGIN_URL } = ctx;
 			const shareData = {
-				title: `Join ${groupSession.client.displayName}'s Beatbump Session`,
+				title: `Rejoins la session de ${groupSession.client.displayName}`,
 
 				url: `${SITE_ORIGIN_URL}/session?token=${IsoBase64.toBase64(
 					JSON.stringify({
@@ -84,13 +84,13 @@
 			try {
 				if (!navigator.canShare) {
 					await navigator.clipboard.writeText(shareData.url);
-					notify("Link copied successfully", "success");
+					notify("Lien copié", "success");
 				} else {
 					const share = await navigator.share(shareData);
-					notify("Shared successfully", "success");
+					notify("Partagé", "success");
 				}
 			} catch (error) {
-				notify("Error: " + error, "error");
+				notify("Erreur : " + error, "error");
 			}
 		},
 		addToPlaylist: async (ctx: BuildMenuParams) => {
@@ -122,13 +122,13 @@
 			try {
 				if (!navigator.canShare) {
 					await navigator.clipboard.writeText(shareData.url);
-					notify("Link copied successfully", "success");
+					notify("Lien copié", "success");
 				} else {
 					await navigator.share(shareData);
-					notify("Shared successfully", "success");
+					notify("Partagé", "success");
 				}
 			} catch (error) {
-				notify("Failed to share: " + error, "error");
+				notify("Partage impossible : " + error, "error");
 			}
 		},
 		keepOffline: (ctx: BuildMenuParams) => {
@@ -179,7 +179,7 @@
 	import { UNAVAILABLE_OFFLINE_MSG, cachedIds, networkOffline } from "$lib/offline";
 
 	import { browser } from "$app/environment";
-	import { buildDropdown, type Dropdown } from "$lib/configs/dropdowns.config";
+	import { buildDropdown, fr, type Dropdown } from "$lib/configs/dropdowns.config";
 	import { APIParams } from "$lib/constants";
 	import { createShare, type SharePageType } from "$lib/shared/createShare";
 	import list from "$lib/stores/list";
@@ -235,7 +235,7 @@
 				item.endpoint.pageType?.includes("MUSIC_PAGE_TYPE_ARTIST"))
 		) {
 			DropdownItems = DropdownItems.filter((item) =>
-				FILTER_ARTIST_ON_ARTIST_PAGE.includes(item.text),
+				FILTER_ARTIST_ON_ARTIST_PAGE.includes(item.key ?? ""),
 			);
 		}
 		if (item.endpoint?.pageType) {
@@ -250,7 +250,8 @@
 								});
 							},
 							icon: "shuffle",
-							text: "Shuffle",
+							key: "Shuffle",
+							text: fr("Shuffle"),
 						},
 						{
 							action: () => playNext(item),
@@ -266,14 +267,15 @@
 								});
 							},
 							icon: "radio",
-							text: "Start Radio",
+							key: "Start Radio",
+							text: fr("Start Radio"),
 						},
 						...DropdownItems.filter(
-							(item) => !FILTER_ALBUM_PLAYLIST_ITEMS.includes(item.text),
+							(item) => !FILTER_ALBUM_PLAYLIST_ITEMS.includes(item.key ?? ""),
 						),
 				  ]
 				: DropdownItems.filter((item) =>
-						FILTER_ALBUM_PLAYLIST_ITEMS.includes(item.text),
+						FILTER_ALBUM_PLAYLIST_ITEMS.includes(item.key ?? ""),
 				  );
 		}
 	}
@@ -281,11 +283,12 @@
 		if (Array.isArray(DropdownItems)) {
 			if ($hasActiveSessionState === true) {
 				const idxOfSessionItem = DropdownItems.findIndex((item) =>
-					item.text.includes("Group Session"),
+					/Group Session/.test(item.key ?? ""),
 				);
 
 				DropdownItems[idxOfSessionItem] = {
-					text: "Share Group Session",
+					key: "Share Group Session",
+					text: fr("Share Group Session"),
 					action: MENU_HANDLERS.shareGroupSession.bind(
 						MENU_HANDLERS.shareGroupSession,
 						ctx,
@@ -294,11 +297,12 @@
 				};
 			} else {
 				const idxOfSessionItem = DropdownItems.findIndex((item) =>
-					item.text.includes("Group Session"),
+					/Group Session/.test(item.key ?? ""),
 				);
 
 				DropdownItems[idxOfSessionItem] = {
-					text: "Start Group Session",
+					key: "Start Group Session",
+					text: fr("Start Group Session"),
 					action: MENU_HANDLERS.startGroupSession.bind(
 						MENU_HANDLERS.startGroupSession,
 						ctx,

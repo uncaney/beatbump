@@ -10,8 +10,12 @@
  *     (toasts, aria-live announcements, label tables), except console.*,
  *     thrown Error messages and import specifiers, which never reach the UI.
  *
- * The original Beatbump screens (Results, Songs, Play Radio, Settings, ...)
- * are out of scope (Camille's pending decision 1) and are NOT listed here.
+ * Decision 1 (lane c59a): the original Beatbump screens are French too and
+ * listed below (search, player menus, row menus, library, sync wizard,
+ * settings, nav, error page, explore, trending, artist). The menu identifiers
+ * of dropdowns.config (English keys such as "View Artist") are not UI text:
+ * their French display label lives in DROPDOWN_LABELS_FR, which is checked
+ * on its own, and a text equal to a key is skipped here.
  * A legitimate hit (an identifier or a brand that happens to match) goes in
  * ALLOW with the exact text and a reason; keep it short.
  */
@@ -19,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { DROPDOWN_LABELS_FR } from "../configs/dropdowns.config";
 
 const SRC = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -76,6 +81,43 @@ export const FILES = [
 	"lib/meStats.ts",
 	"lib/components/ShareWeek/ShareWeek.svelte",
 	"lib/utils/shareWeek.ts",
+	// Decision 1 (c59a): the Beatbump-origin screens, now French.
+	"routes/+error.svelte",
+	"routes/(app)/home/+page.svelte",
+	"routes/(app)/search/[slug]/+page.svelte",
+	"routes/(app)/explore/+page.svelte",
+	"routes/(app)/explore/[slug]/+page.svelte",
+	"routes/(app)/trending/+page.svelte",
+	"routes/(app)/trending/[slug]/+page.svelte",
+	"routes/(app)/[artistOrChannel=channel]/[slug]/+page.svelte",
+	"routes/(app)/playlist/[slug]/+page.svelte",
+	"routes/(app)/session/+page.svelte",
+	"routes/(app)/settings/+page.svelte",
+	"routes/(app)/library/+page.svelte",
+	"routes/(app)/library/_Sync.svelte",
+	"routes/(app)/library/songs/+page.svelte",
+	"routes/(app)/library/_components/Grid/Grid.svelte",
+	"routes/(app)/library/_components/Popup.svelte",
+	"lib/components/Nav/Nav.svelte",
+	"lib/components/Layouts/Header.svelte",
+	"lib/components/Carousel/Carousel.svelte",
+	"lib/components/Carousel/CarouselItem.svelte",
+	"lib/components/Item/Listing.svelte",
+	"lib/components/ListItem/ListItem.svelte",
+	"lib/components/ListItem/LocalListItem.svelte",
+	"lib/components/Player/Player.svelte",
+	"lib/components/Player/Fullscreen.svelte",
+	"lib/components/Popper/MobilePopper.svelte",
+	"lib/components/ArtistPageHeader/ArtistPageHeader.svelte",
+	"lib/components/ArtistPageHeader/Description/Description.svelte",
+	"lib/components/ListInfoBar/Select.svelte",
+	"lib/components/ListInfoBar/ListInfoBar.svelte",
+	"lib/components/PlaylistPopper/PlaylistPopper.svelte",
+	"lib/components/PlaylistPopper/CreatePlaylist.svelte",
+	"lib/components/DownloadSongModal/DownloadSongModal.svelte",
+	"lib/components/GroupSessionCreator/GroupSessionCreator.svelte",
+	"lib/components/Search/options.ts",
+	"lib/stores/ogtags.ts",
 ] as const;
 
 /**
@@ -114,10 +156,39 @@ export const DENY = [
 	"See All",
 	"Album Radio",
 	"Uh-Oh",
+	// Decision 1 (c59a): words of the Beatbump-origin screens.
+	"Favorite",
+	"View Artist",
+	"Lyrics",
+	"Appearance",
+	"Playback",
+	"Account",
+	"Show More",
+	"Show All",
+	"Showing results",
+	"Not Playing",
+	"Now playing",
+	"Export Data",
+	"Import Data",
+	"Sync Your Data",
+	"Next Step",
+	"Trending",
+	"Search",
+	"Home",
+	"Songs",
+	"Beatbump",
 ] as const;
 
+/** Menu identifiers (dropdowns.config keys): code, not UI text; their French label is checked below. */
+const MENU_KEYS = new Set<string>(Object.keys(DROPDOWN_LABELS_FR));
+
 /** Accepted hits: `${file}::${text}` -> reason. */
-const ALLOW: Record<string, string> = {};
+const ALLOW: Record<string, string> = {
+	// Decision 1 (c59a): identifiers that never reach the screen as such.
+	"routes/(app)/search/[slug]/+page.svelte::Your Library": "titre de l etagere renvoye par le backend, affiche via SHELF_TITLES_FR",
+	"routes/(app)/playlist/[slug]/+page.svelte::text: fr(\"Shuffle\"),": "libelle via fr(), identifiant de menu",
+	"lib/components/Carousel/Carousel.svelte::Trending": "test sur le titre d un carrousel YouTube, pas un texte affiche",
+};
 
 const USER_ATTRS = ["aria-label", "title", "placeholder", "alt", "label"];
 
@@ -198,10 +269,39 @@ describe("frenchScreens: program screens carry no English UI words", () => {
 		it(file, () => {
 			const src = readFileSync(join(SRC, file), "utf-8");
 			const texts = file.endsWith(".ts") ? scriptStrings(src) : visibleTexts(src);
-			const hits = denyHits(texts).filter((h) => !ALLOW[`${file}::${h.text}`]);
+			const hits = denyHits(texts).filter((h) => !ALLOW[`${file}::${h.text}`] && !MENU_KEYS.has(h.text));
 			expect(hits).toEqual([]);
 		});
 	}
+});
+
+describe("frenchScreens: menu labels (dropdowns.config) are French", () => {
+	it("every menu key has a non-empty French label without English UI words", () => {
+		const labels = Object.values(DROPDOWN_LABELS_FR);
+		expect(labels.every((l) => typeof l === "string" && l.trim().length > 0)).toBe(true);
+		expect(denyHits(labels)).toEqual([]);
+		// The keys the code still filters on keep their English spelling but never reach the screen.
+		expect(DROPDOWN_LABELS_FR["View Artist"]).toBe("Voir l'artiste");
+		expect(DROPDOWN_LABELS_FR.Favorite).toBe("Favori");
+		expect(DROPDOWN_LABELS_FR["Download to device"]).toBe("Télécharger sur l'appareil");
+	});
+});
+
+describe("frenchScreens: shell and PWA name (decisions 1 and 13)", () => {
+	it("app.html is lang=fr and names the app Musique", () => {
+		const html = readFileSync(join(SRC, "app.html"), "utf-8");
+		expect(html).toMatch(/<html\s+lang="fr"/);
+		expect(html).not.toContain('content="Beatbump"');
+		expect(html).toMatch(/name="apple-mobile-web-app-title"\s+content="Musique"/);
+	});
+	it("manifest.json is named Musique and keeps its icons and shortcuts", () => {
+		const m = JSON.parse(readFileSync(join(SRC, "../static/manifest.json"), "utf-8"));
+		expect(m.name).toBe("Musique");
+		expect(m.short_name).toBe("Musique");
+		expect(m.lang).toBe("fr");
+		expect(Array.isArray(m.icons) && m.icons.length >= 2).toBe(true);
+		expect(Array.isArray(m.shortcuts) && m.shortcuts.length >= 4).toBe(true);
+	});
 });
 
 describe("frenchScreens: program lines of Beatbump-origin files", () => {

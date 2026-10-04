@@ -108,7 +108,7 @@
 						console.log(ArrayOfStores);
 					}
 
-					notify("Data sync completed!", "success");
+					notify("Synchronisation terminée", "success");
 					setTimeout(() => {
 						completed = true;
 					}, 1250);
@@ -121,7 +121,7 @@
 					}
 				});
 				conn.on("open", () => {
-					notify("Connection established!", "success");
+					notify("Connexion établie", "success");
 				});
 			});
 		}
@@ -204,26 +204,25 @@
 			{#if stepCounter === 0}
 				<div class="screen">
 					<div class="content">
-						<h1>Sync your data</h1>
-						<div class="subheading">Access your favorites on any device</div>
+						<h1>Synchroniser tes données</h1>
+						<div class="subheading">Retrouve tes favoris sur tous tes appareils</div>
 						<p>
-							Securely sync your data across your devices! <br /> To begin, open
-							this screen on another device. Whenever you are ready, hit 'Next Step'
+							Synchronise tes données entre tes appareils. Pour commencer, ouvre cet écran sur l'autre appareil, puis touche « Étape suivante ».
 						</p>
 					</div>
 				</div>
 				<div class="next">
 					<button
 						class="nextbtn"
-						on:click={nextStep}>Next Step</button
+						on:click={nextStep}>Étape suivante</button
 					>
 				</div>
 			{:else if stepCounter === 1}
 				<div class="screen">
 					<div class="content">
-						<h1>First things first...</h1>
+						<h1>Commençons</h1>
 						<div class="subheading">
-							Will this device be <em>sending</em> or <em>receiving</em> data?
+							Cet appareil va <em>envoyer</em> ou <em>recevoir</em> les données ?
 						</div>
 						<!-- <p>Follow these steps on both devices.</p> -->
 						<section class="container row justify">
@@ -239,7 +238,7 @@
 										><Icon
 											name="send"
 											size="2em"
-										/><span class="label">Sending</span></span
+										/><span class="label">Envoyer</span></span
 									>
 								</label>
 							</div>
@@ -255,7 +254,7 @@
 										><Icon
 											name="import"
 											size="2em"
-										/><span class="label">Receiving</span></span
+										/><span class="label">Recevoir</span></span
 									>
 								</label>
 							</div>
@@ -265,12 +264,12 @@
 					{#if check === "sending"}
 						<div class="content">
 							<span class="subheading"
-								>What kind of data would you like to send?</span
+								>Quelles données veux-tu envoyer ?</span
 							>
 							<div class="container">
 								{#each dataType as option}
 									<label>
-										{option}
+										{option === "Favorites" ? "Favoris" : option}
 										<input
 											type="checkbox"
 											bind:group={kindOfData}
@@ -291,19 +290,19 @@
 							: check === undefined}
 						on:click={() => {
 							if (check !== undefined) nextStep();
-						}}>Next Step</button
+						}}>Étape suivante</button
 					>
 				</div>
 			{:else if stepCounter === 2}
 				<div class="screen">
 					<div class="content">
-						<h1>Generate Your ID</h1>
-						<div class="subheading">The temporary ID is needed for syncing</div>
+						<h1>Génère ton identifiant</h1>
+						<div class="subheading">Un identifiant temporaire relie les deux appareils</div>
 						<hr />
 
 						<section class="container">
 							<div class="id">
-								<p>Your ID:</p>
+								<p>Ton identifiant :</p>
 
 								<div class="id-cont">
 									<code>{id} </code>
@@ -328,7 +327,7 @@
 									if (!browser) return;
 
 									ID();
-								}}>Create ID</button
+								}}>Créer l'identifiant</button
 							>
 						</section>
 					</div>
@@ -339,7 +338,7 @@
 						disabled={id === "unset"}
 						on:click={() => {
 							if (id !== "unset") nextStep();
-						}}>Next Step</button
+						}}>Étape suivante</button
 					>
 				</div>
 			{:else if stepCounter === 3}
@@ -347,17 +346,15 @@
 					{#if check === "sending"}
 						<div class="content">
 							<h1>
-								Get the {(peerType =
-									check !== "sending" ? "Sender" : "Receiver")}'s ID
+								{(peerType = check !== "sending" ? "Sender" : "Receiver") && ""}Identifiant de l'autre appareil
 							</h1>
-							<div class="subheading">Let's find the other device</div>
+							<div class="subheading">Relions les deux appareils</div>
 							<p
-								>After generating an ID for both devices, enter the other's ID
-								in the field below.</p
+								>Une fois les deux identifiants générés, saisis celui de l'autre appareil ci-dessous.</p
 							>
 							<hr />
 							<div class="id">
-								<p>Your ID:</p>
+								<p>Ton identifiant :</p>
 
 								<div class="id-cont">
 									<code>{id} </code>
@@ -392,17 +389,16 @@
 								disabled={peerID.length < 1}
 								on:click={() => {
 									connect();
-								}}>Connect</button
+								}}>Connecter</button
 							>
 						</div>
 					{:else}
 						<div class="content">
-							<h1>Ready to Receive Data</h1>
-							<span>Your ID: <div class="id-cont"><code>{id}</code></div></span>
-							<div class="subheading">Waiting for sender to connect.</div>
+							<h1>Prêt à recevoir</h1>
+							<span>Ton identifiant : <div class="id-cont"><code>{id}</code></div></span>
+							<div class="subheading">En attente de l'autre appareil.</div>
 							<p
-								>Once data transfer is completed, this popup window will close
-								automatically</p
+								>Une fois le transfert terminé, cette fenêtre se fermera toute seule.</p
 							>
 						</div>
 					{/if}

@@ -13,6 +13,9 @@
 	import { installPrompt, isInstalled, isIOS, promptInstall } from "$lib/stores/pwa";
 	import { notify } from "$lib/utils";
 	const themes: Theme[] = ["Dark", "Dim", "Midnight", "YTM"];
+	// Decision 1: the stored values stay (they are CSS class names on <html>);
+	// only the option labels are French.
+	const THEME_LABELS: Record<Theme, string> = { Dark: "Sombre", Dim: "Tamisé", Midnight: "Minuit", YTM: "YTM" };
 
 	// PWA install (Settings > Application). States: installed (standalone or
 	// just installed) -> no button; Chromium fired beforeinstallprompt -> button;
@@ -41,16 +44,16 @@
 </script>
 
 <Header
-	title="Settings"
+	title="Réglages"
 	url="/settings"
-	desc="Configure your app settings"
+	desc="Configure ton application"
 />
 {#if browser}
 	<main class="resp-content-width">
 		<section>
-			<span class="h5">Appearance</span>
+			<span class="h5">Apparence</span>
 			<div class="setting">
-				<label for="theme">Theme </label>
+				<label for="theme">Thème </label>
 				<div class="select">
 					<select
 						name="theme"
@@ -61,7 +64,7 @@
 							<option
 								value={theme}
 								selected={$settings["appearance"]["Theme"] === theme}
-								>{theme}</option
+								>{THEME_LABELS[theme] ?? theme}</option
 							>
 						{/each}
 					</select>
@@ -70,7 +73,7 @@
 			<div class="setting">
 				<!-- svelte-ignore a11y-label-has-associated-control -->
 				<label
-					>Immersive Queue
+					>File immersive
 					<span class="help"
 						>Affiche la file en plein écran avec la pochette en fond</span
 					>
@@ -88,7 +91,7 @@
 			</div>
 		</section>
 		<section>
-			<span class="h5">Playback</span>
+			<span class="h5">Lecture</span>
 			<div class="setting">
 				<!-- svelte-ignore a11y-label-has-associated-control -->
 				<label
@@ -112,7 +115,7 @@
 			<div class="setting">
 				<!-- svelte-ignore a11y-label-has-associated-control -->
 				<label
-					>Dedupe Automix
+					>Automix sans doublons
 					<span class="help"
 						>Évite les doublons dans les mixes automatiques</span
 					>
@@ -133,7 +136,7 @@
                 <!-- Audit v7 item 10: the help sits under the title like the
                      other rows (was a full-width <p> under the switch). -->
                 <label for="lasttrack"
-                    >Remember Last Track
+                    >Reprendre où tu t'es arrêté
                     <span class="help"
                         >À la réouverture, la file et la position reviennent telles quelles, en pause</span
                     >

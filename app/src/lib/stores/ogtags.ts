@@ -15,13 +15,13 @@ type Tags = {
 };
 
 const tags: Tags = {
-	title: "Beatbump",
-	description: "Unlock your music",
+	title: "Musique",
+	description: "Ta musique, en ligne et hors ligne.",
 	url: "https://beatbump.io/",
 	type: "website",
 	image: "https://beatbump.io/favicon.png",
 	"og:image": "/favicon.png",
-	"og:description": "Unlock your music",
+	"og:description": "Ta musique, en ligne et hors ligne.",
 	"og:type": "website",
 	"og:url": "https://beatbump.io/",
 };

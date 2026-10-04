@@ -18,7 +18,7 @@
 <Header
 	title={title ? title.replace(",", " ") : ""}
 	url={$page.url.pathname}
-	desc="The latest in music"
+	desc="Les nouveautés musicales"
 />
 
 <main>

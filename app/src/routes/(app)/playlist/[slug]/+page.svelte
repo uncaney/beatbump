@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { fr } from "$lib/configs/dropdowns.config";
 	import ListItem, {
 		listItemPageContext,
 	} from "$lib/components/ListItem/ListItem.svelte";
@@ -292,7 +293,7 @@
 						});
 					},
 					icon: "shuffle",
-					text: "Shuffle",
+					text: fr("Shuffle"),
 				},
 				{
 					action: () => {
@@ -305,7 +306,7 @@
 					},
 					icon: "play",
 					type: "outlined",
-					text: "Start Radio",
+					text: fr("Start Radio"),
 				},
 				{
 					// eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -319,7 +320,7 @@
 				setId();
 				list.initPlaylistSession({ playlistId: header.playlistId, index: 0 });
 
-				notify(`${pageTitle} added to queue!`, "success");
+				notify(`${pageTitle} ajouté à la file`, "success");
 			}}
 			on:playlistAdd={async () => {
 				const response = await APIClient.fetch(

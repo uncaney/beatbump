@@ -6,7 +6,7 @@
 
 <label
 	class="secondary"
-	for="select">Sort</label
+	for="select">Trier</label
 >
 
 <div class="select">

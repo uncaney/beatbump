@@ -111,7 +111,7 @@
 	// Direct mobile actions (avoid the popper, which conflicts with the swipe gesture)
 	async function mobileDownload() {
 		const r = await downloadToDevice($currentTrack);
-		notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
+		notify(r.ok ? "Téléchargement…" : (r.reason || "Échec du téléchargement"), r.ok ? "success" : "error");
 	}
 	async function mobileViewArtist() {
 		const aid = await resolveArtistId($currentTrack);
@@ -152,6 +152,12 @@
 		Queue,
 		Popup,
 	}
+
+	// Decision 11 (c59a): audio-only app, the Vidéo / Audio segment is hidden.
+	// `$mode` keeps its "audio" default and the video code paths stay in place
+	// (player.ts), so an old profile or a future flip of this constant needs
+	// nothing else.
+	const VIDEO_SEGMENT = false;
 
 	// U14-5: French labels (ids unchanged: the harness and the code key on them).
 	const upNextTab: TabItem = {
@@ -659,6 +665,7 @@
 							  }vw, 0px, 0) !important;`
 							: ""}
 					>
+						{#if VIDEO_SEGMENT}
 						<div
 							class="player-kind-wrapper"
 							role="group"
@@ -684,6 +691,7 @@
 								}}>Audio</button
 							>
 						</div>
+						{/if}
 							{#if $sleepLabel}
 								<!-- P4: sleep timer chip; click cancels the timer. -->
 								<button

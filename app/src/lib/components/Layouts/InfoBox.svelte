@@ -242,7 +242,7 @@
 								style="margin-right: 0.1em; stroke-width: 4;font-weight: 800;"
 								size="1em"
 							>
-								<span class="sr-only">Explicit</span>
+								<span class="sr-only">Explicite</span>
 							</Icon>
 						{/if}
 						{releaseLine}

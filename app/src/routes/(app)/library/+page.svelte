@@ -87,7 +87,7 @@
 		}}
 		hasFocus={showImportModal}
 	>
-		<h1 slot="header">Import your data</h1>
+		<h1 slot="header">Importer tes données</h1>
 		<div class="container">
 			<input
 				type="file"
@@ -96,7 +96,7 @@
 				accept=".json"
 				bind:files
 			/>
-			<p>Import your data using the form above!</p>
+			<p>Choisis le fichier JSON exporté depuis un autre appareil.</p>
 		</div>
 	</Modal>
 {/if}
@@ -108,7 +108,7 @@
 	<CollectionNav active="playlists" />
 
 	<header>
-		<h1>Your Library</h1>
+		<h1>Ta bibliothèque</h1>
 		<button
 			on:click={() => {
 				showSyncModal = true;
@@ -117,7 +117,7 @@
 				name="send"
 				size="1.1em"
 			/>
-			<span class="btn-text">Sync Your Data</span></button
+			<span class="btn-text">Synchroniser</span></button
 		>
 		<div style="margin-block-start: 0.5em;">
 			<Button
@@ -134,7 +134,7 @@
 					name="upload"
 					size="1.1em"
 				/>
-				<span class="btn-text">Export Data</span></Button
+				<span class="btn-text">Exporter</span></Button
 			>
 			<Button
 				outlined
@@ -146,7 +146,7 @@
 					name="download"
 					size="1.1em"
 				/>
-				<span class="btn-text">Import Data</span></Button
+				<span class="btn-text">Importer</span></Button
 			>
 		</div>
 	</header>
@@ -195,7 +195,7 @@
 	</section>
 	<section>
 		<Grid
-			heading="Your Playlists"
+			heading="Tes playlists"
 			items={playlists}
 			on:new_playlist={() => {
 				showPlaylistModal = true;
@@ -227,7 +227,7 @@
 						on:click={() => (confirmDeleteAll = false)}>Annuler</button
 					>
 				{:else if playlists.length > 0}
-					<!-- Audit v8 TOP 10: no disabled button under an empty "Your Playlists". -->
+					<!-- Audit v8 TOP 10: no disabled button under an empty "Tes playlists". -->
 					<button
 						type="button"
 						class="outlined"
@@ -238,7 +238,7 @@
 						><Icon
 							name="x"
 							size="1.1em"
-						/><span class="btn-text">Delete All Playlists</span></button
+						/><span class="btn-text">Supprimer toutes les playlists</span></button
 					>
 				{/if}
 			</div></Grid
