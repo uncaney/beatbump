@@ -120,7 +120,7 @@
 </script>
 
 <Header
-	title={header?.name === undefined ? "Artist" : header?.name}
+	title={header?.name === undefined ? "Artiste" : header?.name}
 	desc={header?.name}
 	url={$page.url.pathname}
 	image={header?.thumbnails && header?.thumbnails[0]?.url}
@@ -167,12 +167,12 @@
 			{#if songs?.items?.length > 0}
 				<section class="song-list resp-content-width">
 					<div class="header">
-						<span class="h2">Songs</span>
+						<span class="h2">Titres</span>
                         {#if songs?.header?.browseId }
                             <a
                                 style="white-space:pre; display: inline-block;"
                                 href={`/playlist/${songs?.header?.browseId}?params=${songs?.header?.params}`}
-                            ><small>See All</small></a>
+                            ><small>Voir tout</small></a>
                         {/if}
 
 					</div>

@@ -227,7 +227,7 @@
 								list.initAutoMixSession({
 									config: { playerParams: header.buttons.radio?.params },
 									playlistId: header.buttons.radio?.playlistId,
-								})}><span class="button-text"> Play Radio</span></Button
+								})}><span class="button-text"> Radio</span></Button
 						>
 					{/if}
 					{#if header?.buttons?.shuffle !== false}
@@ -239,7 +239,7 @@
 									videoId: header.buttons.shuffle?.videoId,
 									config: { playerParams: header.buttons.shuffle?.params },
 									playlistId: header.buttons.shuffle?.playlistId,
-								})}><span class="button-text"> Shuffle</span></Button
+								})}><span class="button-text"> Aléatoire</span></Button
 						>
 					{/if}
 					{#if artistId}

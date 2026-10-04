@@ -51,6 +51,30 @@
 		return activeFilter === value;
 	}
 
+	// Decision 1: the YouTube shelf headers (English, the backend asks hl=en) and
+	// the backend's owned-library shelf ("Your Library") are displayed in French;
+	// the `?filter=` href of "Tout afficher" keeps the original title (the
+	// backend keys on it) and the rows themselves (YouTube data) are untouched.
+	const SHELF_TITLES_FR: Record<string, string> = {
+		"Your Library": "Ta bibliothèque",
+		"Top result": "Meilleur résultat",
+		Results: "Résultats",
+		Songs: "Titres",
+		Videos: "Vidéos",
+		Albums: "Albums",
+		Artists: "Artistes",
+		Playlists: "Playlists",
+		"Community playlists": "Playlists de la communauté",
+		"Featured playlists": "Playlists à la une",
+		Podcasts: "Podcasts",
+		Episodes: "Épisodes",
+		Profiles: "Profils",
+	};
+	function shelfTitle(title: string | undefined): string {
+		const t = (title ?? "").trim();
+		return SHELF_TITLES_FR[t] ?? t;
+	}
+
 	// F1 (audit-features-v2): a filtered search answers with the paginated
 	// YouTube shelf PLUS the owned-library shelf ("Your Library", `local: true`,
 	// appended last by backend/api/search.go). Only the YouTube shelf feeds the
@@ -206,8 +230,8 @@
 </script>
 
 <Header
-	title="Search"
-	desc={`Search results for ${decodeURIComponent($page.params.slug)}`}
+	title="Recherche"
+	desc={`Résultats pour ${decodeURIComponent($page.params.slug)}`}
 	url={$page.url.pathname}
 />
 
@@ -232,14 +256,14 @@
 {#if data.correction && (data.correction.correctedQuery || data.correction.showingResultsFor)}
 	<div class="search-correction resp-content-width">
 		<span
-			>Showing results for
+			>Résultats pour
 			<strong>{data.correction.correctedQuery || data.correction.showingResultsFor}</strong></span
 		>
 		{#if data.correction.originalQuery}
 			<a
 				class="link secondary"
 				href={`/search/${encodeURIComponent(data.correction.originalQuery)}?filter=${filter}`}
-				>Search instead for {data.correction.originalQuery}</a
+				>Chercher plutôt {data.correction.originalQuery}</a
 			>
 		{/if}
 	</div>
@@ -253,7 +277,7 @@
 		{#if filter !== "all"}
 			{#each localShelves as shelf}
 				<section class="container music-shelf local-shelf resp-content-width">
-					<span class="h3">{shelf.header?.title}</span>
+					<span class="h3">{shelfTitle(shelf.header?.title)}</span>
 					<div class="music-shelf-list local-shelf-list">
 						{#each shelf.contents as item}
 							<Listing data={item} />
@@ -277,7 +301,7 @@
 			{/each}
 			{#if ytShelf}
 				<div class="container music-shelf yt-shelf resp-content-width">
-					<span class="h3">{ytShelf.header?.title}</span>
+					<span class="h3">{shelfTitle(ytShelf.header?.title)}</span>
 					<div
 						class="music-shelf-list"
 						style:margin-bottom|important={0}
@@ -300,7 +324,7 @@
 		{:else}
 			{#each allResults as result}
 				<div class="container music-shelf resp-content-width">
-					<span class="h3">{result.header.title}</span>
+					<span class="h3">{shelfTitle(result.header.title)}</span>
 					<div class="music-shelf-list">
 						{#each result.contents as item}
 							<Listing data={item} />
@@ -313,7 +337,7 @@
 								href={`${$page.params.slug}?filter=${result.header.title
 									.replace(/\s/g, "_")
 									.toLowerCase()}`}
-								class="link secondary">Show All</a
+								class="link secondary">Tout afficher</a
 							>
 						</div>
 					{/if}

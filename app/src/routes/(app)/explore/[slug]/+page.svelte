@@ -24,9 +24,9 @@
 	</main>
 {:else}
 <Header
-	title="{data.response.header} Playlists"
+	title="Playlists {data.response.header}"
 	url={data.path}
-	desc="Find the perfect playlist that'll match your mood, or fit any occasion."
+	desc="Trouve la playlist qui colle à ton humeur ou à l'occasion."
 />
 <main>
 	<div class="header">

@@ -113,7 +113,7 @@
 
 <Header
 	title={releaseInfo.title}
-	desc={`${releaseInfo.title} by ${releaseInfo?.artist[0]?.name} on Beatbump`}
+	desc={`${releaseInfo.title} par ${releaseInfo?.artist[0]?.name}`}
 	url={path + `?id=${id}`}
 	image={thumbnail}
 />
