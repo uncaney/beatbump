@@ -152,9 +152,17 @@ func runAcquire(profileID, artistID, name string, limit int) int {
 		if limit > 0 && enq >= limit {
 			break
 		}
+		// Decision 8: each track of the pull is one acquisition against the
+		// profile's daily cap; the pull stops for the day once it is reached.
+		if !acquireTryCharge(profileID, "enqueued", artistID, name, vid) {
+			break
+		}
 		if enqueueYubal(vid) {
-			db.DB.Create(&db.AcquireJob{ProfileID: profileID, ArtistID: artistID, ArtistName: name, VideoID: vid, Status: "enqueued", CreatedAt: time.Now()})
 			enq++
+		} else {
+			db.DB.Model(&db.AcquireJob{}).
+				Where("profile_id = ? AND video_id = ? AND status = ?", profileID, vid, "enqueued").
+				Update("status", "error")
 		}
 		time.Sleep(500 * time.Millisecond) // slow, polite acquisition
 	}
@@ -180,6 +188,11 @@ func MeAcquireHandler(c echo.Context) error {
 		MaxAlbums int    `json:"maxAlbums"`
 	}
 	_ = decodeBody(c, &b)
+	// Decision 8: an explicit acquisition past the profile's daily cap is
+	// refused up front (a dry run only enumerates, it is not charged).
+	if !b.DryRun && acquireAllowance(pid) <= 0 {
+		return acquireQuotaResponse(c)
+	}
 	artistID := b.ArtistID
 	if artistID == "" || isLocalArtist(artistID) {
 		if b.Name == "" {

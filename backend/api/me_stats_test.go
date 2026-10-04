@@ -28,7 +28,7 @@ func useTestDB(t *testing.T) {
 	}
 	sqlDB, _ := d.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := d.AutoMigrate(&db.Profile{}, &db.PlayEvent{}); err != nil {
+	if err := d.AutoMigrate(&db.Profile{}, &db.PlayEvent{}, &db.AcquireJob{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	db.DB = d

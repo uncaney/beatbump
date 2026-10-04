@@ -62,6 +62,9 @@ type libraryStats struct {
 	LastAdded   string `json:"lastAdded"`
 	Version     string `json:"version"`
 	ReportEmail string `json:"reportEmail,omitempty"`
+	// AcquisitionsToday (decision 8, c59b): acquisition requests of every
+	// profile since 00:00 UTC, as counted by the daily cap (acquire_cap.go).
+	AcquisitionsToday int `json:"acquisitionsToday"`
 }
 
 // reportEmail is YTM_REPORT_EMAIL when it looks like one address
@@ -113,6 +116,7 @@ func LibraryStatsHandler(c echo.Context) error {
 	}
 	_, out.Albums = countIndex("albums", nil, []string{"id"})
 	_, out.Artists = countIndex("artists", nil, []string{"id"})
+	out.AcquisitionsToday = acquisitionsToday()
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, out)
 }

@@ -201,7 +201,7 @@ func PlayerEndpointHandler(c echo.Context) error {
 	// played track itself during resolution and does not see these headers;
 	// this gate covers the album and queue lookahead this server enqueues.
 	if !isPrefetchRequest(c) && !harnessRequest(c.Request()) {
-		autoCacheOnPlayFn(videoId, playlistId, playerResponse)
+		autoCacheOnPlayFn(acquireProfileKey(c), videoId, playlistId, playerResponse)
 	}
 
 	return c.JSON(http.StatusOK, playerResponse)
@@ -211,59 +211,82 @@ func PlayerEndpointHandler(c echo.Context) error {
 // companion call (a variable so tests keep fast).
 var playerRetryDelay = 300 * time.Millisecond
 
-func autoCacheOnPlay(videoId string, playlistId string, playerResponse _youtube.PlayerResponse) {
+func autoCacheOnPlay(profile string, videoId string, playlistId string, playerResponse _youtube.PlayerResponse) {
 	go func() {
 		defer func() { _ = recover() }()
+		autoCacheRun(profile, videoId, playlistId, playerResponse)
+	}()
+}
 
-		if !autoCacheEnabled() {
-			return
-		}
-		// Local (owned) tracks are addressed by lid and already in the library.
-		if videoId == "" || isLid(videoId) || !ytVideoRe.MatchString(videoId) {
-			return
-		}
+// autoCacheRun is the body of autoCacheOnPlay, synchronous (tests call it
+// directly). profile is the cap key of decision 8 (acquireProfileKey).
+func autoCacheRun(profile string, videoId string, playlistId string, playerResponse _youtube.PlayerResponse) {
+	if !autoCacheEnabled() {
+		return
+	}
+	// Local (owned) tracks are addressed by lid and already in the library.
+	if videoId == "" || isLid(videoId) || !ytVideoRe.MatchString(videoId) {
+		return
+	}
 
-		// (a) The PLAYED track is enqueued by the ytm-cache bridge during
-		// player resolution (it applies the same content-aware owned check),
-		// so we do NOT enqueue it here too -- doing both raced and produced
-		// duplicate Yubal jobs (P3). We only need the owned verdict to gate
-		// the album + lookahead below.
-		title := playerResponse.VideoDetails.Title
-		author := playerResponse.VideoDetails.Author
-		owned := cachedOwnsTrack(videoId, title, author)
+	// (a) The PLAYED track is enqueued by the ytm-cache bridge during
+	// player resolution (it applies the same content-aware owned check),
+	// so we do NOT enqueue it here too -- doing both raced and produced
+	// duplicate Yubal jobs (P3). We only need the owned verdict to gate
+	// the album + lookahead below.
+	title := playerResponse.VideoDetails.Title
+	author := playerResponse.VideoDetails.Author
+	owned := cachedOwnsTrack(videoId, title, author)
 
-		// (b) Resolve + enqueue the whole album this track belongs to --
-		// unless we already own this track by content (P2a). Owning the track
-		// almost always means the album is already in the library (e.g. a
-		// lidarr rip); re-downloading it would create a duplicate album.
-		if !owned {
-			albumURL := ""
-			if strings.HasPrefix(playlistId, "OLAK5uy") {
-				// An OLAK5uy playlist IS the album; enqueue it directly.
-				albumURL = "https://music.youtube.com/playlist?list=" + playlistId
-			} else if a := resolveAlbumURL(videoId); a != "" {
-				albumURL = a
-			}
-			if albumURL != "" && !autoCacheSeen("al:"+albumURL) {
-				enqueueYubalURL(albumURL, 0)
-			}
+	// (b) Resolve the whole album this track belongs to -- unless we already
+	// own this track by content (P2a). Owning the track almost always means
+	// the album is already in the library (e.g. a lidarr rip); re-downloading
+	// it would create a duplicate album. An album already requested within
+	// autoCacheTTL is not requested (nor charged) again.
+	albumURL := ""
+	if !owned {
+		if strings.HasPrefix(playlistId, "OLAK5uy") {
+			// An OLAK5uy playlist IS the album; enqueue it directly.
+			albumURL = "https://music.youtube.com/playlist?list=" + playlistId
+		} else if a := resolveAlbumURL(videoId); a != "" {
+			albumURL = a
 		}
+		if albumURL != "" && autoCacheSeen("al:"+albumURL) {
+			albumURL = ""
+		}
+	}
 
-		// (c) Look ahead in the queue and pre-cache upcoming tracks.
-		//     Finite playlists (VL/OLAK5uy/PL): up to 20. RD*/mix: cap at 3.
-		if playlistId == "" || playlistId == "undefined" {
-			return
-		}
-		lookahead := 0
+	// (c) Look ahead in the queue and pre-cache upcoming tracks.
+	//     Finite playlists (VL/OLAK5uy/PL): up to 20. RD*/mix: cap at 3.
+	//     One queue is charged once per profile within autoCacheTTL: the
+	//     tracks of an album played in a row share the lookahead charge.
+	lookahead := 0
+	if playlistId != "" && playlistId != "undefined" {
 		if isFinitePlaylist(playlistId) {
 			lookahead = 20
 		} else if isMixPlaylist(playlistId) {
 			lookahead = 3
-		} else {
-			return
 		}
+		if lookahead > 0 && autoCacheSeen("la:"+profile+":"+playlistId) {
+			lookahead = 0
+		}
+	}
+	if albumURL == "" && lookahead == 0 {
+		return
+	}
+
+	// Decision 8: one acquisition (album and/or queue newly requested by this
+	// play) against the profile's daily cap. Past the cap the play is served
+	// as usual (the stream does not depend on yubal), nothing is enqueued.
+	if !acquireTryCharge(profile, "autocache", "", author, videoId) {
+		return
+	}
+	if albumURL != "" {
+		enqueueYubalURL(albumURL, 0)
+	}
+	if lookahead > 0 {
 		enqueueLookahead(videoId, playlistId, lookahead)
-	}()
+	}
 }
 
 // --- auto-cache toggles + guards -------------------------------------------

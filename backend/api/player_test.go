@@ -48,7 +48,7 @@ func stubAutoCache(t *testing.T) *int32 {
 	t.Helper()
 	var calls int32
 	prev := autoCacheOnPlayFn
-	autoCacheOnPlayFn = func(string, string, _youtube.PlayerResponse) { atomic.AddInt32(&calls, 1) }
+	autoCacheOnPlayFn = func(string, string, string, _youtube.PlayerResponse) { atomic.AddInt32(&calls, 1) }
 	t.Cleanup(func() { autoCacheOnPlayFn = prev })
 	return &calls
 }
