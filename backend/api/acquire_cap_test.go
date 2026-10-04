@@ -200,3 +200,81 @@ func TestAutoCacheRunChargesOncePerAlbumAndStopsAtCap(t *testing.T) {
 	assert.Equal(t, int32(3), atomic.LoadInt32(&jobs))
 	assert.Equal(t, 1, acquireUsedToday("anon"))
 }
+
+// TestRunAcquireChargesPerAlbum: a discography pull is charged one acquisition
+// per album it enqueues (40 tracks over 3 albums = 3), one per single track
+// outside any album, and stops at the album boundary once the cap is reached.
+func TestRunAcquireChargesPerAlbum(t *testing.T) {
+	useTestDB(t)
+	useAcquireClock(t, time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC))
+	t.Setenv("YTM_ACQUIRE_DAILY_CAP", "")
+
+	prevPause, prevTrack := acquireAlbumPause, acquireTrackPause
+	acquireAlbumPause, acquireTrackPause = 0, 0
+	t.Cleanup(func() { acquireAlbumPause, acquireTrackPause = prevPause, prevTrack })
+
+	vid := func(alb, i int) string { return fmt.Sprintf("Q%dT%08d", alb, i) }
+	tracks := map[int]int{1: 14, 2: 13, 3: 13} // 40 tracks over 3 albums
+	prevSelf := selfGetFn
+	selfGetFn = func(path string) map[string]interface{} {
+		switch {
+		case strings.HasPrefix(path, "/api/v1/artist/"):
+			// Top songs: one album track and one standalone single.
+			return map[string]interface{}{
+				"albums": []interface{}{
+					map[string]interface{}{"browseId": "MPREb_album1"},
+					map[string]interface{}{"browseId": "MPREb_album2"},
+					map[string]interface{}{"browseId": "MPREb_album3"},
+				},
+				"songs": []interface{}{
+					map[string]interface{}{"videoId": vid(1, 0)},
+					map[string]interface{}{"videoId": "QsSingle001"},
+				},
+			}
+		case strings.HasPrefix(path, "/api/v1/main.json?browseId=MPREb_album"):
+			n := int(path[len(path)-1] - '0')
+			items := []interface{}{}
+			for i := 0; i < tracks[n]; i++ {
+				items = append(items, map[string]interface{}{"videoId": vid(n, i)})
+			}
+			return map[string]interface{}{"tracks": items}
+		}
+		return nil
+	}
+	t.Cleanup(func() { selfGetFn = prevSelf })
+
+	var jobs int32
+	yubal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/jobs" {
+			atomic.AddInt32(&jobs, 1)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(yubal.Close)
+	t.Setenv("YUBAL_URL", yubal.URL)
+
+	albums, singles := discographyAlbums("UCartistA", 40)
+	require.Len(t, albums, 3)
+	assert.Equal(t, []string{"QsSingle001"}, singles, "a top song inside an album is not a single")
+
+	enq := runAcquire("p-test", "UCartistA", "Artist A", 0)
+	assert.Equal(t, 41, enq, "40 album tracks + 1 single enqueued")
+	assert.Equal(t, int32(41), atomic.LoadInt32(&jobs))
+	assert.Equal(t, 4, acquireUsedToday("p-test"), "3 albums + 1 single = 4 acquisitions, not 41")
+	assert.Equal(t, 16, acquireAllowance("p-test"))
+
+	// With one slot left, a second pull enqueues exactly one album and stops.
+	t.Setenv("YTM_ACQUIRE_DAILY_CAP", "5")
+	atomic.StoreInt32(&jobs, 0)
+	enq = runAcquire("p-test", "UCartistB", "Artist B", 0)
+	assert.Equal(t, 14, enq, "only the first album (14 tracks) fits")
+	assert.Equal(t, int32(14), atomic.LoadInt32(&jobs))
+	assert.Equal(t, 0, acquireAllowance("p-test"))
+
+	// Cap reached: a third pull enqueues nothing.
+	atomic.StoreInt32(&jobs, 0)
+	assert.Equal(t, 0, runAcquire("p-test", "UCartistC", "Artist C", 0))
+	assert.Equal(t, int32(0), atomic.LoadInt32(&jobs))
+}

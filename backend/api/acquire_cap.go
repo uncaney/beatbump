@@ -2,16 +2,18 @@ package api
 
 // Decision 8 (program/DECISIONS-PAUL.md): a server side cap on the
 // acquisitions a profile may request per UTC day, 20 by default
-// (YTM_ACQUIRE_DAILY_CAP, 0 = no cap). One acquisition is one album or one
-// playlist / radio queue newly requested by a play (autoCacheOnPlay), or one
-// track of a discography pull (runAcquire: follow of a YouTube artist, POST
-// me/acquire). Past the cap, plays are still served (the stream does not
+// (YTM_ACQUIRE_DAILY_CAP, 0 = no cap). The unit is the album: one acquisition
+// is one album or one playlist / radio queue newly requested by a play
+// (autoCacheOnPlay), one album enqueued by a discography pull (runAcquire:
+// follow of a YouTube artist, POST me/acquire; a 40-track discography over 3
+// albums costs 3), or one single track outside any album (1 each). Past the
+// cap, plays are still served (the stream does not
 // depend on the acquisition) but nothing more is enqueued to yubal, and the
 // explicit POST me/acquire answers 429 {"error":"quota","reason":...}.
 //
-// The counter is the existing acquire_jobs table (db.AcquireJob): the
-// discography pull already wrote one row per track there, the play driven
-// acquisitions now write one row per charge (status "autocache"), so the count
+// The counter is the existing acquire_jobs table (db.AcquireJob): one row per
+// charge (status "autocache" for a play, "album" for an album of a pull with
+// the album browseId as videoId, "enqueued" for a single track), so the count
 // survives restarts and GET me/acquire lists everything the profile asked for.
 // Anonymous profiles are one per bbp cookie; a request without any cookie is
 // pooled under "anon" (no cookie is minted by a play).
