@@ -293,7 +293,6 @@
 						});
 					},
 					icon: "shuffle",
-					key: "Shuffle",
 					text: fr("Shuffle"),
 				},
 				{
@@ -307,7 +306,6 @@
 					},
 					icon: "play",
 					type: "outlined",
-					key: "Start Radio",
 					text: fr("Start Radio"),
 				},
 				{

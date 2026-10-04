@@ -186,7 +186,6 @@ const MENU_KEYS = new Set<string>(Object.keys(DROPDOWN_LABELS_FR));
 const ALLOW: Record<string, string> = {
 	// Decision 1 (c59a): identifiers that never reach the screen as such.
 	"routes/(app)/search/[slug]/+page.svelte::Your Library": "titre de l etagere renvoye par le backend, affiche via SHELF_TITLES_FR",
-	"routes/(app)/playlist/[slug]/+page.svelte::key: \"Shuffle\",": "identifiant de menu construit dans le markup",
 	"routes/(app)/playlist/[slug]/+page.svelte::text: fr(\"Shuffle\"),": "libelle via fr(), identifiant de menu",
 	"lib/components/Carousel/Carousel.svelte::Trending": "test sur le titre d un carrousel YouTube, pas un texte affiche",
 };
