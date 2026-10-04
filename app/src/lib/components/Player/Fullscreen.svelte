@@ -111,7 +111,7 @@
 	// Direct mobile actions (avoid the popper, which conflicts with the swipe gesture)
 	async function mobileDownload() {
 		const r = await downloadToDevice($currentTrack);
-		notify(r.ok ? "Downloading…" : (r.reason || "Download failed"), r.ok ? "success" : "error");
+		notify(r.ok ? "Téléchargement…" : (r.reason || "Échec du téléchargement"), r.ok ? "success" : "error");
 	}
 	async function mobileViewArtist() {
 		const aid = await resolveArtistId($currentTrack);

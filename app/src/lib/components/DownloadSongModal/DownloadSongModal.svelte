@@ -26,14 +26,14 @@
 				`/api/v1/download/song?${params.toString()}`,
 			);
 			if (res.ok) {
-				notify("Download queued successfully", "success");
+				notify("Téléchargement mis en file", "success");
 				showDownloadSongPopper.set({ state: false, item: undefined });
 			} else {
 				const data = await res.json();
-				notify(data.message || "Failed to queue download", "error");
+				notify(data.message || "Téléchargement impossible", "error");
 			}
 		} catch (e) {
-			notify("Error queuing download", "error");
+			notify("Erreur lors du téléchargement", "error");
 			console.error(e);
 		}
 	}

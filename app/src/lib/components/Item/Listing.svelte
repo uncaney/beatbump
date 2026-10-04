@@ -462,7 +462,7 @@
 							fill="hsla(0, 0%, 95%, 0.7)"
 							size="12px"
 						>
-							<span class="sr-only">Explicit</span>
+							<span class="sr-only">Explicite</span>
 						</Icon>
 					{/if}
 				</p>

@@ -103,7 +103,7 @@
 				Deleting this playlist will permanently delete all of its data from
 				your device (thumbnail, title, songs, etc.).
 			</p>
-			<p>This action is permanent and cannot be undone!</p>
+			<p>Cette action est définitive.</p>
 		</div>
 		<div class="body">
 			<div class="image">

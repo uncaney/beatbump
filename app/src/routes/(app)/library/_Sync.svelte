@@ -108,7 +108,7 @@
 						console.log(ArrayOfStores);
 					}
 
-					notify("Data sync completed!", "success");
+					notify("Synchronisation terminée", "success");
 					setTimeout(() => {
 						completed = true;
 					}, 1250);
@@ -121,7 +121,7 @@
 					}
 				});
 				conn.on("open", () => {
-					notify("Connection established!", "success");
+					notify("Connexion établie", "success");
 				});
 			});
 		}
@@ -269,7 +269,7 @@
 							<div class="container">
 								{#each dataType as option}
 									<label>
-										{option}
+										{option === "Favorites" ? "Favoris" : option}
 										<input
 											type="checkbox"
 											bind:group={kindOfData}
