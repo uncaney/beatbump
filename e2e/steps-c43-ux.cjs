@@ -98,7 +98,9 @@ async function run(deps) {
       }
       parts.push("library " + libParts.join(", "));
 
-      // 3. U12-2: no default (UA) border on the Mixes cards, only the coloured left edge.
+      // 3. U12-2: no default (UA) border on the Mixes cards, only the coloured left edge (a library without any
+      //    mix card, below the 15-album threshold, ends the step as a SKIP with the reason).
+      await require("./harness-lib.cjs").requireMixCards(URL);
       await mp.goto(URL + "/library/mixes", { waitUntil: "load", timeout: 45000 });
       const card = mp.locator(".mix-card").first();
       await card.waitFor({ state: "visible", timeout: 25000 });

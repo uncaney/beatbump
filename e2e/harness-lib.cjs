@@ -15,6 +15,9 @@
 //   isSkip(err)                    true for an error thrown by skip()
 //   libraryAtLeast(base, n)        true when the served library holds at least n tracks (false when unreadable)
 //   requireLibrary(base, n, what)  skip() unless libraryAtLeast(base, n); <what> names the step's need
+//   requireMixCards(base)          skip() unless GET /api/v1/local/mixes lists at least one card (a decade or year
+//                                  with 15 albums, or a genre with 200 titles over 15 albums): the Mixes page of a
+//                                  smaller library shows its empty state, there is no mix card to check
 //   typoOf(query)                  a one-letter-dropped variant of the query (typo-tolerant search steps)
 //   headerFor(base)                HARNESS_HEADERS, the X-Ytm-Harness: 1 header every browser context sends
 const fs = require("fs");
@@ -100,6 +103,27 @@ async function requireLibrary(base, n, what) {
   skip(`${what || "this step"} needs a library of at least ${n} tracks (served: ${d && d.tracks != null ? d.tracks : "unreadable"})`);
 }
 
+let mixCardsMemo = null;
+async function requireMixCards(base) {
+  if (!mixCardsMemo) {
+    mixCardsMemo = (async () => {
+      try {
+        const r = await rawRequest(base, "GET", "/api/v1/local/mixes", { Accept: "application/json" }, 20000);
+        if (r.status !== 200) return { n: -1, why: "HTTP " + r.status };
+        const d = JSON.parse(r.body) || {};
+        const n = ["decades", "years", "genres", "crossovers"].reduce((t, k) => t + (Array.isArray(d[k]) ? d[k].length : 0), 0);
+        return { n, why: "" };
+      } catch (e) { return { n: -1, why: String((e && e.message) || e).slice(0, 60) }; }
+    })();
+  }
+  const m = await mixCardsMemo;
+  if (m.n < 0) return; // unreadable: let the step itself fail on the page
+  if (m.n === 0) {
+    mixCardsMemo = null; // re-read next time (the 5 min response cache may still hold an older answer)
+    skip("no mix card on this library: GET /api/v1/local/mixes lists none (a mix needs 15 albums of one decade or year, or 200 titles of one genre over 15 albums)");
+  }
+}
+
 // "daft punk" -> "daft pnk": drop one inner letter of the last word longer than 3 characters.
 function typoOf(query) {
   const words = String(query || "").trim().split(/\s+/);
@@ -110,4 +134,4 @@ function typoOf(query) {
   return words.join(" ");
 }
 
-module.exports = { HARNESS_HEADERS, loadFixtures, fixturesPath, parseBase, rawRequest, servedStats, servedVersion, skip, isSkip, libraryStats, libraryAtLeast, requireLibrary, typoOf };
+module.exports = { HARNESS_HEADERS, loadFixtures, fixturesPath, parseBase, rawRequest, servedStats, servedVersion, skip, isSkip, libraryStats, libraryAtLeast, requireLibrary, requireMixCards, typoOf };

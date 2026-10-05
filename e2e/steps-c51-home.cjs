@@ -141,7 +141,7 @@ async function run(deps) {
       const api = await mp.evaluate(async () => { const r = await fetch("/api/v1/local/artists/aliases?limit=50", { cache: "no-store" }); return { status: r.status, body: await r.json().catch(() => null) }; });
       if (api.status !== 200 || !api.body || !Array.isArray(api.body.groups)) throw new Error(`aliases API ${api.status}: ${JSON.stringify(api.body).slice(0, 120)}`);
       const groups = api.body.groups.map((g) => ({ g, chips: distinctChips(g) })).filter((x) => x.chips > ALIAS_CHIPS_SHOWN).sort((a, b) => b.chips - a.chips);
-      if (!groups.length) throw new Error(`no artist group with more than ${ALIAS_CHIPS_SHOWN} distinct credits among ${api.body.groups.length} groups (largest: ${api.body.groups[0] ? api.body.groups[0].name + " size " + api.body.groups[0].size : "none"})`);
+      if (!groups.length) require("./harness-lib.cjs").skip(`no artist group with more than ${ALIAS_CHIPS_SHOWN} distinct credits in this library (${api.body.groups.length} groups, largest: ${api.body.groups[0] ? api.body.groups[0].name + " size " + api.body.groups[0].size : "none"}): nothing to fold`);
       const { g, chips: expected } = groups[0];
 
       await mp.goto(URL + "/artist/" + encodeURIComponent(g.id), { waitUntil: "load", timeout: 45000 });

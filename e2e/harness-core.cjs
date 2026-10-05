@@ -61,6 +61,7 @@ let LID = FIX.localLid || ""; // resolved from /api/v1/local/songs below when th
 const { skip, rawRequest } = lib;
 const libraryAtLeast = (n) => lib.libraryAtLeast(URL, n);
 const requireLibrary = (n, what) => lib.requireLibrary(URL, n, what);
+const requireMixCards = () => lib.requireMixCards(URL);
 const ROBOT_UAS = Array.isArray(FIX.robotUserAgents) && FIX.robotUserAgents.length ? FIX.robotUserAgents : ["WhatsApp/2.23.20.0 A"];
 const HUMAN_UA = FIX.humanUserAgent || "Mozilla/5.0 (X11; Linux x86_64) Chrome/126";
 // Fixture album / artist when present, else the old API lookup (run inside the page).
@@ -1127,6 +1128,7 @@ async function search(page) {
     await stg.waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
     if ((await stg.count()) && (await stg.getAttribute("aria-expanded")) !== "true") { await stg.click({ timeout: 5000 }); await sleep(400); } // c37c: folded by default
     await page.locator('[data-testid="pack-size"]').first().waitFor({ state: "visible", timeout: 15000 });
+    await requireMixCards();
     await gotoQuiet(page, URL + "/library/mixes", { timeout: 45000 });
     await page.locator('[data-testid="mix-card"]').first().waitFor({ state: "visible", timeout: 15000 });
     const keep = await page.locator('[data-testid="mix-keep"]').count();
@@ -1347,6 +1349,7 @@ async function search(page) {
     const h1 = await rawHead("/listen?id=" + ogId, uaB);
     const h2 = await rawHead("/listen?id=" + ogId, uaB);
     if (!/max-age=600/.test(h2.cc) || !/User-Agent/i.test(h2.vary)) throw new Error("OG HIT headers: " + JSON.stringify([h1, h2]));
+    await requireMixCards();
     await gotoQuiet(page, URL + "/library/mixes", { timeout: 45000 });
     await page.locator('[data-testid="mix-card"]').first().waitFor({ state: "visible", timeout: 15000 });
     const unavailable = await page.locator('[data-testid="mix-card"][data-unavailable]').count();
@@ -1374,6 +1377,7 @@ async function search(page) {
         if (m.x >= 0 && m.x < 12) throw new Error(path + " title at x=" + m.x + " (no gutter)");
         out.push(path.replace("/library/", "") + ":" + m.x);
       }
+      await requireMixCards();
       await mp.goto(URL + "/library/mixes", { waitUntil: "load", timeout: 45000 });
       await mp.locator('[data-testid="mix-card"]').first().waitFor({ state: "visible", timeout: 15000 });
       const cards = await mp.locator('[data-testid="mix-card"]').count(); const keeps = await mp.locator('[data-testid="mix-keep"]').count();
@@ -1488,6 +1492,7 @@ async function search(page) {
       const m = await mp.evaluate(() => { const h = document.querySelector("main h1, main h2"); const r = h && h.getBoundingClientRect(); const b = Array.from(document.querySelectorAll("main button, main a.btn-primary, main a.btn-secondary")).find((x) => /nouvelle playlist/i.test(x.textContent || "")); const br = b && b.getBoundingClientRect(); const cs = b && getComputedStyle(b); return { x: r ? Math.round(r.x) : -1, btn: b ? { h: Math.round(br.height), cls: b.className.slice(0, 40), bg: cs.backgroundColor } : null, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 }; });
       if (m.overflow || (m.x >= 0 && m.x < 12)) throw new Error("playlists page gutter: " + JSON.stringify(m));
       if (!m.btn || m.btn.h < 43 || !/btn-primary/.test(m.btn.cls)) throw new Error("Nouvelle playlist button: " + JSON.stringify(m.btn));
+      await requireMixCards();
       await mp.goto(URL + "/library/mixes", { waitUntil: "load", timeout: 45000 });
       await mp.locator('[data-testid="mix-card"]').first().waitFor({ state: "visible", timeout: 15000 });
       const border = await mp.evaluate(() => { const c = document.querySelector('[data-testid="mix-card"]'); const cs = getComputedStyle(c); return [cs.borderTopStyle, cs.borderTopWidth]; });
@@ -1547,6 +1552,7 @@ async function search(page) {
     const cross = (mixes.crossovers || []).length, years = (mixes.years || []).length;
     await gotoQuiet(page, URL + "/home", { timeout: 45000 });
     await page.locator('[data-testid="album-of-day"]').first().waitFor({ state: "visible", timeout: 15000 });
+    await requireMixCards();
     await gotoQuiet(page, URL + "/library/mixes", { timeout: 45000 });
     await page.locator('[data-testid="mix-card"]').first().waitFor({ state: "visible", timeout: 15000 });
     const yearCards = await page.locator('[data-testid="mix-card"][data-mix^="year:"]').count();

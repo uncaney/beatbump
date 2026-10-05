@@ -93,6 +93,9 @@ async function run(deps) {
       // the invariant is the SET of ids (same members, same size), not the sequence (chain 57).
       if (JSON.stringify([...idsAsc].sort()) !== JSON.stringify([...idsDesc].sort())) throw new Error("sort=year:asc and sort=year:desc return different no-year sets (some item carries a real year)");
 
+      // A library where every album carries a year has nothing to count under the h1 (the page shows its empty
+      // state): a precondition of the library, reported as a SKIP rather than a pass.
+      if (json.total === 0) require("./harness-lib.cjs").skip("no album without a release year in this library (GET local/albums?filter=no-year total 0)");
       const pageTotal = await pollUntil(async () => {
         const txt = await p.locator("main .sub").last().innerText().catch(() => "");
         return parseIntFr(txt);

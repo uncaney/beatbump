@@ -1,5 +1,5 @@
 {
-  "_comment": "Harness fixtures for the synthetic sample library of fixtures/make-sample-library.sh (18 CC0 tracks, 4 artists, 6 albums). Use with HARNESS_FIXTURES=fixtures.sample.json e2e/run.sh <url>. The lb-/la- ids and the lid are hashes of the sample's names and paths (MUSIC_DIR/sample/<Artist>/<Album>/...), stable across fresh installs. No acquiredVideoId: the YouTube-backed steps skip. Keys documented in harness-core.cjs.",
+  "_comment": "Harness fixtures for the synthetic sample library of fixtures/make-sample-library.sh (45 CC0 tracks, 19 albums, 9 credited artists). Use with HARNESS_FIXTURES=fixtures.sample.json e2e/run.sh <url>. The lb-/la- ids and the lid are hashes of the sample's names and paths (MUSIC_DIR/sample/<Artist>/<Album>/...), stable across fresh installs. No acquiredVideoId: the YouTube-backed steps skip. Keys documented in harness-core.cjs.",
   "query": "The Sine Waves",
   "typoQuery": "The Sine Wves",
   "localLid": "d18ccea3837",
@@ -8,8 +8,8 @@
   "localAlbumTitle": "Sweep",
   "localAlbumArtist": "Low Pass Orchestra",
   "localAlbumTracks": 3,
-  "localArtistId": "la-1ffb308beda9",
-  "localArtistName": "Low Pass Orchestra",
+  "localArtistId": "la-3801694f6a31",
+  "localArtistName": "Pulse Train",
   "genre": "Electronic",
   "genreMinTracks": 3,
   "robotUserAgents": [

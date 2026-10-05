@@ -18,7 +18,8 @@
 //                               bar (data-testid install-hint) shows with data-offer "android-manual", the menu
 //                               steps (install-hint-steps: "menu", "Installer l'application"), the /bienvenue link
 //                               and no "Installer" button; /bienvenue shows bienvenue-manual and no bienvenue-install.
-//   cover_fallback_initials     every /cover request answered 404 (route): the fixture album header shows
+//   cover_fallback_initials     every /cover request answered 404 (route, in a context without the service worker,
+//                               whose own /cover fetches a route cannot see): the fixture album header shows
 //                               release-cover-initials and no visible broken <img alt=album>; a played track shows
 //                               mini-cover-initials in the mini-bar and player-cover-initials in the fullscreen
 //                               player, each broken <img> at opacity 0 or loaded (naturalWidth > 0).
@@ -96,8 +97,11 @@ async function run(deps) {
 
   // One Android context: page, play() hook, errors collected, logged in as `name` (fresh profile = no history, the
   // day-one card's condition), the SW controlling the page. `routes` = optional Playwright route handlers.
-  async function androidSession(name, { routes } = {}) {
-    const mctx = await newCtx(browser, ANDROID);
+  // noServiceWorker: a context whose pages are never controlled by the SW (serviceWorkers "block"). Playwright's
+  // context.route() does not see what the SW fetches itself, and the SW answers /cover (coverFetch, cache-first):
+  // with the SW in control a route that 404s every /cover only reached the requests made before it took control.
+  async function androidSession(name, { routes, noServiceWorker } = {}) {
+    const mctx = await newCtx(browser, noServiceWorker ? { ...ANDROID, serviceWorkers: "block" } : ANDROID);
     const errs = [];
     try {
       await mctx.addInitScript(mediaHook);
@@ -111,6 +115,7 @@ async function run(deps) {
         if (!(st >= 200 && st < 300)) throw new Error(`login as ${name} answered ${st}`);
       }
       await mp.reload({ waitUntil: "load", timeout: 45000 });
+      if (noServiceWorker) return { mctx, mp, errs };
       let ctl = await pollUntil(() => swControlled(mp), 15000, 500);
       if (!ctl) { await mp.reload({ waitUntil: "load", timeout: 45000 }); await sleep(1500); ctl = await swControlled(mp); }
       if (!ctl) throw new Error("page not controlled by the service worker (two loads)");
@@ -244,7 +249,7 @@ async function run(deps) {
     // step must not depend on that. The app's own images (icons, blur) are not under /cover.
     const covered = [];
     const routes = [[/\/cover(\?|\/|$)/, (route) => { covered.push(route.request().url().replace(URL, "").slice(0, 60)); return route.fulfill({ status: 404, contentType: "text/plain", body: "" }); }]];
-    const { mctx, mp, errs } = await androidSession(null, { routes });
+    const { mctx, mp, errs } = await androidSession(null, { routes, noServiceWorker: true });
     try {
       if (!albumId) throw new Error("fixtures.localAlbumId missing");
       const imgState = (sel) => mp.evaluate((s) => Array.from(document.querySelectorAll(s)).map((img) => { const r = img.getBoundingClientRect(); return { alt: img.getAttribute("alt"), complete: img.complete, nw: img.naturalWidth, opacity: getComputedStyle(img).opacity, w: Math.round(r.width), h: Math.round(r.height) }; }), sel);
