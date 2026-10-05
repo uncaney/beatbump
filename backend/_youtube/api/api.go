@@ -417,22 +417,23 @@ func getHttpClient() http.Client {
 	return client
 }
 
-// getResidentialHttpClient returns an http.Client whose upstream egresses
-// through the residential gost proxy (env RESIDENTIAL_PROXY, default
-// http://gost:8888). Used for background auto-cache lookups so they do not
-// hit YouTube from the datacenter IP and trip rate-limits.
+// getResidentialHttpClient returns an http.Client for the background
+// auto-cache lookups ("next" track resolution). When RESIDENTIAL_PROXY is set
+// (an HTTP proxy URL, e.g. a residential egress) the requests go through it so
+// a datacenter IP does not trip YouTube rate-limits; when it is empty the
+// client egresses directly, like every other request of this process. The old
+// default of http://gost:8888 (a host-specific container) made every such
+// lookup fail silently on a generic deployment.
 func getResidentialHttpClient() http.Client {
 	myDialer := net.Dialer{}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return myDialer.DialContext(ctx, "tcp4", addr)
 	}
-	proxy := os.Getenv("RESIDENTIAL_PROXY")
-	if proxy == "" {
-		proxy = "http://gost:8888"
-	}
-	if u, err := url.Parse(proxy); err == nil {
-		transport.Proxy = http.ProxyURL(u)
+	if proxy := os.Getenv("RESIDENTIAL_PROXY"); proxy != "" {
+		if u, err := url.Parse(proxy); err == nil {
+			transport.Proxy = http.ProxyURL(u)
+		}
 	}
 	return http.Client{Transport: transport}
 }
