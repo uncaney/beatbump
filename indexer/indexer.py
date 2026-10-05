@@ -205,8 +205,29 @@ def resolve_sources():
     return out
 
 
+def reconcile_state(state):
+    """The mtime state lives on a bind mount, the index in a volume: after a
+    `docker compose down -v` (or a wiped meili) the state would claim every file is
+    indexed while the index is empty. An empty index with a non-empty state means
+    exactly that: forget the state so the pass re-indexes everything. (The state
+    also keeps entries of deleted files, so a count comparison would be wrong.)"""
+    if not state:
+        return state
+    try:
+        wait_tasks()
+        n = int(meili("GET", f"/indexes/{IDX}/stats").get("numberOfDocuments", 0))
+    except Exception as e:
+        print(f"[indexer] index stats unavailable ({e}); keeping state", flush=True)
+        return state
+    if n == 0:
+        print(f"[indexer] index is empty but state knows {len(state)} files: full re-scan",
+              flush=True)
+        return {}
+    return state
+
+
 def scan():
-    state = load_state()
+    state = reconcile_state(load_state())
     new_state = dict(state)
     batch = []
     stats = {}
