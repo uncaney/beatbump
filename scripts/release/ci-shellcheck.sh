@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Run ShellCheck over the shell entry points of the repository.
-# Blocking at SHELLCHECK_SEVERITY (default: error); the warning-level report is
-# printed afterwards for information only (13 warnings in ops/ and e2e/run.sh
-# when the gate was written; raise the severity once they are fixed).
+# Blocking at SHELLCHECK_SEVERITY (default: warning, the tree is clean at that
+# level since ops/ became path-agnostic); with a stricter default the
+# warning-level report is still printed for information.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-severity=${SHELLCHECK_SEVERITY:-error}
+severity=${SHELLCHECK_SEVERITY:-warning}
 files=()
 for f in up.sh ops/*.sh e2e/run.sh fixtures/*.sh scripts/release/*.sh; do
   [ -f "$f" ] && files+=("$f")

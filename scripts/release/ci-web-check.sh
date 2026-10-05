@@ -16,12 +16,21 @@ base=$(tr -dc '0-9' <"$baseline_file" 2>/dev/null || true)
 cd "$root/app"
 npx svelte-kit sync >/dev/null 2>&1 || true
 # svelte-check exits 1 whenever it finds an error; the count is what we gate on.
+# Its output is occasionally cut short on a loaded host (seen once: the
+# summary line missing after ~30 files), so one retry before the gate closes.
 esc=$(printf '\033')
-out=$(npx svelte-check --threshold error 2>&1 | sed -E "s/${esc}\[[0-9;]*[A-Za-z]//g" || true)
-n=$(printf '%s\n' "$out" | grep -E 'svelte-check found [0-9]+ error' | tail -1 | sed -E 's/.*svelte-check found ([0-9]+) error.*/\1/' || true)
+log=${TMPDIR:-/tmp}/svelte-check.log
+n=""
+for attempt in 1 2; do
+  out=$(npx svelte-check --threshold error 2>&1 | sed -E "s/${esc}\[[0-9;]*[A-Za-z]//g" || true)
+  printf '%s\n' "$out" >"$log"
+  n=$(printf '%s\n' "$out" | grep -E 'svelte-check found [0-9]+ error' | tail -1 | sed -E 's/.*svelte-check found ([0-9]+) error.*/\1/' || true)
+  [ -z "$n" ] || break
+  echo "svelte-check gate: attempt $attempt produced no 'svelte-check found N errors' line ($(printf '%s\n' "$out" | wc -l | tr -d ' ') lines, see $log)"
+done
 [ -n "$n" ] || {
-  printf '%s\n' "$out" | tail -20
-  echo "svelte-check gate: no 'svelte-check found N errors' line -> refuse"
+  tail -20 "$log"
+  echo "svelte-check gate: no 'svelte-check found N errors' line after 2 attempts -> refuse"
   exit 3
 }
 if [ "$n" -gt "$base" ]; then

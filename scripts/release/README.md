@@ -22,7 +22,7 @@ Contents:
 | `ci-install-go.sh` | installs the Go toolchain named by `go.mod` (`toolchain` line) into `/usr/local/go`, links `go` into `/usr/local/bin` |
 | `ci-install-tools.sh` | installs pinned `docker` CLI, `buildx`, `compose`, `buildctl`, `ruff`, `shellcheck` into a plain container, checksum-verified where the project publishes one |
 | `ci-web-check.sh` | svelte-check gate: error count must not exceed `ops/svelte-check.baseline` (same rule as `ops/finish-cycle.sh`) |
-| `ci-shellcheck.sh` | shellcheck on `up.sh`, `ops/*.sh`, `e2e/run.sh`, `fixtures/*.sh`, `scripts/release/*.sh` (blocking at `error`, warning report printed) |
+| `ci-shellcheck.sh` | shellcheck on `up.sh`, `ops/*.sh`, `e2e/run.sh`, `fixtures/*.sh`, `scripts/release/*.sh` (blocking at `warning`; `SHELLCHECK_SEVERITY` overrides) |
 | `ci-python.sh` | `py_compile` on every tracked `.py` outside `app/`, plus `ruff --select E9,F63,F7,F82` when ruff is present |
 | `ci-compose.sh` | `docker compose config -q` on `deploy/compose.yml`, then with `deploy/compose.images.yml`, with a `.env` generated from `.env.example` |
 | `check-version.sh TAG` | tag is `vX.Y.Z[-pre]`, equals `VERSION`, and `CHANGELOG.md` has `## [X.Y.Z] - date` with content |
@@ -48,15 +48,17 @@ container (node 22 is what the root `Dockerfile` builds with):
 | --- | --- | --- |
 | `go` | `ci-install-go.sh`, `go vet ./...`, `go test -count=1 ./...`, `go test -count=3 ./backend/api/` (`CGO_ENABLED=0`, `GOFLAGS=-p=2`) | tests pass |
 | `web` | `npm ci --legacy-peer-deps` in `app/`, `npx vitest run`, `ci-web-check.sh` | vitest green, svelte-check errors <= baseline |
-| `shell` | apt `shellcheck`, `ci-shellcheck.sh` | no finding at severity `error` |
+| `shell` | apt `shellcheck`, `ci-shellcheck.sh` | no finding at severity `warning` |
 | `python` | pinned `ruff` (best effort), `ci-python.sh` | every `.py` compiles, no E9/F63/F7/F82 |
 | `harness-headers` | `node e2e/check-harness-headers.cjs` | every Playwright context sends `X-Ytm-Harness` |
 | `compose` | standalone compose binary, `ci-compose.sh` | both compose files resolve, override names only existing services |
 
 Verified on 2026-10-05 against the `ship` tree in the same images CI uses:
 Go 3 packages ok, vitest 71 files / 880 tests, svelte-check 411 errors
-(baseline 411), shellcheck 0 errors (13 warnings), py_compile 41 files ok,
-ruff selection clean.
+(baseline 411), shellcheck 0 findings at warning level, py_compile ok, ruff
+selection clean, compose base and images override resolve, harness headers
+OK; `forgejo-release.sh` exercised against an API mock (create, update,
+asset replacement, pre-release flag) and `tag.sh` in a throwaway clone.
 
 Design choices worth knowing:
 
