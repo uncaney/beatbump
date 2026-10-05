@@ -53,10 +53,14 @@ func putNowPlaying(t *testing.T, body string, hdr map[string]string) (int, strin
 	return rec.Code, rec.Body.String()
 }
 
-func TestNowPlayingGet404WhenNone(t *testing.T) {
+func TestNowPlayingGet204WhenNone(t *testing.T) {
 	useNowPlayingDB(t)
-	if code, _ := getNowPlaying(t); code != http.StatusNotFound {
-		t.Fatalf("status %d, want 404", code)
+	c, rec := ctxFor(http.MethodGet, "/api/v1/me/nowplaying", "", chromeUA)
+	if err := MeNowPlayingGetHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("status %d body %q, want 204 and no body (a 404 is a console error for every fresh profile)", rec.Code, rec.Body.String())
 	}
 }
 
@@ -105,7 +109,7 @@ func TestNowPlayingPutRejects(t *testing.T) {
 			t.Errorf("%s: status %d (%s), want %d", tc.name, code, b, tc.want)
 		}
 	}
-	if code, _ := getNowPlaying(t); code != http.StatusNotFound {
+	if code, _ := getNowPlaying(t); code != http.StatusNoContent {
 		t.Fatalf("a rejected PUT stored a row")
 	}
 }
@@ -121,7 +125,7 @@ func TestNowPlayingIgnoresHarness(t *testing.T) {
 			t.Fatalf("harness put: %d %s", code, b)
 		}
 	}
-	if code, _ := getNowPlaying(t); code != http.StatusNotFound {
+	if code, _ := getNowPlaying(t); code != http.StatusNoContent {
 		t.Fatalf("harness PUT stored a row")
 	}
 	t.Setenv("YTM_STATS_INCLUDE_HARNESS", "1")

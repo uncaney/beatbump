@@ -515,12 +515,12 @@ export async function putNowPlaying(
 		return { status: 0 };
 	}
 }
-/** The profile's last resume state from any device; null when none (404) or on error. */
+/** The profile's last resume state from any device; null when none (204, 404 from an older server) or on error. */
 export async function getNowPlaying(): Promise<NowPlayingRow | null> {
 	try {
 		// 40A: re-read on every foreground refresh, never from the HTTP cache.
 		const r = await APIClient.fetch(`/api/v1/me/nowplaying`, { cache: "no-store" });
-		if (!r?.ok) return null;
+		if (!r?.ok || r.status === 204) return null;
 		const j = await r.json();
 		if (!j || typeof j !== "object" || !j.payload) return null;
 		const row = j as NowPlayingRow;

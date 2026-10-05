@@ -175,12 +175,15 @@ func MeNowPlayingPutHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
-// MeNowPlayingGetHandler: GET /api/v1/me/nowplaying, 404 when none.
+// MeNowPlayingGetHandler: GET /api/v1/me/nowplaying, 204 No Content when the
+// profile has no resume state yet. A fresh profile asks on every load: a 404
+// there printed a red "Failed to load resource" line in the browser console of
+// every new user although nothing was wrong (getNowPlaying reads both as null).
 func MeNowPlayingGetHandler(c echo.Context) error {
 	pid := profileID(c)
 	var row db.NowPlaying
 	if err := db.DB.Where("profile_id = ?", pid).First(&row).Error; err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "none"})
+		return c.NoContent(http.StatusNoContent)
 	}
 	out := nowPlayingOut{
 		DeviceID:   row.DeviceID,

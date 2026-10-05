@@ -778,7 +778,8 @@ async function search(page) {
   });
 
   await step(page, "nowplaying_contract", async () => {
-    // Cycle 21 (c21b): me/nowplaying exists; harness writes are ignored (stats exclusion), reads answer 404 or a row.
+    // Cycle 21 (c21b): me/nowplaying exists; harness writes are ignored (stats exclusion), reads answer a row, or
+    // 204 when the profile has none (404 before the ship branch: a console error on every fresh profile).
     const r = await page.evaluate(async () => {
       const put = await fetch("/api/v1/me/nowplaying", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: "harness", deviceName: "Harness", position: 12, payload: { v: 1, mix: [] } }) });
       const putBody = await put.json().catch(() => null);
@@ -789,7 +790,7 @@ async function search(page) {
     });
     // Prod ignores harness writes ({"ignored":true}); staging runs with YTM_STATS_INCLUDE_HARNESS=1 and stores them ({"ok":true}).
     if (r.put !== 200 || !r.putBody || (r.putBody.ignored !== true && r.putBody.ok !== true)) throw new Error("harness PUT answer: " + JSON.stringify(r));
-    if (![200, 404].includes(r.get)) throw new Error("GET status " + r.get);
+    if (![200, 204, 404].includes(r.get)) throw new Error("GET status " + r.get);
     if (r.get === 200 && !/deviceId.*payload.*position.*updatedAt/.test(r.getKeys)) throw new Error("GET shape: " + r.getKeys);
     if (![400, 200].includes(r.bad)) throw new Error("bad JSON status " + r.bad);
     return `PUT ${r.putBody.ignored ? "ignored (prod rule)" : "stored (staging flag)"}, GET ${r.get}${r.get === 200 ? " (" + r.getKeys + ")" : ""}, bad JSON ${r.bad}`;
