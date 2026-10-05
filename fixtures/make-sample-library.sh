@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
-# Generate a small CC0 synthetic music library (18 opus tracks, 20-38 s each,
-# 4 artists, 6 albums incl. one 2-disc album and one single) with full tags and
-# embedded cover art, so a fresh Beatbump install has content to show.
+# Generate a small CC0 synthetic music library (45 opus tracks, 20-38 s each,
+# 19 albums incl. one 2-disc album and one single) with full tags and embedded
+# cover art, so a fresh Beatbump install has content to show. The catalogue also
+# exercises the paths a real library reaches (and the e2e harness checks):
+#   - 16 albums released in the 2020s, so the Mixes page has a decade mix
+#     (a slice needs 15 albums, backend/api/local_mix.go);
+#   - one artist (Pulse Train) with 15 titles, for "Tout lire" on an artist page;
+#   - one artist credited under 5 spellings (Bitfield, "Bitfield feat. ...",
+#     "Bitfield ft. ...", "Bitfield (featuring ...)"), the "Aussi sous" alias
+#     group with more chips than the folded row shows;
+#   - one album without a release year (the "Sans annee" filter).
 #
 #   fixtures/make-sample-library.sh [OUT_DIR]      (default: fixtures/sample-library)
 #
@@ -28,6 +36,7 @@ trap 'rm -rf "$WORK"' EXIT
 GEN="$WORK/gen.sh"
 printf '#!/bin/sh\nset -e\n' > "$GEN"
 COUNT=0
+ALBUMS=0
 
 # album "Artist" "Album" "c0" "c1" "gradient type"  -> folder + cover.png command
 album() {
@@ -35,16 +44,20 @@ album() {
     mkdir -p "$dir"
     printf 'ffmpeg -y -loglevel error -f lavfi -i "gradients=s=600x600:c0=%s:c1=%s:n=2:type=%s:x0=60:y0=60:x1=540:y1=540" -frames:v 1 "%s/cover.png"\n' \
         "$3" "$4" "$5" "/out/$1/$2" >> "$GEN"
+    ALBUMS=$((ALBUMS + 1))
 }
 
 # track "Artist" "Album" year genre disc ndisc n ntracks "Title" seconds "lavfi source"
 track() {
     local artist=$1 albumname=$2 year=$3 genre=$4 disc=$5 ndisc=$6 n=$7 ntracks=$8 title=$9 dur=${10} src=${11}
     local sub="" fade_out
+    local date_arg=""
     if [ "$ndisc" -gt 1 ]; then sub="/Disc $disc"; mkdir -p "$OUT/$artist/$albumname$sub"; fi
     fade_out=$((dur - 2))
-    printf 'ffmpeg -y -loglevel error -f lavfi -i "%s" -t %s -af "volume=0.6,afade=t=in:st=0:d=1,afade=t=out:st=%s:d=2" -ar 48000 -ac 2 -c:a libopus -b:a 96k -metadata title="%s" -metadata artist="%s" -metadata album_artist="%s" -metadata album="%s" -metadata date="%s" -metadata genre="%s" -metadata track="%s/%s" -metadata disc="%s/%s" -metadata comment="Synthetic CC0 sample track (Beatbump fixtures)" "%s/%02d - %s.opus"\n' \
-        "$src" "$dur" "$fade_out" "$title" "$artist" "$artist" "$albumname" "$year" "$genre" "$n" "$ntracks" "$disc" "$ndisc" \
+    # year "-" = no date tag at all (an album without a release year)
+    if [ "$year" != "-" ]; then date_arg="-metadata date=\"$year\""; fi
+    printf 'ffmpeg -y -loglevel error -f lavfi -i "%s" -t %s -af "volume=0.6,afade=t=in:st=0:d=1,afade=t=out:st=%s:d=2" -ar 48000 -ac 2 -c:a libopus -b:a 96k -metadata title="%s" -metadata artist="%s" -metadata album_artist="%s" -metadata album="%s" %s -metadata genre="%s" -metadata track="%s/%s" -metadata disc="%s/%s" -metadata comment="Synthetic CC0 sample track (Beatbump fixtures)" "%s/%02d - %s.opus"\n' \
+        "$src" "$dur" "$fade_out" "$title" "$artist" "$artist" "$albumname" "$date_arg" "$genre" "$n" "$ntracks" "$disc" "$ndisc" \
         "/out/$artist/$albumname$sub" "$n" "$title" >> "$GEN"
     COUNT=$((COUNT + 1))
 }
@@ -83,18 +96,61 @@ album "$A" "Sweep" "0x4a0a2a" "0xff7ab6" radial
 track "$A" "Sweep" 2023 Soundtrack 1 1 1 3 "Rising"  30 "aevalsrc=0.4*sin(2*PI*(80+t*12)*t):s=48000"
 track "$A" "Sweep" 2023 Soundtrack 1 1 2 3 "Falling" 32 "aevalsrc=0.4*sin(2*PI*(900-t*20)*t):s=48000"
 track "$A" "Sweep" 2023 Soundtrack 1 1 3 3 "Plateau" 38 "aevalsrc=0.35*sin(2*PI*196*t)*(0.6+0.4*sin(2*PI*0.25*t)):s=48000"
+
+album "$A" "Resonance" "0x2a0a4a" "0xb67aff" circular
+track "$A" "Resonance" 2024 Soundtrack 1 1 1 2 "Q Factor"  22 "aevalsrc=0.4*sin(2*PI*300*t)*(0.5+0.5*sin(2*PI*2*t)):s=48000"
+track "$A" "Resonance" 2024 Soundtrack 1 1 2 2 "Ringing"   24 "aevalsrc=0.4*sin(2*PI*600*t)*exp(-mod(t\,1)*3):s=48000"
+
+A="The Sine Waves"
+album "$A" "Overtones" "0x0a2a4a" "0x7ad6ff" linear
+track "$A" "Overtones" 2022 Electronic 1 1 1 2 "Octave"    22 "aevalsrc=0.3*(sin(2*PI*220*t)+sin(2*PI*440*t)):s=48000"
+track "$A" "Overtones" 2022 Electronic 1 1 2 2 "Twelfth"   20 "aevalsrc=0.3*(sin(2*PI*220*t)+sin(2*PI*660*t)):s=48000"
+
+# Pulse Train: 15 titles over five EPs (2020-2024), the "Tout lire" artist.
+A="Pulse Train"
+pt=0
+for y in 2020 2021 2022 2023 2024; do
+    pt=$((pt + 1))
+    album "$A" "Pulse $pt" "0x1a1a$((40 + pt * 10))" "0xff$((50 + pt * 9))40" linear
+    for n in 1 2 3; do
+        hz=$((120 + pt * 40 + n * 15))
+        track "$A" "Pulse $pt" "$y" Electronic 1 1 "$n" 3 "Pulse $pt.$n" $((20 + n)) "aevalsrc=0.3*sgn(sin(2*PI*${hz}*t))*gt(mod(t\,0.$((n + 2)))\,0.1):s=48000"
+    done
+done
+
+# Bitfield credited under four more spellings (one album each, all 2020s): the
+# artists index keys an artist by its raw name, so these are five la- artists the
+# app groups as one "Aussi sous" family (four chips, more than the three shown).
+A="Bitfield"
+album "$A" "Square Roots II" "0x0b3d2b" "0x5cffb0" radial
+track "$A" "Square Roots II" 2025 Chiptune 1 1 1 2 "Triangle"  22 "aevalsrc=0.4*asin(sin(2*PI*220*t))/PI*2:s=48000"
+track "$A" "Square Roots II" 2025 Chiptune 1 1 2 2 "Sawtooth"  20 "aevalsrc=0.25*(2*mod(t*220\,1)-1):s=48000"
+alias_album() { # alias_album "Credit" "Album" year hz
+    album "$1" "$2" "0x0b2d3d" "0x5cd0ff" spiral
+    track "$1" "$2" "$3" Chiptune 1 1 1 1 "$2" 21 "aevalsrc=0.3*sgn(sin(2*PI*$4*t)):s=48000"
+}
+alias_album "Bitfield feat. Noise Floor" "Interference" 2024 260
+alias_album "Bitfield ft. The Sine Waves" "Carrier" 2024 280
+alias_album "Bitfield (featuring Low Pass Orchestra)" "Cutoff" 2023 300
+alias_album "Bitfield feat. Pulse Train" "Duty Cycle" 2022 320
+
+# An album without any release year (no date tag).
+A="Noise Floor"
+album "$A" "Field Recordings" "0x2a2a20" "0xd0d0a0" circular
+track "$A" "Field Recordings" - Experimental 1 1 1 2 "Hum"    22 "aevalsrc=0.3*sin(2*PI*50*t)+0.05*sin(2*PI*150*t):s=48000"
+track "$A" "Field Recordings" - Experimental 1 1 2 2 "Hiss"   20 "anoisesrc=color=violet:amplitude=0.15:sample_rate=48000"
 # -----------------------------------------------------------------------------
 
 cat > "$OUT/README.txt" <<'EOF'
 Beatbump sample library
 =======================
-18 synthetic tracks (sine, square, noise, sweeps) generated by
+45 synthetic tracks (sine, square, noise, sweeps) generated by
 fixtures/make-sample-library.sh. Tagged with artist / album / title / year /
 genre / track and disc numbers, with embedded cover art. Public domain (CC0 1.0):
 delete this folder once you have real music in your library.
 EOF
 
-echo "[sample] rendering $COUNT tracks + 6 covers with $FFMPEG_IMAGE into $OUT"
+echo "[sample] rendering $COUNT tracks + $ALBUMS covers with $FFMPEG_IMAGE into $OUT"
 docker run --rm --user "$UIDGID" -v "$OUT:/out" -v "$WORK:/work:ro" --entrypoint sh "$FFMPEG_IMAGE" /work/gen.sh
 
 echo "[sample] embedding cover art with mutagen ($PYTHON_IMAGE)"
