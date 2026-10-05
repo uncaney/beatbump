@@ -1,0 +1,5 @@
+# Mount point run.sh creates for the fixtures override (see run.sh)
+.fixtures.json
+out/
+profiles/
+node_modules/

@@ -18,36 +18,18 @@
 //                          toi") titled "Arrive en <mois>", unless the dedupe left it under 4 cards (reported).
 const fs = require("fs");
 const path = require("path");
-const https = require("https");
 
 const C44_SKIP = new Set(); // chain 47: artist_of_day_stable under diagnosis (c46b, fixed); re-enabled by c47a (B8-16) after a run alone 02/10 02:45 (PASS 4 s)
 const STEP_NAMES = ["artist_of_day_stable", "arrived_month_row"];
 const MONTH_MIN = "2026-07";
 const ROW_MIN = 4;
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
-// Node-side request to Traefik on 127.0.0.1 (run.sh uses --network host) with SNI + Host (same trick as
-// steps-c42-core.cjs: Playwright's request context ignores --host-resolver-rules, the box hairpin is broken).
-function rawRequest(base, method, reqPath, headers = {}, timeoutMs = 15000) {
-  return new Promise((resolve, reject) => {
-    const host = String(base).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-    const t0 = Date.now();
-    const req = https.request({ host: "127.0.0.1", port: 443, path: reqPath, method, servername: host, rejectUnauthorized: false, headers: { Host: host, ...headers } }, (res) => {
-      const chunks = [];
-      res.on("data", (d) => chunks.push(d));
-      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString("utf8"), ms: Date.now() - t0 }));
-    });
-    req.on("error", reject);
-    req.setTimeout(timeoutMs, () => req.destroy(new Error(`timeout ${timeoutMs} ms ${method} ${reqPath}`)));
-    req.end();
-  });
-}
+// Node-side request derived from the harness URL (harness-lib.cjs rawRequest: scheme, host and port from the
+// URL, HARNESS_RESOLVE_IP for a named host whose hairpin route is broken; the page's request context ignores
+// Chrome's --host-resolver-rules).
+const { rawRequest } = require("./harness-lib.cjs");
 
 const defaultLoginAs = async (p, name) => p.evaluate(async (n) => {
   const x = await fetch("/api/v1/me/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) });

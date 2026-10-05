@@ -2,19 +2,26 @@
 //   --phase=seed   : on build N, install the SW, play a track, keep one local album offline, record state.
 //   --phase=verify : on build N+1 (or after a rollback), reopen the same profile and assert: SW updated,
 //                    no _app 404, pins intact, resume restored, app usable, few _app re-downloads.
-// run: ./run.sh <url> "daft punk" probe-deploy-survives.cjs --phase=seed --label=N
+// run: ./run.sh <url> "" probe-deploy-survives.cjs --phase=seed --label=N   (probe-ds1-*.cjs are thin wrappers)
+// The profile and the state file live under the e2e directory (profiles/ds1, out/ds1-state.json, out/ds1-<label>.json),
+// which run.sh mounts at /e2e; --query (else fixtures.query) names the search; --resolver like the harnesses.
 const fs = require("fs"); const path = require("path");
 const { chromium } = require("playwright");
+const lib = require("./harness-lib.cjs");
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split("=").slice(1).join("=");
-const URL = arg("url", "https://staging-music.ekaii.fr").replace(/\/$/, "");
+const FIX = lib.loadFixtures();
+const URL = arg("url", process.env.YTM_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
+const QUERY = arg("query", FIX.query || "daft punk");
+const RESOLVER = arg("resolver", "");
 const PHASE = arg("phase", "seed"); const LABEL = arg("label", PHASE);
-const PROFILE = arg("profile", "/e2e/profiles/ds1"); const STATE = "/e2e/out/ds1-state.json";
+const E2E_OUT = path.join(__dirname, "out");
+const PROFILE = arg("profile", path.join(__dirname, "profiles", "ds1")); const STATE = path.join(E2E_OUT, "ds1-state.json");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(`[ds1 ${PHASE}:${LABEL}]`, ...a);
 (async () => {
   if (PHASE === "seed") fs.rmSync(PROFILE, { recursive: true, force: true });
-  fs.mkdirSync(PROFILE, { recursive: true });
-  const ctx = await chromium.launchPersistentContext(PROFILE, { extraHTTPHeaders: { "X-Ytm-Harness": "1" },  channel: process.env.PW_CHANNEL || undefined, ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, args: ["--autoplay-policy=no-user-gesture-required", "--ignore-certificate-errors", "--host-resolver-rules=MAP *.ekaii.fr 127.0.0.1"] });
+  fs.mkdirSync(PROFILE, { recursive: true }); fs.mkdirSync(E2E_OUT, { recursive: true });
+  const ctx = await chromium.launchPersistentContext(PROFILE, { extraHTTPHeaders: { "X-Ytm-Harness": "1" },  channel: process.env.PW_CHANNEL || undefined, ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, args: ["--autoplay-policy=no-user-gesture-required", "--ignore-certificate-errors", ...(RESOLVER ? ["--host-resolver-rules=" + RESOLVER] : [])] });
   const appReq = []; const notFound = []; const errs = [];
   const page = await ctx.newPage();
   // PF4-5: count only real downloads (responses not served by the service worker).
@@ -46,7 +53,7 @@ const log = (...a) => console.log(`[ds1 ${PHASE}:${LABEL}]`, ...a);
   const ver = await version();
   log("served version", ver, "sw", JSON.stringify(sw));
   if (PHASE === "seed") {
-    for (let a = 0; a < 3; a++) { if (await page.goto(URL + "/search/daft%20punk?filter=all", { waitUntil: "domcontentloaded", timeout: 60000 }).then(() => true).catch(() => false)) break; }
+    for (let a = 0; a < 3; a++) { if (await page.goto(URL + "/search/" + encodeURIComponent(QUERY) + "?filter=all", { waitUntil: "domcontentloaded", timeout: 60000 }).then(() => true).catch(() => false)) break; }
     await page.getByText(/Song\s*•/).first().click({ position: { x: 8, y: 8 }, timeout: 20000 });
     await sleep(6000);
     const title = ((await page.locator(".now-playing-title").first().innerText().catch(() => "")) || "").trim();
@@ -79,7 +86,7 @@ const log = (...a) => console.log(`[ds1 ${PHASE}:${LABEL}]`, ...a);
     let p = { pinned: -1, total: -1 };
     for (let a = 0; a < 4 && p.pinned < 0; a++) { await sleep(a ? 3000 : 0); await page.evaluate(() => navigator.serviceWorker.ready.then(() => null)).catch(() => {}); p = await safe(pinned, { pinned: -1, total: -1 }); }
     // app usable: SPA navigation renders search rows
-    await page.evaluate(() => { const a = document.createElement("a"); a.href = "/search/daft%20punk?filter=all"; a.textContent = "x"; document.body.appendChild(a); a.click(); });
+    await page.evaluate((q) => { const a = document.createElement("a"); a.href = "/search/" + encodeURIComponent(q) + "?filter=all"; a.textContent = "x"; document.body.appendChild(a); a.click(); }, QUERY);
     const rows = await page.getByText(/Song\s*•/).first().waitFor({ state: "visible", timeout: 20000 }).then(() => true).catch(() => false);
     await dumpClient("after-spa-search");
     const resumeTitle = ((await page.locator(".now-playing-title").first().innerText().catch(() => "")) || "").trim();
@@ -99,7 +106,7 @@ const log = (...a) => console.log(`[ds1 ${PHASE}:${LABEL}]`, ...a);
     // Every hash changes between two real builds, so re-downloads are expected; only an absurd count
     // (chunks fetched again and again) or any 404 is a failure. The number is reported for trend.
     if (appReq.length > 500) fails.push(`_app re-downloads ${appReq.length} > 500`);
-    fs.writeFileSync(`/e2e/out/ds1-${LABEL}.json`, JSON.stringify({ result, fails }, null, 2));
+    fs.writeFileSync(path.join(E2E_OUT, `ds1-${LABEL}.json`), JSON.stringify({ result, fails }, null, 2));
     fs.writeFileSync(STATE, JSON.stringify({ ...seed, lastVersion: ver, lastShells: sw.shells }, null, 2));
     log(fails.length ? "FAIL " + fails.join(" | ") : "PASS", JSON.stringify(result));
     if (fails.length) process.exitCode = 1;

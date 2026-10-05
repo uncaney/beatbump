@@ -37,12 +37,7 @@ const C48_SKIP = new Set(); // chain 59: first_pack_card enabled (step fixed by 
 const STEP_NAMES = ["first_pack_card", "install_hint_after_sound", "account_form_keeps_input"];
 const IPHONE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
 // Same play() hook as harness-core.cjs: the player's media element is an Audio() outside the DOM.
 function mediaHook() {

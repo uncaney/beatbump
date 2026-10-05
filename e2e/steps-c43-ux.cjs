@@ -24,12 +24,7 @@ const C43_SKIP = new Set(); // chain 47: ux_v12_open_fixes under diagnosis (c46b
 const STEP_NAMES = ["ux_v12_open_fixes"];
 const MIN_TAP = 44;
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
 // Same play() hook as harness-core.cjs: the player's media element is an Audio() outside the DOM.
 function mediaHook() {

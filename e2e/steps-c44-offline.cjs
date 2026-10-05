@@ -32,12 +32,7 @@ const C44_SKIP = new Set(); // chain 55: pack_refresh enabled (cycle 47 build)
 const STEP_NAMES = ["pack_refresh", "pack_too_big"];
 const MB = 1024 * 1024;
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
 // SW audio list (raw entries + quota); the SW replies on the MessageChannel port.
 const swListRaw = (p) => p.evaluate(async () => {

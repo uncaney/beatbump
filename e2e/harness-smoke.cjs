@@ -1,33 +1,33 @@
-// ytm-e2e-smoke (cycle 43, lane c43c, B7-15): smoke navigateur de music.ekaii.fr / staging, < 90 s.
-// Appele par agents/ops/smoke.sh (SMOKE_BROWSER=1) via e2e/run.sh, donc par agents/promote.sh apres le
-// smoke HTTP. Memes conventions, fixtures et helpers que harness-core.cjs (arg(), FIX, step/shot/report,
-// servedVersion, pollUntil, media), 4 etapes + le budget :
-//   smoke_home_first_personal_row  /home repond, la premiere rangee personnelle ([data-row]) est peinte
-//   smoke_local_track_plays        /listen?id=<fixtures.localLid> : "Start Listening", source /localf,
-//                                  currentTime avance (aucune acquisition : lid LOCAL)
-//   smoke_service_worker           navigator.serviceWorker : enregistrement actif (scope, controller)
-//   smoke_version                  version servie (stats/library via 127.0.0.1 + SNI, sinon la page) non vide,
-//                                  et egale a la version attendue si elle est donnee
-//   smoke_under_budget             tout en moins de 90 s
-// Version attendue : --expect=<sha> ou env YTM_SMOKE_EXPECT (run.sh ne transmet pas d argument : smoke.sh pose
-// l env, run.sh le passe au conteneur). report.json comme harness-core ; toutes les etapes sont prefixees
-// smoke_ : weekly.sh, qui reconnait les rapports coeur / hors-ligne a deux noms d etapes precis, ignore
-// celui-ci. Sortie : exit 1 si un echec.
-// Usage direct : ./run.sh https://staging-music.ekaii.fr "daft punk" harness-smoke.cjs
+// ytm-e2e-smoke (cycle 43, lane c43c, B7-15): browser smoke of the music app, under 90 s.
+// Called by ops/smoke.sh (SMOKE_BROWSER=1) through e2e/run.sh, hence by ops/promote.sh after the HTTP smoke.
+// Same conventions, fixtures and helpers as harness-core.cjs (arg(), FIX, step/shot/report, servedVersion,
+// pollUntil, media), 4 steps plus the budget:
+//   smoke_home_first_personal_row  /home answers, the first personal row ([data-row]) is painted
+//   smoke_local_track_plays        /listen?id=<localLid> (fixture, else the first local track): "Start Listening",
+//                                  /localf source, currentTime advances (no acquisition: LOCAL lid)
+//   smoke_service_worker           navigator.serviceWorker: active registration (scope, controller)
+//   smoke_version                  served version (stats/library through harness-lib, else the page) not empty,
+//                                  and equal to the expected one when given
+//   smoke_under_budget             everything under 90 s
+// Expected version: --expect=<sha> or env YTM_SMOKE_EXPECT (smoke.sh sets the env, run.sh hands it to the
+// container). report.json like harness-core; every step is prefixed smoke_: weekly.sh, which recognises the
+// core / offline reports by two precise step names, ignores this one. Exit 1 on any failure.
+// Direct use: ./run.sh http://127.0.0.1:8080 "" harness-smoke.cjs
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
+const lib = require("./harness-lib.cjs");
 process.on("unhandledRejection", (e) => console.log("UNHANDLED", String((e && e.message) || e)));
 
-const FIX = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures.json"), "utf8")) || {}; } catch (e) { console.log("fixtures.json not loaded (" + String(e.message || e).slice(0, 60) + ")"); return {}; } })();
+const FIX = lib.loadFixtures();
 const arg = (k, d = "") =>
   (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split("=").slice(1).join("=");
-const URL = arg("url", "https://staging-music.ekaii.fr").replace(/\/$/, "");
+const URL = arg("url", process.env.YTM_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const OUT = arg("out", "/out");
 const QUERY = arg("query", FIX.query || "daft punk");
 const RESOLVER = arg("resolver", "");
 const EXPECT = (arg("expect", process.env.YTM_SMOKE_EXPECT || "") || "").trim();
-const LID = FIX.localLid || "6300e80e2e2";
+let LID = FIX.localLid || ""; // resolved from /api/v1/local/songs when the fixture is absent
 const TOTAL_BUDGET_MS = 90000;
 const STEP_BUDGET_MS = { smoke_home_first_personal_row: 30000, smoke_local_track_plays: 45000, smoke_service_worker: 20000, smoke_version: 15000 };
 
@@ -64,22 +64,15 @@ async function step(page, name, fn) {
     return false;
   }
 }
-// Served version without the browser: Traefik on 127.0.0.1 with SNI + Host (box hairpin is broken).
-function servedVersion() {
-  return new Promise((resolve) => {
-    if (!/^https:/.test(URL)) return resolve(null);
-    const host = URL.replace(/^https?:\/\//, "");
-    const req = require("https").request({ host: "127.0.0.1", port: 443, path: "/api/v1/stats/library", method: "GET", servername: host, rejectUnauthorized: false, headers: { Host: host } }, (res) => { let b = ""; res.on("data", (d) => (b += d)); res.on("end", () => { try { resolve(JSON.parse(b).version || null); } catch { resolve(null); } }); });
-    req.on("error", () => resolve(null)); req.setTimeout(10000, () => { req.destroy(); resolve(null); }); req.end();
-  });
-}
+// Served version without the browser: plain GET of <URL>/api/v1/stats/library (harness-lib rawRequest).
+const servedVersion = () => lib.servedVersion(URL);
 function writeReport(version) {
   const finished = Date.now();
   const failed = steps.filter((s) => !s.ok && !s.upstream).length;
   const upstream = steps.filter((s) => !s.ok && s.upstream).length;
-  const report = { url: URL, query: QUERY, version, expected: EXPECT || null, startedAt: new Date(STARTED).toISOString(), finishedAt: new Date(finished).toISOString(), durationMs: finished - STARTED, budgetMs: TOTAL_BUDGET_MS, overBudget: finished - STARTED > TOTAL_BUDGET_MS, passed: steps.filter((s) => s.ok).length, failed, upstream, steps };
+  const report = { url: URL, query: QUERY, version, expected: EXPECT || null, startedAt: new Date(STARTED).toISOString(), finishedAt: new Date(finished).toISOString(), durationMs: finished - STARTED, budgetMs: TOTAL_BUDGET_MS, overBudget: finished - STARTED > TOTAL_BUDGET_MS, passed: steps.filter((s) => s.ok).length, failed, upstream, skipped: 0, steps };
   fs.writeFileSync(path.join(OUT, "report.json"), JSON.stringify(report, null, 2));
-  console.log(`\nReport: ${report.passed} passed / ${report.failed} failed / ${report.upstream} upstream -> ${OUT}/report.json`);
+  console.log(`\nReport: ${report.passed} passed / ${report.failed} failed / ${report.upstream} upstream / 0 skipped -> ${OUT}/report.json`);
   console.log(`Report budget: ${(report.durationMs / 1000).toFixed(0)} s / ${TOTAL_BUDGET_MS / 1000} s${report.overBudget ? " OVER BUDGET" : ""}, version=${version}, expected=${EXPECT || "-"}`);
   return report;
 }
@@ -130,7 +123,10 @@ setTimeout(() => { console.log("FATAL smoke over 120 s: aborting"); try { writeR
   });
 
   await step(page, "smoke_local_track_plays", async () => {
-    // Fixture lid: already in the library, served by /localf (no acquisition, like smoke.sh #8).
+    // Fixture lid (else the first local track): already in the library, served by /localf (no acquisition,
+    // like smoke.sh check 8).
+    if (!LID) LID = await page.evaluate(async () => { try { const d = await (await fetch("/api/v1/local/songs?limit=1", { cache: "no-store" })).json(); return (d.items && d.items[0] && d.items[0].videoId) || ""; } catch { return ""; } }).catch(() => "");
+    if (!LID) throw new Error("no local track: fixtures.localLid absent and /api/v1/local/songs empty");
     await goto(URL + "/listen?id=" + LID).catch(() => {});
     const btn = page.getByRole("button", { name: /start listening|écouter|ecouter|lire/i }).first();
     await btn.click({ timeout: 15000 });

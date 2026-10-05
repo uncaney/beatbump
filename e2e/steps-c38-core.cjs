@@ -13,34 +13,16 @@
 //   blank_profile_empty_states brand-new named profile: empty-state (not error-state) on recent / rediscover, first-run on home
 const fs = require("fs");
 const path = require("path");
-const https = require("https");
 
 const C38_SKIP = new Set();
 const STEP_NAMES = ["home_stale_path", "never_played_paging", "og_head_robot", "home_json_delayed_then_500", "blank_profile_empty_states"];
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
-// Node-side request to Traefik on 127.0.0.1 (run.sh uses --network host) with SNI + Host: Playwright's
-// request context ignores --host-resolver-rules and the box hairpin is broken (share_preview_and_owned).
-function rawRequest(base, method, reqPath, headers = {}, timeoutMs = 15000) {
-  return new Promise((resolve, reject) => {
-    const host = String(base).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-    const t0 = Date.now();
-    const req = https.request({ host: "127.0.0.1", port: 443, path: reqPath, method, servername: host, rejectUnauthorized: false, headers: { Host: host, ...headers } }, (res) => {
-      const chunks = [];
-      res.on("data", (d) => chunks.push(d));
-      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString("utf8"), ms: Date.now() - t0 }));
-    });
-    req.on("error", reject);
-    req.setTimeout(timeoutMs, () => req.destroy(new Error(`timeout ${timeoutMs} ms ${method} ${reqPath}`)));
-    req.end();
-  });
-}
+// Node-side request derived from the harness URL (harness-lib.cjs rawRequest: scheme, host and port from the
+// URL, HARNESS_RESOLVE_IP for a named host whose hairpin route is broken; the page's request context ignores
+// Chrome's --host-resolver-rules).
+const { rawRequest } = require("./harness-lib.cjs");
 
 const defaultLoginAs = async (p, name) => p.evaluate(async (n) => {
   const x = await fetch("/api/v1/me/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) });
@@ -57,7 +39,8 @@ async function run(deps) {
   const pollUntil = deps.pollUntil || (async (fn, timeoutMs, everyMs = 1000) => { const t0 = Date.now(); let last; while (Date.now() - t0 < timeoutMs) { last = await fn(); if (last) return last; await sleep(everyMs); } return last; });
   const loginAs = deps.loginAs || defaultLoginAs;
   const FIX = deps.fixtures || loadFixtures();
-  const VID = FIX.acquiredVideoId || "fa5IWHDbftI";
+  // Any owned track has an OG card: the YouTube fixture when present, else the local lid harness-core resolved.
+  const VID = deps.acquiredVideoId || FIX.acquiredVideoId || deps.lid || FIX.localLid || "";
   const ROBOT_UA = (Array.isArray(FIX.robotUserAgents) && FIX.robotUserAgents[0]) || "WhatsApp/2.23.20.0 A";
   const raw = (method, p, headers, t) => rawRequest(URL, method, p, headers, t);
   const enabled = process.env.C38_STEPS_ENABLED !== "0";
@@ -131,6 +114,7 @@ async function run(deps) {
   await c38step("og_head_robot", async () => {
     // Blind spot 4 / item 10b: the robot HEAD goes through the OG card cache (L9-1). A per-run query
     // gives a fresh cache key (the key covers path + query), so the HEAD is the request that fills it.
+    if (!VID) (deps.skip || ((m) => { throw new Error(m); }))("no owned track id (acquiredVideoId / localLid) for the OG card");
     const p = "/listen?id=" + encodeURIComponent(VID) + "&c38=" + Date.now().toString(36);
     const h = await raw("HEAD", p, { "User-Agent": ROBOT_UA }, 15000);
     const hv = String(h.headers["vary"] || "");

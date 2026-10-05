@@ -23,12 +23,7 @@ const path = require("path");
 const C54_SKIP = new Set(); // chain 69 validation: both steps rewritten (fetch from page; theme contract) and enabled
 const STEP_NAMES = ["artists_header_folded", "primary_disabled_look"];
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
 // "rgb(179, 47, 42)" -> { a: 1, ch: [179, 47, 42] }, "rgba(255, 255, 255, 0.1)" -> { a: 0.1, ch: [255, 255, 255] }.
 function parseColor(color) {

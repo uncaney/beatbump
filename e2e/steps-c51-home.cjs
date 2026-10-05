@@ -30,12 +30,7 @@ const STEP_NAMES = ["home_today_header", "artist_alias_chips_folded", "about_lin
 const MIN_TAP = 44;
 const ALIAS_CHIPS_SHOWN = 3;
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
 // Same play() hook as harness-core.cjs: window.__ytmMedia IS the element (deps.media reads it as one).
 function mediaHook() {

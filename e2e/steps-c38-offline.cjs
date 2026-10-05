@@ -26,12 +26,7 @@ const path = require("path");
 const C38_SKIP = new Set();
 const STEP_NAMES = ["pack_cancel_two_tabs"];
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
 // SW audio list; the SW replies on a MessageChannel port when one is given, else by client message.
 const swList = (p) => p.evaluate(async () => {

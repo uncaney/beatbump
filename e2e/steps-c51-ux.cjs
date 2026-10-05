@@ -27,12 +27,7 @@ const STEP_NAMES = ["stats_tabs_visible", "first_pack_size_announced"];
 const MIN_TAP = 44;
 const MIN_RATIO = 4.5;
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
 // Same play() hook as harness-core.cjs: window.__ytmMedia is the media element itself once play() ran.
 function mediaHook() {

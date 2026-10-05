@@ -33,12 +33,7 @@ const WEEKEND_HREF = "/library/downloads-offline?pack=dur:7200";
 const LID_RE = /^[0-9a-f]{11}$/;
 const UNKNOWN_LID = "0000000000a";
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
 // Same play() hook as harness-core.cjs / steps-c43-ux.cjs (the player's media element is an Audio() outside the
 // DOM), plus the list of every src that reached play() so the detail can name them all.

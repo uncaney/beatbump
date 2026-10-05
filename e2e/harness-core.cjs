@@ -1,17 +1,21 @@
-// ytm-e2e-core — non-regression des parcours principaux de music.ekaii.fr (vrai navigateur).
-// Complement de harness-offline.cjs. Memes conventions (run.sh <url> <query> harness-core.cjs).
-// Lecture detectee via hook HTMLMediaElement.play (Beatbump joue via un Audio() detache).
+// ytm-e2e-core: non-regression of the main user journeys of the music app (real browser).
+// Companion of harness-offline.cjs, same conventions (run.sh <url> <query> harness-core.cjs).
+// Playback is detected through a HTMLMediaElement.play hook (Beatbump plays through a detached Audio()).
 //
-// Fixtures (cycle 34 HD1): e2e/fixtures.json holds fixed inputs so that two runs exercise the
-// same tracks / albums and no run triggers a NEW acquisition. Every key is optional: a missing
-// file or key falls back to the old lookup (first search result, newest local album, ...).
-//   query              default search query when --query= is not given (run.sh always passes one)
+// Fixtures (cycle 34 HD1): e2e/fixtures.json (or HARNESS_FIXTURES=<file>, see run.sh) holds fixed inputs
+// so that two runs exercise the same tracks / albums and no run triggers a NEW acquisition. Every key is
+// optional: a missing file or key falls back to an API lookup (first search result, newest local album,
+// first local track, ...). Steps whose precondition the target cannot meet (no YouTube-backed fixture,
+// library too small) end as "SKIP <name> - <reason>" (report.skipped), never as a failure.
+//   query              default search query when --query= is not given
+//   typoQuery          misspelt query for the typo-tolerant suggestions step (default: one letter dropped)
 //   acquiredVideoId    YouTube videoId whose track is ALREADY in the library (owned by content),
 //                      used for /listen OG cards, share-target, next/related caches and
 //                      nonlocal_track_plays (env NONLOCAL_VIDEO_ID still wins); replaces
 //                      dQw4w9WgXcQ / fa5IWHDbftI / 9bZkp7q19f0
 //   acquiredVideoTitle its title (documentation only)
-//   localLid           a playable local lid (/localf), short track with synced lyrics
+//   localLid           a playable local lid (/localf), short track with synced lyrics (default: first
+//                      item of /api/v1/local/songs)
 //   localLidTitle      its title (documentation only)
 //   localAlbumId       local album lb-... with >= 3 tracks (replaces "newest local album")
 //   localAlbumTitle    its title, and localAlbumArtist its artist: albums/match input
@@ -26,31 +30,37 @@
 // Report (cycle 34 HD2/HD3): report.json keeps url/query/passed/failed/steps[].name/ok/detail/shot
 // and adds version (served stats/library.version), startedAt, finishedAt, durationMs, budgetMs,
 // overBudget, upstream (count) and per step durationMs, slow (over its budget, not a failure),
-// upstream (failure caused by YouTube / the network: not counted in failed) and rerun (known-flaky
-// step retried once; firstDetail keeps the first failure).
+// upstream (failure caused by YouTube / the network: not counted in failed), rerun (known-flaky step
+// retried once; firstDetail keeps the first failure) and skipped (precondition not met on this target).
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
+const lib = require("./harness-lib.cjs");
 process.on("unhandledRejection", (e) => console.log("UNHANDLED", String((e && e.message) || e)));
 
-const FIX = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures.json"), "utf8")) || {}; } catch (e) { console.log("fixtures.json not loaded (" + String(e.message || e).slice(0, 60) + "): old lookups"); return {}; } })();
+const FIX = lib.loadFixtures();
 const arg = (k, d = "") =>
   (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split("=").slice(1).join("=");
-const URL = arg("url", "https://staging-music.ekaii.fr").replace(/\/$/, "");
+const URL = arg("url", process.env.YTM_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const OUT = arg("out", "/out");
 // c52c (B9-13): every browser context of the harness sends X-Ytm-Harness: 1 so prod stats never record a
-// harness play (api/me_stats.go harnessRequest; staging keeps YTM_STATS_INCLUDE_HARNESS=1). The wrapper on
-// browser.newContext below merges it too, so a module calling browser.newContext directly is still covered;
-// the helper is what the step modules receive through deps.newHarnessContext (check-harness-headers.cjs).
-const HARNESS_HEADERS = { "X-Ytm-Harness": "1" };
+// harness play (api/me_stats.go harnessRequest; a staging target may set YTM_STATS_INCLUDE_HARNESS=1). The
+// wrapper on browser.newContext below merges it too, so a module calling browser.newContext directly is still
+// covered; the helper is what the step modules receive through deps.newHarnessContext (check-harness-headers.cjs).
+const HARNESS_HEADERS = lib.HARNESS_HEADERS;
 function newHarnessContext(browser, opts) {
   const o = opts || {};
   return browser.newContext({ ...o, extraHTTPHeaders: { ...(o.extraHTTPHeaders || {}), ...HARNESS_HEADERS } });
 }
 module.exports = { newHarnessContext, HARNESS_HEADERS };
 const QUERY = arg("query", FIX.query || "daft punk");
+const TYPO_QUERY = FIX.typoQuery || lib.typoOf(QUERY);
 const RESOLVER = arg("resolver", "");
-const VID = FIX.acquiredVideoId || ""; // empty = old hard-coded ids per step
+const VID = FIX.acquiredVideoId || ""; // empty = no YouTube-backed fixture: the steps that need one skip
+let LID = FIX.localLid || ""; // resolved from /api/v1/local/songs below when the fixture is absent
+const { skip, rawRequest } = lib;
+const libraryAtLeast = (n) => lib.libraryAtLeast(URL, n);
+const requireLibrary = (n, what) => lib.requireLibrary(URL, n, what);
 const ROBOT_UAS = Array.isArray(FIX.robotUserAgents) && FIX.robotUserAgents.length ? FIX.robotUserAgents : ["WhatsApp/2.23.20.0 A"];
 const HUMAN_UA = FIX.humanUserAgent || "Mozilla/5.0 (X11; Linux x86_64) Chrome/126";
 // Fixture album / artist when present, else the old API lookup (run inside the page).
@@ -111,6 +121,14 @@ async function step(page, name, fn, opts = {}) {
       return true;
     } catch (e) {
       const msg = String((e && e.message) || e).split("\n")[0];
+      if (lib.isSkip(e)) {
+        // Precondition not met on this target (small library, no YouTube-backed fixture, ...): neither a
+        // pass nor a failure. Counted in report.skipped, printed as "SKIP <name> - <reason>".
+        const durationMs = Date.now() - t0;
+        steps.push({ name, ok: true, skipped: true, detail: msg, durationMs });
+        console.log("SKIP", name, "-", msg);
+        return true;
+      }
       if (attempt === 0 && FLAKY_KNOWN.has(name)) {
         firstDetail = msg;
         console.log("RETRY", name, "-", msg);
@@ -129,15 +147,26 @@ async function step(page, name, fn, opts = {}) {
     }
   }
 }
-// Served version without the browser: talk to Traefik on 127.0.0.1 (run.sh uses --network host)
-// with SNI + Host, like share_preview_and_owned does (the box hairpin is broken).
-function servedVersion() {
-  return new Promise((resolve) => {
-    const host = URL.replace(/^https?:\/\//, "");
-    const req = require("https").request({ host: "127.0.0.1", port: 443, path: "/api/v1/stats/library", method: "GET", servername: host, rejectUnauthorized: false, headers: { Host: host } }, (res) => { let b = ""; res.on("data", (d) => (b += d)); res.on("end", () => { try { resolve(JSON.parse(b).version || null); } catch { resolve(null); } }); });
-    req.on("error", () => resolve(null)); req.setTimeout(10000, () => { req.destroy(); resolve(null); }); req.end();
-  });
+// Served version without the browser: plain GET of <URL>/api/v1/stats/library (harness-lib rawRequest, which
+// honours HARNESS_RESOLVE_IP for a named host whose hairpin route is broken).
+const servedVersion = () => lib.servedVersion(URL);
+// Does the server count harness plays (YTM_STATS_INCLUDE_HARNESS=1, a staging setting)? Read from the answer
+// to a harness PUT on me/nowplaying ({"ignored":true} = prod rule), env HARNESS_STATS_INCLUDE_HARNESS=0|1 wins.
+// The steps that need counted plays are not played otherwise (listed in report.envSkipped, no SKIP line:
+// they are an environment choice, not a missing precondition).
+async function detectStatsInclude(page) {
+  const env = String(process.env.HARNESS_STATS_INCLUDE_HARNESS || "").trim();
+  if (env === "0" || env === "1") return env === "1";
+  const r = await page.evaluate(async () => {
+    try {
+      const x = await fetch("/api/v1/me/nowplaying", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: "harness-probe", deviceName: "Harness", position: 0, payload: { v: 1, mix: [] } }) });
+      const j = await x.json().catch(() => null);
+      return { status: x.status, ignored: !!(j && j.ignored === true) };
+    } catch (e) { return { status: 0, ignored: true, err: String(e) }; }
+  }).catch(() => ({ status: 0, ignored: true }));
+  return r.status === 200 && !r.ignored;
 }
+const envSkipped = [];
 // c51b: the steps the step modules gate at run time, so the coordinator reads `gated` in report.json
 // instead of the files. Each module exports its C<N>_SKIP Set (+ env C<N>_SKIP="a,b" adds to it,
 // C<N>_STEPS_ENABLED=0 gates the whole module). Read-only, never throws: a module that cannot be
@@ -170,13 +199,16 @@ function writeReport(version) {
   const finished = Date.now();
   const failed = steps.filter((s) => !s.ok && !s.upstream).length;
   const upstream = steps.filter((s) => !s.ok && s.upstream).length;
+  const skipped = steps.filter((s) => s.skipped);
   // c47a (B8-14, B8-18): tier, the steps the tier skipped, the time spent in gotoQuiet windows and the
   // click -> first sound delay of play_from_search (firstSoundMs, alert threshold 3 s in weekly.sh).
   // c51b: `gated` = the steps the modules' C<N>_SKIP sets (+ env) skipped in this run.
   const gated = gatedSteps(GATED_MODULES);
-  const report = { url: URL, query: QUERY, version, tier: TIER, startedAt: new Date(STARTED).toISOString(), finishedAt: new Date(finished).toISOString(), durationMs: finished - STARTED, budgetMs: TOTAL_BUDGET_MS, overBudget: finished - STARTED > TOTAL_BUDGET_MS, passed: steps.filter((s) => s.ok).length, failed, upstream, skippedTier, gated, gotoCount: GOTO.n, gotoWaitMs: GOTO.waitMs, gotoHow: { networkidle: GOTO.networkidle, quiet: GOTO.quiet, cap: GOTO.cap }, firstSoundMs, steps };
+  const report = { url: URL, query: QUERY, version, tier: TIER, startedAt: new Date(STARTED).toISOString(), finishedAt: new Date(finished).toISOString(), durationMs: finished - STARTED, budgetMs: TOTAL_BUDGET_MS, overBudget: finished - STARTED > TOTAL_BUDGET_MS, passed: steps.filter((s) => s.ok && !s.skipped).length, failed, upstream, skipped: skipped.length, skippedTier, envSkipped, gated, gotoCount: GOTO.n, gotoWaitMs: GOTO.waitMs, gotoHow: { networkidle: GOTO.networkidle, quiet: GOTO.quiet, cap: GOTO.cap }, firstSoundMs, steps };
   fs.writeFileSync(path.join(OUT, "report.json"), JSON.stringify(report, null, 2));
-  console.log(`\nReport: ${report.passed} passed / ${report.failed} failed / ${report.upstream} upstream -> ${OUT}/report.json`);
+  console.log(`\nReport: ${report.passed} passed / ${report.failed} failed / ${report.upstream} upstream / ${report.skipped} skipped -> ${OUT}/report.json`);
+  if (skipped.length) console.log("Report skipped: " + skipped.map((s) => `${s.name} (${s.detail})`).join("; "));
+  if (envSkipped.length) console.log("Report not played on this target: " + envSkipped.join(", "));
   console.log("Report gated: " + (gated.length ? gated.map((g) => `${g.step} (${g.module}, ${g.source})`).join(", ") : "none"));
   console.log(`Report budget: ${(report.durationMs / 1000).toFixed(0)} s / ${TOTAL_BUDGET_MS / 1000} s${report.overBudget ? " OVER BUDGET" : ""}, tier=${TIER}${skippedTier.length ? " (skipped " + skippedTier.join(",") + ")" : ""}, version=${version}, slow steps=${steps.filter((s) => s.slow).length}, gotoQuiet ${GOTO.n} x ${GOTO.n ? (GOTO.waitMs / GOTO.n / 1000).toFixed(2) : 0} s (idle ${GOTO.networkidle}/quiet ${GOTO.quiet}/cap ${GOTO.cap}), firstSound=${firstSoundMs === null ? "n/a" : firstSoundMs + " ms"}`);
   console.log("Report slowest: " + steps.slice().sort((a, b) => b.durationMs - a.durationMs).slice(0, 5).map((s) => `${s.name} ${(s.durationMs / 1000).toFixed(1)}s`).join(", "));
@@ -278,6 +310,10 @@ async function search(page) {
     return `status ${r.status()} title=${JSON.stringify(title)}`;
   });
   if (!version) version = await page.evaluate(async () => { try { return (await (await fetch("/api/v1/stats/library", { cache: "no-store" })).json()).version || null; } catch { return null; } }).catch(() => null);
+  // No localLid fixture: the first local track of the library plays the part (every target has one once indexed).
+  if (!LID) LID = await page.evaluate(async () => { try { const d = await (await fetch("/api/v1/local/songs?limit=1", { cache: "no-store" })).json(); return (d.items && d.items[0] && d.items[0].videoId) || ""; } catch { return ""; } }).catch(() => "");
+  const STATS_INCLUDE = await detectStatsInclude(page);
+  console.log(`target: ${URL} version=${version} lid=${LID || "none"} acquiredVideoId=${VID || "none"} statsIncludeHarness=${STATS_INCLUDE} tier=${TIER}`);
 
   await step(page, "manifest_and_sw", async () => {
     const m = await page.evaluate(async () => {
@@ -505,7 +541,7 @@ async function search(page) {
     if (await opener.count()) await opener.click({ timeout: 5000 }).catch(() => {});
     const box = page.locator("#searchBox, input[type=search], input[placeholder*='earch' i], input[placeholder*='herch' i]").first();
     await box.click({ timeout: 8000 });
-    await page.keyboard.type("daft pnk", { delay: 40 }); // real key events (the overlay listens to input + keyup)
+    await page.keyboard.type(TYPO_QUERY, { delay: 40 }); // real key events (the overlay listens to input + keyup)
     const local = page.locator('[data-testid="local-suggestion"]');
     await local.first().waitFor({ state: "visible", timeout: 10000 });
     const n = await local.count();
@@ -758,13 +794,13 @@ async function search(page) {
     return `PUT ${r.putBody.ignored ? "ignored (prod rule)" : "stored (staging flag)"}, GET ${r.get}${r.get === 200 ? " (" + r.getKeys + ")" : ""}, bad JSON ${r.bad}`;
   });
 
-  // Cycle 23 steps (audit v6 TOP 10 item 10): staging has YTM_STATS_INCLUDE_HARNESS=1 so the
-  // harness profile's plays reach history and me/nowplaying. Enabled once lane c23a is in the build.
+  // Cycle 23 steps (audit v6 TOP 10 item 10): need a server that counts harness plays
+  // (YTM_STATS_INCLUDE_HARNESS=1, a staging setting) so the harness profile's plays reach history and
+  // me/nowplaying; prod ignores harness plays by design (STATS_INCLUDE, detected above).
   const C23_STEPS_ENABLED = true;
   const C23_SKIP = new Set(); // c23a merged (0b97c13)
-  // These steps need YTM_STATS_INCLUDE_HARNESS=1 (staging only): prod ignores harness plays by design.
-  const C23_STAGING_ONLY = !/staging/.test(URL);
-  const c23step = (name, fn) => (C23_STEPS_ENABLED && !C23_SKIP.has(name) && !C23_STAGING_ONLY ? step(page, name, fn) : Promise.resolve());
+  const needsCountedPlays = (name) => { if (STATS_INCLUDE) return true; envSkipped.push(name); return false; };
+  const c23step = (name, fn) => (C23_STEPS_ENABLED && !C23_SKIP.has(name) && needsCountedPlays(name) ? step(page, name, fn) : Promise.resolve());
   // Since cycle 25 (K12) whoami is memoised 5 min in sessionStorage ("ytm-whoami"): a raw fetch login
   // bypasses me.ts login(), so drop the memo (and the remote-consumed marker) like the app's login does.
   const loginAs = async (p, name) => { const r = await p.evaluate(async (n) => { const x = await fetch("/api/v1/me/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) }); try { sessionStorage.removeItem("ytm-whoami"); } catch {} return x.status; }, name); return r; };
@@ -857,7 +893,7 @@ async function search(page) {
       cold = `_app requests=${app.size}, me/mix=${mix}, me/stats/recent=${recent}, whoami=${whoami}`;
     } finally { await fctx.close(); }
     // perf_v3 (c33b): search.json slimmed under the SW cap, cover 404 cacheable, home.json stale-while-revalidate.
-    const sz = await page.evaluate(async () => { const r = await fetch("/api/v1/search.json?q=daft+punk&filter=all", { cache: "no-store" }); const t = await r.text(); return { bytes: t.length, cache: r.headers.get("x-ytm-cache") }; });
+    const sz = await page.evaluate(async (q) => { const r = await fetch("/api/v1/search.json?q=" + encodeURIComponent(q) + "&filter=all", { cache: "no-store" }); const t = await r.text(); return { bytes: t.length, cache: r.headers.get("x-ytm-cache") }; }, QUERY);
     if (sz.bytes > 300000) throw new Error("search.json still " + sz.bytes + " bytes (SW cap 300 KB)");
     const cv = await page.evaluate(async () => { const r = await fetch("/cover?lid=000000000000", { cache: "no-store" }); return { status: r.status, cc: r.headers.get("cache-control") || "" }; });
     if (cv.status === 404 && !/max-age/.test(cv.cc)) throw new Error("cover 404 without Cache-Control: " + JSON.stringify(cv));
@@ -888,11 +924,13 @@ async function search(page) {
 
   await c25step("perf_api_caches", async () => {
     // K5 + K6: suggestions / next / related answers are served from the Go TTL cache on a second call.
-    const r = await page.evaluate(async (vid) => {
+    // next.json / related.json are YouTube-backed: they need the acquiredVideoId fixture.
+    if (!VID) skip("needs the acquiredVideoId fixture (YouTube-backed next/related caches)");
+    const r = await page.evaluate(async ({ vid, q }) => {
       // Read the first body to the end: the Go cache stores the entry once the handler finished writing it.
       const hit = async (u) => { await (await fetch(u, { cache: "no-store" })).text(); const x = await fetch(u, { cache: "no-store" }); return x.headers.get("x-ytm-cache"); };
-      return { sugg: await hit("/api/v1/get_search_suggestions.json?q=daft"), next: await hit("/api/v1/next.json?videoId=" + vid), related: await hit("/api/v1/related.json?videoId=" + vid) };
-    }, VID || "9bZkp7q19f0");
+      return { sugg: await hit("/api/v1/get_search_suggestions.json?q=" + encodeURIComponent(q)), next: await hit("/api/v1/next.json?videoId=" + vid), related: await hit("/api/v1/related.json?videoId=" + vid) };
+    }, { vid: VID, q: QUERY.split(/\s+/)[0] });
     // PF5-6 (cycle 50): next.json and search have SWR, a second call may be STALE (served from cache, refreshing): cached too.
     const bad = Object.entries(r).filter(([, v]) => v !== "HIT" && v !== "STALE");
     if (bad.length) throw new Error("not cached on 2nd call: " + JSON.stringify(r));
@@ -1160,16 +1198,12 @@ async function search(page) {
 
   await c31step("share_preview_and_owned", async () => {
     // c31b: OG cards for robots only, "Tu l'as déjà" banner, Partager button copies the canonical link.
-    // Robot-vs-human responses need a custom User-Agent: use a request context that ignores the
-    // self-signed staging certificate (the page's request context does not).
-    // Playwright's request context ignores Chrome's --host-resolver-rules, so it would hit the broken
-    // hairpin: talk to Traefik on 127.0.0.1 directly (run.sh uses --network host) with SNI + Host.
-    const rawGet = (path, ua) => new Promise((resolve, reject) => {
-      const host = URL.replace(/^https?:\/\//, "");
-      const req = require("https").request({ host: "127.0.0.1", port: 443, path, method: "GET", servername: host, rejectUnauthorized: false, headers: { Host: host, "User-Agent": ua } }, (res) => { let b = ""; res.on("data", (d) => (b += d)); res.on("end", () => resolve({ status: res.statusCode, body: b })); });
-      req.on("error", reject); req.setTimeout(15000, () => req.destroy(new Error("timeout"))); req.end();
-    });
-    const ogId = VID || "dQw4w9WgXcQ";
+    // Robot-vs-human responses need a custom User-Agent: Node-side requests (harness-lib rawRequest: the
+    // page's request context ignores Chrome's --host-resolver-rules and would hit a broken hairpin).
+    const rawGet = (p, ua) => rawRequest(URL, "GET", p, { "User-Agent": ua });
+    // The OG card exists for any owned track: the YouTube fixture when present, else the local lid.
+    const ogId = VID || LID;
+    if (!ogId) skip("no owned track id (acquiredVideoId / localLid) for the /listen OG card");
     // Every robot UA of the fixture list gets the OG card (the first one is the historical WhatsApp probe).
     let rt = "";
     for (const ua of ROBOT_UAS) {
@@ -1303,14 +1337,15 @@ async function search(page) {
     // c33a: never-played paging contract, OG fallback never cached + headers on HIT, mix cards unavailable state.
     const np = await page.evaluate(async () => { const a = await fetch("/api/v1/local/albums?filter=never-played&limit=20"); const d = await a.json().catch(() => ({})); const b = await fetch("/api/v1/local/albums?filter=never-played&limit=20&offset=2001"); return { status: a.status, nextOffset: d.nextOffset, items: (d.items || []).length, far: b.status }; });
     if (np.status !== 200 || typeof np.nextOffset !== "number" || np.far !== 400) throw new Error("never-played contract: " + JSON.stringify(np));
-    const host = URL.replace(/^https?:\/\//, "");
-    const rawHead = (path, ua) => new Promise((resolve, reject) => { const req = require("https").request({ host: "127.0.0.1", port: 443, path, method: "GET", servername: host, rejectUnauthorized: false, headers: { Host: host, "User-Agent": ua } }, (res) => { res.resume(); res.on("end", () => resolve({ status: res.statusCode, cache: res.headers["x-ytm-cache"] || "", cc: res.headers["cache-control"] || "", vary: res.headers["vary"] || "" })); }); req.on("error", reject); req.setTimeout(15000, () => req.destroy(new Error("timeout"))); req.end(); });
+    const rawHead = async (p, ua) => { const r = await rawRequest(URL, "GET", p, { "User-Agent": ua }); return { status: r.status, cache: r.headers["x-ytm-cache"] || "", cc: r.headers["cache-control"] || "", vary: r.headers["vary"] || "" }; };
     const uaA = ROBOT_UAS[0], uaB = ROBOT_UAS.find((u) => /twitterbot/i.test(u)) || "Twitterbot/1.0";
     const f1 = await rawHead("/listen?id=zzzzzzzzzzz", uaA);
     const f2 = await rawHead("/listen?id=zzzzzzzzzzz", uaA);
     if (/HIT/.test(f2.cache) || !/no-cache/.test(f1.cc)) throw new Error("OG fallback cached: " + JSON.stringify([f1, f2]));
-    const h1 = await rawHead("/listen?id=" + (VID || "dQw4w9WgXcQ"), uaB);
-    const h2 = await rawHead("/listen?id=" + (VID || "dQw4w9WgXcQ"), uaB);
+    const ogId = VID || LID;
+    if (!ogId) skip("no owned track id (acquiredVideoId / localLid) for the OG HIT headers");
+    const h1 = await rawHead("/listen?id=" + ogId, uaB);
+    const h2 = await rawHead("/listen?id=" + ogId, uaB);
     if (!/max-age=600/.test(h2.cc) || !/User-Agent/i.test(h2.vary)) throw new Error("OG HIT headers: " + JSON.stringify([h1, h2]));
     await gotoQuiet(page, URL + "/library/mixes", { timeout: 45000 });
     await page.locator('[data-testid="mix-card"]').first().waitFor({ state: "visible", timeout: 15000 });
@@ -1354,8 +1389,8 @@ async function search(page) {
     // c52c (B8-15 / B9-21): share_target (HL5, c29) merged here, assertions kept: manifest share_target action,
     // GET /share-target 200, a shared text with a youtu.be link lands on /listen without auto-play, the
     // unrecognized state offers a way home. Detail "share_target part ; share_target_smart part".
-    const fx = (() => { try { return JSON.parse(require("fs").readFileSync("/e2e/fixtures.json", "utf8")); } catch { return {}; } })();
-    const vid = fx.acquiredVideoId || "fa5IWHDbftI";
+    // Share routing is client-side: any well-formed YouTube id proves it (the fixture one when present).
+    const vid = VID || "dQw4w9WgXcQ";
     const mf = await page.evaluate(async () => (await fetch("/manifest.json", { cache: "no-store" })).json());
     if (!mf.share_target || mf.share_target.action !== "/share-target") throw new Error("manifest share_target missing: " + JSON.stringify(mf.share_target || null));
     const st = await page.evaluate(async () => (await fetch("/share-target", { cache: "no-store" })).status);
@@ -1407,8 +1442,7 @@ async function search(page) {
 
   await c37step("logic_v10", async () => {
     // c37a: missing _app asset is a 404 no-store; home.json failure shows a retry; t= seeks on /listen.
-    const host = URL.replace(/^https?:\/\//, "");
-    const raw = (path) => new Promise((resolve, reject) => { const req = require("https").request({ host: "127.0.0.1", port: 443, path, method: "GET", servername: host, rejectUnauthorized: false, headers: { Host: host } }, (res) => { let n = 0; res.on("data", (d) => (n += d.length)); res.on("end", () => resolve({ status: res.statusCode, cc: res.headers["cache-control"] || "", ct: res.headers["content-type"] || "", bytes: n })); }); req.on("error", reject); req.setTimeout(15000, () => req.destroy(new Error("timeout"))); req.end(); });
+    const raw = async (p) => { const r = await rawRequest(URL, "GET", p); return { status: r.status, cc: r.headers["cache-control"] || "", ct: r.headers["content-type"] || "", bytes: Buffer.byteLength(r.body) }; };
     const miss = await raw("/_app/immutable/chunks/doesnotexist-abc123.js");
     if (miss.status !== 404 || !/no-store/.test(miss.cc) || /text\/html/.test(miss.ct)) throw new Error("missing _app asset: " + JSON.stringify(miss));
     // serviceWorkers: "block": page.route() cannot intercept requests the SW answers; this context has no SW.
@@ -1423,8 +1457,10 @@ async function search(page) {
       await fp.unroute("**/api/v1/home.json*");
       await fp.locator('[data-testid="retry-home"]').first().click({ timeout: 5000 });
       await fp.locator('[data-testid="home-error"]').first().waitFor({ state: "hidden", timeout: 20000 }).catch(() => {});
-      const fx = (() => { try { return JSON.parse(require("fs").readFileSync("/e2e/fixtures.json", "utf8")); } catch { return {}; } })();
-      const vid = fx.acquiredVideoId || "fa5IWHDbftI";
+      // /listen?t=30 needs an owned track longer than 30 s: the YouTube fixture, else the local lid (the
+      // seek is asserted only when the track is long enough; a short local track reports the duration).
+      const vid = VID || LID;
+      if (!vid) skip("no owned track id (acquiredVideoId / localLid) for /listen?t=30");
       await fp.goto(URL + "/listen?id=" + vid + "&t=30", { waitUntil: "load", timeout: 45000 });
       const startBtn = fp.locator('[data-start-at], button:has-text("Start Listening"), button:has-text("Écouter")').first();
       await startBtn.waitFor({ state: "visible", timeout: 15000 }).catch((e) => { throw new Error("listen start button not found on /listen?t=30: " + String(e.message).slice(0, 60)); });
@@ -1432,7 +1468,11 @@ async function search(page) {
       await startBtn.click({ timeout: 5000 });
       // The player's media element is an Audio() object outside the DOM: read it through the play() hook.
       const ct = await pollUntil(async () => { const t = await fp.evaluate(() => { const m = window.__ytmMedia; const a = (m && m.el) || document.querySelector("audio, video"); return a ? a.currentTime : -1; }); return t >= 28 ? t : null; }, 30000);
-      if (!ct) throw new Error("listen t=30 did not seek (data-start-at=" + startAt + ")");
+      if (!ct) {
+        const dur = await fp.evaluate(() => { const m = window.__ytmMedia; const a = (m && m.el) || document.querySelector("audio, video"); return a && Number.isFinite(a.duration) ? a.duration : null; }).catch(() => null);
+        if (dur !== null && dur < 31) return `missing _app -> ${miss.status} ${miss.cc}; home.json 500 -> retry shown (personal rows=${rows}); /listen t=30 not asserted: track ${vid} lasts ${Math.round(dur)} s (shorter than 30 s)`;
+        throw new Error("listen t=30 did not seek (data-start-at=" + startAt + ")");
+      }
       return `missing _app -> ${miss.status} ${miss.cc}; home.json 500 -> retry shown (personal rows=${rows}); /listen t=30 -> currentTime ${Math.round(ct)} s`;
     } finally { await fctx.close(); }
   });
@@ -1461,8 +1501,8 @@ async function search(page) {
   // Cycle 39 steps (brainstorm v6): enabled per lane once merged.
   const C39_STEPS_ENABLED = true;
   const C39_SKIP = new Set(); // c39a c39b c39c merged (6e3a33c)
-  // identity_migration needs the harness plays to count (YTM_STATS_INCLUDE_HARNESS=1): staging only.
-  if (!/staging/.test(URL)) C39_SKIP.add("identity_migration");
+  // identity_migration needs the harness plays to count (YTM_STATS_INCLUDE_HARNESS=1 on the target).
+  if (!STATS_INCLUDE) { C39_SKIP.add("identity_migration"); envSkipped.push("identity_migration"); }
   const c39step = (name, fn) => (C39_STEPS_ENABLED && !C39_SKIP.has(name) ? step(page, name, fn) : Promise.resolve());
 
   await c39step("identity_migration", async () => {
@@ -1531,10 +1571,10 @@ async function search(page) {
     return `seek 0 ok (${t1} -> ${t2}), artwork sizes ${r.sizes.join(",")}`;
   });
 
-  // Cycle 40 steps (brainstorm v6): enabled when chain 43 (cycle 40) runs; staging only where the harness UA must count.
+  // Cycle 40 steps (brainstorm v6): resume_take_over and smart_queue_skips need counted harness plays.
   const C40_STEPS_ENABLED = true;
   const C40_SKIP = new Set(); // c40a c40b c40c merged
-  if (!/staging/.test(URL)) { C40_SKIP.add("resume_take_over"); C40_SKIP.add("smart_queue_skips"); }
+  if (!STATS_INCLUDE) for (const n of ["resume_take_over", "smart_queue_skips"]) { C40_SKIP.add(n); envSkipped.push(n); }
   const c40step = (name, fn) => (C40_STEPS_ENABLED && !C40_SKIP.has(name) ? step(page, name, fn) : Promise.resolve());
 
   await c40step("resume_take_over", async () => {
@@ -1631,54 +1671,57 @@ async function search(page) {
   });
 
   // Cycle 38 steps live in steps-c38-core.cjs (gated by its own C38_SKIP / env C38_SKIP).
+  // Every module receives the same contract (DEPS): page helpers, fixtures, the skip / library
+  // precondition helpers, the lid resolved above and whether the target counts harness plays.
+  const DEPS = { page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext, rawRequest, skip, libraryAtLeast, requireLibrary, lid: LID, acquiredVideoId: VID, statsIncludeHarness: STATS_INCLUDE, envSkipped };
   // A module that throws outside a step (setup code) must not idle the run until the chain timeout
   // (chains 47-50: "URL is not a constructor" in steps-c45-core): it becomes a FAIL and the run goes on.
-  try { await require("./steps-c38-core.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c38-core.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c38_core", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c38_core", "-", msg); }
   // Cycle 42 (c42b) and cycle 43 (c43a) steps live in their own modules (gated by C42_SKIP / C43_SKIP).
   // A module that throws outside a step (setup code) must not idle the run until the chain timeout
   // (chains 47-50: "URL is not a constructor" in steps-c45-core): it becomes a FAIL and the run goes on.
-  try { await require("./steps-c42-core.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c42-core.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c42_core", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c42_core", "-", msg); }
   // A module that throws outside a step (setup code) must not idle the run until the chain timeout
   // (chains 47-50: "URL is not a constructor" in steps-c45-core): it becomes a FAIL and the run goes on.
-  try { await require("./steps-c43-ux.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c43-ux.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c43_ux", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c43_ux", "-", msg); }
   // A module that throws outside a step (setup code) must not idle the run until the chain timeout
   // (chains 47-50: "URL is not a constructor" in steps-c45-core): it becomes a FAIL and the run goes on.
-  try { await require("./steps-c44-core.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c44-core.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c44_core", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c44_core", "-", msg); }
   // A module that throws outside a step (setup code) must not idle the run until the chain timeout
   // (chains 47-50: "URL is not a constructor" in steps-c45-core): it becomes a FAIL and the run goes on.
-  try { await require("./steps-c45-core.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c45-core.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c45_core", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c45_core", "-", msg); }
   // A module that throws outside a step (setup code) must not idle the run until the chain timeout
   // (chains 47-50: "URL is not a constructor" in steps-c45-core): it becomes a FAIL and the run goes on.
-  try { await require("./steps-c45-stats.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c45-stats.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c45_stats", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c45_stats", "-", msg); }
   // Cycle 47 (c47c) steps: pack refresh preview + data saver; gated "enable with chain 55" in C47_SKIP until the
   // chain builds f257daa on staging (c47a). Same try/catch pattern.
-  try { await require("./steps-c47-core.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c47-core.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c47_core", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c47_core", "-", msg); }
-  try { await require("./steps-c48-core.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c48-core.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c48_core", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c48_core", "-", msg); }
-  try { await require("./steps-c48-artists.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c48-artists.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c48_artists", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c48_artists", "-", msg); }
-  try { await require("./steps-c48-dayone.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c48-dayone.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c48_dayone", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c48_dayone", "-", msg); }
-  try { await require("./steps-c51-ux.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c51-ux.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c51_ux", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c51_ux", "-", msg); }
-  try { await require("./steps-c51-home.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c51-home.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c51_home", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c51_home", "-", msg); }
-  try { await require("./steps-c52-ux.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c52-ux.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c52_ux", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c52_ux", "-", msg); }
-  try { await require("./steps-c54-core.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c54-core.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c54_core", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c54_core", "-", msg); }
-  try { await require("./steps-c56-core.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c56-core.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c56_core", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c56_core", "-", msg); }
-  try { await require("./steps-c57-ux.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c57-ux.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c57_ux", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c57_ux", "-", msg); }
-  try { await require("./steps-c59-fr.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, gotoQuiet, waitQuiet, tier: TIER, fixtures: FIX, newHarnessContext }); }
+  try { await require("./steps-c59-fr.cjs").run(DEPS); }
   catch (e) { const msg = "module_crash " + String((e && e.message) || e).split("\n")[0]; steps.push({ name: "module_c59_fr", ok: false, detail: msg, durationMs: 0 }); console.log("FAIL", "module_c59_fr", "-", msg); }
 
   await step(page, "home_personal_rows", async () => {
@@ -1809,7 +1852,8 @@ async function search(page) {
     // Playing it also acquires it (by design), so after the first run the source becomes /localf.
     // HD1: the fixture id is a YouTube track the library ALREADY owns by content, so no run
     // enqueues a new acquisition (the path under test is still the YouTube /listen?id= one).
-    const vid = process.env.NONLOCAL_VIDEO_ID || VID || "9bZkp7q19f0";
+    const vid = process.env.NONLOCAL_VIDEO_ID || VID;
+    if (!vid) skip("needs the acquiredVideoId fixture (a YouTube track streamed through /aud)");
     await gotoQuiet(page, URL + "/listen?id=" + vid, { timeout: 45000 }).catch(() => {});
     await page.getByRole("button", { name: /start listening|écouter|lire/i }).first().click({ timeout: 15000 });
     const m0 = await pollUntil(async () => { const m = await media(page); return m && m.src ? m : null; }, 45000);

@@ -25,12 +25,7 @@ const path = require("path");
 const C45_SKIP = new Set(); // chain 52: login_keeps_inflight_writes failed (account page click), fixed by c46b; re-enabled by c47a (B8-16) after a run alone 02/10 04:50 (PASS 43 s)
 const STEP_NAMES = ["share_year", "login_keeps_inflight_writes"];
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
 // Same play() hook as harness-core.cjs: the player's media element is an Audio() outside the DOM.
 function mediaHook() {
@@ -87,10 +82,12 @@ async function run(deps) {
   const sleep = deps.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const pollUntil = deps.pollUntil || (async (fn, timeoutMs, everyMs = 1000) => { const t0 = Date.now(); let last; while (Date.now() - t0 < timeoutMs) { last = await fn(); if (last) return last; await sleep(everyMs); } return last; });
   const loginAs = deps.loginAs || (async (p, name) => p.evaluate(async (n) => { const x = await fetch("/api/v1/me/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) }); try { sessionStorage.removeItem("ytm-whoami"); } catch {} return x.status; }, name));
-  const staging = /staging/.test(URL);
+  // login_keeps_inflight_writes needs a server that counts harness plays (deps.statsIncludeHarness, detected
+  // by harness-core from me/nowplaying; YTM_STATS_INCLUDE_HARNESS=1 on a staging target).
+  const countsHarness = deps.statsIncludeHarness === true;
   const enabled = process.env.C45_STEPS_ENABLED !== "0";
   const skip = new Set([...C45_SKIP, ...String(process.env.C45_SKIP || "").split(",").map((s) => s.trim()).filter(Boolean)]);
-  if (!staging) skip.add("login_keeps_inflight_writes");
+  if (!countsHarness) { skip.add("login_keeps_inflight_writes"); if (deps.envSkipped) deps.envSkipped.push("login_keeps_inflight_writes"); }
   const c45step = (name, fn, opts) => (enabled && !skip.has(name) ? deps.step(page, name, fn, opts) : Promise.resolve());
 
   await c45step("share_year", async () => {

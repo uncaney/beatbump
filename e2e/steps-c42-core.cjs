@@ -16,34 +16,16 @@
 //                               malformed date -> 400, out-of-bounds date -> 400 (tolerant until c42a ships)
 const fs = require("fs");
 const path = require("path");
-const https = require("https");
 
 const C42_SKIP = new Set(); // chain 47: mediasession_real_handlers under diagnosis (c46b, fixed); re-enabled by c47a (B8-16) after a run alone 02/10 03:34 (PASS 21 s)
 const STEP_NAMES = ["mediasession_real_handlers", "skips_exclusion_real", "album_of_day_stable"];
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
-// Node-side request to Traefik on 127.0.0.1 (run.sh uses --network host) with SNI + Host (same trick as
-// steps-c38-core.cjs: Playwright's request context ignores --host-resolver-rules, the box hairpin is broken).
-function rawRequest(base, method, reqPath, headers = {}, timeoutMs = 15000) {
-  return new Promise((resolve, reject) => {
-    const host = String(base).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-    const t0 = Date.now();
-    const req = https.request({ host: "127.0.0.1", port: 443, path: reqPath, method, servername: host, rejectUnauthorized: false, headers: { Host: host, ...headers } }, (res) => {
-      const chunks = [];
-      res.on("data", (d) => chunks.push(d));
-      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString("utf8"), ms: Date.now() - t0 }));
-    });
-    req.on("error", reject);
-    req.setTimeout(timeoutMs, () => req.destroy(new Error(`timeout ${timeoutMs} ms ${method} ${reqPath}`)));
-    req.end();
-  });
-}
+// Node-side request derived from the harness URL (harness-lib.cjs rawRequest: scheme, host and port from the
+// URL, HARNESS_RESOLVE_IP for a named host whose hairpin route is broken; the page's request context ignores
+// Chrome's --host-resolver-rules).
+const { rawRequest } = require("./harness-lib.cjs");
 
 const defaultLoginAs = async (p, name) => p.evaluate(async (n) => {
   const x = await fetch("/api/v1/me/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) });
@@ -96,10 +78,12 @@ async function run(deps) {
   const ALBUM = FIX.localAlbumId || "lb-f9c16fd93917";
   const LID = FIX.localLid || "6300e80e2e2";
   const raw = (method, p, headers, t) => rawRequest(URL, method, p, headers, t);
-  const staging = /staging/.test(URL);
+  // skips_exclusion_real needs a server that counts harness plays (deps.statsIncludeHarness, detected by
+  // harness-core from me/nowplaying; YTM_STATS_INCLUDE_HARNESS=1 on a staging target).
+  const countsHarness = deps.statsIncludeHarness === true;
   const enabled = process.env.C42_STEPS_ENABLED !== "0";
   const skip = new Set([...C42_SKIP, ...String(process.env.C42_SKIP || "").split(",").map((s) => s.trim()).filter(Boolean)]);
-  if (!staging) skip.add("skips_exclusion_real");
+  if (!countsHarness) { skip.add("skips_exclusion_real"); if (deps.envSkipped) deps.envSkipped.push("skips_exclusion_real"); }
   const c42step = (name, fn, opts) => (enabled && !skip.has(name) ? deps.step(page, name, fn, opts) : Promise.resolve());
 
   await c42step("mediasession_real_handlers", async () => {

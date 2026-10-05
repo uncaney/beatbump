@@ -27,12 +27,7 @@ const C52_SKIP = new Set(); // chain 61: ux_v13_data_saver gated (locator.check 
 const STEP_NAMES = ["ux_v13_stats_about", "ux_v13_today_share", "ux_v13_data_saver"];
 const MIN_TAP = 44;
 
-function loadFixtures() {
-  for (const f of [path.join(__dirname, "fixtures.json"), "/e2e/fixtures.json"]) {
-    try { return JSON.parse(fs.readFileSync(f, "utf8")) || {}; } catch { /* next */ }
-  }
-  return {};
-}
+const loadFixtures = () => require("./harness-lib.cjs").loadFixtures();
 
 // Same play() hook as harness-core.cjs: window.__ytmMedia IS the element (deps.media reads it as one).
 function mediaHook() {

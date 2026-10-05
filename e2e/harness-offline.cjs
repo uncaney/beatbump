@@ -1,32 +1,35 @@
-// ytm-e2e-offline — harness navigateur reel des fonctionnalites offline de music.ekaii.fr
-// (auto-cache de tout morceau joue, prefetch du suivant, lecture hors-ligne depuis la page
-// Offline, download sur appareil sans blocage). Conventions de harness.cjs.
-// UI patchee (p17/p20) : pas de bouton Play dans les resultats, on tape la rangee ("Song • Artiste");
-// le "⋮" n'a pas d'aria-label ; le bouton "Download to device" est dans la barre du player.
-// La lecture est detectee via l'element <audio> (currentSrc / currentTime), PAS via les evenements
-// reseau : le service worker intercepte l'audio et Playwright ne voit pas toujours ces requetes.
-// run (depuis la box, via e2e/run.sh <url> <query> harness-offline.cjs)
+// ytm-e2e-offline: real-browser harness of the offline features of the music app (auto-cache of every
+// played track, prefetch of the next one, offline playback from the Offline page, download to device
+// without a dead end). Same conventions as harness-core.cjs (run.sh <url> <query> harness-offline.cjs).
+// Patched UI (p17/p20): no Play button in the results, the row itself is tapped ("Song • Artist"); the "⋮"
+// has no aria-label; the "Download to device" button sits in the player bar.
+// Playback is detected through the <audio> element (currentSrc / currentTime), NOT through network
+// events: the service worker intercepts the audio and Playwright does not always see those requests.
 //
-// Fixtures (cycle 34 HD1): e2e/fixtures.json, keys documented in the header of harness-core.cjs.
+// Fixtures (cycle 34 HD1): e2e/fixtures.json (or HARNESS_FIXTURES), keys documented in harness-core.cjs.
 // Used here: query (default when --query= is absent) and localAlbumId (keep_album_offline, instead
-// of "the newest local album", which changed with every acquisition). Missing file / key = old lookup.
-// Report (cycle 34 HD2/HD3): same fields as harness-core.cjs (version, startedAt, finishedAt,
-// durationMs, budgetMs, overBudget, upstream; per step durationMs, slow, upstream, rerun, firstDetail).
+// of "the newest local album", which changed with every acquisition). Missing file / key = API lookup.
+// Report (cycle 34 HD2/HD3): same fields as harness-core.cjs (version, startedAt, finishedAt, durationMs,
+// budgetMs, overBudget, upstream, skipped; per step durationMs, slow, upstream, rerun, firstDetail, skipped).
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
+const lib = require("./harness-lib.cjs");
 process.on("unhandledRejection", (e) => console.log("UNHANDLED", String((e && e.message) || e)));
 
-const FIX = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures.json"), "utf8")) || {}; } catch (e) { console.log("fixtures.json not loaded (" + String(e.message || e).slice(0, 60) + "): old lookups"); return {}; } })();
+const FIX = lib.loadFixtures();
 const arg = (k, d = "") =>
   (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split("=").slice(1).join("=");
-const URL = arg("url", "https://staging-music.ekaii.fr").replace(/\/$/, "");
+const URL = arg("url", process.env.YTM_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const OUT = arg("out", "/out");
 // c52c (B9-13): every browser context of the harness sends X-Ytm-Harness: 1 so prod stats never record a
-// harness play (api/me_stats.go harnessRequest; staging keeps YTM_STATS_INCLUDE_HARNESS=1). The wrapper on
-// browser.newContext below merges it too, so a module calling browser.newContext directly is still covered;
-// the helper is what the step modules receive through deps.newHarnessContext (check-harness-headers.cjs).
-const HARNESS_HEADERS = { "X-Ytm-Harness": "1" };
+// harness play (api/me_stats.go harnessRequest). The wrapper on browser.newContext below merges it too, so a
+// module calling browser.newContext directly is still covered; the helper is what the step modules receive
+// through deps.newHarnessContext (check-harness-headers.cjs).
+const HARNESS_HEADERS = lib.HARNESS_HEADERS;
+const { skip, rawRequest } = lib;
+const libraryAtLeast = (n) => lib.libraryAtLeast(URL, n);
+const requireLibrary = (n, what) => lib.requireLibrary(URL, n, what);
 function newHarnessContext(browser, opts) {
   const o = opts || {};
   return browser.newContext({ ...o, extraHTTPHeaders: { ...(o.extraHTTPHeaders || {}), ...HARNESS_HEADERS } });
@@ -86,6 +89,12 @@ async function step(page, name, fn, opts = {}) {
       return true;
     } catch (e) {
       const msg = String((e && e.message) || e).split("\n")[0];
+      if (lib.isSkip(e)) {
+        // Precondition not met on this target: neither a pass nor a failure (report.skipped).
+        steps.push({ name, ok: true, skipped: true, detail: msg, durationMs: Date.now() - t0 });
+        console.log("SKIP", name, "-", msg);
+        return true;
+      }
       if (attempt === 0 && FLAKY_KNOWN.has(name)) {
         firstDetail = msg;
         console.log("RETRY", name, "-", msg);
@@ -104,14 +113,8 @@ async function step(page, name, fn, opts = {}) {
     }
   }
 }
-// Served version without the browser: Traefik on 127.0.0.1 (run.sh uses --network host), SNI + Host.
-function servedVersion() {
-  return new Promise((resolve) => {
-    const host = URL.replace(/^https?:\/\//, "");
-    const req = require("https").request({ host: "127.0.0.1", port: 443, path: "/api/v1/stats/library", method: "GET", servername: host, rejectUnauthorized: false, headers: { Host: host } }, (res) => { let b = ""; res.on("data", (d) => (b += d)); res.on("end", () => { try { resolve(JSON.parse(b).version || null); } catch { resolve(null); } }); });
-    req.on("error", () => resolve(null)); req.setTimeout(10000, () => { req.destroy(); resolve(null); }); req.end();
-  });
-}
+// Served version without the browser: plain GET of <URL>/api/v1/stats/library (harness-lib rawRequest).
+const servedVersion = () => lib.servedVersion(URL);
 // c51b: the steps the offline step modules gate at run time (exported C<N>_SKIP Set + env C<N>_SKIP,
 // C<N>_STEPS_ENABLED=0 gates the whole module), written as `gated` in report.json. Same shape as in
 // harness-core.cjs. Read-only, never throws.
@@ -134,9 +137,11 @@ function writeReport(version) {
   const failed = steps.filter((s) => !s.ok && !s.upstream).length;
   const upstream = steps.filter((s) => !s.ok && s.upstream).length;
   const gated = gatedSteps(GATED_MODULES);
-  const report = { url: URL, query: QUERY, version, tier: TIER, startedAt: new Date(STARTED).toISOString(), finishedAt: new Date(finished).toISOString(), durationMs: finished - STARTED, budgetMs: TOTAL_BUDGET_MS, overBudget: finished - STARTED > TOTAL_BUDGET_MS, passed: steps.filter((s) => s.ok).length, failed, upstream, skippedTier, gated, steps };
+  const skipped = steps.filter((s) => s.skipped);
+  const report = { url: URL, query: QUERY, version, tier: TIER, startedAt: new Date(STARTED).toISOString(), finishedAt: new Date(finished).toISOString(), durationMs: finished - STARTED, budgetMs: TOTAL_BUDGET_MS, overBudget: finished - STARTED > TOTAL_BUDGET_MS, passed: steps.filter((s) => s.ok && !s.skipped).length, failed, upstream, skipped: skipped.length, skippedTier, gated, steps };
   fs.writeFileSync(path.join(OUT, "report.json"), JSON.stringify(report, null, 2));
-  console.log(`\nReport: ${report.passed} passed / ${report.failed} failed / ${report.upstream} upstream -> ${OUT}/report.json`);
+  console.log(`\nReport: ${report.passed} passed / ${report.failed} failed / ${report.upstream} upstream / ${report.skipped} skipped -> ${OUT}/report.json`);
+  if (skipped.length) console.log("Report skipped: " + skipped.map((s) => `${s.name} (${s.detail})`).join("; "));
   console.log("Report gated: " + (gated.length ? gated.map((g) => `${g.step} (${g.module}, ${g.source})`).join(", ") : "none"));
   console.log(`Report budget: ${(report.durationMs / 1000).toFixed(0)} s / ${TOTAL_BUDGET_MS / 1000} s${report.overBudget ? " OVER BUDGET" : ""}, tier=${TIER}, version=${version}, slow steps=${steps.filter((s) => s.slow).length}`);
   console.log("Report slowest: " + steps.slice().sort((a, b) => b.durationMs - a.durationMs).slice(0, 5).map((s) => `${s.name} ${(s.durationMs / 1000).toFixed(1)}s`).join(", "));
@@ -168,8 +173,8 @@ async function pollUntil(fn, timeoutMs, everyMs = 1500) {
 async function bannerVisible(page) {
   return page.evaluate((re) => new RegExp(re, "i").test(document.body.innerText || ""), BANNER_RE.source);
 }
-// Recherche puis lecture du premier resultat de type "Song" en tapant la rangee ; attend que
-// l'element audio ait une source. Retourne l'etat audio.
+// Search, then play the nth "Song" result by tapping its row; waits until the audio element has a
+// source and returns the audio state.
 async function searchAndPlay(page, nth = 0, avoidCurrent = false) {
   const box = page.locator("input[type=search], input[role=searchbox], input[placeholder*='earch' i], input[placeholder*='herch' i], input[name*='earch' i]").first();
   if (await box.count() === 0) await page.locator("a[href*='search'], button[aria-label*='earch' i], button[aria-label*='herch' i], a[aria-label*='herch' i]").first().click({ timeout: 5000 }).catch(() => {});
@@ -504,9 +509,10 @@ async function assertAdvancing(page, label) {
     return `${fuNote}; ${packNote}`;
   });
 
-  // Cycle 38 offline steps live in steps-c38-offline.cjs.
-  await require("./steps-c38-offline.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, fixtures: FIX, newHarnessContext });
-  await require("./steps-c44-offline.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, fixtures: FIX, newHarnessContext });
+  // Cycle 38 / 44 offline steps live in their own modules (same contract as the core modules).
+  const DEPS = { page, browser, ctx, URL, QUERY, step, pollUntil, sleep, fixtures: FIX, newHarnessContext, rawRequest, skip, libraryAtLeast, requireLibrary, tier: TIER };
+  await require("./steps-c38-offline.cjs").run(DEPS);
+  await require("./steps-c44-offline.cjs").run(DEPS);
 
   await step(page, "me_pages_offline_message", async () => {
     // Cycle 16 (c16b): offline, the server-backed library pages say so instead of an empty list.
@@ -559,7 +565,7 @@ async function assertAdvancing(page, label) {
 
   await step(page, "download_to_device_no_dead_end", async () => {
     await page.goto(URL + "/", { waitUntil: "load", timeout: 45000 }).catch(() => {});
-    await searchAndPlay(page, 0, true); // eviter le morceau courant restaure (clic = no-op)
+    await searchAndPlay(page, 0, true); // avoid the restored current track (clicking it is a no-op)
     await sleep(2000);
     const dlBtn = page.locator("[aria-label*='download to device' i], [title*='download to device' i], button:has-text('Download to device'), [aria-label*='télécharger' i]").first();
     if (await dlBtn.count() === 0) throw new Error("no 'Download to device' control found");
