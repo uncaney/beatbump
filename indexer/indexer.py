@@ -248,8 +248,26 @@ def scan():
     return added
 
 
+def wait_tasks(timeout=600):
+    """Meilisearch indexes asynchronously: block until no task is enqueued or
+    processing, so a derived rebuild right after an upload sees every track
+    (on a fresh install the first pass used to aggregate 0 albums / 0 artists)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            pending = meili("GET", "/tasks?statuses=enqueued,processing&limit=1").get("results", [])
+        except Exception as e:
+            print(f"[indexer] task poll error: {e}", flush=True)
+            pending = []
+        if not pending:
+            return
+        time.sleep(1)
+    print("[indexer] tasks still pending after wait; continuing", flush=True)
+
+
 def rebuild_derived():
     """Aggregate albums + artists from all `tracks` docs in Meili (disk-free)."""
+    wait_tasks()
     albums = {}
     artists = {}
     offset = 0

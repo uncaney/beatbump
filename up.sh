@@ -13,7 +13,7 @@
 #
 # Environment overrides: COMPOSE_PROJECT_NAME (default beatbump; several stacks can
 # coexist), BEATBUMP_PORT (written into deploy/.env on first run), MUSIC_DIR (idem),
-# COMPOSE_PARALLEL_LIMIT=1 to build sequentially on a loaded host.
+# BUILD_PARALLEL=1 to build the images in parallel (default: one at a time).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
@@ -187,13 +187,27 @@ print_summary() {
 EOF
 }
 
+# Build the four images one after the other: the node + go build of the app is
+# memory hungry and a parallel build on a small host swaps or gets OOM-killed.
+# BUILD_PARALLEL=1 restores compose's default parallel build.
+build_images() {
+    local s pull=()
+    if [ "${1:-}" = "--pull" ]; then pull=(--pull); shift; fi
+    # Explicit services given (./up.sh build indexer): build just those.
+    if [ "$#" -gt 0 ] || [ "${BUILD_PARALLEL:-0}" = 1 ]; then compose build ${pull[@]+"${pull[@]}"} "$@"; return; fi
+    for s in bridge indexer yubal beatbump; do
+        log "building $s"
+        compose build ${pull[@]+"${pull[@]}"} "$s"
+    done
+}
+
 cmd_up() {
     check_prereqs
     ensure_env
     ensure_dirs
     if [ "$WANT_SAMPLE" = 1 ]; then sample_library; fi
     log "building images (first build takes several minutes)"
-    compose build
+    build_images
     log "starting the stack (project $PROJECT)"
     compose up -d --remove-orphans
     wait_healthy || exit 1
@@ -218,14 +232,14 @@ case "$CMD" in
              compose down ${ARGS[@]+"${ARGS[@]}"} ;;
     logs)    check_prereqs; compose logs -f --tail=200 ${ARGS[@]+"${ARGS[@]}"} ;;
     ps|status) check_prereqs; stack_status || true ;;
-    build)   check_prereqs; ensure_env; compose build ${ARGS[@]+"${ARGS[@]}"} ;;
+    build)   check_prereqs; ensure_env; build_images ${ARGS[@]+"${ARGS[@]}"} ;;
     update)  check_prereqs; ensure_env
              if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
                  log "git pull --ff-only"; git -C "$ROOT" pull --ff-only
                  env_set BEATBUMP_VERSION "$(git -C "$ROOT" rev-parse --short HEAD)"
              fi
              ensure_dirs
-             compose build --pull
+             build_images --pull
              compose up -d --remove-orphans
              wait_healthy || exit 1
              print_summary ;;
