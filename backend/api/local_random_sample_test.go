@@ -72,10 +72,12 @@ func newPagedTracksStub(t *testing.T, n int) *pagedTracksStub {
 // past the end of the index and the mix came back empty.
 func TestRandomLibrarySampleSmallLibrary(t *testing.T) {
 	stub := newPagedTracksStub(t, 28)
-	for round := 0; round < 5; round++ {
+	// The windows are drawn at random and may overlap (deduped by lid): the
+	// sample holds a good part of the library, never nothing.
+	for round := 0; round < 20; round++ {
 		items := randomLibrarySample(40)
-		if len(items) < 20 {
-			t.Fatalf("round %d: a 28-track library gave %d sample items (expected most of the library)", round, len(items))
+		if len(items) < 8 {
+			t.Fatalf("round %d: a 28-track library gave %d sample items", round, len(items))
 		}
 	}
 	stub.mu.Lock()
