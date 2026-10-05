@@ -9,6 +9,12 @@
 // Fixtures (cycle 34 HD1): e2e/fixtures.json (or HARNESS_FIXTURES), keys documented in harness-core.cjs.
 // Used here: query (default when --query= is absent) and localAlbumId (keep_album_offline, instead
 // of "the newest local album", which changed with every acquisition). Missing file / key = API lookup.
+// Fixtures without acquiredVideoId but with localLid and localAlbumId (fixtures.sample.json, a fresh install):
+// after the search, the played tracks come from the fixture album ("Tout lire") instead of the first "Song"
+// rows of "Tout", where YouTube shelves come first: a YouTube result's length decides whether its listen
+// counts within a step (a one-hour video never does, so nothing is kept or prefetched), its radio ids are
+// never listed again by a search, and without iv-vp its /vp downloads run at real-time speed. With
+// acquiredVideoId (Camille's library) nothing changes.
 // Report (cycle 34 HD2/HD3): same fields as harness-core.cjs (version, startedAt, finishedAt, durationMs,
 // budgetMs, overBudget, upstream, skipped; per step durationMs, slow, upstream, rerun, firstDetail, skipped).
 const { chromium } = require("playwright");
@@ -40,6 +46,7 @@ const STREAM_RE = /(videoplayback|googlevideo|\/localf|\/vp\?|\/aud\/|\.m4a|\.op
 const AUDIO_CACHE = "ytm-offline-audio";
 const LS_KEY = "ytm-offline-tracks";
 const BANNER_RE = /acquisition en cours/i;
+const LIBRARY_FIRST = !FIX.acquiredVideoId && !!FIX.localLid && !!FIX.localAlbumId;
 
 fs.mkdirSync(OUT, { recursive: true });
 let shotN = 0;
@@ -184,23 +191,39 @@ async function searchAndPlay(page, nth = 0, avoidCurrent = false) {
   // The suggestions overlay can stay open above the results (BACKLOG P3) and swallow later clicks.
   await page.keyboard.press("Escape").catch(() => {});
   await sleep(400);
-  let sub = page.getByText(/Song\s*•/).nth(nth);
+  if (LIBRARY_FIRST && FIX.localAlbumId) {
+    // A fresh install without a YouTube-backed fixture (see the header): after the same search, the fixture
+    // album is played ("Tout lire"), so the queue stays in the library. A local track played from the search
+    // queues its YouTube radio, whose /vp downloads the generic stack (no iv-vp) gets at real-time speed: the
+    // +1 of the queue would be kept minutes later, never within prefetch_next_cached.
+    await page.goto(URL + "/release?id=" + encodeURIComponent(FIX.localAlbumId), { waitUntil: "load", timeout: 45000 });
+    const play = page.locator('[data-testid="release-play"]').first();
+    await play.waitFor({ state: "visible", timeout: 15000 });
+    const before = await audioState(page);
+    if (!(avoidCurrent && before && before.src && !before.paused)) await play.click({ timeout: 8000 });
+    const st = await pollUntil(async () => { const s = await audioState(page); return s && s.src ? s : null; }, 30000);
+    if (!st) throw new Error("no <audio> source after Tout lire on the fixture album " + FIX.localAlbumId + " (state=" + JSON.stringify(await audioState(page)) + ")");
+    return st;
+  }
+  const rowsOf = () => page.getByText(/Song\s*•/);
+  const rowText = (cand) => cand.locator("xpath=..").innerText().catch(() => "");
+  let sub = rowsOf().nth(nth);
   await sub.waitFor({ state: "visible", timeout: 15000 });
   if (avoidCurrent) {
     // Clicking the track that is already current (restored session) is a no-op: pick another row.
     const cur = ((await page.locator(".now-playing-title, .player-title").first().innerText().catch(() => "")) || "").trim().toLowerCase();
-    const n = await page.getByText(/Song\s*•/).count();
+    const n = await rowsOf().count();
     for (let i = 0; i < Math.min(n, 8); i++) {
-      const cand = page.getByText(/Song\s*•/).nth(i);
-      const rowText = ((await cand.locator("xpath=..").innerText().catch(() => "")) || "").toLowerCase();
-      if (!cur || !rowText.includes(cur.slice(0, 20))) { sub = cand; break; }
+      const cand = rowsOf().nth(i);
+      const txt = ((await rowText(cand)) || "").toLowerCase();
+      if (!cur || !txt.includes(cur.slice(0, 20))) { sub = cand; break; }
     }
   }
   await sub.click({ position: { x: 8, y: 8 }, timeout: 8000 }); // left edge: the artist link has a 26 px tap box since cycle 14
   let st = await pollUntil(async () => { const s = await audioState(page); return s && s.src ? s : null; }, 30000);
   if (!st) {
     // Clicking the restored current track is a no-op (see BACKLOG cycle 3): try the next Song row once.
-    const alt = page.getByText(/Song\s*•/).nth(nth + 1);
+    const alt = rowsOf().nth(nth + 1);
     if (await alt.count()) {
       await alt.click({ position: { x: 8, y: 8 }, timeout: 8000 }).catch(() => {});
       st = await pollUntil(async () => { const s = await audioState(page); return s && s.src ? s : null; }, 30000);
@@ -374,6 +397,23 @@ async function assertAdvancing(page, label) {
       await page.goto(URL + "/library/recent", { waitUntil: "load", timeout: 45000 });
       await ready.first().waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
       nReady = await ready.count(); where = "/library/recent";
+    }
+    if (!nReady && FIX.localLid && FIX.localLidTitle) {
+      // A small library: the first "Song" rows of the query and their radio are YouTube results (cached under
+      // ids no search lists again: the radio's video ids differ from the song rows of a title search) and the
+      // harness profile has no history. Make one LIBRARY track cached the way a listener does: play the fixture
+      // lid from the library search until its listen counts (half of a short track) and the automatic keep
+      // stores it, then its library row must carry the badge.
+      await page.goto(URL + "/search/" + encodeURIComponent(FIX.localLidTitle) + "?filter=songs", { waitUntil: "load", timeout: 45000 });
+      const own = page.getByText(FIX.localLidTitle, { exact: true }).first();
+      await own.waitFor({ state: "visible", timeout: 15000 });
+      await own.click({ timeout: 8000 });
+      const kept = await pollUntil(async () => { const l = await offlineList(page); return l.some((e) => e && e.videoId === FIX.localLid && e._cached) ? true : null; }, 60000, 1500);
+      if (kept) {
+        await page.goto(URL + "/search/" + encodeURIComponent(FIX.localLidTitle) + "?filter=songs", { waitUntil: "load", timeout: 45000 });
+        await ready.first().waitFor({ state: "visible", timeout: 12000 }).catch(() => {});
+        nReady = await ready.count(); where = "library:" + FIX.localLidTitle + " (played until kept)";
+      }
     }
     if (!nReady) {
       await page.goto(URL + "/search/" + encodeURIComponent(QUERY) + "?filter=songs", { waitUntil: "load", timeout: 45000 });

@@ -80,7 +80,10 @@ async function run(deps) {
   const c38step = (name, fn, opts) => (enabled && !skip.has(name) ? step(page, name, fn, opts) : Promise.resolve());
 
   await c38step("pack_cancel_two_tabs", async () => {
-    const tctx = await newCtx(browser, { ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 } });
+    // A small library (the sample one: ~25 short tracks per 100 Mo pack) completes A's pack in about a second,
+    // before B can start its keep: there every audio download is held 1.5 s (harness-lib slowAudioContext).
+    const slow = await require("./harness-lib.cjs").slowAudioContext(URL, () => newCtx(browser, { ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 } }), 1500);
+    const tctx = slow.ctx;
     const diag = { aNavs: [], bNavs: [], errors: [], bMark: null };
     const watch = (p, tag) => {
       p.on("framenavigated", (f) => { if (f === p.mainFrame()) (tag === "A" ? diag.aNavs : diag.bNavs).push(f.url().replace(URL, "")); });
@@ -201,8 +204,8 @@ async function run(deps) {
         if (res.st !== "ready") throw new Error(`keep on tab B ended ${res.st} ${res.ready}/${res.total} with ${why}; ${pinnedTxt}; ${d.text}`);
       }
       const btnNote = res && res.st === "ready" ? "" : `; BUTTON idle after the complete keep (${btnTxt}): localStorage flags lost to tab A's writes, app fix c43d pending`;
-      return `pack A running -> ${fin} in ${cancelMs} ms; shared ${sharedIds.length} ids: A cancelled, B ok; keep B (${albumId}) ${keepBefore}->${keepRun}->${res ? res.st : "?"} complete (${albumIds.length - missing.length}/${albumIds.length} pinned in the SW, acks ok); ${pinnedTxt}${btnNote}`;
-    } finally { await tctx.close(); }
+      return `${slow.slowed ? "small library: audio held 1.5 s; " : ""}pack A running -> ${fin} in ${cancelMs} ms; shared ${sharedIds.length} ids: A cancelled, B ok; keep B (${albumId}) ${keepBefore}->${keepRun}->${res ? res.st : "?"} complete (${albumIds.length - missing.length}/${albumIds.length} pinned in the SW, acks ok); ${pinnedTxt}${btnNote}`;
+    } finally { await tctx.close(); slow.release(); }
   }, { budgetMs: 180000 });
 }
 

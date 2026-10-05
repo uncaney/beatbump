@@ -111,7 +111,10 @@ async function run(deps) {
   const c44step = (name, fn, opts) => (enabled && !skip.has(name) ? step(page, name, fn, opts) : Promise.resolve());
   if (!enabled || (skip.has("pack_refresh") && skip.has("pack_too_big"))) return;
 
-  const tctx = await newCtx(browser, { ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 } });
+  // A small library finishes a pack in a second or two, before startPack() reads "running" (pack_too_big then saw
+  // "done"): there every audio download is held 0.8 s (harness-lib slowAudioContext), nothing changes elsewhere.
+  const slow = await require("./harness-lib.cjs").slowAudioContext(URL, () => newCtx(browser, { ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 } }), 800);
+  const tctx = slow.ctx;
   const errors = [];
   let a = null;
   try {
@@ -263,19 +266,22 @@ async function run(deps) {
       const longest = "dur:" + Math.max(...durations);
       const pinnedBefore = q.pinned;
       let { prog, st } = await startPack(a, longest, pollUntil);
-      if (st === "running") {
-        // The estimate fit (small library / low bitrate): stop at once, then force a custom quota.
+      // The estimate fit (small library / low bitrate): stop at once, then force a custom quota, pinned + 20 Mo,
+      // and on a library whose whole remainder weighs less than that (the sample library: 15 short tracks,
+      // about 12 Mo) pinned + 2 Mo.
+      for (const roomMb of [20, 2]) {
+        if (st !== "running") break;
         await a.locator('[data-testid="pack-cancel"]').first().click({ timeout: 5000 });
         await pollUntil(async () => { const s = await prog.getAttribute("data-state").catch(() => null); return s === "cancelled" || s === "done" ? s : null; }, 10000, 300);
         const g0 = await a.evaluate(() => (window.__ytmPackPlan && window.__ytmPackPlan.guard) || null);
         const l = await swList(a);
-        const forced = Math.floor((l ? l.pinnedBytes : 0) + 20 * MB);
+        const forced = Math.floor((l ? l.pinnedBytes : 0) + roomMb * MB);
         const got = await setQuota(a, forced);
-        if (got !== forced) throw new Error(`fallback quota not applied (${got} for ${forced}); first try ran with guard=${JSON.stringify(g0)}`);
+        if (got !== forced) throw new Error(`fallback quota not applied (${got} for ${forced}); the try before ran with guard=${JSON.stringify(g0)}`);
         await a.reload({ waitUntil: "load" });
         await ensureControlled(a, sleep, pollUntil);
         await expandSpace(a, sleep);
-        leg = `${leg} (${Math.round(quotaBytes / MB)} Mo) let the estimate through (guard=${JSON.stringify(g0)}), forced quota pinned+20 Mo=${Math.round(forced / MB)} Mo`;
+        leg = `${leg} (${Math.round(quotaBytes / MB)} Mo) let the estimate through (guard=${JSON.stringify(g0)}), forced quota pinned+${roomMb} Mo=${Math.round(forced / MB)} Mo`;
         ({ prog, st } = await startPack(a, longest, pollUntil));
       }
       const txt = await packText(a);
@@ -293,6 +299,7 @@ async function run(deps) {
     }, { budgetMs: 120000 });
   } finally {
     await tctx.close().catch(() => {});
+    slow.release();
   }
 }
 

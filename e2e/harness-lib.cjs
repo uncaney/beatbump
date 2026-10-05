@@ -18,6 +18,15 @@
 //   requireMixCards(base)          skip() unless GET /api/v1/local/mixes lists at least one card (a decade or year
 //                                  with 15 albums, or a genre with 200 titles over 15 albums): the Mixes page of a
 //                                  smaller library shows its empty state, there is no mix card to check
+//   slowAudioContext(base, create, ms)
+//                                  on a small library (< 2000 tracks) the offline packs of a fresh context finish in a
+//                                  second or two (short tracks served from a local disk), before a step can act while
+//                                  one runs: this creates the context through create() with every audio request
+//                                  (/localf, /aud, /vp), the service worker's own included, held `ms` before it goes
+//                                  out. Playwright routes a service worker's fetches only with
+//                                  PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS set when the worker attaches: it is set
+//                                  for the context's lifetime and restored by the returned release(). On a larger
+//                                  library nothing changes. Resolves { ctx, slowed, release }.
 //   typoOf(query)                  a one-letter-dropped variant of the query (typo-tolerant search steps)
 //   headerFor(base)                HARNESS_HEADERS, the X-Ytm-Harness: 1 header every browser context sends
 const fs = require("fs");
@@ -124,6 +133,19 @@ async function requireMixCards(base) {
   }
 }
 
+const SW_NET_ENV = "PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS";
+async function slowAudioContext(base, create, ms) {
+  if (await libraryAtLeast(base, 2000)) return { ctx: await create(), slowed: false, release: () => {} };
+  const prev = process.env[SW_NET_ENV];
+  process.env[SW_NET_ENV] = "1";
+  const release = () => { if (prev === undefined) delete process.env[SW_NET_ENV]; else process.env[SW_NET_ENV] = prev; };
+  try {
+    const ctx = await create();
+    await ctx.route(/\/(localf|aud|vp)(\?|\/|$)/, async (route) => { await new Promise((r) => setTimeout(r, ms)); await route.continue().catch(() => {}); });
+    return { ctx, slowed: true, release };
+  } catch (e) { release(); throw e; }
+}
+
 // "daft punk" -> "daft pnk": drop one inner letter of the last word longer than 3 characters.
 function typoOf(query) {
   const words = String(query || "").trim().split(/\s+/);
@@ -134,4 +156,4 @@ function typoOf(query) {
   return words.join(" ");
 }
 
-module.exports = { HARNESS_HEADERS, loadFixtures, fixturesPath, parseBase, rawRequest, servedStats, servedVersion, skip, isSkip, libraryStats, libraryAtLeast, requireLibrary, requireMixCards, typoOf };
+module.exports = { HARNESS_HEADERS, loadFixtures, fixturesPath, parseBase, rawRequest, servedStats, servedVersion, skip, isSkip, libraryStats, libraryAtLeast, requireLibrary, requireMixCards, slowAudioContext, typoOf };
