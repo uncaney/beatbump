@@ -490,7 +490,7 @@ func radioPool(seed map[string]interface{}, seedLid string) []map[string]interfa
 	if len(pool) < 20 {
 		off := 0
 		if rand.Intn(2) == 1 {
-			off = rand.Intn(40000)
+			off = randomTrackOffset(libraryTrackTotal(), 60)
 		}
 		pool = append(pool, meiliSearchIndex("tracks", map[string]interface{}{
 			"q": "", "offset": off, "limit": 60, "sort": []string{"dateAdded:desc"},
@@ -523,6 +523,48 @@ func localRadio(seed map[string]interface{}, seedLid string) []Item {
 	return out
 }
 
+// libraryTrackTotal is the number of documents in the tracks index (Meili's
+// estimatedTotalHits for an empty query), memoised trackTotalTTL; 0 when
+// Meili cannot answer. The random windows below draw their offsets under it.
+const trackTotalTTL = time.Minute
+
+var trackTotalMemo struct {
+	sync.Mutex
+	n  int
+	at time.Time
+}
+
+func libraryTrackTotal() int {
+	trackTotalMemo.Lock()
+	defer trackTotalMemo.Unlock()
+	if !trackTotalMemo.at.IsZero() && time.Since(trackTotalMemo.at) < trackTotalTTL {
+		return trackTotalMemo.n
+	}
+	_, n := meiliBrowse("tracks", map[string]interface{}{"q": "", "offset": 0, "limit": 0})
+	if n > 0 {
+		trackTotalMemo.n, trackTotalMemo.at = n, time.Now()
+	}
+	return n
+}
+
+// resetTrackTotalMemo forgets the memoised track count (tests).
+func resetTrackTotalMemo() {
+	trackTotalMemo.Lock()
+	defer trackTotalMemo.Unlock()
+	trackTotalMemo.n, trackTotalMemo.at = 0, time.Time{}
+}
+
+// randomTrackOffset is a random offset whose `window` tracks still lie inside
+// a library of `total` tracks (0 when the library is not larger than one
+// window, or its size is unknown).
+func randomTrackOffset(total, window int) int {
+	max := total - window
+	if max <= 0 {
+		return 0
+	}
+	return rand.Intn(max + 1)
+}
+
 // randomLibrarySample returns localSongItems from a random library window
 // (cold-start fallback for the mix when there's no listening history yet).
 // randomLibrarySample returns n tracks spread over many albums: the index is sorted
@@ -543,8 +585,13 @@ func randomLibrarySample(n int) []IListItemRenderer {
 	// them in window order so the result is the same as the sequential loop.
 	pages := make([][]map[string]interface{}, windows)
 	var wg sync.WaitGroup
+	// The offsets stay inside the library: a fixed 0..40000 range (sized for a
+	// 54k-track library) made every window of a small library land past its
+	// end, so a fresh install's cold-start "Pour toi" mix, and the offline pack
+	// built on it, came back empty.
+	total := libraryTrackTotal()
 	for w := 0; w < windows; w++ {
-		off := rand.Intn(40000)
+		off := randomTrackOffset(total, perWindow)
 		wg.Add(1)
 		go func(i, off int) {
 			defer wg.Done()

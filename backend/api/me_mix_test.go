@@ -82,8 +82,9 @@ func (s *mixMeiliStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-		default: // random window (offset + sort)
-			off := int(body["offset"].(float64))
+		default: // random window (offset + sort); the count query (limit 0) has no offset
+			offF, _ := body["offset"].(float64)
+			off := int(offF)
 			for i := 0; i < limit; i++ {
 				lid := fmt.Sprintf("r-%d-%d", off, i)
 				hits = append(hits, map[string]interface{}{"lid": lid, "title": "R " + lid, "artist": "Rnd"})
@@ -91,7 +92,9 @@ func (s *mixMeiliStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"hits": hits})
+	// A large library (estimatedTotalHits): the random windows of the cold
+	// start draw their offsets under it (libraryTrackTotal).
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"hits": hits, "estimatedTotalHits": 54000})
 }
 
 func newMixTestEnv(t *testing.T, delay time.Duration) *mixMeiliStub {
@@ -105,6 +108,8 @@ func newMixTestEnv(t *testing.T, delay time.Duration) *mixMeiliStub {
 	t.Cleanup(srv.Close)
 	t.Setenv("MEILI_URL", srv.URL)
 	t.Setenv("YTM_API_CACHE", "")
+	resetTrackTotalMemo()
+	t.Cleanup(resetTrackTotalMemo)
 	mixCacheMu.Lock()
 	mixCache = map[string]mixCacheEntry{}
 	mixCacheMu.Unlock()
