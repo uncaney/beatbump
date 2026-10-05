@@ -72,8 +72,9 @@ Other `up.sh` commands:
 
 Environment overrides read by `up.sh`: `COMPOSE_PROJECT_NAME` (default `beatbump`; several
 stacks can coexist), `BEATBUMP_PORT`, `MUSIC_DIR` and `BEATBUMP_BIND` (written into `deploy/.env`
-on the first run), `COMPOSE_PARALLEL_LIMIT=1` to build sequentially on a loaded host. The raw
-equivalent once `deploy/.env` exists:
+on the first run), `HEALTH_TIMEOUT` (600 s), `BUILD_PARALLEL=1` to build the four images in
+parallel (default: one at a time, kinder to a loaded host; `./up.sh build <service>` rebuilds one
+image). The raw equivalent once `deploy/.env` exists:
 `docker compose -p beatbump --project-directory deploy -f deploy/compose.yml up -d`.
 
 ## Requirements
