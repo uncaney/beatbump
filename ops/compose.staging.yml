@@ -1,0 +1,27 @@
+# ops/compose.staging.yml: compose override for the STAGING instance of the shipped stack (ops/env.sh
+# YTM_STAGING_OVERRIDE), added after deploy/compose.yml under the project YTM_STAGING_PROJECT. The named volumes
+# (meili index, companion cache) are already per project; the bind mounts below move the state the services
+# write under deploy/data-staging so that staging and production never share a database, an indexer state, a
+# bridge state or a downloads folder. The music library (MUSIC_DIR, read-only) stays shared. The port comes
+# from YTM_STAGING_ENV_FILE (deploy/.env.staging: a copy of deploy/.env with another BEATBUMP_PORT; the secrets
+# can be the same). Needs docker compose v2.24+ (`!override`).
+services:
+  beatbump:
+    volumes: !override
+      - ./data-staging/beatbump-db:/db
+      - ./data-staging/beatbump-downloads:/downloads
+    environment:
+      # Staging counts the harness plays: the harness steps that need counted plays run here, not in prod.
+      YTM_STATS_INCLUDE_HARNESS: "1"
+  indexer:
+    volumes: !override
+      - ${MUSIC_DIR:-./data/music}:/music:ro
+      - ./data-staging/indexer-state:/state
+  bridge:
+    volumes: !override
+      - ${MUSIC_DIR:-./data/music}:/library:ro
+      - ./data-staging/bridge-state:/app/state
+  yubal:
+    volumes: !override
+      - ./data-staging/music-ytm:/app/data
+      - ./data-staging/yubal-config:/app/config

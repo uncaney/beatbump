@@ -1,25 +1,23 @@
-# Crontab propose pour music.ekaii.fr (decision 19 de program/DECISIONS-PAUL.md, en attente). NON INSTALLE :
-# Camille decide. Installation (compte docker-host, la box est en UTC) : crontab -e, puis coller les DEUX lignes non
-# commentees ci-dessous. Verification : crontab -l | grep -c 'monday.sh\|smoke.sh' = 2.
+# Suggested crontab (decision 19 of the program). NOT INSTALLED by anything: the operator decides.
+# Installation (the account that owns the checkout; the host is assumed to be on UTC): crontab -e, then paste
+# the TWO uncommented lines below with YOUR paths. Check: crontab -l | grep -c 'monday.sh\|smoke.sh' = 2.
+# The scripts read their layout from ops/env.sh (ops/env.local or exported variables): set YTM_ENV or export
+# the variables in the crontab when the checkout is not the shipped layout (see ops/env.example).
 #
-# 1. Lundi 06:00 UTC (avant les chaines et promotions de la journee) : ops/monday.sh (cycle 53, B9-15) = attente
-#    d une box libre (pas de ytm-harness-*, pas de chaine, pas de build), harness prod palier full (coeur +
-#    hors-ligne, environ 20 min), weekly.sh (UNE ligne ajoutee a agents/program/WEEKLY.md ; bloc dans
-#    agents/program/ALERT.md si : rapport full absent ou vieux de plus de 8 j, etapes gatees depuis plus d une
-#    semaine, harness < 100 %, version servie != dernier "PROD = <sha>" de CYCLES.md, disque < 10 % libre,
-#    0 telechargement avec des echecs, Kuma 167 DOWN avec cle), puis smoke.sh HTTP avec SMOKE_ALERT=1.
-#    Journal detaille : agents/program/logs/monday-<date>.log (10 gardes) ; le cron ne recoit que le resume.
-#    Ne pas rediriger stdout vers WEEKLY.md (la ligne serait en double). Pas de mail ; pas de cle Kuma sur la box
-#    (aucune cle ne doit y etre ecrite : la colonne Kuma vaut "n/a (jeton)"). WEEKLY_DB_RO=1 est pose par monday.sh
-#    (colonne retention : lecture seule de la base prod, mode=ro).
-0 6 * * 1 /bin/sh /srv/beatbump/agents/ops/monday.sh >> /srv/beatbump/agents/ops/monday-cron.log 2>&1  # music.ekaii.fr lundi (cycle 53)
+# 1. Monday 06:00 UTC (before the day's chains and promotions): ops/monday.sh (cycle 53, B9-15) = wait for a free
+#    host (no ytm-harness-*, no chain, no build), prod harness full tier (core + offline, about 20 min), weekly.sh
+#    (ONE line appended to $YTM_PROGRAM_DIR/WEEKLY.md; a block in ALERT.md when: no full report or one older than
+#    8 days, steps gated for more than a week, harness < 100 %, served version != last "PROD = <sha>" of CYCLES.md,
+#    disk < 10 % free, 0 download with failures, stats monitor DOWN with a Kuma key), then smoke.sh HTTP with
+#    SMOKE_ALERT=1. Detailed log: $YTM_PROGRAM_DIR/logs/monday-<date>.log (10 kept); cron only gets the summary.
+#    Never redirect stdout to WEEKLY.md (the line would be duplicated). No mail; no Kuma key on the host (the Kuma
+#    column then reads "n/a (token)"). WEEKLY_DB_RO=1 is set by monday.sh (retention column: read-only database).
+0 6 * * 1 /bin/sh /path/to/checkout/ops/monday.sh >> /path/to/checkout/ops/monday-cron.log 2>&1  # music app monday (cycle 53)
 #
-# 2. Tous les jours 06:30 UTC : smoke prod HTTP + navigateur (cycle 43, B7-15/B7-16) ; le navigateur est SAUTE
-#    (pas un echec) si un ytm-harness-* tourne deja (le lundi, monday.sh a normalement fini avant 06:30) ;
-#    bloc ALERT.md en cas d echec.
-30 6 * * * SMOKE_BROWSER=1 SMOKE_ALERT=1 /bin/sh /srv/beatbump/agents/ops/smoke.sh https://music.ekaii.fr >> /srv/beatbump/agents/ops/smoke-cron.log 2>&1  # music.ekaii.fr smoke (cycle 43)
+# 2. Every day 06:30 UTC: prod smoke HTTP + browser (cycle 43, B7-15/B7-16); the browser is SKIPPED (not a failure)
+#    when a ytm-harness-* already runs (on Mondays monday.sh normally finishes before 06:30); ALERT.md block on
+#    failure. The URL is the production base URL ($YTM_PROD_URL of ops/env.sh).
+30 6 * * * SMOKE_BROWSER=1 SMOKE_ALERT=1 /bin/sh /path/to/checkout/ops/smoke.sh http://127.0.0.1:8080 >> /path/to/checkout/ops/smoke-cron.log 2>&1  # music app smoke (cycle 43)
 #
-# Lecture : tail -3 /srv/beatbump/agents/program/WEEKLY.md ; ls -l /srv/beatbump/agents/program/ALERT.md ;
-#   tail -5 /srv/beatbump/agents/ops/monday-cron.log ; ls -t /srv/beatbump/agents/program/logs/monday-*.log | head -1
-# Ancienne ligne (cycle 39, remplacee par monday.sh ; a ne plus installer) :
-#   0 8 * * 1 /bin/sh /srv/beatbump/agents/ops/weekly.sh >> /srv/beatbump/agents/ops/weekly-cron.log 2>&1
+# Reading: tail -3 $YTM_PROGRAM_DIR/WEEKLY.md ; ls -l $YTM_PROGRAM_DIR/ALERT.md ;
+#   tail -5 ops/monday-cron.log ; ls -t $YTM_PROGRAM_DIR/logs/monday-*.log | head -1

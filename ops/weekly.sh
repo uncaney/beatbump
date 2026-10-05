@@ -1,80 +1,68 @@
 #!/bin/sh
-# Mesures hebdomadaires de music.ekaii.fr (cycle 36, item HO6 de program/brainstorm-v5.md section 4).
-# Lecture seule, sans navigateur, moins de 90 s. Seule ecriture : UNE ligne ajoutee a program/WEEKLY.md.
-# A lancer SUR la box docker-host (depuis le Mac : ssh -o ControlMaster=no -o ControlPath=none docker-host '...').
+# Weekly measurements of the production instance (cycle 36, item HO6 of program/brainstorm-v5.md section 4).
+# Read-only, no browser, under 90 s. Only write: ONE line appended to $YTM_PROGRAM_DIR/WEEKLY.md.
+# Run ON the host.
 #
-# Usage : sh /srv/beatbump/agents/ops/weekly.sh [-]
-#   Secrets (cycle 39 L11-3) : JAMAIS un chemin de fichier en argument, jamais une copie sur le disque de la box.
-#   Deux sources possibles, lues une fois puis retirees de l environnement (curl les recoit par -K - sur
-#   l entree standard : rien dans ps ni /proc/<pid>/cmdline) :
-#     - variables d environnement WEEKLY_KUMA_KEY (cle API Uptime Kuma, Reglages > Cles API) et
-#       YTM_ADMIN_TOKEN (jeton Bearer de GET /api/v1/client-log, decision 15) ;
-#     - argument "-" : lignes NOM=valeur sur l entree standard (seuls ces deux noms sont acceptes). Depuis le Mac,
-#       apres "secret-store request" (le clair reste dans <secret store>, il transite par ssh) :
-#         { printf 'WEEKLY_KUMA_KEY='; cat <secret store>/<nom>; echo; } | \
-#           ssh -o ControlMaster=no -o ControlPath=none docker-host 'sh /srv/beatbump/agents/ops/weekly.sh -'
-#   Sans cle Kuma : colonne "kuma : n/a (jeton)" ; sans jeton admin : "n/a (YTM_ADMIN_TOKEN non pose)".
-#   La cle et le jeton ne sont jamais affiches ni ecrits.
-#   WEEKLY_DRY_RUN=1 (env, optionnel) : affiche la ligne sans l ajouter a WEEKLY.md (ni ecrire ALERT.md).
-#   Alerte (cycles 39 et 41, cron.weekly.example) : ajoute un bloc a program/ALERT.md (raisons + ligne) quand
-#     - le taux de passage du harness prod (coeur ou hors-ligne) est < 100 %, ou qu aucun rapport prod n existe ;
-#     - la version servie differe du dernier "PROD = <sha>" de program/CYCLES.md ;
-#     - le volume de la bibliotheque (source du montage /app/data de ytm-yubal) ou /srv/data a moins de 10 % libre
-#       (ou df ne repond pas en 10 s : NFS bloque) ;
-#     - zero piste telechargee par yubal sur la fenetre alors qu il y a des echecs (piste ou tache) ;
-#     - le moniteur Kuma 167 (API stats/library) est DOWN (seulement avec WEEKLY_KUMA_KEY).
-#   Pas de mail, pas de push Kuma. Les raisons de l alerte vont sur stderr ; stdout garde exactement la ligne WEEKLY.
+# Usage: sh ops/weekly.sh [-]
+#   Secrets (cycle 39 L11-3): NEVER a file path as argument, never a copy on the host disk. Two sources, read once
+#   then removed from the environment (curl receives them through -K - on stdin: nothing in ps nor
+#   /proc/<pid>/cmdline):
+#     - environment variables WEEKLY_KUMA_KEY (Uptime Kuma API key, Settings > API keys) and YTM_ADMIN_TOKEN
+#       (Bearer token of GET /api/v1/client-log, decision 15);
+#     - argument "-": NAME=value lines on stdin (only these two names are accepted), e.g. from a workstation:
+#         { printf 'WEEKLY_KUMA_KEY='; cat <key file>; echo; } | ssh host 'sh /path/ops/weekly.sh -'
+#   Without a Kuma key: column "kuma: n/a (token)"; without the admin token: "n/a (YTM_ADMIN_TOKEN not set)".
+#   The key and the token are never printed nor written.
+#   WEEKLY_DRY_RUN=1 (env, optional): prints the line without appending it to WEEKLY.md (nor writing ALERT.md).
+#   Alert (cycles 39 and 41, cron.weekly.example): a block is appended to $YTM_PROGRAM_DIR/ALERT.md when
+#     - the pass rate of the prod harness (core or offline) is < 100 %, or no prod report exists;
+#     - the served version differs from the last "PROD = <sha>" of $YTM_PROGRAM_DIR/CYCLES.md;
+#     - the library volume or one of YTM_DISK_PATHS has less than 10 % free (or df does not answer in 10 s: NFS);
+#     - zero track downloaded by the acquisition container over the window while there are failures;
+#     - the Kuma monitor YTM_KUMA_STATS_MONITOR is DOWN (only with WEEKLY_KUMA_KEY).
+#   No mail, no Kuma push. The alert reasons go to stderr; stdout keeps exactly the WEEKLY line.
 #
-# Les 5 chiffres (brainstorm-v5 section 4) :
-#   (a) harness prod : dernier e2e/out/*/report.json dont url = https://music.ekaii.fr, coeur (etape
-#       perf_cold_home_requests presente) et hors-ligne (etape load_home presente)
-#       (passed, failed, upstream, durationMs, version ; "-" quand le rapport date d avant le cycle 34)
-#   (b) accueil a froid : detail de l etape perf_cold_home_requests de ce rapport coeur (_app requests ...)
-#   (c) stats/library : titres / albums / artistes, age de lastAdded en jours, version servie
-#   (d) Kuma : etat + temps de reponse des moniteurs 86, 119, 106, 167 (endpoint /metrics, cle API)
-#   (e) client-log : nombre d entrees par kind sur les 50 plus recentes (avec YTM_ADMIN_TOKEN) ; sans jeton,
-#       nombre de POST /api/v1/client-log par statut HTTP dans le journal d acces du conteneur prod (cycle 41)
-# Colonnes ajoutees au cycle 41 (lane 41C, B6-27), apres (e), toujours en lecture seule :
-#   (f) usage 7 j : POST /api/v1/me/history (2xx) du journal d acces Echo de ytm-beatbump, hors agents harness
-#       (HeadlessChrome, ytm-perf, curl, python, Go-http, Uptime-Kuma) ; "profils actifs" = IP clientes
-#       distinctes (APPROXIMATION : pas de cookie bbp dans les logs ; les clients du LAN et de la box sont
-#       confondus sous l IP privee du proxy). docker logs ne couvre que la vie du conteneur : chaque promotion
-#       le recree, la fenetre reelle ("logs depuis ...") est affichee.
-#   (g) acquisition : journal de ytm-yubal sur 168 h : pistes telechargees ("Downloaded:"), deja presentes
-#       ("Skipped (file exists)"), echecs de piste ("Failed to download"), taches en echec ("Job <id> failed"),
-#       heure du dernier telechargement.
-#   (h) disque : df du volume de la bibliotheque et de /srv/data (timeout 10 s, le NFS peut bloquer)
-#   (i) sauvegardes image : nombre et taille de image-backups/*.tar.gz (rollback de promote.sh)
-#   (j) API lente : les 3 prefixes d uri /api/ au p90 le plus haut sur la fenetre (>= 5 requetes, ids
-#       remplaces par :id, flux audio exclus)
-# Cycle 53 (lane c53a, brainstorm-v9 B9-14 et B9-16) :
-#   (a) auto-controle : le rapport prod retenu (coeur et hors-ligne) est le DERNIER de palier "full" (champ
-#       tier de report.json) ; il doit avoir moins de WEEKLY_MAX_REPORT_AGE_D jours (defaut 8, age lu dans
-#       finishedAt, sinon dans le nom du dossier). La colonne imprime tier, age, firstSoundMs (coeur, "> 3 s"
-#       si au-dessus ; la charge au moment du run n est pas dans le rapport) et la liste gated (doit etre []).
-#       Raison d alerte (bloc ALERT.md) : aucun rapport full (le dernier rapport prod, quel que soit son palier,
-#       est alors affiche avec son tier), rapport full plus vieux que la limite, ou liste gated non vide alors
-#       qu une ligne de WEEKLY.md vieille d au moins 7 jours en portait deja une : une colonne a 100 % sur un
-#       rapport vieux d un mois n est plus silencieuse.
-#   (k) retention 7 j (lecture SEULE de la base prod, seulement avec WEEKLY_DB_RO=1 ; sinon "n/a") :
-#       sqlite3 "file:<beatbump-db>/beatbump.db?mode=ro" + PRAGMA query_only, tables profiles(id, name) et
-#       play_events(profile_id, ref, title, artist, album, played_at). Profil HARNESS = profiles.name LIKE
-#       'harness-%' OU toutes ses ecoutes (tout l historique) sont des ecoutes de fixture : ref dans
-#       e2e/fixtures.json (acquiredVideoId, localLid) ou 9bZkp7q19f0 (Gangnam Style), titre contenant
-#       "gangnam style", artiste = localAlbumArtist / localArtistName (Daft Punk : la requete du harness, dont
-#       les pistes de l album lb-f9c16fd93917). Un profil avec au moins une ecoute hors fixtures est HUMAIN.
-#       A = profils humains avec une ecoute sur [J-7, J) ; P = idem sur [J-14, J-7) ; revenus = A inter P ;
-#       ecoutes humaines 7 j = nombre et mediane par jour UTC sur les 7 derniers jours ; derniere ecoute humaine.
-#       Le backend n ecrit plus les ecoutes harness depuis le cycle 52 (en-tete X-Ytm-Harness partout) : les
-#       exclusions couvrent les lignes anterieures. Aucune API publique ne donne ces chiffres (decision 15).
-#       Chemin de la base : source du montage /db de ytm-beatbump (docker inspect), sinon $YTM/beatbump-db.
+# The columns (brainstorm-v5 section 4, then cycles 41 and 53):
+#   (a) prod harness: last e2e/out/*/report.json whose url = $YTM_PROD_URL, core (step perf_cold_home_requests
+#       present) and offline (step load_home present): passed, failed, upstream, durationMs, version. c53a B9-14:
+#       the report kept is the LAST one of tier "full"; it must be younger than WEEKLY_MAX_REPORT_AGE_D days
+#       (default 8, age read from finishedAt, else from the directory name); tier, age, firstSoundMs (core, "> 3 s"
+#       when above) and the gated list (must be []) are printed; alert when no full report, a full report older
+#       than the limit, or a non-empty gated list while a WEEKLY line at least 7 days old already carried one.
+#   (b) cold home: detail of the step perf_cold_home_requests of that core report (_app requests ...)
+#   (c) stats/library: tracks / albums / artists, age of lastAdded in days, served version
+#   (d) Kuma: state + response time of the monitors YTM_KUMA_MONITORS (/metrics endpoint, API key)
+#   (e) client-log: entries per kind over the 50 most recent (with YTM_ADMIN_TOKEN); without the token, the
+#       POST /api/v1/client-log count per HTTP status in the access log of the prod container (cycle 41)
+#   (f) usage 7 d: POST /api/v1/me/history (2xx) of the Echo access log of the prod container, harness agents
+#       excluded (HeadlessChrome, ytm-perf, curl, python, Go-http, Uptime-Kuma); "active profiles" = distinct
+#       client IPs (APPROXIMATION: no profile cookie in the logs). docker logs only cover the container's life:
+#       every promotion recreates it, the real window ("logs since ...") is printed.
+#   (g) acquisition: log of YTM_ACQ_CONTAINER over 168 h: tracks downloaded ("Downloaded:"), already present
+#       ("Skipped (file exists)"), track failures ("Failed to download"), failed jobs ("Job <id> failed"), time of
+#       the last download; "n/a" without YTM_ACQ_CONTAINER
+#   (h) disk: df of the library volume and of each YTM_DISK_PATHS (timeout 10 s, NFS may hang)
+#   (i) image backups: count and size of $YTM_IMAGE_BACKUPS/*.tar.gz (promote.sh rollback)
+#   (j) slow API: the 3 /api/ uri prefixes with the highest p90 over the window (>= 5 requests, ids replaced by
+#       :id, audio streams excluded)
+#   (k) retention 7 d (READ-ONLY access to the prod database, only with WEEKLY_DB_RO=1; else "n/a"):
+#       sqlite3 "file:<db dir>/beatbump.db?mode=ro" + PRAGMA query_only, tables profiles(id, name) and
+#       play_events(profile_id, ref, title, artist, album, played_at). HARNESS profile = profiles.name LIKE
+#       'harness-%' OR all its plays (whole history) are fixture plays: ref in the fixtures file (acquiredVideoId,
+#       localLid) or 9bZkp7q19f0, title containing "gangnam style", artist = localAlbumArtist / localArtistName.
+#       A profile with at least one non-fixture play is HUMAN. A = human profiles with a play in [D-7, D);
+#       P = same over [D-14, D-7); returning = A and P; human plays 7 d = count and median per UTC day over the
+#       last 7 days; last human play. The backend has not written harness plays since cycle 52 (X-Ytm-Harness
+#       everywhere): the exclusions cover older rows. No public API gives these numbers (decision 15).
+#       Database path: source of the /db mount of the prod container, else $YTM_DB_DIR.
 set -u
-YTM=/srv/beatbump
-OUT="$YTM/e2e/out"
-WEEKLY="$YTM/agents/program/WEEKLY.md"
-ALERT="$YTM/agents/program/ALERT.md"
-CYCLES="$YTM/agents/program/CYCLES.md"
-R="--resolve music.ekaii.fr:443:127.0.0.1"
+OPS_DIR=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=env.sh
+. "$OPS_DIR/env.sh"
+OUT="$YTM_E2E_DIR/out"
+WEEKLY="$YTM_PROGRAM_DIR/WEEKLY.md"
+CYCLES="$YTM_PROGRAM_DIR/CYCLES.md"
+PRD="$YTM_PROD_URL"
 KUMA_KEY="${WEEKLY_KUMA_KEY:-}"
 ADMIN_TOKEN="${YTM_ADMIN_TOKEN:-}"
 unset WEEKLY_KUMA_KEY YTM_ADMIN_TOKEN
@@ -85,26 +73,27 @@ case "${1:-}" in
          WEEKLY_KUMA_KEY=*) KUMA_KEY=${l#WEEKLY_KUMA_KEY=} ;;
          YTM_ADMIN_TOKEN=*) ADMIN_TOKEN=${l#YTM_ADMIN_TOKEN=} ;;
          "") ;;
-         *) echo "entree standard : ligne ignoree (attendu WEEKLY_KUMA_KEY=... ou YTM_ADMIN_TOKEN=...)" >&2 ;;
+         *) echo "stdin: line ignored (expected WEEKLY_KUMA_KEY=... or YTM_ADMIN_TOKEN=...)" >&2 ;;
        esac
      done ;;
-  *) echo "weekly.sh : argument refuse (plus de chemin de fichier secret depuis le cycle 39) ; voir l en-tete : env ou \"-\" + stdin" >&2; exit 2 ;;
+  *) echo "weekly.sh: argument refused (no secret file path since cycle 39); see the header: env or \"-\" + stdin" >&2; exit 2 ;;
 esac
 KUMA_KEY=$(printf '%s' "$KUMA_KEY" | tr -d ' \r\n')
 ADMIN_TOKEN=$(printf '%s' "$ADMIN_TOKEN" | tr -d ' \r\n')
-# valeur entre guillemets pour un fichier de config curl (-K -) : echappe \ et "
+# quoted value for a curl config file (-K -): escapes \ and "
 cfgq() { printf '%s' "$1" | sed 's/[\\"]/\\&/g'; }
 NOW=$(date -u +"%Y-%m-%d %H:%M")
 
-# (a) + (b) : rapports du harness prod (lecture des fichiers seulement). c53a B9-14 : dernier rapport de palier
-# full par genre (coeur = etape perf_cold_home_requests, hors-ligne = etape load_home : noms conserves par c52c),
-# age < WEEKLY_MAX_REPORT_AGE_D jours, firstSoundMs et gated imprimes, raisons d alerte sur la 4e ligne (WHY).
+# (a) + (b): prod harness reports (file reads only). c53a B9-14: last full-tier report per kind (core = step
+# perf_cold_home_requests, offline = step load_home: names kept by c52c), age < WEEKLY_MAX_REPORT_AGE_D days,
+# firstSoundMs and gated printed, alert reasons on the 4th line (WHY).
 MAX_AGE_D="${WEEKLY_MAX_REPORT_AGE_D:-8}"
-AB=$(python3 - "$OUT" "$WEEKLY" "$MAX_AGE_D" <<'PY' 2>/dev/null
+AB=$(python3 - "$OUT" "$WEEKLY" "$MAX_AGE_D" "$PRD" "$YTM_ALLOW_SKIPS" <<'PY' 2>/dev/null
 import datetime, glob, json, os, re, sys
-out, weekly, maxage = sys.argv[1], sys.argv[2], float(sys.argv[3])
+out, weekly, maxage, prod = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4].rstrip("/")
+allow_skips = sys.argv[5] == "1"
 now = datetime.datetime.now(datetime.timezone.utc)
-KINDS = ("coeur", "hors-ligne")
+KINDS = ("core", "offline")
 full = {k: None for k in KINDS}
 latest = {k: None for k in KINDS}
 for f in sorted(glob.glob(os.path.join(out, "*", "report.json")), reverse=True):
@@ -112,10 +101,10 @@ for f in sorted(glob.glob(os.path.join(out, "*", "report.json")), reverse=True):
         d = json.load(open(f))
     except Exception:
         continue
-    if str(d.get("url", "")).rstrip("/") != "https://music.ekaii.fr":
+    if str(d.get("url", "")).rstrip("/") != prod:
         continue
     names = {s.get("name") for s in d.get("steps", [])}
-    kind = "coeur" if "perf_cold_home_requests" in names else ("hors-ligne" if "load_home" in names else None)
+    kind = "core" if "perf_cold_home_requests" in names else ("offline" if "load_home" in names else None)
     if kind is None:
         continue
     ts = os.path.basename(os.path.dirname(f))
@@ -125,8 +114,6 @@ for f in sorted(glob.glob(os.path.join(out, "*", "report.json")), reverse=True):
         full[kind] = (ts, d)
     if all(full.values()):
         break
-def fr(x):
-    return ("%.1f" % x).replace(".", ",")
 def age_days(r):
     ts, d = r
     try:
@@ -144,17 +131,19 @@ def gated_txt(d):
     return "gated=[%s]" % ",".join(str(x) for x in g)
 def fmt(label, r, core):
     if not r:
-        return "%s aucun rapport" % label
+        return "%s no report" % label
     ts, d = r
     p, k = d.get("passed", 0), d.get("failed", 0)
     rate = (100.0 * p / (p + k)) if (p + k) else 0.0
     dur = d.get("durationMs")
     dur = "%d s" % round(dur / 1000) if isinstance(dur, (int, float)) else "-"
     a = age_days(r)
-    extra = "tier=%s, age %s j" % (d.get("tier") or "-", fr(a) if a is not None else "?")
+    extra = "tier=%s, age %s d" % (d.get("tier") or "-", "%.1f" % a if a is not None else "?")
     if core:
         fs = d.get("firstSoundMs")
         extra += ", firstSound=%s" % ("%d ms%s" % (fs, " (> 3 s)" if fs > 3000 else "") if isinstance(fs, (int, float)) else "-")
+    if d.get("skipped"):
+        extra += ", skipped=%s" % d.get("skipped")
     extra += ", " + gated_txt(d)
     return "%s %d/%d (%.0f %%, upstream %s, %s, version %s, %s, out/%s)" % (
         label, p, p + k, rate, d.get("upstream", "-"), dur, d.get("version", "-"), extra, ts)
@@ -164,22 +153,24 @@ for k in KINDS:
     if r is None:
         chosen[k] = latest[k]
         l = latest[k]
-        why.append("harness prod %s : aucun rapport de palier full (dernier rapport prod : %s)" % (
-            k, ("tier=%s, age %s j, out/%s" % (l[1].get("tier") or "-", fr(age_days(l)) if age_days(l) is not None else "?", l[0])) if l else "aucun"))
+        why.append("prod harness %s: no full-tier report (last prod report: %s)" % (
+            k, ("tier=%s, age %s d, out/%s" % (l[1].get("tier") or "-", "%.1f" % age_days(l) if age_days(l) is not None else "?", l[0])) if l else "none"))
         continue
     chosen[k] = r
     a = age_days(r)
     if a is None:
-        why.append("harness prod %s : rapport full sans date lisible (out/%s)" % (k, r[0]))
+        why.append("prod harness %s: full report without a readable date (out/%s)" % (k, r[0]))
     elif a > maxage:
-        why.append("harness prod %s : rapport full vieux de %s j (> %g j, out/%s)" % (k, fr(a), maxage, r[0]))
-core, off = chosen["coeur"], chosen["hors-ligne"]
+        why.append("prod harness %s: full report %.1f d old (> %g d, out/%s)" % (k, a, maxage, r[0]))
+    if r[1].get("skipped") and not allow_skips:
+        why.append("prod harness %s: %s step(s) skipped (precondition not met; YTM_ALLOW_SKIPS=1 to accept)" % (k, r[1].get("skipped")))
+core, off = chosen["core"], chosen["offline"]
 cold = "-"
 if core:
     for s in core[1].get("steps", []):
         if s.get("name") == "perf_cold_home_requests":
             cold = "%s%s" % (s.get("detail", "-"), "" if s.get("ok") else " (FAIL)")
-# liste gated non vide alors qu une ligne WEEKLY d au moins 7 jours en portait deja une
+# non-empty gated list while a WEEKLY line at least 7 days old already carried one
 gated_now = [(k, chosen[k][1].get("gated")) for k in KINDS if chosen[k] and isinstance(chosen[k][1].get("gated"), list) and chosen[k][1].get("gated")]
 if gated_now:
     old = []
@@ -194,10 +185,10 @@ if gated_now:
     except Exception:
         pass
     if old:
-        why.append("etapes gatees depuis plus d une semaine (deja dans la ligne du %s) : %s" % (
-            old[-1], " ; ".join("%s [%s]" % (k, ",".join(str(x) for x in g)) for k, g in gated_now)))
-print("harness prod : " + fmt("coeur", core, True) + " ; " + fmt("hors-ligne", off, False))
-print("accueil a froid : " + cold)
+        why.append("steps gated for more than a week (already in the line of %s): %s" % (
+            old[-1], "; ".join("%s [%s]" % (k, ",".join(str(x) for x in g)) for k, g in gated_now)))
+print("prod harness: " + fmt("core", core, True) + "; " + fmt("offline", off, False))
+print("cold home: " + cold)
 def ok(r):
     if not r:
         return "none"
@@ -207,42 +198,43 @@ print("RATES %s %s" % (ok(core), ok(off)))
 print("WHY " + "; ".join(why))
 PY
 )
-[ -n "$AB" ] || AB="harness prod : lecture des rapports impossible
-accueil a froid : -"
+[ -n "$AB" ] || AB="prod harness: reports unreadable
+cold home: -"
 A=$(printf '%s\n' "$AB" | sed -n 1p)
 B=$(printf '%s\n' "$AB" | sed -n 2p)
 RATES=$(printf '%s\n' "$AB" | sed -n 3p)
 AWHY=$(printf '%s\n' "$AB" | sed -n 4p | sed 's/^WHY //; s/^WHY$//')
 
-# (c) stats/library servie par la prod (hairpin casse : --resolve vers Traefik local)
-STATS=$(curl -s --max-time 15 $R https://music.ekaii.fr/api/v1/stats/library 2>/dev/null || true)
+# (c) stats/library served by prod
+STATS=$(ytm_curl "$PRD/api/v1/stats/library" -s --max-time 15 2>/dev/null || true)
 C=$(printf '%s' "$STATS" | python3 -c '
 import json, sys, datetime
 try:
     d = json.load(sys.stdin)
 except Exception:
-    print("bibliotheque : stats/library illisible"); sys.exit()
+    print("library: stats/library unreadable"); sys.exit()
 age = "?"
 la = d.get("lastAdded") or ""
 try:
     t = datetime.datetime.strptime(la, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
-    age = ("%.1f" % ((datetime.datetime.now(datetime.timezone.utc) - t).total_seconds() / 86400)).replace(".", ",")
+    age = "%.1f" % ((datetime.datetime.now(datetime.timezone.utc) - t).total_seconds() / 86400)
 except Exception:
     pass
-print("bibliotheque : %s titres / %s albums / %s artistes, lastAdded il y a %s j, version servie %s" % (
+print("library: %s tracks / %s albums / %s artists, lastAdded %s d ago, served version %s" % (
     d.get("tracks", "?"), d.get("albums", "?"), d.get("artists", "?"), age, d.get("version", "?")))
 ' 2>/dev/null)
-[ -n "$C" ] || C="bibliotheque : stats/library illisible"
-SERVED=$(printf '%s' "$STATS" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("version",""))' 2>/dev/null || true)
+[ -n "$C" ] || C="library: stats/library unreadable"
+SERVED=$(printf '%s' "$STATS" | ytm_json_get version)
 
-# (d) Kuma : seulement avec une cle API ; IP du conteneur resolue a chaque execution (jamais en dur)
-D="kuma : n/a (jeton)"
-if [ -n "$KUMA_KEY" ]; then
-    KIP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' uptime-kuma 2>/dev/null | cut -d' ' -f1)
+# (d) Kuma: only with an API key and configured monitors; the container IP is resolved on every run (never fixed)
+D="kuma: n/a (token)"
+if [ -z "$YTM_KUMA_MONITORS" ]; then D="kuma: n/a (YTM_KUMA_MONITORS not set)"
+elif [ -n "$KUMA_KEY" ]; then
+    KIP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$YTM_KUMA_CONTAINER" 2>/dev/null | cut -d' ' -f1)
     if [ -n "$KIP" ]; then
       D=$(printf 'user = ":%s"\n' "$(cfgq "$KUMA_KEY")" | curl -s --max-time 10 -K - "http://$KIP:3001/metrics" 2>/dev/null | python3 -c '
 import re, sys
-want = ["86", "119", "106", "167"]
+want = sys.argv[1].split()
 st, rt = {}, {}
 for line in sys.stdin:
     m = re.match(r"(monitor_status|monitor_response_time)\{([^}]*)\}\s+(\S+)", line)
@@ -253,17 +245,17 @@ for line in sys.stdin:
     if i in want:
         (st if m.group(1) == "monitor_status" else rt)[i] = m.group(3)
 if not st:
-    print("kuma : /metrics sans moniteur (cle refusee ?)"); sys.exit()
+    print("kuma: /metrics without a monitor (key refused?)"); sys.exit()
 name = {"1": "up", "0": "DOWN", "2": "pending", "3": "maintenance"}
-print("kuma : " + ", ".join("%s=%s %s ms" % (i, name.get(st.get(i, ""), "?"), rt.get(i, "?").split(".")[0]) for i in want))
-' 2>/dev/null)
-      [ -n "$D" ] || D="kuma : /metrics injoignable"
+print("kuma: " + ", ".join("%s=%s %s ms" % (i, name.get(st.get(i, ""), "?"), rt.get(i, "?").split(".")[0]) for i in want))
+' "$YTM_KUMA_MONITORS" 2>/dev/null)
+      [ -n "$D" ] || D="kuma: /metrics unreachable"
     else
-      D="kuma : conteneur uptime-kuma introuvable"
+      D="kuma: container $YTM_KUMA_CONTAINER not found"
     fi
 fi
 
-# Journal d acces Echo du conteneur prod (stdout, une ligne JSON par requete) : (e) sans jeton, (f), (j)
+# Echo access log of the prod container (stdout, one JSON line per request): (e) without token, (f), (j)
 PYACCESS=$(cat <<'PY'
 import collections, datetime, json, re, sys
 started = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -311,13 +303,13 @@ now = datetime.datetime.now(datetime.timezone.utc)
 t0 = ts(started) or ts(first)
 week = now - datetime.timedelta(days=7)
 if t0 and t0 > week:
-    win = "logs depuis %s, %s j" % (t0.strftime("%d/%m %H:%M"), ("%.1f" % ((now - t0).total_seconds() / 86400)).replace(".", ","))
+    win = "logs since %s, %.1f d" % (t0.strftime("%d/%m %H:%M"), (now - t0).total_seconds() / 86400)
 else:
-    win = "7 j"
+    win = "7 d"
 priv = sum(1 for i in ips if re.match(r"(10|127|192\.168|172\.(1[6-9]|2\d|3[01]))\.", i))
-print("usage 7 j : %d ecoutes hors harness (%d harness), %d IP clientes distinctes dont %d privees (proxy des profils actifs : pas de cookie dans les logs) (%s)" % (plays, harness, len(ips), priv, win))
+print("usage 7 d: %d plays outside the harness (%d harness), %d distinct client IPs of which %d private (proxy of the active profiles: no cookie in the logs) (%s)" % (plays, harness, len(ips), priv, win))
 tot = sum(cl.values())
-print("client-log : %d envois (7 j) via logs%s (%s)" % (tot, (" (" + ", ".join("http %d=%d" % kv for kv in sorted(cl.items())) + ")") if cl else "", win))
+print("client-log: %d posts (7 d) via logs%s (%s)" % (tot, (" (" + ", ".join("http %d=%d" % kv for kv in sorted(cl.items())) + ")") if cl else "", win))
 rows = []
 for k, v in lat.items():
     if len(v) < 5:
@@ -325,39 +317,40 @@ for k, v in lat.items():
     v.sort()
     rows.append((v[min(len(v) - 1, int(0.9 * len(v) + 0.999) - 1)], k, len(v)))
 rows.sort(reverse=True)
-print("API lente (p90) : " + (", ".join("%s %s ms (n=%d)" % (k, ("%.0f" % p), n) for p, k, n in rows[:3]) if rows else "moins de 5 requetes par prefixe") + " (%s)" % win)
+print("slow API (p90): " + (", ".join("%s %s ms (n=%d)" % (k, ("%.0f" % p), n) for p, k, n in rows[:3]) if rows else "fewer than 5 requests per prefix") + " (%s)" % win)
 PY
 )
-STARTED=$(docker inspect -f '{{.State.StartedAt}}' ytm-beatbump 2>/dev/null || true)
-ACC=$(timeout 40 docker logs --since 168h ytm-beatbump 2>&1 | python3 -c "$PYACCESS" "$STARTED" 2>/dev/null)
+STARTED=$(docker inspect -f '{{.State.StartedAt}}' "$YTM_PROD_CONTAINER" 2>/dev/null || true)
+ACC=$(timeout 40 docker logs --since 168h "$YTM_PROD_CONTAINER" 2>&1 | python3 -c "$PYACCESS" "$STARTED" 2>/dev/null)
 F=$(printf '%s\n' "$ACC" | sed -n 1p)
 ELOG=$(printf '%s\n' "$ACC" | sed -n 2p)
 J=$(printf '%s\n' "$ACC" | sed -n 3p)
-[ -n "$F" ] || F="usage 7 j : journal d acces de ytm-beatbump illisible"
-[ -n "$J" ] || J="API lente (p90) : journal d acces illisible"
+[ -n "$F" ] || F="usage 7 d: access log of $YTM_PROD_CONTAINER unreadable"
+[ -n "$J" ] || J="slow API (p90): access log unreadable"
 
-# (e) journal des erreurs client (decision 15) ; sans jeton : comptage des POST dans le journal d acces
-E=${ELOG:-"client-log : journal d acces illisible (YTM_ADMIN_TOKEN non pose)"}
+# (e) client error log (decision 15); without the token: POST count in the access log
+E=${ELOG:-"client-log: access log unreadable (YTM_ADMIN_TOKEN not set)"}
 if [ -n "$ADMIN_TOKEN" ]; then
-  E=$(printf 'header = "Authorization: Bearer %s"\n' "$(cfgq "$ADMIN_TOKEN")" | curl -s --max-time 15 $R -K - -w '\n%{http_code}' "https://music.ekaii.fr/api/v1/client-log?limit=50" 2>/dev/null | python3 -c '
+  # shellcheck disable=SC2046  # resolve rule words
+  E=$(printf 'header = "Authorization: Bearer %s"\n' "$(cfgq "$ADMIN_TOKEN")" | curl -s --max-time 15 $(ytm_resolve_args "$PRD") -K - -w '\n%{http_code}' "$PRD/api/v1/client-log?limit=50" 2>/dev/null | python3 -c '
 import json, sys
 raw = sys.stdin.read().rsplit("\n", 1)
 code = raw[1] if len(raw) == 2 else "?"
 if code != "200":
-    print("client-log : http %s" % code); sys.exit()
+    print("client-log: http %s" % code); sys.exit()
 try:
     e = json.loads(raw[0]).get("entries") or []
 except Exception:
-    print("client-log : reponse illisible"); sys.exit()
+    print("client-log: unreadable answer"); sys.exit()
 c = {}
 for x in e:
     c[x.get("kind", "?")] = c.get(x.get("kind", "?"), 0) + 1
-print("client-log : %d entrees sur 50 max%s" % (len(e), (" (" + ", ".join("%s=%d" % kv for kv in sorted(c.items())) + ")") if c else ""))
+print("client-log: %d entries of 50 max%s" % (len(e), (" (" + ", ".join("%s=%d" % kv for kv in sorted(c.items())) + ")") if c else ""))
 ' 2>/dev/null)
-  [ -n "$E" ] || E="client-log : lecture impossible"
+  [ -n "$E" ] || E="client-log: read failed"
 fi
 
-# (g) acquisition : journal de ytm-yubal (sortie rich : codes ANSI retires, messages coupes sur 2 lignes)
+# (g) acquisition: log of the acquisition container (rich output: ANSI codes removed, messages cut on 2 lines)
 PYACQ=$(cat <<'PY'
 import datetime, re, sys
 started = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -387,45 +380,59 @@ t0 = ts(started)
 f0 = ts(first)
 if f0 and (not t0 or f0 > t0):
     t0 = f0
-win = "7 j"
+win = "7 d"
 if t0 and t0 > now - datetime.timedelta(days=7):
-    win = "logs depuis %s" % t0.strftime("%d/%m %H:%M")
+    win = "logs since %s" % t0.strftime("%d/%m %H:%M")
 lt = ts(last)
-print("acquisition : %d pistes telechargees, %d deja presentes, %d echecs de piste, %d taches en echec (%s), dernier telechargement %s" % (
-    dl, skip, ftrack, fjob, win, lt.strftime("%Y-%m-%d %H:%M UTC") if lt else "aucun"))
+print("acquisition: %d tracks downloaded, %d already present, %d track failures, %d failed jobs (%s), last download %s" % (
+    dl, skip, ftrack, fjob, win, lt.strftime("%Y-%m-%d %H:%M UTC") if lt else "none"))
 print("ACQ %d %d" % (dl, ftrack + fjob))
 PY
 )
-YSTART=$(docker inspect -f '{{.State.StartedAt}}' ytm-yubal 2>/dev/null || true)
-GA=$(timeout 40 docker logs -t --since 168h ytm-yubal 2>&1 | python3 -c "$PYACQ" "$YSTART" 2>/dev/null)
-G=$(printf '%s\n' "$GA" | sed -n 1p)
-ACQ=$(printf '%s\n' "$GA" | sed -n 2p)
-[ -n "$G" ] || G="acquisition : journal de ytm-yubal illisible"
-# c59b (decision 8) : demandes d acquisition du jour (UTC, tous profils) comptees par le serveur
-# (stats/library acquisitionsToday, plafond YTM_ACQUIRE_DAILY_CAP par profil et par jour, 20 par defaut)
-ACQD=$(printf '%s' "$STATS" | python3 -c 'import json,sys;v=json.load(sys.stdin).get("acquisitionsToday");print("" if v is None else v)' 2>/dev/null || true)
-[ -n "$ACQD" ] && G="$G, $ACQD demandes d acquisition aujourd hui (plafond serveur par profil)"
+G="acquisition: n/a (YTM_ACQ_CONTAINER not set)"; ACQ=""
+if [ -n "$YTM_ACQ_CONTAINER" ]; then
+  YSTART=$(docker inspect -f '{{.State.StartedAt}}' "$YTM_ACQ_CONTAINER" 2>/dev/null || true)
+  GA=$(timeout 40 docker logs -t --since 168h "$YTM_ACQ_CONTAINER" 2>&1 | python3 -c "$PYACQ" "$YSTART" 2>/dev/null)
+  G=$(printf '%s\n' "$GA" | sed -n 1p)
+  ACQ=$(printf '%s\n' "$GA" | sed -n 2p)
+  [ -n "$G" ] || G="acquisition: log of $YTM_ACQ_CONTAINER unreadable"
+fi
+# c59b (decision 8): today's acquisition requests (UTC, every profile) counted by the server (stats/library
+# acquisitionsToday, cap YTM_ACQUIRE_DAILY_CAP per profile and per day, 20 by default)
+ACQD=$(printf '%s' "$STATS" | ytm_json_get acquisitionsToday)
+[ -n "$ACQD" ] && G="$G, $ACQD acquisition requests today (server cap per profile)"
 
-# (h) disque : volume de la bibliotheque (source du montage /app/data de ytm-yubal, resolue a chaque run) et /srv/data
-LIB=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}' ytm-yubal 2>/dev/null)
-[ -n "$LIB" ] || LIB=/mnt/nas/media/music/ytm
-# df -P -k : champs 2 = taille, 4 = disponible (Ko) ; sortie "<libre lisible> <pourcentage libre entier>"
-dfree() { timeout 10 df -P -k "$1" 2>/dev/null | awk 'NR == 2 && $2 > 0 { a = $4; u = "Ko"; if (a >= 1024) { a /= 1024; u = "Mo" } if (a >= 1024) { a /= 1024; u = "Go" } if (a >= 1024) { a /= 1024; u = "To" } s = sprintf("%.1f %s", a, u); sub(/\./, ",", s); printf "%s %d\n", s, int(100 * $4 / $2) }'; }
-DL=$(dfree "$LIB"); DF=$(dfree /srv/data)
-fmtdf() { if [ -n "$2" ]; then echo "$1 ${2% *} libres (${2##* } %)"; else echo "$1 df sans reponse en 10 s"; fi; }
-H="disque : bibliotheque $(fmtdf "$LIB" "$DL"), $(fmtdf /srv/data "$DF")"
+# (h) disk: library volume (source of the acquisition container's mount, resolved on every run) and YTM_DISK_PATHS
+LIB="$YTM_LIBRARY_DIR"
+[ -n "$LIB" ] || [ -z "$YTM_ACQ_CONTAINER" ] || LIB=$(docker inspect -f "{{range .Mounts}}{{if eq .Destination \"$YTM_ACQ_MOUNT\"}}{{.Source}}{{end}}{{end}}" "$YTM_ACQ_CONTAINER" 2>/dev/null)
+[ -n "$LIB" ] || LIB="$YTM_DATA_DIR"
+# df -P -k: fields 2 = size, 4 = available (KB); output "<human free> <integer free percentage>"
+dfree() { timeout 10 df -P -k "$1" 2>/dev/null | awk 'NR == 2 && $2 > 0 { a = $4; u = "KB"; if (a >= 1024) { a /= 1024; u = "MB" } if (a >= 1024) { a /= 1024; u = "GB" } if (a >= 1024) { a /= 1024; u = "TB" } printf "%.1f %s %d\n", a, u, int(100 * $4 / $2) }'; }
+fmtdf() { if [ -n "$2" ]; then echo "$1 ${2% *} free (${2##* } %)"; else echo "$1 df without answer in 10 s"; fi; }
+DL=$(dfree "$LIB")
+H="disk: library $(fmtdf "$LIB" "$DL")"
+DISK_WHY=""
+[ -z "$DL" ] && DISK_WHY="$DISK_WHY; disk library $LIB: df without answer in 10 s"
+[ -n "$DL" ] && [ "${DL##* }" -lt 10 ] && DISK_WHY="$DISK_WHY; disk library $LIB: ${DL##* } % free (< 10 %)"
+for p in $YTM_DISK_PATHS; do
+  [ "$p" = "$LIB" ] && continue
+  DF=$(dfree "$p"); H="$H, $(fmtdf "$p" "$DF")"
+  [ -z "$DF" ] && DISK_WHY="$DISK_WHY; disk $p: df without answer in 10 s"
+  [ -n "$DF" ] && [ "${DF##* }" -lt 10 ] && DISK_WHY="$DISK_WHY; disk $p: ${DF##* } % free (< 10 %)"
+done
 
-# (i) sauvegardes image de promote.sh
-I=$(ls -l "$YTM"/image-backups/*.tar.gz 2>/dev/null | awk '{ n++; s += $5 } END { printf "sauvegardes image : %d (%.0f Mo)", n, s / 1048576 }')
-[ -n "$I" ] || I="sauvegardes image : 0"
+# (i) image backups of promote.sh
+I=$(find "$YTM_IMAGE_BACKUPS" -maxdepth 1 -name '*.tar.gz' -printf '%s\n' 2>/dev/null | awk '{ n++; s += $1 } END { printf "image backups: %d (%.0f MB)", n, s / 1048576 }')
+[ -n "$I" ] || I="image backups: 0"
 
-# (k) retention 7 j (c53a, B9-16) : lecture SEULE de la base prod, seulement avec WEEKLY_DB_RO=1 (monday.sh le
-# pose ; a la main : WEEKLY_DB_RO=1 WEEKLY_DRY_RUN=1 sh weekly.sh). Formule dans l en-tete et program/WEEKLY.md.
-K="retention 7 j : n/a (WEEKLY_DB_RO=1 non pose : pas de lecture de la base)"
+# (k) retention 7 d (c53a, B9-16): READ-ONLY access to the prod database, only with WEEKLY_DB_RO=1 (monday.sh sets
+# it; by hand: WEEKLY_DB_RO=1 WEEKLY_DRY_RUN=1 sh weekly.sh). Formula in the header.
+K="retention 7 d: n/a (WEEKLY_DB_RO=1 not set: no database read)"
 if [ "${WEEKLY_DB_RO:-}" = 1 ]; then
-  DBDIR=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/db"}}{{.Source}}{{end}}{{end}}' ytm-beatbump 2>/dev/null)
-  [ -n "$DBDIR" ] || DBDIR="$YTM/beatbump-db"
-  K=$(timeout 30 python3 - "$DBDIR/beatbump.db" "$YTM/e2e/fixtures.json" <<'PY' 2>/dev/null
+  DBDIR=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/db"}}{{.Source}}{{end}}{{end}}' "$YTM_PROD_CONTAINER" 2>/dev/null)
+  [ -n "$DBDIR" ] || DBDIR="$YTM_DB_DIR"
+  FIXF=${HARNESS_FIXTURES:-$YTM_E2E_DIR/fixtures.json}; case "$FIXF" in /*) ;; *) FIXF="$YTM_E2E_DIR/$FIXF" ;; esac
+  K=$(timeout 30 python3 - "$DBDIR/beatbump.db" "$FIXF" <<'PY' 2>/dev/null
 import collections, datetime, json, re, sqlite3, statistics, sys
 db, fx = sys.argv[1], sys.argv[2]
 try:
@@ -445,7 +452,7 @@ try:
     rows = con.execute("SELECT profile_id, COALESCE(ref, ''), COALESCE(title, ''), COALESCE(artist, ''), played_at FROM play_events").fetchall()
     con.close()
 except Exception as e:
-    print("retention 7 j : n/a (base illisible en mode ro : %s)" % str(e)[:80]); sys.exit()
+    print("retention 7 d: n/a (database unreadable in ro mode: %s)" % str(e)[:80]); sys.exit()
 def ts(v):
     m = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?", str(v))
     if not m:
@@ -473,54 +480,51 @@ plays7 = [t for p in humans for t in byp[p][2] if d7 <= t < now]
 perday = collections.Counter(t.date() for t in plays7)
 med = statistics.median(perday.get((now - datetime.timedelta(days=i)).date(), 0) for i in range(7))
 last = max((t for p in humans for t in byp[p][2]), default=None)
-print("retention 7 j : profils humains actifs %d (J-14..J-7 : %d, revenus %d) ; ecoutes humaines 7 j : %d (mediane/jour %s) ; derniere ecoute humaine : %s ; exclus : %d profils harness ou fixtures seules sur %d (lecture mode=ro)" % (
-    len(A), len(P), len(A & P), len(plays7), ("%g" % med).replace(".", ","), last.strftime("%Y-%m-%d %H:%M UTC") if last else "aucune", len(harness), len(byp)))
+print("retention 7 d: active human profiles %d (D-14..D-7: %d, returning %d); human plays 7 d: %d (median/day %g); last human play: %s; excluded: %d harness or fixture-only profiles out of %d (mode=ro read)" % (
+    len(A), len(P), len(A & P), len(plays7), med, last.strftime("%Y-%m-%d %H:%M UTC") if last else "none", len(harness), len(byp)))
 PY
 )
-  [ -n "$K" ] || K="retention 7 j : n/a (lecture mode=ro en echec ou base absente : $DBDIR)"
+  [ -n "$K" ] || K="retention 7 d: n/a (ro read failed or database absent: $DBDIR)"
 fi
 
 LINE="- $NOW UTC | $A | $B | $C | $D | $E | $F | $G | $H | $I | $J | $K"
 
-# Alerte : harness prod < 100 % (ou absent), version servie != dernier "PROD = <sha>" de CYCLES.md
+# Alert: prod harness < 100 % (or absent), served version != last "PROD = <sha>" of CYCLES.md
 WHY=""
-# c53a B9-14 : rapport full absent ou trop vieux, etapes gatees depuis plus d une semaine (4e ligne du bloc (a))
+# c53a B9-14: full report absent or too old, steps gated for more than a week (4th line of block (a))
 [ -z "${AWHY:-}" ] || WHY="$WHY; $AWHY"
 case "$RATES" in
   "RATES 1 1") ;;
-  RATES*) set -- $RATES; [ "$2" = 1 ] || WHY="$WHY; harness prod coeur $( [ "$2" = none ] && echo absent || echo '< 100 %')"
-          [ "$3" = 1 ] || WHY="$WHY; harness prod hors-ligne $( [ "$3" = none ] && echo absent || echo '< 100 %')" ;;
-  *) WHY="$WHY; rapports du harness prod illisibles" ;;
+  RATES*) # shellcheck disable=SC2086
+          set -- $RATES; [ "$2" = 1 ] || WHY="$WHY; prod harness core $( [ "$2" = none ] && echo absent || echo '< 100 %')"
+          [ "$3" = 1 ] || WHY="$WHY; prod harness offline $( [ "$3" = none ] && echo absent || echo '< 100 %')" ;;
+  *) WHY="$WHY; prod harness reports unreadable" ;;
 esac
 LASTPROD=$(grep -o 'PROD = [0-9a-f]\{7,12\}' "$CYCLES" 2>/dev/null | tail -1 | cut -d' ' -f3)
-if [ -z "$SERVED" ]; then WHY="$WHY; version servie illisible"
-elif [ -z "$LASTPROD" ]; then WHY="$WHY; aucun \"PROD = <sha>\" dans CYCLES.md"
-elif [ "$SERVED" != "$LASTPROD" ]; then WHY="$WHY; version servie $SERVED != dernier PROD = $LASTPROD (CYCLES.md)"
+if [ -z "$SERVED" ]; then WHY="$WHY; served version unreadable"
+elif [ -z "$LASTPROD" ]; then WHY="$WHY; no \"PROD = <sha>\" in CYCLES.md"
+elif [ "$SERVED" != "$LASTPROD" ]; then WHY="$WHY; served version $SERVED != last PROD = $LASTPROD (CYCLES.md)"
 fi
-# cycle 41 : disque < 10 % libre (ou df bloque), acquisition a zero avec des echecs, moniteur Kuma 167 DOWN
-for pair in "bibliotheque $LIB|$DL" "/srv/data|$DF"; do
-  lab=${pair%%|*}; v=${pair#*|}
-  if [ -z "$v" ]; then WHY="$WHY; disque $lab : df sans reponse en 10 s"
-  elif [ "${v##* }" -lt 10 ]; then WHY="$WHY; disque $lab : ${v##* } % libre (< 10 %)"
-  fi
-done
+# cycle 41: disk < 10 % free (or hung df), zero acquisition with failures, stats monitor DOWN
+WHY="$WHY$DISK_WHY"
 case "$ACQ" in
   "ACQ 0 0"|"") ;;
-  "ACQ 0 "*) WHY="$WHY; acquisition : 0 piste telechargee et ${ACQ##* } echecs sur la fenetre" ;;
+  "ACQ 0 "*) WHY="$WHY; acquisition: 0 track downloaded and ${ACQ##* } failures over the window" ;;
 esac
-case "$D" in *"167=DOWN"*) WHY="$WHY; Kuma 167 (API stats/library) DOWN" ;; esac
+[ -z "$YTM_KUMA_STATS_MONITOR" ] || case "$D" in *"$YTM_KUMA_STATS_MONITOR=DOWN"*) WHY="$WHY; Kuma $YTM_KUMA_STATS_MONITOR (API stats/library) DOWN" ;; esac
 WHY=${WHY#; }
 
 if [ "${WEEKLY_DRY_RUN:-}" = 1 ]; then
   echo "$LINE"
-  [ -z "$WHY" ] || echo "ALERT (dry-run, ALERT.md non ecrit) : $WHY" >&2
+  [ -z "$WHY" ] || echo "ALERT (dry-run, ALERT.md not written): $WHY" >&2
 else
-  [ -f "$WEEKLY" ] || { echo "WEEKLY.md absent : $WEEKLY" >&2; exit 1; }
+  mkdir -p "$YTM_PROGRAM_DIR"
+  [ -f "$WEEKLY" ] || printf '# WEEKLY (one line per run of ops/weekly.sh; columns in its header)\n' > "$WEEKLY"
   printf '%s\n' "$LINE" >> "$WEEKLY"
   echo "$LINE"
   if [ -n "$WHY" ]; then
-    [ -f "$ALERT" ] || printf '# ALERT music.ekaii.fr (ecrit par agents/ops/weekly.sh ; supprimer apres traitement)\n' > "$ALERT"
-    printf '\n## %s UTC\n- raisons : %s\n- ligne : %s\n' "$NOW" "$WHY" "$LINE" >> "$ALERT"
-    echo "ALERT : $WHY (-> $ALERT)" >&2
+    ALERT=$(ytm_alert_file)
+    printf '\n## %s UTC (weekly.sh)\n- reasons: %s\n- line: %s\n' "$NOW" "$WHY" "$LINE" >> "$ALERT"
+    echo "ALERT: $WHY (-> $ALERT)" >&2
   fi
 fi

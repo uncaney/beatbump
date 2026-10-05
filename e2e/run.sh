@@ -27,7 +27,7 @@ E2E=$(cd "$(dirname "$0")" && pwd)
 URL="${1:-${YTM_URL:-http://127.0.0.1:8080}}"
 QUERY="${2:-}"
 HARNESS="${3:-harness-core.cjs}"
-[ $# -gt 3 ] && shift 3 || shift $#
+if [ $# -gt 3 ]; then shift 3; else shift $#; fi
 BUILD_LOCK="${YTM_BUILD_LOCK:-/tmp/beatbump-build.lock}"
 LOAD_MAX="${HARNESS_LOAD_MAX:-60}"
 WAIT_MAX="${HARNESS_WAIT_MAX:-900}"

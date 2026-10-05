@@ -1,41 +1,46 @@
 #!/usr/bin/env python3
-"""Journal d une promotion : entree CHANGELOG.md + ligne CYCLES.md (cycle 34 OP2).
+"""Journal of a promotion: CHANGELOG.md entry + CYCLES.md line (cycle 34 OP2).
 
-Usage : python3 agents/ops/journal.py <cycle> <head> [--chain <N>] [--dry-run]
-  <cycle> : identifiant du cycle (33, 21b, ...) ; le texte vient de agents/ops/journal/cycle-<cycle>.md
-  <head>  : SHA court promu (integration), ex. b8e98f4
-  --chain : numero de la chaine staging verte, requis si le texte contient {chain}
-  --dry-run : affiche ce qui serait ecrit, n ecrit rien
+Usage: python3 ops/journal.py <cycle> <head> [--chain <N>] [--dry-run]
+  <cycle> : cycle identifier (33, 21b, ...); the text comes from ops/journal/cycle-<cycle>.md
+  <head>  : promoted short SHA, e.g. b8e98f4
+  --chain : number of the green staging chain, required when the text contains {chain}
+  --dry-run : prints what would be written, writes nothing
 
-Logique commune reprise des /tmp/journalNN.py (copies dans agents/ops/journal/) :
-  - l entree est ajoutee en fin de CHANGELOG.md seulement si son marqueur n est pas deja dans un titre
-    "## " de CHANGELOG.md (idempotent) ;
-  - la ligne CYCLES.md (meta "cycles:") est ajoutee seulement si son marqueur ("cycles-marker:",
-    sinon la ligne entiere) n est pas deja dans une ligne "- " de CYCLES.md.
-Garde-fous (cycle 39, L11-14) : <head> doit etre un sha court (^[0-9a-f]{7,12}$) ; "cycles-marker:" est
-obligatoire quand "cycles:" contient {now}, {date} ou {time} (sinon une relance ajouterait une 2e ligne) ;
-tout jeton {xxx} sans valeur arrete le script AVANT toute ecriture. Relancer le meme cycle / head ne
-change rien et le dit ("rien a ecrire"). --dry-run affiche les lignes exactes qui seraient ajoutees.
+Both files live in $YTM_PROGRAM_DIR (ops/env.sh; default ops/program next to this script) and are created
+with a one-line header when absent.
+  - the entry is appended to CHANGELOG.md only when its marker is not already in a "## " heading of
+    CHANGELOG.md (idempotent);
+  - the CYCLES.md line (meta "cycles:") is appended only when its marker ("cycles-marker:", else the whole
+    line) is not already in a "- " line of CYCLES.md.
+Guards (cycle 39, L11-14): <head> must be a short sha (^[0-9a-f]{7,12}$); "cycles-marker:" is mandatory when
+"cycles:" contains {now}, {date} or {time} (otherwise a rerun would add a second line); any {xxx} token without
+a value stops the script BEFORE any write. Running the same cycle / head again changes nothing and says so
+("nothing to write"). --dry-run prints the exact lines that would be appended.
 
-Format d un fichier cycle-<N>.md (un nouveau cycle = un nouveau fichier texte, pas de code) :
-  <!-- marker: cycle 34 en prod -->                       (defaut : "cycle <N> en prod")
-  <!-- cycles: - {now} : chaine {chain} ({head}) verte ; promu (cycle 34 : c34a + c34b). -->   (optionnel)
-  <!-- cycles-marker: chaine {chain} ({head}) verte -->   (optionnel)
-  ## {date} {time} UTC (horloge box) : cycle 34 en prod (integration {head}) : titre
-  - puce 1
-  - puce 2
-Jetons remplaces (remplacement litteral, pas de format Python) : {head}, {chain},
-{date} = date -u AAAA-MM-JJ, {time} = HH:MM, {now} = "HH:MM UTC JJ/MM (horloge box)" (convention de
-CYCLES.md depuis la correction d horodatage du 01/10 17:21 UTC).
+Format of a cycle-<N>.md file (a new cycle = a new text file, no code):
+  <!-- marker: cycle 34 in prod -->                       (default: "cycle <N> in prod")
+  <!-- cycles: - {now}: chain {chain} ({head}) green; promoted (cycle 34: c34a + c34b). -->   (optional)
+  <!-- cycles-marker: chain {chain} ({head}) green -->   (optional)
+  ## {date} {time} UTC (host clock): cycle 34 in prod (integration {head}): title
+  - bullet 1
+  - bullet 2
+Tokens replaced (literal replacement, not Python formatting): {head}, {chain}, {date} = date -u YYYY-MM-DD,
+{time} = HH:MM, {now} = "HH:MM UTC DD/MM (host clock)" (CYCLES.md convention since the timestamp fix of
+2026-10-01 17:21 UTC).
 """
 import datetime
+import os
 import pathlib
 import re
 import sys
 
-PROGRAM = pathlib.Path("/srv/beatbump/agents/program")
-DATA = pathlib.Path(__file__).resolve().parent / "journal"
+HERE = pathlib.Path(__file__).resolve().parent
+PROGRAM = pathlib.Path(os.environ.get("YTM_PROGRAM_DIR") or (HERE / "program"))
+DATA = HERE / "journal"
 META_RE = re.compile(r"^<!--\s*([a-z-]+):\s?(.*?)\s*-->\s*$")
+HEADERS = {"CHANGELOG.md": "# CHANGELOG (written by ops/journal.py at each promotion)\n",
+           "CYCLES.md": "# CYCLES (one line per green chain / promotion, written by ops/journal.py)\n"}
 
 
 def parse(path):
@@ -57,12 +62,18 @@ def fill(text, tokens):
         text = text.replace("{" + k + "}", v)
     left = re.findall(r"\{([a-z][a-z_-]*)\}", text)
     if left:
-        sys.exit(f"jeton sans valeur : {{{left[0]}}} (passer --chain ?)")
+        sys.exit(f"token without a value: {{{left[0]}}} (pass --chain?)")
     return text
 
 
+def ensure(path):
+    if not path.is_file():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(HEADERS.get(path.name, ""))
+
+
 def present(path, marker, prefix):
-    """Le marqueur est-il deja dans une ligne qui commence par prefix ? Renvoie cette ligne ou None."""
+    """Is the marker already in a line starting with prefix? Returns that line or None."""
     for l in path.read_text().splitlines():
         if l.startswith(prefix) and marker in l:
             return l
@@ -70,20 +81,21 @@ def present(path, marker, prefix):
 
 
 def append_once(path, marker, block, prefix, dry):
+    ensure(path)
     hit = present(path, marker, prefix)
     if hit is not None:
-        print(f"{path.name} : deja present, rien a ecrire ({marker}) : {hit[:160]}")
+        print(f"{path.name}: already present, nothing to write ({marker}): {hit[:160]}")
         return False
     if dry:
-        print(f"--- {path.name} : lignes exactes qui seraient ajoutees (dry-run) ---")
+        print(f"--- {path.name}: exact lines that would be appended (dry-run) ---")
         sys.stdout.write(block if block.endswith("\n") else block + "\n")
-        print(f"--- fin {path.name} ---")
+        print(f"--- end {path.name} ---")
         return True
     s = path.read_text()
     tmp = path.with_suffix(path.suffix + ".tmp-journal")
     tmp.write_text(s.rstrip("\n") + "\n" + block)
     tmp.replace(path)
-    print(f"{path.name} : ajoute ({marker})")
+    print(f"{path.name}: appended ({marker})")
     return True
 
 
@@ -95,45 +107,45 @@ def main(argv):
         elif a == "--chain":
             chain = next(it, None)
             if chain is None:
-                sys.exit("--chain sans valeur")
+                sys.exit("--chain without a value")
         else:
             args.append(a)
     if len(args) != 2:
         sys.exit(__doc__.split("\n\n")[1])
     cycle, head = args
     if not re.fullmatch(r"[0-9a-f]{7,12}", head):
-        sys.exit(f"head invalide : {head!r} (attendu un sha court, ^[0-9a-f]{{7,12}}$)")
+        sys.exit(f"invalid head: {head!r} (expected a short sha, ^[0-9a-f]{{7,12}}$)")
     if chain is not None and not re.fullmatch(r"[0-9]+[a-z]?", chain):
-        sys.exit(f"--chain invalide : {chain!r} (attendu un numero de chaine, ex. 41)")
+        sys.exit(f"invalid --chain: {chain!r} (expected a chain number, e.g. 41)")
     src = DATA / f"cycle-{cycle}.md"
     if not src.is_file():
-        sys.exit(f"texte absent : {src} (creer ce fichier, voir le format dans journal.py)")
+        sys.exit(f"text missing: {src} (create this file, see the format in journal.py)")
     meta, body = parse(src)
     now = datetime.datetime.now(datetime.timezone.utc)
     tokens = {"head": head, "date": now.strftime("%Y-%m-%d"), "time": now.strftime("%H:%M"),
-              "now": now.strftime("%H:%M UTC %d/%m") + " (horloge box)"}
+              "now": now.strftime("%H:%M UTC %d/%m") + " (host clock)"}
     if chain is not None:
         tokens["chain"] = chain
-    marker = fill(meta.get("marker", f"cycle {cycle} en prod"), tokens)
+    marker = fill(meta.get("marker", f"cycle {cycle} in prod"), tokens)
     entry = "\n" + fill(body.strip("\n"), tokens) + "\n"
     if marker not in entry:
-        sys.exit(f"le marqueur {marker!r} n apparait pas dans le texte de {src.name}")
+        sys.exit(f"the marker {marker!r} does not appear in the text of {src.name}")
     line = cmark = None
-    if "cycles" in meta:  # rempli AVANT toute ecriture : un jeton manquant n ecrit rien
+    if "cycles" in meta:  # filled BEFORE any write: a missing token writes nothing
         if "cycles-marker" not in meta and re.search(r"\{(now|date|time)\}", meta["cycles"]):
-            sys.exit(f"{src.name} : 'cycles-marker:' obligatoire quand 'cycles:' contient {{now}}/{{date}}/{{time}} "
-                     "(sinon une relance ajoute une 2e ligne) ; rien n a ete ecrit")
+            sys.exit(f"{src.name}: 'cycles-marker:' is mandatory when 'cycles:' contains {{now}}/{{date}}/{{time}} "
+                     "(otherwise a rerun adds a second line); nothing was written")
         line = fill(meta["cycles"], tokens)
         cmark = fill(meta.get("cycles-marker", line), tokens)
         if not cmark.strip():
-            sys.exit(f"{src.name} : 'cycles-marker:' vide ; rien n a ete ecrit")
+            sys.exit(f"{src.name}: empty 'cycles-marker:'; nothing was written")
     changed = append_once(PROGRAM / "CHANGELOG.md", marker, entry, "## ", dry)
     if line:
         changed = append_once(PROGRAM / "CYCLES.md", cmark, line + "\n", "- ", dry) or changed
     if not changed:
-        print(f"journal {cycle} : rien a ecrire, cycle {cycle} deja journalise (CHANGELOG.md et CYCLES.md inchanges)")
+        print(f"journal {cycle}: nothing to write, cycle {cycle} already journaled (CHANGELOG.md and CYCLES.md unchanged)")
     else:
-        print(f"journal {cycle} ok" + (" (dry-run : rien ecrit)" if dry else ""))
+        print(f"journal {cycle} ok" + (" (dry-run: nothing written)" if dry else ""))
 
 
 if __name__ == "__main__":

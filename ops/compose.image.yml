@@ -1,0 +1,13 @@
+# ops/compose.image.yml: compose override the ops scripts add (ops/env.sh YTM_COMPOSE_OVERRIDE) so that the app
+# service runs a NAMED image tag instead of the `build:` of deploy/compose.yml:
+#   production  <YTM_IMAGE>:local    (what promote.sh promotes)
+#   staging     <YTM_IMAGE>:staging  (what stage-cycle.sh builds and tests)
+# The tag comes from YTM_IMAGE_TAG, set by the ytm_compose / ytm_staging_compose helpers. `pull_policy: never`
+# keeps compose from building or pulling: the image must exist (stage-cycle.sh builds it, promote.sh tags it).
+# Needs docker compose v2.24+ (`!reset`). Set YTM_COMPOSE_OVERRIDE= (empty) for a compose file that already
+# names the image, like the original production layout (ops/env.example).
+services:
+  beatbump:
+    image: ${YTM_IMAGE:-beatbump}:${YTM_IMAGE_TAG:-local}
+    build: !reset null
+    pull_policy: never

@@ -1,0 +1,6 @@
+env.local
+gated.prev
+program/
+monday-cron.log
+smoke-cron.log
+__pycache__/

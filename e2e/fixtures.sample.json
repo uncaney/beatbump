@@ -1,0 +1,25 @@
+{
+  "_comment": "Harness fixtures for the synthetic sample library of fixtures/make-sample-library.sh (18 CC0 tracks, 4 artists, 6 albums). Use with HARNESS_FIXTURES=fixtures.sample.json e2e/run.sh <url>. The lb-/la- ids and the lid are hashes of the sample's names and paths (MUSIC_DIR/sample/<Artist>/<Album>/...), stable across fresh installs. No acquiredVideoId: the YouTube-backed steps skip. Keys documented in harness-core.cjs.",
+  "query": "The Sine Waves",
+  "typoQuery": "The Sine Wves",
+  "localLid": "d18ccea3837",
+  "localLidTitle": "Plateau",
+  "localAlbumId": "lb-0e431809f0e9",
+  "localAlbumTitle": "Sweep",
+  "localAlbumArtist": "Low Pass Orchestra",
+  "localAlbumTracks": 3,
+  "localArtistId": "la-1ffb308beda9",
+  "localArtistName": "Low Pass Orchestra",
+  "genre": "Electronic",
+  "genreMinTracks": 3,
+  "robotUserAgents": [
+    "WhatsApp/2.23.20.0 A",
+    "Twitterbot/1.0",
+    "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+    "TelegramBot (like TwitterBot)",
+    "Discordbot/2.0; +https://discordapp.com",
+    "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+    "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)"
+  ],
+  "humanUserAgent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/126"
+}
