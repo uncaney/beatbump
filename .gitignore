@@ -13,3 +13,4 @@ beatbump.exe
 /fixtures/sample-library/*.opus
 /deploy/.env
 /deploy/data/
+__pycache__/

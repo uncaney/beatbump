@@ -1,4 +1,9 @@
-FROM ghcr.io/guillevc/yubal:latest
+# yubal (https://github.com/guillevc/yubal) + the bgutil PO-token plugin + deno.
+# Built by deploy/compose.yml (service `yubal`); the base tag is overridable with
+# --build-arg YUBAL_BASE=... . Runtime config: see deploy/.env.example (YUBAL_*,
+# EGRESS_PROXY -> YTM_YTDLP_PROXY, bgutil -> YTM_POT_BASE_URL).
+ARG YUBAL_BASE=ghcr.io/guillevc/yubal:latest
+FROM ${YUBAL_BASE}
 
 # Add the bgutil po-token provider plugin into yubal's venv so yt-dlp
 # auto-discovers it (yt_dlp_plugins namespace). --no-deps so it can't drag

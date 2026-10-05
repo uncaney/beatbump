@@ -1,0 +1,244 @@
+# Beatbump music stack: one `docker compose up` brings everything up.
+#
+#   ./up.sh                 (repo root) writes deploy/.env from deploy/.env.example,
+#                           creates ./data, builds, starts and waits for health.
+#   docker compose -p beatbump --project-directory deploy -f deploy/compose.yml up -d
+#                           is the equivalent raw command once deploy/.env exists.
+#
+# Services (one private network, created per project):
+#   beatbump   SvelteKit app + Go API server (the only published port)
+#   meili      Meilisearch index of the local library (tracks / albums / artists)
+#   indexer    walks MUSIC_DIR, reads tags, upserts into meili (no HTTP endpoint)
+#   bridge     serves local audio (/localf) and covers (/cover), proxies YouTube
+#              player calls to companion, rewrites audio to the local copy when the
+#              library has it, enqueues yubal downloads otherwise
+#   companion  invidious-companion: anonymous YouTube player / stream URLs
+#   bgutil     PO-token provider used by yt-dlp inside yubal
+#   yubal      acquisition: downloads tracks/albums into MUSIC_DIR/ytm (opus)
+#
+# No container_name anywhere: several instances coexist by project name
+# (COMPOSE_PROJECT_NAME or `docker compose -p`). Everything persistent lives
+# under ./data (bind mounts, owned by PUID:PGID) or in the named volumes below.
+name: beatbump
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  beatbump:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${BEATBUMP_VERSION:-dev}
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    logging: *logging
+    ports:
+      - "${BEATBUMP_BIND:-0.0.0.0}:${BEATBUMP_PORT:-8080}:8080"
+    environment:
+      # The bridge is the "companion" from the app's point of view: it fronts the
+      # real companion and adds the local-library resolution.
+      COMPANION_URL: http://bridge:8789
+      COMPANION_SECRET_KEY: ${COMPANION_SECRET_KEY:?missing in deploy/.env (run ./up.sh)}
+      YTM_ADMIN_TOKEN: ${YTM_ADMIN_TOKEN:?missing in deploy/.env (run ./up.sh)}
+      MEILI_URL: http://meili:7700
+      MEILI_KEY: ${MEILI_MASTER_KEY:?missing in deploy/.env (run ./up.sh)}
+      BEATBUMP_DB_PATH: /db
+      # Same-origin audio: the app reverse-proxies /localf, /vp and /cover to the bridge.
+      LOCALF_BASE: /localf
+      COVER_BASE: /cover
+      # No logged-in iv-vp sidecar in this stack: keep audio on /vp (the bridge) instead
+      # of rerouting it to /aud/<id>, which only exists when IVVP_URL points somewhere.
+      YTM_PREFER_IVVP_AUDIO: "0"
+      BEATBUMP_AUTOCACHE: ${BEATBUMP_AUTOCACHE:-true}
+      YTM_ACQUIRE_DAILY_CAP: ${YTM_ACQUIRE_DAILY_CAP:-20}
+      YTM_REPORT_EMAIL: ${YTM_REPORT_EMAIL:-}
+      YTM_VERSION: ${BEATBUMP_VERSION:-dev}
+      # Background InnerTube "next" lookups go through RESIDENTIAL_PROXY when set.
+      RESIDENTIAL_PROXY: ${EGRESS_PROXY:-}
+    volumes:
+      - ./data/beatbump-db:/db
+      - ./data/beatbump-downloads:/downloads
+    healthcheck:
+      # Distroless image (no shell, no curl): the binary probes itself (healthcheck.go).
+      test: ["CMD", "/app/beat-server", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      meili:
+        condition: service_healthy
+      bridge:
+        condition: service_healthy
+
+  meili:
+    image: getmeili/meilisearch:v1.12
+    restart: unless-stopped
+    cpu_shares: 256
+    logging: *logging
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?missing in deploy/.env (run ./up.sh)}
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_ENV: production
+    volumes:
+      - meili-data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  indexer:
+    build:
+      context: ../indexer
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    cpu_shares: 128
+    logging: *logging
+    environment:
+      MEILI_URL: http://meili:7700
+      MEILI_KEY: ${MEILI_MASTER_KEY:?missing in deploy/.env (run ./up.sh)}
+      MUSIC_ROOT: /music
+      STATE_DIR: /state
+      # "*" = every top-level folder of MUSIC_DIR (yubal writes to MUSIC_DIR/ytm,
+      # the sample library lives in MUSIC_DIR/sample, your own folders are picked up too).
+      SOURCES: ${INDEXER_SOURCES:-*}
+      SCAN_INTERVAL: ${INDEXER_SCAN_INTERVAL:-300}
+      BATCH: "1000"
+    volumes:
+      - ${MUSIC_DIR:-./data/music}:/music:ro
+      - ./data/indexer-state:/state
+    depends_on:
+      meili:
+        condition: service_healthy
+
+  bridge:
+    build:
+      context: ../bridge
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    cpu_shares: 512
+    logging: *logging
+    environment:
+      PORT: "8789"
+      STATE_DIR: /app/state
+      COMPANION_UPSTREAM: http://companion:8282
+      YUBAL_URL: http://yubal:8000
+      LIBRARY_DIR: /library
+      MEILI_URL: http://meili:7700
+      MEILI_KEY: ${MEILI_MASTER_KEY:?missing in deploy/.env (run ./up.sh)}
+      # Optional integrations, all off by default (see deploy/.env.example):
+      GOST_PROXY: ${EGRESS_PROXY:-}
+      IVVP_UPSTREAM: ${IVVP_UPSTREAM:-}
+      INVIDIOUS_UPSTREAM: ${INVIDIOUS_UPSTREAM:-}
+      # Audio/cover URLs handed to the app are same-origin relative paths.
+      VP_PUBLIC_BASE: /vp
+      LOCALF_PUBLIC_BASE: /localf
+      AUD_PUBLIC_BASE: /aud
+    volumes:
+      - ${MUSIC_DIR:-./data/music}:/library:ro
+      - ./data/bridge-state:/app/state
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8789/healthz', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      meili:
+        condition: service_healthy
+      companion:
+        condition: service_started
+      yubal:
+        condition: service_started
+
+  companion:
+    image: ${COMPANION_IMAGE:-quay.io/invidious/invidious-companion:latest}
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8282"
+      # The Go server calls <bridge>/companion/youtubei/v1/player; keep the base path.
+      SERVER_BASE_PATH: /companion
+      # Must be exactly 16 characters (companion constraint); shared with beatbump.
+      SERVER_SECRET_KEY: ${COMPANION_SECRET_KEY:?missing in deploy/.env (run ./up.sh)}
+      PROXY: ${EGRESS_PROXY:-}
+    volumes:
+      # Generic config (no secrets): deploy/companion/config.toml
+      - ./companion:/app/config:ro
+      - companion-cache:/var/tmp/youtubei.js
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # /thc is the tiny health-check binary shipped in the image (probes /healthz).
+      test: ["CMD", "/thc"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  bgutil:
+    image: brainicism/bgutil-ytdlp-pot-provider:1.3.1
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      HTTP_PROXY: ${EGRESS_PROXY:-}
+      HTTPS_PROXY: ${EGRESS_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1,bgutil
+    healthcheck:
+      # Node-only image: probe the provider's /ping with fetch.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4416/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  yubal:
+    build:
+      context: ../yubal
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    cpu_shares: 256
+    logging: *logging
+    environment:
+      YUBAL_HOST: 0.0.0.0
+      YUBAL_PORT: "8000"
+      YUBAL_AUDIO_FORMAT: ${YUBAL_AUDIO_FORMAT:-opus}
+      YUBAL_AUDIO_QUALITY: "0"
+      YUBAL_FETCH_LYRICS: "true"
+      YUBAL_REPLAYGAIN: "true"
+      YUBAL_TZ: ${TZ:-UTC}
+      YUBAL_LOG_LEVEL: ${YUBAL_LOG_LEVEL:-INFO}
+      # yt-dlp shim (yubal/sitecustomize.py): egress proxy (empty = direct) + PO tokens.
+      YTM_YTDLP_PROXY: ${EGRESS_PROXY:-}
+      YTM_POT_BASE_URL: http://bgutil:4416
+      HTTP_PROXY: ${EGRESS_PROXY:-}
+      HTTPS_PROXY: ${EGRESS_PROXY:-}
+      NO_PROXY: bgutil,companion,meili,bridge,beatbump,localhost,127.0.0.1
+    volumes:
+      # Downloads land in MUSIC_DIR/ytm (the indexer picks them up as source "ytm").
+      - ${MUSIC_DIR:-./data/music}/ytm:/app/data
+      - ./data/yubal-config:/app/config
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      bgutil:
+        condition: service_started
+
+volumes:
+  meili-data:
+  companion-cache:

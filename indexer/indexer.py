@@ -23,11 +23,15 @@ import mutagen
 MEILI = os.environ.get("MEILI_URL", "http://meili:7700")
 KEY = os.environ.get("MEILI_KEY", "")
 ROOT = os.environ.get("MUSIC_ROOT", "/music")
-SOURCES = [s.strip() for s in os.environ.get("SOURCES", "ytm").split(",") if s.strip()]
+# SOURCES: comma-separated top-level directories of MUSIC_ROOT to index (each becomes the
+# `source` attribute). The default "*" indexes EVERY top-level directory (named after it)
+# plus the files sitting directly in MUSIC_ROOT (source "local"), so a fresh install works
+# with any layout; an explicit list keeps the old behaviour.
+SOURCES = [s.strip() for s in os.environ.get("SOURCES", "*").split(",") if s.strip()]
 IDX = os.environ.get("INDEX", "tracks")
 INTERVAL = int(os.environ.get("SCAN_INTERVAL", "1800"))
 BATCH = int(os.environ.get("BATCH", "1000"))
-STATE = "/state/index_state.json"
+STATE = os.path.join(os.environ.get("STATE_DIR", "/state"), "index_state.json")
 AUDIO = (".opus", ".m4a", ".mp3", ".flac", ".ogg", ".aac", ".wav")
 
 
@@ -184,6 +188,23 @@ def build_doc(path, rel, source, mt):
     return doc
 
 
+def resolve_sources():
+    """(source label, directory, recursive) triples for this pass. With SOURCES="*" the
+    top-level directories are discovered on every pass (a new folder dropped into the
+    library is picked up without a restart); files at the root go under "local"."""
+    if SOURCES != ["*"]:
+        return [(s, os.path.join(ROOT, s), True) for s in SOURCES]
+    try:
+        names = sorted(os.listdir(ROOT))
+    except OSError as e:
+        print(f"[indexer] cannot list {ROOT}: {e}", flush=True)
+        return []
+    out = [(n, os.path.join(ROOT, n), True)
+           for n in names if not n.startswith(".") and os.path.isdir(os.path.join(ROOT, n))]
+    out.append(("local", ROOT, False))
+    return out
+
+
 def scan():
     state = load_state()
     new_state = dict(state)
@@ -197,12 +218,12 @@ def scan():
             batch.clear()
             save_state(new_state)
 
-    for src in SOURCES:
-        base = os.path.join(ROOT, src)
+    for src, base, recursive in resolve_sources():
         if not os.path.isdir(base):
             continue
         st = stats.setdefault(src, {"files": 0, "new": 0})
-        for root, _dirs, files in os.walk(base):
+        walk = os.walk(base) if recursive else [(base, [], sorted(os.listdir(base)))]
+        for root, _dirs, files in walk:
             for fn in files:
                 if not fn.lower().endswith(AUDIO):
                     continue
@@ -278,7 +299,25 @@ def rebuild_derived():
     print(f"[indexer] derived: albums={len(alb_docs)} artists={len(art_docs)}", flush=True)
 
 
+def wait_for_meili(timeout=300):
+    """Block until Meilisearch answers /health (compose starts us after its healthcheck,
+    but a restart of meili alone must not crash-loop the indexer)."""
+    deadline = time.time() + timeout
+    while True:
+        try:
+            meili("GET", "/health")
+            return
+        except Exception as e:
+            if time.time() > deadline:
+                raise
+            print(f"[indexer] waiting for meilisearch at {MEILI}: {e}", flush=True)
+            time.sleep(5)
+
+
 if __name__ == "__main__":
+    print(f"[indexer] root={ROOT} sources={','.join(SOURCES)} state={STATE} interval={INTERVAL}s",
+          flush=True)
+    wait_for_meili()
     ensure_indexes()
     first_pass = True
     while True:

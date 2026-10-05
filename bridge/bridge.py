@@ -26,22 +26,32 @@ import time
 import urllib.parse
 from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 
+# Portability (deploy/compose.yml): every upstream below is env-driven and the defaults are the
+# GENERIC ones. An empty value disables the optional integration:
+#   IVVP_UPSTREAM      "" -> no logged-in fallback; a walled companion answer is returned as-is
+#                            (audio stays on /vp, served by the app's same-origin proxy)
+#   INVIDIOUS_UPSTREAM "" -> /iv/* answers 502 (only the ytify client ever used those routes)
+#   GOST_PROXY         "" -> direct egress for /vp and /iv/videoplayback
+# Public bases default to RELATIVE paths (/vp, /localf, /aud): the Go backend reverse-proxies
+# them to this bridge and leaves relative URLs untouched (backend/api/audioproxy.go).
+# Camille's instance keeps its behaviour by setting the variables explicitly in its compose file.
 COMPANION = os.environ.get("COMPANION_UPSTREAM", "http://companion:8282")
 # iv-vp = logged-in (metube) player/playback sidecar. Fallback when the anonymous companion is walled
 # (LOGIN_REQUIRED / no audio format). Returns a player response with a raw googlevideo audio-140 URL
 # minted via the SAME gost egress the bridge's /vp uses, so /vp streams it (matching IP-lock).
-IVVP = os.environ.get("IVVP_UPSTREAM", "http://iv-vp:5007")
-INVIDIOUS = os.environ.get("INVIDIOUS_UPSTREAM", "http://invidious-app-t2s:3000")
+IVVP = os.environ.get("IVVP_UPSTREAM", "").strip()
+INVIDIOUS = os.environ.get("INVIDIOUS_UPSTREAM", "").strip()
 YUBAL = os.environ.get("YUBAL_URL", "http://yubal:8000")
-GOST = os.environ.get("GOST_PROXY", "http://gost:8888")
+# Egress proxy for googlevideo streams (residential IP in Camille's setup). Empty = direct.
+GOST = os.environ.get("GOST_PROXY", "").strip() or None
 MEILI_URL = os.environ.get("MEILI_URL", "http://meili:7700")
 MEILI_KEY = os.environ.get("MEILI_KEY", "")
 LIBRARY = os.environ.get("LIBRARY_DIR", "/library")
-VP_PUBLIC = os.environ.get("VP_PUBLIC_BASE", "https://ytify.ekaii.fr/vp")
-LOCALF_PUBLIC = os.environ.get("LOCALF_PUBLIC_BASE", "https://ytify.ekaii.fr/localf")
+VP_PUBLIC = os.environ.get("VP_PUBLIC_BASE", "/vp")
+LOCALF_PUBLIC = os.environ.get("LOCALF_PUBLIC_BASE", "/localf")
 # iv-vp progressive-audio endpoint: iv-vp downloads via metube AND serves the bytes, so no IP-locked
 # googlevideo re-fetch (unlike /vp+gost, which races on egress IP). Used for the fallback path.
-AUD_PUBLIC = os.environ.get("AUD_PUBLIC_BASE", "https://invidious.ekaii.fr/aud")
+AUD_PUBLIC = os.environ.get("AUD_PUBLIC_BASE", "/aud")
 PORT = int(os.environ.get("PORT", "8789"))
 DEBOUNCE_TTL = int(os.environ.get("DEBOUNCE_TTL", str(6 * 3600)))
 LOCAL_TTL = int(os.environ.get("LOCAL_CACHE_TTL", "600"))
@@ -52,25 +62,26 @@ LA_PATH = os.path.join(STATE_DIR, "last_access.json")
 LA_FLUSH_SECS = int(os.environ.get("LA_FLUSH_SECS", "60"))
 _last_access = {}
 _la_dirty = False
+# True once the on-disk state has been merged in. Until then nothing is flushed, so a
+# save can never overwrite a full history with the few entries touched since boot.
+_la_loaded = False
 
 
-def _load_last_access():
-    """Load last_access.json, dropping keys whose file no longer exists so the
-    state file cannot grow without bound across the cache's lifetime."""
-    global _last_access
+def _read_last_access():
+    """Blocking part of the load (runs in a worker thread): read last_access.json and
+    drop keys whose file no longer exists, so the state file cannot grow without bound.
+    On a large NAS library the per-file stat takes minutes; that is why it no longer
+    runs before the HTTP server listens (see _load_last_access_bg)."""
     try:
         with open(LA_PATH) as fh:
             data = json.load(fh)
     except FileNotFoundError:
-        _last_access = {}
-        return
+        return {}, 0
     except Exception as e:
         print(f"[la] load error: {e}", flush=True)
-        _last_access = {}
-        return
+        return {}, 0
     if not isinstance(data, dict):
-        _last_access = {}
-        return
+        return {}, 0
     base = os.path.realpath(LIBRARY)
     clean = {}
     for k, v in data.items():
@@ -80,8 +91,38 @@ def _load_last_access():
                 clean[k] = int(v)
         except Exception:
             pass
+    return clean, len(data) - len(clean)
+
+
+def _apply_last_access(clean, dropped):
+    """Event-loop side of the load: merge the on-disk entries under whatever was
+    touched while the file was being read (the live entries are newer)."""
+    global _last_access, _la_loaded, _la_dirty
+    touched = _last_access
+    clean.update(touched)
     _last_access = clean
-    print(f"[la] loaded {len(_last_access)} entries (dropped {len(data) - len(clean)} stale)", flush=True)
+    _la_loaded = True
+    if touched:
+        _la_dirty = True
+    print(f"[la] loaded {len(clean)} entries (dropped {dropped} stale, "
+          f"{len(touched)} touched during load)", flush=True)
+
+
+async def _load_last_access_bg():
+    """Startup stall fix: stat the library in a thread AFTER the server listens, then
+    merge on the loop. Serving never waits for it (touches go to the live dict)."""
+    loop = asyncio.get_running_loop()
+    try:
+        clean, dropped = await loop.run_in_executor(None, _read_last_access)
+    except Exception as e:
+        print(f"[la] background load failed: {e}", flush=True)
+        clean, dropped = {}, 0
+    _apply_last_access(clean, dropped)
+
+
+def _load_last_access():
+    """Synchronous load (kept for callers/tests that want the old blocking behaviour)."""
+    _apply_last_access(*_read_last_access())
 
 
 def _touch_access(rel):
@@ -96,7 +137,7 @@ def _touch_access(rel):
 
 def _save_last_access():
     global _la_dirty
-    if not _la_dirty:
+    if not _la_dirty or not _la_loaded:
         return
     try:
         os.makedirs(STATE_DIR, exist_ok=True)
@@ -264,6 +305,7 @@ async def stream_via_gost(request, target_url):
     fwd = {k: v for k, v in request.headers.items() if k.lower() in ("range", "user-agent", "accept")}
     session = request.app["session"]
     try:
+        # GOST is None when no egress proxy is configured: aiohttp then connects directly.
         async with session.get(target_url, headers=fwd, proxy=GOST, allow_redirects=True,
                                timeout=ClientTimeout(total=None, sock_connect=20, sock_read=60)) as up:
             resp = web.StreamResponse(status=up.status)
@@ -292,6 +334,8 @@ def player_playable(data):
 async def ivvp_player(session, vid):
     """Logged-in fallback: iv-vp returns a player response (real-companion-first, else metube synth)
     with a raw googlevideo audio-140 url. Returns the dict if playable, else None."""
+    if not IVVP:
+        return None  # no logged-in sidecar configured: the fallback path is disabled
     try:
         async with session.post(IVVP + "/youtubei/v1/player", json={"videoId": vid},
                                 timeout=ClientTimeout(total=75)) as up:
@@ -583,6 +627,10 @@ async def handler(request):
     if full == "/vp":
         u = request.query.get("u")
         return await stream_via_gost(request, u) if u else web.Response(status=400, text="missing u")
+    # /iv/* exists for the ytify client only; without an Invidious upstream every route answers
+    # 502 (never a crash) so a misrouted probe is an explicit, visible failure.
+    if full.startswith("/iv/") and not INVIDIOUS and not full.startswith("/iv/videoplayback"):
+        return web.Response(status=502, text="invidious upstream not configured (INVIDIOUS_UPSTREAM)")
     if full.startswith("/iv/videoplayback"):
         q = dict(request.query)
         host = q.pop("host", None)
@@ -702,14 +750,20 @@ async def on_startup(app):
     global _cover_sem
     _cover_sem = asyncio.Semaphore(COVER_SEM_N)
     _cover_init()
-    _load_last_access()
+    # The last-access state is loaded in the background (one stat per library file: ~110 s
+    # on a NAS) so the listener comes up immediately. See _load_last_access_bg.
+    app["_la_load"] = asyncio.create_task(_load_last_access_bg())
     app["_la_task"] = asyncio.create_task(_la_flusher())
+    print(f"[bridge] listening on :{PORT} companion={COMPANION} yubal={YUBAL} "
+          f"ivvp={IVVP or 'off'} invidious={INVIDIOUS or 'off'} proxy={GOST or 'direct'} "
+          f"bases vp={VP_PUBLIC} localf={LOCALF_PUBLIC} aud={AUD_PUBLIC}", flush=True)
 
 
 async def on_cleanup(app):
-    t = app.get("_la_task")
-    if t:
-        t.cancel()
+    for key in ("_la_task", "_la_load"):
+        t = app.get(key)
+        if t:
+            t.cancel()
     _save_last_access()
     await app["session"].close()
 

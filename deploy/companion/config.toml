@@ -1,0 +1,35 @@
+# invidious-companion configuration for the Beatbump stack (deploy/compose.yml).
+# Mounted read-only at /app/config/config.toml. No secret lives here: the secret
+# key, host/port, base path and the optional proxy come from the environment
+# (SERVER_SECRET_KEY, HOST, PORT, SERVER_BASE_PATH, PROXY), see compose.yml.
+# Reference: config.example.toml shipped in the image.
+
+[server]
+# The Go server calls <bridge>/companion/youtubei/v1/player, so the companion
+# must serve under /companion (env SERVER_BASE_PATH says the same).
+base_path = "/companion"
+verify_requests = false
+encrypt_query_params = false
+
+[cache]
+# youtubei.js player cache; lives in the `companion-cache` volume.
+enabled = true
+directory = "/var/tmp"
+
+[networking.videoplayback]
+# UMP is YouTube's newer streaming format; the bridge/app pipeline expects the
+# classic videoplayback responses.
+ump = false
+
+[networking.fetch]
+timeout_ms = 30000
+
+[networking.fetch.retry]
+enabled = true
+times = 2
+initial_debounce = 500
+debounce_multiplier = 2
+
+[jobs.youtube_session]
+po_token_enabled = true
+frequency = "*/5 * * * *"
