@@ -182,6 +182,23 @@ async function run(deps) {
       // a library pack announces the lossless default at least (U14-1).
       if (bps < MIN_LOSSLESS_BPS) throw new Error(`announced ${before.txt} = ${Math.round(bps)} B/s for ${before.est.seconds} s on a fresh context (expected >= ${MIN_LOSSLESS_BPS} B/s, the lossless default: the old 1 Mo/min guess said 60 Mo for 2 Go)`);
 
+      // The Espace progress line ("… sur env. X") lives while the pack runs: a small or fast library (the sample
+      // library: 44 short tracks done in about 1.5 s) ends it before any poll. An observer records every such line
+      // from the tap on (installed in this document, the tap navigates inside the SPA, and for any later load).
+      const watchEnvLines = () => {
+        if (window.__ytmEnvLines) return;
+        window.__ytmEnvLines = [];
+        const RE = /env\.\s*\d+(?:[.,]\d+)?\s*[kMG]o\b/u;
+        const look = () => {
+          const el = document.querySelector('[data-testid="offline-space"]');
+          const t = el ? (el.innerText || el.textContent || "").replace(/\s+/g, " ") : "";
+          if (t && RE.test(t.replace(/[  ]/g, " ")) && window.__ytmEnvLines[window.__ytmEnvLines.length - 1] !== t) window.__ytmEnvLines.push(t.slice(0, 300));
+        };
+        new MutationObserver(look).observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+        look();
+      };
+      await mp.addInitScript(watchEnvLines);
+      await mp.evaluate(watchEnvLines);
       await mp.locator('[data-testid="first-pack-start"]').first().click({ timeout: 5000 });
       await sleep(2000);
       const after = await mp.evaluate(() => { const f = window.__ytmFirstPack || {}; return { started: f.started, reason: f.reason, estimatedBytes: f.estimatedBytes, count: f.count, url: location.pathname + location.search }; }).catch(() => ({}));
@@ -189,9 +206,13 @@ async function run(deps) {
       if (after.estimatedBytes !== before.est.bytes) throw new Error(`announced ${before.est.bytes} bytes (${tokenBefore}) before the tap, planned ${after.estimatedBytes} after it (U14-1: the plan must be frozen once announced)`);
       // The Espace progress line carries the same formatted size ("… sur env. X").
       const line = await pollUntil(async () => {
-        const txt = ((await mp.locator('[data-testid="offline-space"]').first().innerText().catch(() => "")) || "").replace(/\s+/g, " ");
-        const m = txt.replace(/[  ]/g, " ").match(/env\.\s*(\d+(?:[.,]\d+)?\s*[kMG]o)\b/u);
-        return m ? { txt: txt.slice(0, 200), token: sizeToken(m[1]) } : null;
+        const live = ((await mp.locator('[data-testid="offline-space"]').first().innerText().catch(() => "")) || "").replace(/\s+/g, " ");
+        const seen = await mp.evaluate(() => window.__ytmEnvLines || []).catch(() => []);
+        for (const txt of [live, ...seen]) {
+          const m = txt.replace(/[  ]/g, " ").match(/env\.\s*(\d+(?:[.,]\d+)?\s*[kMG]o)\b/u);
+          if (m) return { txt: txt.slice(0, 200), token: sizeToken(m[1]) };
+        }
+        return null;
       }, 10000, 500);
       if (!line) throw new Error(`no "sur env. X" progress line on ${after.url} 2 to 12 s after the tap (card said ${tokenBefore}; errors ${JSON.stringify(errs.slice(-3))})`);
       if (line.token !== tokenBefore) throw new Error(`card announced ${tokenBefore}, the Espace line says env. ${line.token} (${line.txt})`);
