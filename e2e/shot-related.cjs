@@ -1,0 +1,21 @@
+const { chromium } = require("playwright");
+const URL = process.argv[2] || "https://staging-music.ekaii.fr";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+(async () => {
+  const browser = await chromium.launch({ channel: "chrome", args: ["--autoplay-policy=no-user-gesture-required", "--ignore-certificate-errors", "--host-resolver-rules=MAP *.ekaii.fr 127.0.0.1"] });
+  const ctx = await browser.newContext({ extraHTTPHeaders: { "X-Ytm-Harness": "1" },  ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  page.on("pageerror", (e) => console.log("PAGEERROR", String(e).slice(0, 160)));
+  await page.goto(URL + "/search/" + encodeURIComponent("daft punk") + "?filter=all", { waitUntil: "networkidle", timeout: 60000 });
+  await page.getByText(/Song\s*•/).first().click(); await sleep(4000);
+  await page.locator("footer .now-playing img, footer img").first().click({ timeout: 5000 }).catch(() => {}); await sleep(1500);
+  const tabs = await page.locator("[role=tab], .tab, button:has-text('Related')").allInnerTexts().catch(() => []);
+  console.log("TABS", JSON.stringify(tabs.slice(0, 6)));
+  await page.getByText(/^Related$/i).first().click({ timeout: 5000 }).catch((e) => console.log("related click err", e.message.slice(0, 60)));
+  await sleep(2500);
+  const local = await page.locator('[data-row="related-local"]').count();
+  const cards = await page.locator('[data-row="related-local"] article.item, [data-row="related-local"] .item').count();
+  console.log("LOCAL_RELATED section=" + local + " cards=" + cards);
+  await page.screenshot({ path: "/e2e/out/c8-related.png" });
+  await browser.close();
+})().catch((e) => { console.log("FATAL", String(e)); process.exit(1); });

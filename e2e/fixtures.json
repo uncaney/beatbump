@@ -1,0 +1,27 @@
+{
+  "_comment": "Fixed harness inputs (cycle 34 HD1). Keys documented in the header of harness-core.cjs. Values checked on staging 2026-10-01 (library b8e98f4).",
+  "query": "daft punk",
+  "acquiredVideoId": "fa5IWHDbftI",
+  "acquiredVideoTitle": "One More Time",
+  "localLid": "6300e80e2e2",
+  "localLidTitle": "Around the World",
+  "localAlbumId": "lb-f9c16fd93917",
+  "localAlbumTitle": "One More Time",
+  "localAlbumArtist": "Daft Punk",
+  "localAlbumTracks": 4,
+  "localArtistId": "la-c7e84a3742d0",
+  "localArtistName": "Daft Punk",
+  "ytAlbumId": "MPREb_7ltM34kr0mH",
+  "genre": "Alternative Rock",
+  "genreMinTracks": 200,
+  "robotUserAgents": [
+    "WhatsApp/2.23.20.0 A",
+    "Twitterbot/1.0",
+    "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+    "TelegramBot (like TwitterBot)",
+    "Discordbot/2.0; +https://discordapp.com",
+    "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+    "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)"
+  ],
+  "humanUserAgent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/126"
+}

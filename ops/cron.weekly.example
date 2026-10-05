@@ -1,0 +1,25 @@
+# Crontab propose pour music.ekaii.fr (decision 19 de program/DECISIONS-PAUL.md, en attente). NON INSTALLE :
+# Camille decide. Installation (compte docker-host, la box est en UTC) : crontab -e, puis coller les DEUX lignes non
+# commentees ci-dessous. Verification : crontab -l | grep -c 'monday.sh\|smoke.sh' = 2.
+#
+# 1. Lundi 06:00 UTC (avant les chaines et promotions de la journee) : ops/monday.sh (cycle 53, B9-15) = attente
+#    d une box libre (pas de ytm-harness-*, pas de chaine, pas de build), harness prod palier full (coeur +
+#    hors-ligne, environ 20 min), weekly.sh (UNE ligne ajoutee a agents/program/WEEKLY.md ; bloc dans
+#    agents/program/ALERT.md si : rapport full absent ou vieux de plus de 8 j, etapes gatees depuis plus d une
+#    semaine, harness < 100 %, version servie != dernier "PROD = <sha>" de CYCLES.md, disque < 10 % libre,
+#    0 telechargement avec des echecs, Kuma 167 DOWN avec cle), puis smoke.sh HTTP avec SMOKE_ALERT=1.
+#    Journal detaille : agents/program/logs/monday-<date>.log (10 gardes) ; le cron ne recoit que le resume.
+#    Ne pas rediriger stdout vers WEEKLY.md (la ligne serait en double). Pas de mail ; pas de cle Kuma sur la box
+#    (aucune cle ne doit y etre ecrite : la colonne Kuma vaut "n/a (jeton)"). WEEKLY_DB_RO=1 est pose par monday.sh
+#    (colonne retention : lecture seule de la base prod, mode=ro).
+0 6 * * 1 /bin/sh /srv/beatbump/agents/ops/monday.sh >> /srv/beatbump/agents/ops/monday-cron.log 2>&1  # music.ekaii.fr lundi (cycle 53)
+#
+# 2. Tous les jours 06:30 UTC : smoke prod HTTP + navigateur (cycle 43, B7-15/B7-16) ; le navigateur est SAUTE
+#    (pas un echec) si un ytm-harness-* tourne deja (le lundi, monday.sh a normalement fini avant 06:30) ;
+#    bloc ALERT.md en cas d echec.
+30 6 * * * SMOKE_BROWSER=1 SMOKE_ALERT=1 /bin/sh /srv/beatbump/agents/ops/smoke.sh https://music.ekaii.fr >> /srv/beatbump/agents/ops/smoke-cron.log 2>&1  # music.ekaii.fr smoke (cycle 43)
+#
+# Lecture : tail -3 /srv/beatbump/agents/program/WEEKLY.md ; ls -l /srv/beatbump/agents/program/ALERT.md ;
+#   tail -5 /srv/beatbump/agents/ops/monday-cron.log ; ls -t /srv/beatbump/agents/program/logs/monday-*.log | head -1
+# Ancienne ligne (cycle 39, remplacee par monday.sh ; a ne plus installer) :
+#   0 8 * * 1 /bin/sh /srv/beatbump/agents/ops/weekly.sh >> /srv/beatbump/agents/ops/weekly-cron.log 2>&1

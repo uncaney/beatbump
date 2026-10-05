@@ -7,3 +7,9 @@ beatbump.db-wal
 beatbump-server.exe
 beatbump.exe
 
+/e2e/out/
+/e2e/node_modules/
+/e2e/profiles/
+/fixtures/sample-library/*.opus
+/deploy/.env
+/deploy/data/

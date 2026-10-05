@@ -1,0 +1,22 @@
+const { chromium } = require("playwright");
+const URL = ((process.argv.find((a) => a.startsWith("--url=")) || "--url=https://music.ekaii.fr").split("=").slice(1).join("=")).replace(/\/$/, "");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+(async () => {
+  const browser = await chromium.launch({ channel: process.env.PW_CHANNEL || undefined, args: ["--autoplay-policy=no-user-gesture-required", "--ignore-certificate-errors", "--host-resolver-rules=MAP *.ekaii.fr 127.0.0.1"] });
+  const ctx = await browser.newContext({ extraHTTPHeaders: { "X-Ytm-Harness": "1" },  ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on("pageerror", (e) => errs.push("pageerror: " + String(e).slice(0, 160)));
+  page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errs.push("console: " + m.text().slice(0, 160)); });
+  await page.goto(URL + "/search/daft%20punk?filter=all", { waitUntil: "load", timeout: 45000 });
+  await sleep(3000);
+  await page.getByText(/Song\s*•/).first().click({ position: { x: 8, y: 8 }, timeout: 8000 });
+  await sleep(6000);
+  await page.goto(URL + "/home", { waitUntil: "load", timeout: 45000 });
+  await sleep(5000);
+  const info = await page.evaluate(() => ({ mainText: (document.querySelector("main")?.innerText || "").replace(/\s+/g, " ").slice(0, 160), mainLen: (document.querySelector("main")?.innerText || "").length, rows: [...document.querySelectorAll("[data-row]")].map((e) => e.getAttribute("data-row")), bodyBg: getComputedStyle(document.body).backgroundColor, overlays: [...document.querySelectorAll("body *")].filter((e) => { const cs = getComputedStyle(e); const r = e.getBoundingClientRect(); return cs.position === "fixed" && r.width > 300 && r.height > 500 && cs.visibility !== "hidden" && Number(cs.opacity) > 0.5; }).map((e) => e.tagName + "." + String(e.className).slice(0, 50)) }));
+  console.log("HOME", JSON.stringify(info));
+  console.log("ERRS", JSON.stringify(errs.slice(0, 5)));
+  await page.screenshot({ path: "/e2e/out/probe-home-mobile.png" }).catch(() => {});
+  await browser.close();
+})().catch((e) => { console.log("FATAL", String(e)); process.exit(1); });

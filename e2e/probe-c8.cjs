@@ -1,0 +1,36 @@
+const { chromium } = require("playwright");
+const URL = "https://staging-music.ekaii.fr";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+(async () => {
+  const browser = await chromium.launch({ channel: "chrome", args: ["--autoplay-policy=no-user-gesture-required", "--ignore-certificate-errors", "--host-resolver-rules=MAP *.ekaii.fr 127.0.0.1"] });
+  const ctx = await browser.newContext({ extraHTTPHeaders: { "X-Ytm-Harness": "1" },  ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  page.on("pageerror", (e) => console.log("PAGEERROR", String(e).slice(0, 160)));
+  await page.goto(URL + "/search/" + encodeURIComponent("daft punk") + "?filter=all", { waitUntil: "networkidle", timeout: 60000 });
+  await page.getByText(/Song\s*•/).first().click(); await sleep(5000);
+  const footer = await page.evaluate(() => [...document.querySelectorAll("footer button, footer a, footer [role=button]")].map((e) => (e.getAttribute("aria-label") || e.textContent.trim().slice(0, 20)) + ":" + e.className.toString().slice(0, 30)).join(" | "));
+  console.log("FOOTER", footer);
+  const kebab = page.locator('footer .dd-button, footer [aria-label="More options"]').last();
+  console.log("kebab count", await page.locator('footer .dd-button').count(), "visible", await kebab.isVisible().catch(() => false));
+  await kebab.click({ timeout: 5000 }).catch((e) => console.log("kebab click err", e.message.slice(0, 80)));
+  await sleep(800);
+  const menu = await page.evaluate(() => [...document.querySelectorAll("[role=menu] *, .dropdown *, .popper *, li, button")].filter((e) => e.offsetParent !== null && /Minuterie|Raccourcis|Lyrics|Paroles|Sleep/i.test(e.textContent)).map((e) => e.tagName + ":" + e.textContent.trim().slice(0, 40) + ":" + e.className.toString().slice(0, 30)).slice(0, 8).join(" | "));
+  console.log("MENU", menu);
+  const entry = page.getByText(/Minuterie de sommeil/i).first();
+  console.log("entry count", await page.getByText(/Minuterie de sommeil/i).count(), "visible", await entry.isVisible().catch(() => false));
+  await entry.click({ timeout: 5000 }).catch((e) => console.log("entry click err", e.message.slice(0, 80)));
+  await sleep(800);
+  const dlg = await page.evaluate(() => [...document.querySelectorAll("[role=dialog] button")].map((b) => b.textContent.trim().slice(0, 30)).join(" | "));
+  console.log("DIALOG", dlg);
+  await page.getByRole("button", { name: /Dans 15/i }).first().click({ timeout: 5000 }).catch((e) => console.log("15 click err", e.message.slice(0, 80)));
+  await sleep(800);
+  console.log("CHIP", await page.locator('[data-testid="sleep-timer-chip"]').count(), await page.locator('[data-testid="sleep-timer-chip"]').first().getAttribute("aria-label").catch(() => null));
+  await page.keyboard.press("Escape"); await sleep(300);
+  // lyrics via footer link
+  const link = page.locator('footer a[aria-label="Paroles"]').first();
+  console.log("lyrics link count", await link.count(), "href", await link.getAttribute("href").catch(() => null));
+  await link.click({ timeout: 5000 }).catch((e) => console.log("link click err", e.message.slice(0, 80)));
+  await sleep(3000);
+  console.log("URL", page.url(), "fontplus", await page.locator("#lyrics-font-plus").count(), "title", await page.locator(".now-playing-title").first().innerText().catch(() => "none"), "body", (await page.locator("body").innerText()).replace(/\s+/g, " ").slice(0, 120));
+  await browser.close();
+})().catch((e) => { console.log("FATAL", String(e)); process.exit(1); });
