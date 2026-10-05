@@ -434,8 +434,17 @@ async function search(page) {
 
   await step(page, "album_page", async () => {
     await search(page);
-    const row = page.getByText(/Album\s*•/).first();
-    if (await row.count() === 0) throw new Error("no album row in results");
+    let row = page.getByText(/Album\s*•/).first();
+    let from = "all";
+    if (await row.count() === 0) {
+      // The "Tout" results of a query are YouTube's (the library shelf comes last and lists songs): some days they
+      // hold no album row. The Albums filter lists YouTube albums and the library's own album hits.
+      await gotoQuiet(page, URL + "/search/" + encodeURIComponent(QUERY) + "?filter=albums", { timeout: 45000 });
+      row = page.getByText(/Album\s*•/).first();
+      from = "albums filter";
+      if (!(await row.isVisible({ timeout: 8000 }).catch(() => false))) { row = page.locator("section.local-shelf .itemWrapper .title").first(); from = "library albums"; }
+      if (await row.count() === 0) throw new Error("no album row in the results (Tout, then the Albums filter)");
+    }
     await row.click({ timeout: 8000 });
     await page.waitForURL(/\/release\?id=|\/playlist\//, { timeout: 20000 });
     await waitQuiet(page); // c47a: was networkidle 20 s, never satisfied while the track plays (22 s per run)
@@ -444,7 +453,7 @@ async function search(page) {
     const durations = await page.getByText(/^\s*\d{1,2}:\d{2}\s*$/).count();
     const body = (await page.locator("body").innerText()).length;
     if (durations < 1 && body < 300) throw new Error("album page shows no tracks (" + u + ")");
-    return `${u.slice(URL.length, URL.length + 40)} durations=${durations} body=${body}`;
+    return `${u.slice(URL.length, URL.length + 40)} (${from}) durations=${durations} body=${body}`;
   });
 
   await step(page, "library_pages", async () => {

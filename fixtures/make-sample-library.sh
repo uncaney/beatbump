@@ -9,7 +9,8 @@
 #   - one artist credited under 5 spellings (Bitfield, "Bitfield feat. ...",
 #     "Bitfield ft. ...", "Bitfield (featuring ...)"), the "Aussi sous" alias
 #     group with more chips than the folded row shows;
-#   - one album without a release year (the "Sans annee" filter).
+#   - one album without a release year (the "Sans annee" filter), one of its tracks the only one of its
+#     genre (Noise: a "rare" genre, folded on the Genres page).
 #
 #   fixtures/make-sample-library.sh [OUT_DIR]      (default: fixtures/sample-library)
 #
@@ -134,11 +135,11 @@ alias_album "Bitfield ft. The Sine Waves" "Carrier" 2024 280
 alias_album "Bitfield (featuring Low Pass Orchestra)" "Cutoff" 2023 300
 alias_album "Bitfield feat. Pulse Train" "Duty Cycle" 2022 320
 
-# An album without any release year (no date tag).
+# An album without any release year (no date tag); "Hiss" is the only Noise track (a rare genre).
 A="Noise Floor"
 album "$A" "Field Recordings" "0x2a2a20" "0xd0d0a0" circular
 track "$A" "Field Recordings" - Experimental 1 1 1 2 "Hum"    22 "aevalsrc=0.3*sin(2*PI*50*t)+0.05*sin(2*PI*150*t):s=48000"
-track "$A" "Field Recordings" - Experimental 1 1 2 2 "Hiss"   20 "anoisesrc=color=violet:amplitude=0.15:sample_rate=48000"
+track "$A" "Field Recordings" - Noise 1 1 2 2 "Hiss"   20 "anoisesrc=color=violet:amplitude=0.15:sample_rate=48000"
 # -----------------------------------------------------------------------------
 
 cat > "$OUT/README.txt" <<'EOF'

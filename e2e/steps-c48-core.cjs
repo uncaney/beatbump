@@ -111,6 +111,7 @@ async function run(deps) {
     const ctx = await newCtx(browser, { ignoreHTTPSErrors: true });
     try {
       const p = await ctx.newPage();
+      await require("./harness-lib.cjs").requireRareGenre(URL);
       await p.goto(URL + "/library/genres", { waitUntil: "load", timeout: 45000 });
       const list = p.locator('[data-testid="genre-list"]');
       await list.waitFor({ state: "visible", timeout: 20000 });

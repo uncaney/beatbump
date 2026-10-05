@@ -18,6 +18,8 @@
 //   requireMixCards(base)          skip() unless GET /api/v1/local/mixes lists at least one card (a decade or year
 //                                  with 15 albums, or a genre with 200 titles over 15 albums): the Mixes page of a
 //                                  smaller library shows its empty state, there is no mix card to check
+//   requireRareGenre(base)         skip() unless GET /api/v1/local/genres lists a genre with at most 3 tracks (the
+//                                  "rare" fold of the Genres page, RARE_MAX / genreRareMax)
 //   slowAudioContext(base, create, ms)
 //                                  on a small library (< 2000 tracks) the offline packs of a fresh context finish in a
 //                                  second or two (short tracks served from a local disk), before a step can act while
@@ -133,6 +135,16 @@ async function requireMixCards(base) {
   }
 }
 
+async function requireRareGenre(base) {
+  let genres = null;
+  try {
+    const r = await rawRequest(base, "GET", "/api/v1/local/genres", { Accept: "application/json" }, 20000);
+    if (r.status === 200) { const d = JSON.parse(r.body) || {}; genres = d.genres || d.items || null; }
+  } catch { genres = null; }
+  if (!Array.isArray(genres)) return; // unreadable: let the step fail on the page
+  if (!genres.some((g) => g && Number(g.count) <= 3)) skip(`no rare genre in this library (GET local/genres: ${genres.length} genres, none with 3 tracks or fewer): nothing to fold`);
+}
+
 const SW_NET_ENV = "PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS";
 async function slowAudioContext(base, create, ms) {
   if (await libraryAtLeast(base, 2000)) return { ctx: await create(), slowed: false, release: () => {} };
@@ -156,4 +168,4 @@ function typoOf(query) {
   return words.join(" ");
 }
 
-module.exports = { HARNESS_HEADERS, loadFixtures, fixturesPath, parseBase, rawRequest, servedStats, servedVersion, skip, isSkip, libraryStats, libraryAtLeast, requireLibrary, requireMixCards, slowAudioContext, typoOf };
+module.exports = { HARNESS_HEADERS, loadFixtures, fixturesPath, parseBase, rawRequest, servedStats, servedVersion, skip, isSkip, libraryStats, libraryAtLeast, requireLibrary, requireMixCards, requireRareGenre, slowAudioContext, typoOf };

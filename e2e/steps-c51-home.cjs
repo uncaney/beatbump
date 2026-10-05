@@ -202,6 +202,7 @@ async function run(deps) {
       }
 
       // U13-11: the genres link lands on the open fold, its "(N)" = the rows of the fold.
+      await require("./harness-lib.cjs").requireRareGenre(URL);
       await mp.goto(URL + "/library/genres#rares", { waitUntil: "load", timeout: 45000 });
       const tg = mp.locator('[data-testid="genres-rare-toggle"]');
       await tg.waitFor({ state: "visible", timeout: 25000 }).catch(() => { throw new Error("no [genres-rare-toggle] on /library/genres#rares (no rare genre, or the page did not load)"); });
