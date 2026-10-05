@@ -1,0 +1,74 @@
+# Release: on a `v*` tag, build and push the four images to the Forgejo
+# container registry, then create the Forgejo release with the CHANGELOG.md
+# section as notes and the deploy files as assets.
+#
+# Secrets (repository settings > Actions > Secrets, see scripts/release/README.md):
+#   REGISTRY_TOKEN  Forgejo access token with write:package (registry push)
+#   REGISTRY_USER   optional, the owner of REGISTRY_TOKEN (default: the tag pusher)
+#   RELEASE_TOKEN   Forgejo access token with write:repository (release + assets)
+#   BUILDKIT_ADDR   tcp://<buildkitd>:1234, required on the hardened
+#                   `ubuntu-latest` runner where no Docker daemon is reachable
+#                   from a job; on a runner with a Docker socket it may be unset.
+# Only curl + the Forgejo REST API are used for the release (no third-party action).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  REGISTRY: forgejo.ekaii.fr
+  IMAGE_NS: ekaii/beatbump
+
+jobs:
+  images:
+    name: Build and push images
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must equal VERSION and have a CHANGELOG section
+        run: scripts/release/check-version.sh "$GITHUB_REF_NAME"
+      - name: Install docker CLI, buildx and buildctl (pinned)
+        run: scripts/release/ci-install-tools.sh docker buildx buildctl
+      - name: Log in to the registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER || github.actor }}
+        run: |
+          [ -n "$REGISTRY_TOKEN" ] || { echo "REGISTRY_TOKEN secret is not set"; exit 1; }
+          printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+      - name: Build and push
+        env:
+          BUILDKIT_ADDR: ${{ secrets.BUILDKIT_ADDR }}
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: scripts/release/build-images.sh "$GITHUB_REF_NAME"
+      - name: Log out
+        if: always()
+        run: docker logout "$REGISTRY" || true
+
+  release:
+    name: Forgejo release
+    needs: images
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create or update the release and attach the deploy files
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          FORGEJO_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          scripts/release/forgejo-release.sh "$GITHUB_REF_NAME" \
+            deploy/compose.yml deploy/compose.images.yml deploy/.env.example up.sh

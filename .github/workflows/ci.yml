@@ -1,0 +1,27 @@
+# GitHub is a read-only mirror of https://forgejo.ekaii.fr/Ekaii/beatbump
+# (updated by a Forgejo push mirror). This workflow only keeps a green check on
+# the mirror: it vets and tests the Go server. The full CI (web, shell, python,
+# harness headers, compose) and the releases run on Forgejo from
+# .forgejo/workflows/, which Forgejo prefers over this directory.
+name: CI (mirror)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+        env:
+          CGO_ENABLED: "0"

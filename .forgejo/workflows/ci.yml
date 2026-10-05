@@ -1,0 +1,110 @@
+# CI for the Forgejo repository (canonical: https://forgejo.ekaii.fr/Ekaii/beatbump).
+#
+# Runner: label `ubuntu-latest` (docker-host-ubuntu). Every job runs in a plain
+# node:22-bookworm container and installs what it needs itself, verified
+# against published checksums (scripts/release/ci-install-*.sh):
+#   - no actions/setup-* : they append to $GITHUB_PATH, which kills the job on
+#     this runner (see scripts/release/README.md, "Runner gotchas");
+#   - no Docker daemon is reachable from a job (valid_volumes: [] on the
+#     runner), so the compose job validates with a standalone compose binary.
+# Each job is small; the heavy ones (go, web) stay under ~10 minutes.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"]   # tags run release.yml
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  go:
+    name: Go (vet + test)
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm
+    env:
+      CGO_ENABLED: "0"
+      GOFLAGS: "-p=2"
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the Go toolchain from go.mod
+        run: scripts/release/ci-install-go.sh
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -count=1 ./...
+      - name: go test -count=3 ./backend/api (memo pollution guard, CONTRIBUTING.md)
+        run: go test -count=3 ./backend/api/
+
+  web:
+    name: Web (vitest + svelte-check ceiling)
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm
+    env:
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: npm ci
+        working-directory: app
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+      - name: vitest run
+        working-directory: app
+        run: npx vitest run
+      - name: svelte-check (errors must not exceed ops/svelte-check.baseline)
+        run: scripts/release/ci-web-check.sh
+
+  shell:
+    name: Shell (shellcheck)
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: scripts/release/ci-install-tools.sh shellcheck
+      - name: shellcheck up.sh ops/*.sh e2e/run.sh fixtures/*.sh scripts/release/*.sh
+        run: scripts/release/ci-shellcheck.sh
+
+  python:
+    name: Python (py_compile + ruff)
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ruff (best effort, pinned, checksum-verified)
+        run: scripts/release/ci-install-tools.sh ruff || echo "ruff unavailable, py_compile only"
+      - name: py_compile + ruff
+        run: scripts/release/ci-python.sh
+
+  harness-headers:
+    name: Harness headers (X-Ytm-Harness on every Playwright context)
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: node e2e/check-harness-headers.cjs
+        run: node e2e/check-harness-headers.cjs
+
+  compose:
+    name: Compose (deploy/compose.yml config)
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install docker compose (standalone, no daemon needed)
+        run: scripts/release/ci-install-tools.sh compose
+      - name: docker compose config
+        run: scripts/release/ci-compose.sh
