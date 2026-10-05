@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // PF4-6: the non-hashed build files carry a content ETag through the real
@@ -69,10 +70,57 @@ func TestStaticETagRevalidation(t *testing.T) {
 	if rec := do("/manifest.json", old, false); rec.Code != http.StatusOK || rec.Header().Get("ETag") == old || !strings.Contains(rec.Body.String(), "v2") {
 		t.Fatalf("changed manifest: code %d etag %q", rec.Code, rec.Header().Get("ETag"))
 	}
-	for _, p := range []string{"/_app/immutable/chunks/x.1234.js", "/home", "/api/v1/nope"} {
+	for _, p := range []string{"/_app/immutable/chunks/x.1234.js", "/api/v1/nope"} {
 		if tag := do(p, "", false).Header().Get("ETag"); tag != "" {
 			t.Fatalf("%s got an ETag %q", p, tag)
 		}
+	}
+}
+
+// c59g (DS1 rollback): the SPA routes answer index.html with its content
+// ETag; a matching If-None-Match gets 304, a foreign one (the other build)
+// gets the fresh shell even when If-Modified-Since is in the future (the
+// rollback case: the old file is not newer than the new build's date).
+func TestSpaRouteShellETagSurvivesRollback(t *testing.T) {
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "build", "index.html")
+	if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fp, []byte("<html><head><title>shell</title></head></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	t.Setenv("MEILI_URL", "")
+	e := newServer()
+	do := func(p string, h map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, p, nil)
+		for k, v := range h {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+	root := do("/", nil).Header().Get("ETag")
+	for _, p := range []string{"/home", "/search/daft%20punk?filter=all", "/library/downloads-offline"} {
+		first := do(p, nil)
+		if first.Code != http.StatusOK || first.Header().Get("ETag") != root || !strings.Contains(first.Body.String(), "shell") {
+			t.Fatalf("%s: code %d etag %q (root %q)", p, first.Code, first.Header().Get("ETag"), root)
+		}
+		if rec := do(p, map[string]string{"If-None-Match": root}); rec.Code != http.StatusNotModified {
+			t.Fatalf("%s: same build revalidation code %d", p, rec.Code)
+		}
+		// the browser holds the OTHER build's shell: its tag differs and its date is later than our file
+		future := time.Now().Add(48 * time.Hour).UTC().Format(http.TimeFormat)
+		rec := do(p, map[string]string{"If-None-Match": `W/"otherbuild"`, "If-Modified-Since": future})
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "shell") {
+			t.Fatalf("%s: other build + future If-Modified-Since: code %d body %d (shell frozen on rollback)", p, rec.Code, rec.Body.Len())
+		}
+	}
+	// a missing non-HTML file keeps no shell tag semantics beyond the 404 shell
+	if rec := do("/nope.png", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("/nope.png code %d", rec.Code)
 	}
 }
 
