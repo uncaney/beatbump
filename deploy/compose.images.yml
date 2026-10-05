@@ -1,0 +1,43 @@
+# Override for people who prefer pulling the release images instead of building
+# locally. deploy/compose.yml builds every image from the repository; this file
+# replaces the `build:` of the four images we publish with the tags pushed by
+# .forgejo/workflows/release.yml.
+#
+#   ./up.sh            # once, to create deploy/.env and deploy/data (it builds; harmless)
+#   docker compose -p beatbump --project-directory deploy \
+#     -f deploy/compose.yml -f deploy/compose.images.yml --env-file deploy/.env \
+#     pull && docker compose -p beatbump --project-directory deploy \
+#     -f deploy/compose.yml -f deploy/compose.images.yml --env-file deploy/.env up -d
+#
+# BEATBUMP_TAG defaults to `latest` (put BEATBUMP_TAG=v1.0.0 in deploy/.env to
+# pin a release). Images are linux/amd64. The published beatbump image is built
+# with VERSION=vX.Y.Z+<git sha>, which wins over BEATBUMP_VERSION / YTM_VERSION
+# from deploy/.env (the server prefers the linker value), so
+# /api/v1/stats/library reports the release. `up.sh` always passes only
+# deploy/compose.yml and rebuilds locally (`./up.sh update`, `./up.sh build`);
+# use the raw commands above to stay on the published images.
+# Pulling needs no login (public packages); if the package is private:
+#   docker login forgejo.ekaii.fr
+#
+# Service names must match deploy/compose.yml (scripts/release/ci-compose.sh
+# fails CI when they drift).
+services:
+  beatbump:
+    image: forgejo.ekaii.fr/ekaii/beatbump:${BEATBUMP_TAG:-latest}
+    build: !reset null
+    pull_policy: missing
+
+  bridge:
+    image: forgejo.ekaii.fr/ekaii/beatbump-bridge:${BEATBUMP_TAG:-latest}
+    build: !reset null
+    pull_policy: missing
+
+  indexer:
+    image: forgejo.ekaii.fr/ekaii/beatbump-indexer:${BEATBUMP_TAG:-latest}
+    build: !reset null
+    pull_policy: missing
+
+  yubal:
+    image: forgejo.ekaii.fr/ekaii/beatbump-yubal:${BEATBUMP_TAG:-latest}
+    build: !reset null
+    pull_policy: missing

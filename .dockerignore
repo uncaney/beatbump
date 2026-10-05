@@ -1,0 +1,55 @@
+# Build context of the root Dockerfile (app + Go server). The Dockerfile only
+# needs app/ (sources), backend/, *.go, go.mod and go.sum. Everything else is
+# excluded so the context stays small and host artefacts never leak into the
+# image (a host app/node_modules would otherwise overwrite the one from npm ci).
+# The sidecar images (bridge/, indexer/, yubal/) use their own directories as
+# context and are not affected by this file.
+.git
+.github
+.forgejo
+.idea
+.vscode
+*.code-workspace
+*.iml
+
+# Frontend artefacts and caches
+app/node_modules
+app/.svelte-kit
+app/build
+app/.vercel
+app/.netlify
+app/.wrangler
+app/vite.config.ts.timestamp-*
+
+# Not part of the image
+e2e
+docs
+ops
+fixtures
+deploy
+bridge
+indexer
+yubal
+scripts
+*.md
+Makefile
+docker-compose.yaml
+docker-compose.yml
+.env
+.env.*
+.dockerignore
+.editorconfig
+.gitattributes
+.gitignore
+
+# Data and local state
+data
+deploy/data
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.bak
+*.tar
+*.tgz
+*.exe

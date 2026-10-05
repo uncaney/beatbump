@@ -1,0 +1,53 @@
+# Normalize line endings to LF for text files (auto-detected). `text=auto`
+# leaves files that already have CRLF in the index alone (a few upstream
+# assets under app/static), so adding this file changes nothing by itself.
+* text=auto eol=lf
+
+# Always LF: scripts, workflows, configs
+*.sh text eol=lf
+*.bash text eol=lf
+*.py text eol=lf
+*.go text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.cjs text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.svelte text eol=lf
+*.css text eol=lf
+*.scss text eol=lf
+*.html text eol=lf
+*.env.example text eol=lf
+Dockerfile text eol=lf
+Makefile text eol=lf
+VERSION text eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.opus binary
+*.ogg binary
+*.mp3 binary
+*.m4a binary
+*.flac binary
+*.db binary
+*.sqlite binary
+*.tar binary
+*.gz binary
+*.zip binary
+
+# Keep the audit/journal archives out of language statistics and diffs
+docs/archive/** linguist-documentation
+docs/archive/** -diff
+ops/journal/** linguist-documentation
