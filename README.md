@@ -448,7 +448,7 @@ offer them the corresponding source.
 ## Repository, mirror and releases
 
 - Canonical repository: <https://forgejo.ekaii.fr/Ekaii/beatbump> (issues, pull requests, CI).
-- GitHub mirror (read-only, updated by push mirror; a fork of giwty/Beatbump): GITHUB_MIRROR_URL
+- GitHub mirror (read-only, updated by push mirror; a fork of giwty/Beatbump): https://github.com/uncaney/beatbump
 - Releases are git tags `vX.Y.Z`. Release notes live in the root `CHANGELOG.md` (Keep a Changelog
   format, starting at 1.0.0). The release workflow publishes the images to the Forgejo container
   registry; `deploy/compose.images.yml` is the compose override that pulls those images instead of
