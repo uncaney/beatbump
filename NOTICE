@@ -1,0 +1,17 @@
+beatbump (self-hosted, own-your-data music app)
+
+This repository is derived from Beatbump by snuffyDev
+(https://github.com/snuffyDev/Beatbump), licensed under the GNU Affero General
+Public License v3.0 (AGPL-3.0), through the giwty/Beatbump fork
+(https://github.com/giwty/Beatbump).
+
+This repository keeps the AGPL-3.0 license. The full text is in LICENSE.
+
+Third-party components used at runtime, each under its own license:
+- invidious-companion (https://github.com/iv-org/invidious-companion)
+- Meilisearch (https://www.meilisearch.com/)
+- yubal (https://github.com/guillevc/yubal)
+- yt-dlp (https://github.com/yt-dlp/yt-dlp)
+- bgutil-ytdlp-pot-provider (https://github.com/Brainicism/bgutil-ytdlp-pot-provider)
+- lrclib.net (https://lrclib.net), lyrics API
+- Playwright (https://playwright.dev), used by the end-to-end harness
