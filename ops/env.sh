@@ -30,6 +30,10 @@
 #                         bind mounts under deploy/data-staging so the two instances never share a database)
 #   YTM_DATA_DIR          data root; YTM_DB_DIR (prod beatbump.db), YTM_STAGING_DB_DIR, YTM_IMAGE_BACKUPS
 #                         (promote.sh tarballs, prefix YTM_BACKUP_PREFIX) default under it
+#   YTM_ANALYTICS_SRC, YTM_ANALYTICS_WEBSITE_ID, YTM_ANALYTICS_HOST
+#                         optional page-view analytics of the staging build (an Umami-compatible script URL, its
+#                         website id, its host URL): stage-cycle.sh passes them as the PUBLIC_ANALYTICS_* build
+#                         args of the Dockerfile; empty (default) = no analytics script in the app
 #   YTM_ALLOW_SKIPS       1 = a harness run with SKIP steps (precondition not met: small library, no YouTube
 #                         fixture) still counts as green for finish-cycle.sh and weekly.sh; 0 (default) = a
 #                         production target must play every step (0 FAIL and 0 SKIP)
@@ -85,6 +89,9 @@ YTM_DB_DIR=${YTM_DB_DIR:-$YTM_DATA_DIR/beatbump-db}
 YTM_STAGING_DB_DIR=${YTM_STAGING_DB_DIR:-$YTM_ROOT/deploy/data-staging/beatbump-db}
 YTM_IMAGE_BACKUPS=${YTM_IMAGE_BACKUPS:-$YTM_DATA_DIR/image-backups}
 YTM_ALLOW_SKIPS=${YTM_ALLOW_SKIPS:-0}
+YTM_ANALYTICS_SRC=${YTM_ANALYTICS_SRC:-}
+YTM_ANALYTICS_WEBSITE_ID=${YTM_ANALYTICS_WEBSITE_ID:-}
+YTM_ANALYTICS_HOST=${YTM_ANALYTICS_HOST:-}
 YTM_BACKUP_PREFIX=${YTM_BACKUP_PREFIX:-beatbump-prod}
 YTM_SECRETS_ENV_FILE=${YTM_SECRETS_ENV_FILE:-$YTM_ROOT/deploy/beatbump.env}
 YTM_HEALTHCHECK_LABEL=${YTM_HEALTHCHECK_LABEL:-fr.ekaii.ytm.healthcheck}
@@ -107,6 +114,7 @@ export OPS_DIR YTM_ROOT YTM_SRC_DIR YTM_PROD_URL YTM_STAGING_URL YTM_RESOLVE_IP 
   YTM_COMPOSE_SERVICE YTM_IMAGE YTM_COMPOSE_FILE YTM_COMPOSE_PROJECT YTM_COMPOSE_ENV_FILE YTM_COMPOSE_OVERRIDE \
   YTM_STAGING_COMPOSE YTM_STAGING_PROJECT YTM_STAGING_ENV_FILE YTM_STAGING_OVERRIDE YTM_DATA_DIR YTM_DB_DIR \
   YTM_STAGING_DB_DIR YTM_IMAGE_BACKUPS YTM_BACKUP_PREFIX YTM_ALLOW_SKIPS \
+  YTM_ANALYTICS_SRC YTM_ANALYTICS_WEBSITE_ID YTM_ANALYTICS_HOST \
   YTM_SECRETS_ENV_FILE YTM_HEALTHCHECK_LABEL YTM_E2E_DIR YTM_PROGRAM_DIR YTM_LOG_DIR YTM_BUILD_LOCK YTM_QUERY \
   HARNESS_RESOLVER HARNESS_RESOLVE_IP HARNESS_FIXTURES YTM_LIBRARY_DIR YTM_ACQ_CONTAINER YTM_ACQ_MOUNT \
   YTM_DISK_PATHS YTM_KUMA_CONTAINER YTM_KUMA_MONITORS YTM_KUMA_STATS_MONITOR

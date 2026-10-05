@@ -34,6 +34,7 @@ cp ops/env.example ops/env.local           # or copy it and edit (sourced by env
 | `YTM_STAGING_COMPOSE` / `YTM_STAGING_ENV_FILE` / `YTM_STAGING_OVERRIDE` | the production compose, `deploy/.env.staging`, `ops/compose.staging.yml` | staging instance: another `BEATBUMP_PORT`, its state under `deploy/data-staging` |
 | `YTM_DATA_DIR`, `YTM_DB_DIR`, `YTM_STAGING_DB_DIR`, `YTM_IMAGE_BACKUPS`, `YTM_BACKUP_PREFIX` | under `deploy/data` | data root, databases, `promote.sh` rollback tarballs |
 | `YTM_ALLOW_SKIPS` | `0` | `1` = a harness run with SKIP steps still counts as green (`finish-cycle.sh`, `weekly.sh`); `0` = every step must play (0 FAIL and 0 SKIP) |
+| `YTM_ANALYTICS_SRC`, `YTM_ANALYTICS_WEBSITE_ID`, `YTM_ANALYTICS_HOST` | empty | optional page-view analytics of the staging build (Umami-compatible script URL, website id, host): `stage-cycle.sh` passes them as the `PUBLIC_ANALYTICS_*` build args; empty = no analytics script |
 | `YTM_SECRETS_ENV_FILE` | `deploy/beatbump.env` | env_file `promote.sh` wires into the prod service (mode 600, holds `COMPANION_SECRET_KEY=`) |
 | `YTM_HEALTHCHECK_LABEL` | `fr.ekaii.ytm.healthcheck` | image label saying the binary supports `-healthcheck` |
 | `YTM_E2E_DIR` | `e2e/` | the harness (`run.sh`, fixtures, `out/`) |
@@ -203,6 +204,13 @@ in `ops/env.example` (comment at the end); these are compose environment values,
 | beatbump | `RESIDENTIAL_PROXY` | `http://gost:8888` | direct egress for the InnerTube `next` lookups |
 | beatbump | `YTM_PREFER_IVVP_AUDIO` | `1` | audio through `/aud/<id>` only when this is set and `IVVP_URL` is set |
 | beatbump | `IVVP_URL`, `LOCALF_BASE`, `COVER_BASE` | `http://iv-vp:5007`, `/localf`, `/cover` | already in the production compose |
+
+One more build-time value: the app ships WITHOUT any analytics script (it used to hard-code the production
+Umami script, so every install reported there and an unreachable analytics host held the page load). The
+production keeps its page views only when the build passes `PUBLIC_ANALYTICS_SRC`, `PUBLIC_ANALYTICS_WEBSITE_ID`
+and `PUBLIC_ANALYTICS_HOST`: `stage-cycle.sh` does it from `YTM_ANALYTICS_*`, set in `ops/env.example`. Check in
+the staging shell: `curl -s "$YTM_STAGING_URL/" | grep -c analytics.example.org` = 1 (the value sits in the inline
+loader, which adds the script after the load event).
 
 Then, for the original production layout:
 

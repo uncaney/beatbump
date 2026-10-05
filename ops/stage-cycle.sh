@@ -1,7 +1,8 @@
 #!/bin/sh
 # Staging chain (cycle 34 OP2): build, staging restart, warm-up, header checks, harness core then offline.
 #   1. docker build of $YTM_SRC_DIR into $YTM_IMAGE:staging under flock $YTM_BUILD_LOCK, with
-#      --build-arg VERSION=$(git rev-parse --short HEAD) (the version /api/v1/stats/library serves)
+#      --build-arg VERSION=$(git rev-parse --short HEAD) (the version /api/v1/stats/library serves) and the
+#      optional analytics build args (YTM_ANALYTICS_*, empty = none)
 #   2. staging restart ($YTM_STAGING_COMPOSE, project $YTM_STAGING_PROJECT), warm-up, header checks
 #   3. harness-core then harness-offline (timeout 900 s each, HARNESS_TIER=chain) on $YTM_STAGING_URL
 # Promotes NOTHING: the promotion stays with finish-cycle.sh / promote.sh (SM2 guard), see ops/README.md.
@@ -18,7 +19,10 @@ cd "$YTM_SRC_DIR" || { echo "BUILD_FAIL: source tree missing: $YTM_SRC_DIR"; exi
 SHA=$(git rev-parse --short HEAD)
 echo "=== build staging $(date -u +%H:%M:%S) HEAD $SHA ($YTM_SRC_DIR -> $YTM_IMAGE:staging) ==="
 BLOG=$(mktemp "${TMPDIR:-/tmp}/ytm-build.XXXXXX")
-if ! flock "$YTM_BUILD_LOCK" docker build -q --build-arg VERSION="$SHA" -t "$YTM_IMAGE:staging" . > "$BLOG" 2>&1; then
+# Optional analytics of the app (env.sh YTM_ANALYTICS_*): empty values build an app without any analytics script.
+if ! flock "$YTM_BUILD_LOCK" docker build -q --build-arg VERSION="$SHA" \
+    --build-arg PUBLIC_ANALYTICS_SRC="$YTM_ANALYTICS_SRC" --build-arg PUBLIC_ANALYTICS_WEBSITE_ID="$YTM_ANALYTICS_WEBSITE_ID" \
+    --build-arg PUBLIC_ANALYTICS_HOST="$YTM_ANALYTICS_HOST" -t "$YTM_IMAGE:staging" . > "$BLOG" 2>&1; then
   tail -20 "$BLOG"; rm -f "$BLOG"; echo BUILD_FAIL; exit 1
 fi
 tail -3 "$BLOG"; rm -f "$BLOG"

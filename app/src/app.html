@@ -114,7 +114,28 @@
 				);
 		</script>
 		%sveltekit.head%
-		<script defer src="https://analytics.example.org/st" data-website-id="2041dbc3-b66f-45c6-8650-0b9addb882e3" data-host-url="https://analytics.example.org"></script>
+		<!-- Optional page-view analytics (an Umami-compatible script): OFF unless the build sets
+		     PUBLIC_ANALYTICS_SRC and PUBLIC_ANALYTICS_WEBSITE_ID (Dockerfile build args, PUBLIC_ANALYTICS_HOST
+		     optional). Added once the page has loaded: a <script defer src> in the head held the load event
+		     until the analytics host answered, so an unreachable host froze the page load of every install. -->
+		<script data-analytics-loader>
+			(function () {
+				var src = "%sveltekit.env.PUBLIC_ANALYTICS_SRC%";
+				var id = "%sveltekit.env.PUBLIC_ANALYTICS_WEBSITE_ID%";
+				var host = "%sveltekit.env.PUBLIC_ANALYTICS_HOST%";
+				if (!/^https?:\/\//.test(src) || !id) return;
+				function add() {
+					var s = document.createElement("script");
+					s.defer = true;
+					s.src = src;
+					s.setAttribute("data-website-id", id);
+					if (host) s.setAttribute("data-host-url", host);
+					document.head.appendChild(s);
+				}
+				if (document.readyState === "complete") add();
+				else window.addEventListener("load", add, { once: true });
+			})();
+		</script>
 	</head>
 	<div id="app">%sveltekit.body%</div>
 </html>
