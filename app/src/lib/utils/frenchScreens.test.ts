@@ -122,7 +122,7 @@ export const FILES = [
 
 /**
  * Beatbump-origin files the program edited: only the program's own lines
- * are checked (the original English stays until Camille's decision 1): each
+ * are checked (the original English stays until the owner's decision 1): each
  * entry lists the exact strings that must be French.
  */
 export const PROGRAM_STRINGS: Record<string, string[]> = {

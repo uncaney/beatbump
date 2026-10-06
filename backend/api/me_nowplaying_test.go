@@ -139,7 +139,7 @@ func TestNowPlayingIgnoresHarness(t *testing.T) {
 
 func npTakeBody(device string, pos float64) string {
 	b, _ := json.Marshal(map[string]interface{}{
-		"deviceId": device, "deviceName": "iPhone de Camille", "position": pos, "takenBy": device, "takenAt": 1,
+		"deviceId": device, "deviceName": "iPhone de Sam", "position": pos, "takenBy": device, "takenAt": 1,
 		"payload": map[string]interface{}{"v": 1, "index": 0, "type": "local", "currentTime": pos, "savedAt": 1, "rows": []interface{}{}},
 	})
 	return string(b)
@@ -160,7 +160,7 @@ func TestNowPlayingTakeOver(t *testing.T) {
 	}
 	// A's next plain push is refused and names the taker.
 	code, b := putNowPlaying(t, npBody("dev-a", 1, 45), chromeUA)
-	if code != http.StatusConflict || !strings.Contains(b, `"takenBy":"dev-b"`) || !strings.Contains(b, `"deviceName":"iPhone de Camille"`) {
+	if code != http.StatusConflict || !strings.Contains(b, `"takenBy":"dev-b"`) || !strings.Contains(b, `"deviceName":"iPhone de Sam"`) {
 		t.Fatalf("a after take: %d %s", code, b)
 	}
 	if _, out := getNowPlaying(t); out.DeviceID != "dev-b" || out.Position != 31 {

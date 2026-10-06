@@ -85,7 +85,7 @@ func newServer() *echo.Echo {
 	api.SetVersion(version)
 	// L9-4: c.RealIP() (the client-log rate limit key) only believes
 	// X-Forwarded-For when the direct peer is a proxy of ours (loopback or a
-	// private docker network, i.e. Traefik coolify-proxy); a client reaching
+	// private docker network, i.e. the reverse proxy, e.g. Traefik); a client reaching
 	// the backend directly is keyed on its own address whatever it sends.
 	// X-Real-IP is ignored.
 	e.IPExtractor = echo.ExtractIPFromXFFHeader(
@@ -129,7 +129,7 @@ func newServer() *echo.Echo {
 		HTML5:      true,
 	}))
 
-	// Same-origin audio: /localf, /vp, /cover -> COMPANION_URL (ytm-cache),
+	// Same-origin audio: /localf, /vp, /cover -> COMPANION_URL (the bridge),
 	// /aud/* -> IVVP_URL (iv-vp). Streaming reverse proxies, GET + HEAD.
 	api.RegisterAudioProxyRoutes(e)
 

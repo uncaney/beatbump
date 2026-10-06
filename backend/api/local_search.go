@@ -91,7 +91,7 @@ func envOr(k, d string) string {
 }
 
 // localfURL / coverURL emit SAME-ORIGIN relative URLs by default (/localf,
-// /cover), reverse-proxied by this backend to the ytm-cache bridge (see
+// /cover), reverse-proxied by this backend to the bridge (see
 // audioproxy.go). A legacy absolute LOCALF_BASE/COVER_BASE on a known public
 // host is rewritten to relative as well.
 func localfURL(path string) string {
@@ -675,7 +675,7 @@ func LocalNext(lid string) *NextEndpointResponse {
 }
 
 // ---------------------------------------------------------------------------
-// content-level owned check -- a Go port of the ytm-cache bridge's title_match
+// content-level owned check -- a Go port of the bridge's title_match
 // (bridge.py). videoId is present on <1% of the ~55k library docs, so the
 // videoId-only owned check was a near no-op; this matches by normalized title
 // equality + artist confirmation so already-owned tracks/albums aren't
@@ -746,7 +746,7 @@ func acTitleMatch(playTitle, playAuthor string, hit map[string]interface{}) bool
 }
 
 // meiliOwnsTitleArtist reports whether the owned library already holds a
-// content-equal copy of (title, artist) -- the same strong match ytm-cache uses
+// content-equal copy of (title, artist) -- the same strong match the bridge uses
 // to serve locally.
 func meiliOwnsTitleArtist(title, artist string) bool {
 	if strings.TrimSpace(title) == "" {

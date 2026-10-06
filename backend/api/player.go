@@ -197,7 +197,7 @@ func PlayerEndpointHandler(c echo.Context) error {
 	// Prefetch requests (next track warm-up) must not trigger server side acquisition.
 	// Neither must harness plays (decision 4: X-Ytm-Harness: 1 or a harness
 	// user agent, same rule as the stats; YTM_STATS_INCLUDE_HARNESS=1 on the
-	// staging lets them acquire). Note: the ytm-cache bridge enqueues the
+	// staging lets them acquire). Note: the bridge enqueues the
 	// played track itself during resolution and does not see these headers;
 	// this gate covers the album and queue lookahead this server enqueues.
 	if !isPrefetchRequest(c) && !harnessRequest(c.Request()) {
@@ -229,7 +229,7 @@ func autoCacheRun(profile string, videoId string, playlistId string, playerRespo
 		return
 	}
 
-	// (a) The PLAYED track is enqueued by the ytm-cache bridge during
+	// (a) The PLAYED track is enqueued by the bridge during
 	// player resolution (it applies the same content-aware owned check),
 	// so we do NOT enqueue it here too -- doing both raced and produced
 	// duplicate Yubal jobs (P3). We only need the owned verdict to gate

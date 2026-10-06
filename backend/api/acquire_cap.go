@@ -1,6 +1,6 @@
 package api
 
-// Decision 8 (program/DECISIONS-PAUL.md): a server side cap on the
+// Decision 8 (program decisions log): a server side cap on the
 // acquisitions a profile may request per UTC day, 20 by default
 // (YTM_ACQUIRE_DAILY_CAP, 0 = no cap). The unit is the album: one acquisition
 // is one album or one playlist / radio queue newly requested by a play

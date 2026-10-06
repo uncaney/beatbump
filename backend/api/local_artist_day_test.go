@@ -174,7 +174,7 @@ func TestArtistOfDayStableWithinDay(t *testing.T) {
 // id a YouTube play carries), and keeps its pick for the day.
 func TestArtistOfDayExcludesPlayedArtists(t *testing.T) {
 	stub := newArtistDayStub(t, 40)
-	db.DB.Create(&db.Profile{ID: "p-test", Name: "Camille", CreatedAt: time.Now()})
+	db.DB.Create(&db.Profile{ID: "p-test", Name: "Alex", CreatedAt: time.Now()})
 	// Every eligible artist is played except "Artist 07" (2 + 7%4 = 5 albums):
 	// "Artist 11" only through its artist id (a YouTube play of a renamed credit).
 	for _, a := range stub.artists {
@@ -235,7 +235,7 @@ func TestArtistOfDayExcludesPlayedArtists(t *testing.T) {
 // library pick of the day, flagged "all_played", persisted as such.
 func TestArtistOfDayFallbackWhenAllPlayed(t *testing.T) {
 	stub := newArtistDayStub(t, 24)
-	db.DB.Create(&db.Profile{ID: "p-test", Name: "Camille", CreatedAt: time.Now()})
+	db.DB.Create(&db.Profile{ID: "p-test", Name: "Alex", CreatedAt: time.Now()})
 	for _, a := range stub.artists {
 		db.DB.Create(&db.PlayEvent{ProfileID: "p-test", Ref: "v" + mstr(a, "name"), Title: "t", Artist: mstr(a, "name"), Source: "local", PlayedAt: time.Now()})
 	}
@@ -356,7 +356,7 @@ func TestPlayedArtistNamesNormalised(t *testing.T) {
 
 func TestArtistOfDayExcludesFeaturedCredits(t *testing.T) {
 	stub := newArtistDayStub(t, 40)
-	db.DB.Create(&db.Profile{ID: "p-test", Name: "Camille", CreatedAt: time.Now()})
+	db.DB.Create(&db.Profile{ID: "p-test", Name: "Alex", CreatedAt: time.Now()})
 	// Every eligible artist is played except "Artist 07", each through a
 	// credit the raw comparison used to miss.
 	i := 0

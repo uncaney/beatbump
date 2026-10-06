@@ -2,7 +2,7 @@ package api
 
 // Same-origin audio: the SvelteKit front is served by this Go backend, and
 // every audio/cover URL it receives must be RELATIVE to this origin. The bridge
-// (ytm-cache) and the legacy defaults used to emit absolute URLs on
+// (the bridge) and the legacy defaults used to emit absolute URLs on
 // ytify.ekaii.fr / invidious.ekaii.fr; those hosts sit behind a cookie-gated
 // PoW wall without CORS, so a cross-origin fetch() from the app fails.
 //
@@ -255,7 +255,7 @@ func coverMissAnswer(c echo.Context) error {
 }
 
 // audioProxyFor returns a (cached) streaming reverse proxy for an upstream
-// base URL such as "http://ytm-cache:8789" or "http://iv-vp:5007". The
+// base URL such as "http://bridge:8789" or "http://iv-vp:5007". The
 // incoming request path is appended to the base path; query and Range are
 // forwarded as-is.
 func audioProxyFor(base string) (*httputil.ReverseProxy, error) {
@@ -352,7 +352,7 @@ func serveAudioProxy(c echo.Context, upstream string) error {
 }
 
 // AudioCompanionProxyHandler proxies /localf, /vp and /cover (same path, same
-// query, Range passthrough) to the ytm-cache bridge at COMPANION_URL.
+// query, Range passthrough) to the bridge at COMPANION_URL.
 func AudioCompanionProxyHandler(c echo.Context) error {
 	if err := validateAudioProxyRequest(c.Request().URL.Path, c.Request().URL.Query()); err != nil {
 		return c.String(http.StatusBadRequest, "bad request: "+err.Error())

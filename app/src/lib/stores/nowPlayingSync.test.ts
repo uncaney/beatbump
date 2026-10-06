@@ -79,7 +79,7 @@ describe("deviceNameFromUA", () => {
 
 describe("device name (40A)", () => {
 	it("normalizes: trim, collapse spaces, cap the length", () => {
-		expect(normalizeDeviceName("  iPhone   de\tPaul ")).toBe("iPhone de Camille");
+		expect(normalizeDeviceName("  iPhone   de\tSam ")).toBe("iPhone de Sam");
 		expect(normalizeDeviceName("x".repeat(80))).toHaveLength(DEVICE_NAME_MAX);
 		expect(normalizeDeviceName(null)).toBe("");
 	});
@@ -116,10 +116,10 @@ describe("device name (40A)", () => {
 			put,
 		});
 		await push();
-		name = "iPhone de Camille";
+		name = "iPhone de Sam";
 		t = 30;
 		await push();
-		expect(put.mock.calls.map((c) => c[0].deviceName)).toEqual(["iPhone", "iPhone de Camille"]);
+		expect(put.mock.calls.map((c) => c[0].deviceName)).toEqual(["iPhone", "iPhone de Sam"]);
 	});
 });
 
@@ -482,7 +482,7 @@ describe("Continuer ici (40A)", () => {
 	});
 	it("a 409 pauses once (onTaken) and stops overwriting the row", async () => {
 		let t = 0;
-		const put = vi.fn(async (_b: NowPlayingBody, _k: boolean) => ({ status: 409, takenBy: "phone", deviceName: "iPhone de Camille" }));
+		const put = vi.fn(async (_b: NowPlayingBody, _k: boolean) => ({ status: 409, takenBy: "phone", deviceName: "iPhone de Sam" }));
 		const onTaken = vi.fn();
 		const push = makeNowPlayingPusher({
 			device: { deviceId: "mac", deviceName: "Mac" },
@@ -492,8 +492,8 @@ describe("Continuer ici (40A)", () => {
 			onTaken,
 		});
 		expect(await push()).toBe("taken");
-		expect(onTaken).toHaveBeenCalledWith({ deviceId: "phone", deviceName: "iPhone de Camille" });
-		expect(push.lostTo()).toEqual({ deviceId: "phone", deviceName: "iPhone de Camille" });
+		expect(onTaken).toHaveBeenCalledWith({ deviceId: "phone", deviceName: "iPhone de Sam" });
+		expect(push.lostTo()).toEqual({ deviceId: "phone", deviceName: "iPhone de Sam" });
 		t = 60;
 		expect(await push()).toBe("skipped");
 		expect(put).toHaveBeenCalledTimes(1);
@@ -540,7 +540,7 @@ describe("Continuer ici (40A)", () => {
 		const now = 100_000_000;
 		const row = (over: Record<string, unknown> = {}) => ({
 			deviceId: "phone",
-			deviceName: "iPhone de Camille",
+			deviceName: "iPhone de Sam",
 			position: 1,
 			payload: {},
 			updatedAt: now,
@@ -548,7 +548,7 @@ describe("Continuer ici (40A)", () => {
 			takenAt: now - 1000,
 			...over,
 		});
-		expect(takenAway(row(), "mac", now)).toEqual({ deviceId: "phone", deviceName: "iPhone de Camille" });
+		expect(takenAway(row(), "mac", now)).toEqual({ deviceId: "phone", deviceName: "iPhone de Sam" });
 		expect(takenAway(row(), "phone", now)).toBeNull();
 		expect(takenAway(row({ takenBy: undefined }), "mac", now)).toBeNull();
 		expect(takenAway(row({ takenAt: now - TAKE_GUARD_MS - 1, updatedAt: now - TAKE_GUARD_MS - 1 }), "mac", now)).toBeNull();
@@ -559,7 +559,7 @@ describe("Continuer ici (40A)", () => {
 		const old = now - TAKE_GUARD_MS - 60_000;
 		const row = (over: Record<string, unknown> = {}) => ({
 			deviceId: "phone",
-			deviceName: "iPhone de Camille",
+			deviceName: "iPhone de Sam",
 			position: 1,
 			payload: {},
 			updatedAt: old,
@@ -577,7 +577,7 @@ describe("Continuer ici (40A)", () => {
 		const serverNow = 100_000_000;
 		const row = (over: Record<string, unknown> = {}) => ({
 			deviceId: "phone",
-			deviceName: "iPhone de Camille",
+			deviceName: "iPhone de Sam",
 			position: 1,
 			payload: {},
 			updatedAt: serverNow - 5_000,
@@ -670,7 +670,7 @@ describe("Continuer ici (40A)", () => {
 		expect(gesture.recent()).toBe(false);
 	});
 	it("takenToast names the device in French", () => {
-		expect(takenToast("iPhone de Camille")).toBe("Lecture reprise sur iPhone de Camille");
+		expect(takenToast("iPhone de Sam")).toBe("Lecture reprise sur iPhone de Sam");
 		expect(takenToast("  ")).toBe("Lecture reprise sur un autre appareil");
 	});
 	it("takeRemoteResume plays the restored queue, then PUTs the take with the offer state", async () => {
@@ -685,7 +685,7 @@ describe("Continuer ici (40A)", () => {
 				calls.push("restore:" + o.autoplay);
 				return true;
 			},
-			device: () => ({ deviceId: "phone", deviceName: "iPhone de Camille" }),
+			device: () => ({ deviceId: "phone", deviceName: "iPhone de Sam" }),
 			put,
 			markOwner: () => calls.push("owner"),
 			now: () => 999,
@@ -693,7 +693,7 @@ describe("Continuer ici (40A)", () => {
 		expect(ok).toBe(true);
 		expect(calls).toEqual(["restore:true", "owner", "put"]);
 		expect(put).toHaveBeenCalledWith(
-			expect.objectContaining({ deviceId: "phone", deviceName: "iPhone de Camille", takenBy: "phone", takenAt: 999, position: 77 }),
+			expect.objectContaining({ deviceId: "phone", deviceName: "iPhone de Sam", takenBy: "phone", takenAt: 999, position: 77 }),
 		);
 	});
 	it("takeRemoteResume takes nothing when the restoration failed", async () => {

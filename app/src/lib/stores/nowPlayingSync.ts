@@ -600,7 +600,7 @@ export function guessedDeviceName(): string {
 
 /**
  * This browser's device id / name (stable across tabs and reloads). 40A: the
- * name given on the Compte page ("iPhone de Camille") wins over the UA guess.
+ * name given on the Compte page ("iPhone de Sam") wins over the UA guess.
  */
 export function localDevice(): { deviceId: string; deviceName: string } {
 	const storage = browserStorage();

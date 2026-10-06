@@ -2,7 +2,7 @@ package api
 
 // Album cover resolution for local track items.
 //
-// /cover?lid= is served by the ytm-cache bridge from the embedded art of the
+// /cover?lid= is served by the bridge from the embedded art of the
 // track file behind that lid; tracks without embedded art render a "?"
 // placeholder. The albums index carries a coverLid per album (the lid the
 // indexer found art for), so a track item prefers its ALBUM's coverLid and

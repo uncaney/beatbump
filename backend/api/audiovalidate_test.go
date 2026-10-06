@@ -16,7 +16,7 @@ func TestValidateVPTarget(t *testing.T) {
 	}
 	bad := []string{
 		"", "http://rr3---sn-a.googlevideo.com/videoplayback", "https://example.com/videoplayback",
-		"https://googlevideo.com.evil.tld/videoplayback", "https://ytm-cache:8789/localf?p=x",
+		"https://googlevideo.com.evil.tld/videoplayback", "https://bridge:8789/localf?p=x",
 		"https://127.0.0.1/videoplayback", "https://[::1]/videoplayback", "https://user@a.googlevideo.com/videoplayback",
 		"https://a.googlevideo.com:8443/videoplayback", "https://a.googlevideo.com/x", "ftp://a.googlevideo.com/videoplayback",
 	}

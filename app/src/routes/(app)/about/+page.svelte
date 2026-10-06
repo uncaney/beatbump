@@ -289,8 +289,8 @@
 					</dd>
 				</dl>
 			{/if}
-			<!-- B8-22: LIBRARY-LINT's hygiene counters (read-only; a list for
-			     Camille, not a decision made here). -->
+			<!-- B8-22: LIBRARY-LINT's hygiene counters (read-only; a list for the
+			     owner, not a decision made here). -->
 			{#if lintError}
 				<p class="state lint-hint">Impossible de lire les indicateurs de bibliothèque.</p>
 			{:else if lint}
