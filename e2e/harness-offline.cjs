@@ -535,8 +535,16 @@ async function assertAdvancing(page, label) {
     await prog.waitFor({ state: "visible", timeout: 15000 });
     const st = await pollUntil(async () => { const s = await prog.getAttribute("data-state"); return s && s !== "planning" ? s : null; }, 20000);
     let packNote = `pack state=${st}, total=${await prog.getAttribute("data-total")}`;
+    let stNow = st;
     if (st === "running") {
       await sleep(1500);
+      stNow = await prog.getAttribute("data-state");
+      // A small library (under 2000 tracks: short local files) can finish the whole pack within those 1.5 s; the
+      // cancel itself is exercised by pack_cancel_two_tabs, whose context holds the downloads. On a larger
+      // library the pack must still be running here.
+      if (stNow === "done" && !(await libraryAtLeast(2000))) packNote += ", done within 1.5 s (small library), cancel not exercised here";
+    }
+    if (stNow === "running") {
       const t0 = Date.now();
       await page.locator('[data-testid="pack-cancel"]').first().click({ timeout: 5000 });
       const fin = await pollUntil(async () => { const s = await prog.getAttribute("data-state"); return s === "cancelled" || s === "done" ? s : null; }, 6000);
