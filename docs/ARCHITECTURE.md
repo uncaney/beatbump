@@ -60,7 +60,7 @@ of the first `local/songs?limit=1` track): it never triggers an acquisition.
    `/localf?p=...` so the best local copy is served instead (the "best quality wins" rule); on a
    miss it forwards the YouTube answer with the stream rewritten to `/vp?u=<googlevideo url>`.
 3. The stream then goes through `/vp` (the Go proxy, then the bridge, which fetches googlevideo
-   through `GOST_PROXY` when set, with a strict allow-list on the URL). In Camille's production
+   through `GOST_PROXY` when set, with a strict allow-list on the URL). In the original production
    layout the Go server instead prefers `/aud/<videoId>` served by an iv-vp sidecar
    (`YTM_PREFER_IVVP_AUDIO`, `IVVP_URL`), because the companion's googlevideo URLs were throttled
    to about 18 KB/s without the n-sig transform; `/aud` downloads the audio once and serves it at

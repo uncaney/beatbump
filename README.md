@@ -20,8 +20,7 @@ What makes it different:
 - **Own your data.** Profiles, favourites, follows, playlists, history and statistics live in a
   SQLite file on your server. Audio files live in a folder you control. Nothing leaves the box.
 
-The user interface is in **French**, by decision of the owner (see
-`docs/archive/DECISIONS-PAUL.md`, decisions 1 and 5): the app was built for a French-speaking
+The user interface is in **French**, by decision of the owner (program decisions 1 and 5): the app was built for a French-speaking
 circle, and a dictionary with browser detection was judged more costly than useful. All UI strings
 live in the SvelteKit sources under `app/src` (Svelte markup, the toast and label modules, and the
 `DROPDOWN_LABELS_FR` / `SHELF_TITLES_FR` tables in `app/src/lib/configs/dropdowns.config.ts` and
@@ -142,7 +141,7 @@ own compose file.
 | `COVER_BASE` | | base path of cover URLs; `/cover` keeps them same-origin |
 | `IVVP_URL` | | sidecar that serves `/aud/<videoId>` (progressive audio); optional |
 | `AUDIO_PUBLIC_BASES` | built-in table | mapping of public audio bases to proxy paths (`backend/api/audioproxy.go`) |
-| `RESIDENTIAL_PROXY` | `http://gost:8888` | outbound proxy for YouTube media requests |
+| `RESIDENTIAL_PROXY` | empty (direct) | outbound HTTP proxy for the background InnerTube `next` lookups (e.g. a residential egress proxy) |
 | `PLAYER_TIMEOUT_SECONDS` | `20` | budget of one `player.json` call to YouTube |
 | `BEATBUMP_AUTOCACHE` | `true` | a play of a track you do not own queues its acquisition; `false`, `0`, `no` or `off` disables |
 | `YTM_ACQUIRE_DAILY_CAP` | `20` | acquisitions (albums) per profile per UTC day; `0` = no cap |
@@ -409,7 +408,8 @@ alert thresholds (`ops/weekly.sh`, `ops/monday.sh`) and a recipe for audits and 
 48-hour program (30 September to 2 October 2026) it ran 58 promoted cycles over 74 staging chains,
 then a cycle 59 on 4 and 5 October that applied 21 pending product decisions by their recommended
 defaults. `AGENTS.md` is the hand-over for an AI agent taking the loop over; `ops/README.md`
-documents each script; `docs/archive/` is the raw (French) journal of the program.
+documents each script; the lessons are in `CHALLENGES.md` and `AGENTS.md`, and the raw (French)
+journal of the program is kept privately by the maintainers.
 
 ## Status and limits
 

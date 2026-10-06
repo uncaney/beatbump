@@ -47,7 +47,5 @@ VERSION text eol=lf
 *.gz binary
 *.zip binary
 
-# Keep the audit/journal archives out of language statistics and diffs
-docs/archive/** linguist-documentation
-docs/archive/** -diff
+# Keep the journal texts out of language statistics
 ops/journal/** linguist-documentation

@@ -7,9 +7,8 @@ All notable changes to this fork are documented here. The format follows
 release images carry `v<VERSION>+<git short sha>`, local builds the short sha.
 
 The 1.0.0 entry condenses the 65 production promotions of the autonomous
-improvement programme (2026-09-30 to 2026-10-05) whose French, per-promotion
-log is kept in `docs/archive/CHANGELOG.md`, with the final report in
-`docs/archive/FINAL-REPORT.md`.
+improvement programme (2026-09-30 to 2026-10-05); its French, per-promotion
+log and final report are kept privately by the maintainers.
 
 ## [Unreleased]
 
@@ -279,8 +278,8 @@ production during the programme.
   `YTM_ADMIN_TOKEN`, submissions rate limited per address), access log with
   cache state, latency script that excludes the harness, the healthcheck and
   the uptime monitor.
-- Programme documents archived under `docs/archive/` (runbook, loop, decisions,
-  backlog, audits, brainstorms, weekly lines).
+- Programme runbook condensed into `docs/OPERATIONS.md`, `AGENTS.md` and
+  `CHALLENGES.md`.
 
 #### Browser harness
 

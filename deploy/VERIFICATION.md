@@ -1,18 +1,18 @@
 # Stack verification
 
 - Date: 2026-10-05 (11:30 to 11:45 UTC)
-- Box: `docker-host` (hostname `docker-host`, Linux, Docker Compose v5.1.4, load average 30-35 during the run)
+- Host: the maintainers' Docker host (Linux, Docker Compose v5.1.4, load average 30-35 during the run)
 - Commit under test: `8a32dd1` (branch `ship`; the `beatbump` image was built at `674ecf9`, the Go/app
   sources did not change between the two, only `indexer/` and `up.sh`)
-- Sandbox: `git clone -b ship /srv/beatbump/agents/ship /srv/beatbump/agents/ship-sandbox/beatbump`
-  run with `COMPOSE_PROJECT_NAME=bbship`, so nothing collides with the production project `ytm`.
-- Port: the brief asked for 18080, but 18080 is held by an unrelated `monerod` container on this box,
+- Sandbox: `git clone -b ship <checkout> <sandbox>/beatbump`
+  run with `COMPOSE_PROJECT_NAME=bbship`, so nothing collides with the production project on the same host.
+- Port: the brief asked for 18080, but 18080 is held by an unrelated container on this host,
   so the sandbox publishes **18081**. Everything below uses `http://127.0.0.1:18081`.
 
 ## 1. One command, fresh clone
 
 ```
-$ cd /srv/beatbump/agents/ship-sandbox/beatbump
+$ cd <sandbox>/beatbump
 $ BEATBUMP_PORT=18081 COMPOSE_PROJECT_NAME=bbship ./up.sh --sample-library
 [up.sh] created deploy/.env from deploy/.env.example
 [up.sh] generated MEILI_MASTER_KEY (64 chars)
@@ -43,7 +43,7 @@ $ BEATBUMP_PORT=18081 COMPOSE_PROJECT_NAME=bbship ./up.sh --sample-library
 ```
 
 The first build (node + go app, bridge, indexer, yubal with deno) took about 3 minutes on this loaded
-box. The sample library generation took 11 s.
+host. The sample library generation took 11 s.
 
 `COMPANION_SECRET_KEY` is 16 characters, not 32 bytes of hex: invidious-companion refuses any other
 length (verified against the config.example.toml shipped in the image and the production key length).
@@ -156,7 +156,7 @@ only used for the player); the result merges a local shelf when the query matche
 $ curl -s 'http://127.0.0.1:18081/api/v1/search.json?q=daft+punk'
 http 200 bytes 25542 time 0.578898s
 top keys: ['results', 'continuation']
-titles found: 30 first: ['Results', 'Random Access Memories', 'Discovery', 'Alive 2007', 'Aerodynamic', 'Touch (feat. Camille Williams)']
+titles found: 30 first: ['Results', 'Random Access Memories', 'Discovery', 'Alive 2007', 'Aerodynamic', ...]
 ```
 
 ## 7. YouTube player through bridge -> companion, direct egress, auto-cache
@@ -227,18 +227,18 @@ $ curl -s http://127.0.0.1:18081/api/v1/stats/library
 ## State at the end of this verification
 
 The sandbox stack `bbship` is **left running** at `http://127.0.0.1:18081/` (project `bbship`,
-clone at `/srv/beatbump/agents/ship-sandbox/beatbump`, commit `8a32dd1`) for the browser
-harness. Stop it with `cd /srv/beatbump/agents/ship-sandbox/beatbump && COMPOSE_PROJECT_NAME=bbship ./up.sh down -v`.
+clone at `<sandbox>/beatbump`, commit `8a32dd1`) for the browser
+harness. Stop it with `cd <sandbox>/beatbump && COMPOSE_PROJECT_NAME=bbship ./up.sh down -v`.
 
 ## Known limitations (outside the packaged paths)
 
-- `backend/_youtube/api/api.go` `getResidentialHttpClient()` falls back to `http://gost:8888` when
-  `RESIDENTIAL_PROXY` is empty. Only `NextResidential` (background auto-cache "next" lookups) uses it;
-  in a stack without a proxy those lookups fail quietly. The Go default should become "direct when
+- `backend/_youtube/api/api.go` `getResidentialHttpClient()` fell back to a host-specific proxy container (`http://gost:8888`) when
+  `RESIDENTIAL_PROXY` was empty. Only `NextResidential` (background auto-cache "next" lookups) uses it;
+  in a stack without a proxy those lookups failed quietly. The Go default has since become "direct when
   empty"; the compose file already passes `RESIDENTIAL_PROXY=${EGRESS_PROXY:-}`.
 - `YTM_PREFER_IVVP_AUDIO=0` is set in compose: without it the Go server reroutes every `/vp` audio
   URL to `/aud/<id>`, which only exists with an iv-vp sidecar.
-- Camille's production compose must now set the bridge variables explicitly to keep its behaviour, since
+- The original production compose must now set the bridge variables explicitly to keep its behaviour, since
   the bridge defaults are generic: `GOST_PROXY`, `IVVP_UPSTREAM`, `INVIDIOUS_UPSTREAM`,
   `VP_PUBLIC_BASE`, `LOCALF_PUBLIC_BASE`, `AUD_PUBLIC_BASE`; yubal needs `YTM_YTDLP_PROXY`.
 
@@ -246,7 +246,7 @@ harness. Stop it with `cd /srv/beatbump/agents/ship-sandbox/beatbump && COMPOSE_
 
 The 1.0.0 gate. A brand-new `git clone` of the release branch, nothing reused
 from earlier sandboxes (`./up.sh down -v` first), one command, then the full
-browser harness with the sample-library fixtures. Host: docker-host (32 cores,
+browser harness with the sample-library fixtures. Host: the maintainers' Docker host (32 cores,
 load 30 to 50 during the run).
 
 ```sh

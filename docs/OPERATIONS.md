@@ -1,8 +1,8 @@
 # Operations
 
 Deploy, roll back, check health, back up, schedule, read alerts, and the weekly report. This is
-the English translation of `docs/archive/RUNBOOK.md` (written at cycle 36, French), updated for
-cycle 59 (secrets in env files, cron installed, image-tag guard, content ETag on SPA routes).
+the English version of the program's runbook (written at cycle 36 in French; the raw program
+journal is kept privately by the maintainers), updated for cycle 59 (secrets in env files, cron installed, image-tag guard, content ETag on SPA routes).
 Every command below exists in `ops/` or `e2e/`; a command that is not taken from a script is said
 so.
 
@@ -40,7 +40,7 @@ python3 ops/journal.py <cycle> <sha> --chain <N>
 # health: HTTP smoke (13 checks, under 90 s, no browser) and the served version
 sh ops/smoke.sh https://<host> [expected sha]
 curl -s --resolve <host>:443:127.0.0.1 https://<host>/api/v1/stats/library
-docker inspect -f '{{.Image}}' ytm-beatbump | cut -c8-19
+docker inspect -f '{{.Image}}' "$YTM_PROD_CONTAINER" | cut -c8-19
 
 # Monday measurements
 sh ops/monday.sh                      # prod harness full + weekly.sh + smoke
@@ -62,20 +62,19 @@ docker tag beatbump-ekaii:prod-backup-<TS> beatbump-ekaii:local && cp docker-com
    `/api/v1/me/*`), `ytm-offline-audio` + `ytm-offline-meta`, `ytm-covers`.
 5. Network entry: reverse proxy (Traefik) and a bot wall in front of the container; from the host,
    `127.0.0.1:443` is the proxy.
-6. Production: container `ytm-beatbump`, image `beatbump-ekaii:local`, the production compose
+6. Production: container `$YTM_PROD_CONTAINER`, image `beatbump-ekaii:local`, the production compose
    file, the SQLite folder.
-7. Staging: container `ytm-beatbump-staging`, image `beatbump-ekaii:staging`, its own compose
-   project (`ytm-staging`), its own database, its own host name.
+7. Staging: container `$YTM_STAGING_CONTAINER`, image `beatbump-ekaii:staging`, its own compose
+   project (`$YTM_STAGING_PROJECT`), its own database, its own host name.
 8. Both join the external networks of the music stack and of the companion.
 9. Reference code: the integration checkout (branch `agents/integration`).
 10. The bridge, indexer and yubal have no staging: touching them is a maintenance window.
 
-Camille's production layout (the concrete values the scripts were written against; the generic
-form is in `ops/env.example`): service root `/srv/beatbump`; integration checkout
-`agents/integration`; staging compose `agents/staging-compose.yml`; database `beatbump-db/`;
-backups `image-backups/`; env files `beatbump.env` and `beatbump-staging.env` (mode 600);
-hosts `music.ekaii.fr` and `staging-music.ekaii.fr`; box `docker-host`, reached with
-`ssh -o ControlMaster=no -o ControlPath=none`.
+The original production layout followed the same shape (the generic form is in
+`ops/env.example`; keep your real values in `ops/env.local`, never committed): one service root;
+an integration checkout `agents/integration`; a separate staging compose file; database
+`beatbump-db/`; backups `image-backups/`; env files `beatbump.env` and `beatbump-staging.env`
+(mode 600); a production host name and a staging host name behind the same reverse proxy.
 
 ## 2. Deploy
 
@@ -205,7 +204,7 @@ gzip -t "$T" && [ "$(wc -c < "$T")" -gt 10485760 ] && echo "tarball OK"
 
 ### 3.3 After a rollback, verify
 
-- `docker inspect -f '{{.Image}}' ytm-beatbump | cut -c8-19` equals the target id.
+- `docker inspect -f '{{.Image}}' "$YTM_PROD_CONTAINER" | cut -c8-19` equals the target id.
 - `stats/library` `version` equals the expected commit.
 - Audio: a Range on `/localf` of a local track answers 206 with an audio content type.
 - `probe-postdeploy.cjs`, then the production harness (an older image fails the steps added since:
@@ -228,20 +227,20 @@ Always from the host, with `--resolve` (hairpin NAT: public names resolve to the
 - Audio without acquisition: a local lid from `local/songs?limit=1`, `player.json?videoId=<lid>`
   with `X-Ytm-Prefetch: 1`, then a Range on the returned `/localf` URL: 206, `accept-ranges:
   bytes`, `x-ytm-source: local`. Never probe with a YouTube id you do not own: it acquires.
-- Container: `docker inspect -f '{{.State.Health.Status}}' ytm-beatbump` = `healthy`
+- Container: `docker inspect -f '{{.State.Health.Status}}' "$YTM_PROD_CONTAINER"` = `healthy`
   (`/app/beat-server -healthcheck` every 30 s).
 - Client error log: `GET /api/v1/client-log?limit=50` with `Authorization: Bearer <YTM_ADMIN_TOKEN>`
   (401 without or with a wrong token, 404 while the variable is unset).
-- Server logs: `docker logs --since 168h ytm-beatbump` (one JSON line per request; `docker logs`
+- Server logs: `docker logs --since 168h "$YTM_PROD_CONTAINER"` (one JSON line per request; `docker logs`
   does not accept `7d`). The window stops at the last promotion (container recreated);
   `promote.sh` copies the previous log to the program logs folder.
 - Weekly line in one command: `WEEKLY_DRY_RUN=1 sh ops/weekly.sh` (about 1 s).
-- Acquisition: `docker logs -t --since 168h ytm-yubal 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -c 'download_service - Downloaded:'`.
+- Acquisition: `docker logs -t --since 168h "$YTM_ACQ_CONTAINER" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -c 'download_service - Downloaded:'`.
 - Disk: `timeout 10 df -h <service root> <music folder>` (NFS can hang; the timeout matters).
 - Image guard: `sh ops/smoke.sh https://<host>` check 0 `prod_image_tag` (restores
   `beatbump-ekaii:local` from the tarball if the tag is missing; fails explicitly if it differs).
-- External monitors (Camille's layout): Uptime Kuma monitors 86, 119, 106 and 167 (API
-  `stats/library`, keyword `tracks`) with Discord alerts; Umami analytics. Staging is not
+- External monitors (original layout): Uptime Kuma HTTP monitors on the page and on the API
+  (`stats/library`, keyword `tracks`) with chat alerts; Umami analytics. Staging is not
   monitored on purpose.
 
 ## 5. Environment variables
@@ -273,7 +272,7 @@ build stamps the version with `ARG VERSION` (`--build-arg VERSION=$(git rev-pars
 `docker run --rm --name ytm-harness-<TS> --network host` with the real Chrome image
 (`ytm-harness-chrome:1.47.0`, rebuilt from `e2e/chrome-image` if pruned; else the stock Playwright
 image with a warning about AAC), passes `--host-resolver-rules` from `HARNESS_RESOLVER` when the
-URL host is a name (Camille's box: `MAP *.ekaii.fr 127.0.0.1`, with `HARNESS_RESOLVE_IP=127.0.0.1`
+URL host is a name (behind a broken hairpin: `MAP *.example.org 127.0.0.1`, with `HARNESS_RESOLVE_IP=127.0.0.1`
 for the harness's own Node requests), mounts `HARNESS_FIXTURES` (default `e2e/fixtures.json`),
 forwards `HARNESS_TIER`, `HARNESS_ONLY`, `HARNESS_STATS_INCLUDE_HARNESS`, `YTM_SMOKE_EXPECT`, and
 removes the container on exit. Output: `e2e/out/<TS>/` with `report.json`, one PNG per step,
@@ -294,7 +293,7 @@ precondition not met, never a failure).
 | `perf-audit/api-latency.sh`, `perf-audit/log-latency.py` | curl timings of the API; latency percentiles and cache hit rate from the access logs (harness, healthcheck and Kuma excluded) | short |
 
 The program's one-off probes (`probe-gap.cjs` and the bug probes) were dropped from the tree;
-their results live in `docs/archive/` (`GAP-MEASURE.md`: 29 ms median between cached local
+their results live in the private program journal (29 ms median gap between cached local
 tracks) and in `CHALLENGES.md`.
 
 ### 6.3 Rules
@@ -320,11 +319,11 @@ full list with fixes.
 | Production compose | `docker-compose.yml.pre-sameorigin-<TS>`, ten kept | `promote.sh` | `cp` then `up -d --no-deps beatbump` |
 | SQLite database | `image-backups/beatbump-db-before-<reason>-<TS>.sqlite` | SQLite online `backup` API before any write to production data (decision 20 shows the script) | stop the service, copy the file over `beatbump.db`, start |
 | Access logs | program logs folder, `access-<TS>-<sha>.log`, ten kept | `promote.sh` before recreating the container | read with `e2e/perf-audit/log-latency.py` |
-| Bridge image | `ytm-cache:bak-<lane>` tag plus a tarball, `bridge.py.bak-<lane>` | by hand before a maintenance window | `docker tag`, recreate |
+| Bridge image | `<bridge image>:bak-<lane>` tag plus a tarball, `bridge.py.bak-<lane>` | by hand before a maintenance window | `docker tag`, recreate |
 | Old production tree | `image-backups/beatbump-src-<TS>.tar.gz` | decision 22 | not needed |
 
 The music folder itself is not backed up by these scripts: it is the user's data on their own
-storage (a NAS in Camille's layout).
+storage (a NAS in the original layout).
 
 ## 8. Cron and the weekly report
 
@@ -349,7 +348,7 @@ usage 7 days; acquisition; disk; image backups; slow API p90; retention 7 days) 
 `ALERT.md` when: a harness report is under 100 % or missing, no `full` report or one older than
 `WEEKLY_MAX_REPORT_AGE_D` (8 days), a step gated for over a week, the served version differs from
 the last `PROD = <sha>`, a volume under 10 % free or `df` hung 10 s, zero downloads with
-acquisition failures, Kuma monitor 167 DOWN (only with the key). Secrets: `WEEKLY_KUMA_KEY` and
+acquisition failures, the Kuma monitor `YTM_KUMA_STATS_MONITOR` DOWN (only with the key). Secrets: `WEEKLY_KUMA_KEY` and
 `YTM_ADMIN_TOKEN` by environment or by stdin with the `-` argument, never a file path.
 
 Reading, every Monday (two minutes): `tail -2 WEEKLY.md`; `ls -l ALERT.md`. An `ALERT.md` block
@@ -365,7 +364,7 @@ midnight cleanup if needed; an `ALERT.md` block on failure.
 
 ## 9. Maintenance of components without staging
 
-The bridge (`ytm-cache`), the indexer and yubal are production-only. For a change: prepare the
+The bridge, the indexer and yubal are production-only. For a change: prepare the
 patch in a copy, save the image under a tag and a tarball, pick a window (the bridge is
 unavailable about two minutes at start-up on a large NAS library, see `CHALLENGES.md` Y), apply,
 replay the core and offline harness, keep the rollback command. The companion secret rotation is
@@ -376,7 +375,7 @@ a decision with its rollback (decision 18: facet limit 1000 and genre sorted by 
 
 ## 10. Known incidents (dated)
 
-- 30 September 22:47 UTC: `--filter ancestor=` removed `ytm-beatbump`; recreated in one minute.
+- 30 September 22:47 UTC: `--filter ancestor=` removed the production container; recreated in one minute.
   Rule: exact names only.
 - 1 October 00:12 UTC: an image prune (Coolify) removed the production image, the backup tags and
   the tool images under the running container; tarballs outside the store since.

@@ -63,12 +63,11 @@ brainstorm or backlog id. Co-authorship lines go at the end of the message.
 ## Product decisions
 
 Anything that needs the owner's choice (scope, language, a production component without staging,
-production data, a cost) is not decided in a branch. Add a numbered row and a detail section to
-`docs/archive/DECISIONS-PAUL.md` (pattern: what is blocked, evidence, recommended default, effort,
+production data, a cost) is not decided in a branch. Open an issue labelled `decision` with a numbered
+proposal (pattern: what is blocked, evidence, recommended default, effort,
 what happens after a "yes") and leave the current behaviour in place until it is answered.
 
 ## What not to touch
 
 The production compose file (only `ops/promote.sh` writes it), the bridge, the indexer and yubal
-outside a maintenance window (no staging), the production database file, the `docs/archive/`
-contents (raw program archive, kept as is).
+outside a maintenance window (no staging), the production database file.

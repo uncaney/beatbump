@@ -4,8 +4,9 @@ This file is for an AI agent (Claude Code or similar) that inherits this reposit
 autonomous improvement loop. It says where things are, which rules were learned by breaking
 production, how one cycle runs end to end, and what "done" means. Read `README.md` first for what
 the product is, `docs/OPERATIONS.md` for the commands, `CHALLENGES.md` for the incidents that come
-back. The loop was run for 48 hours (58 promoted cycles, 74 staging chains) plus a cycle 59; its raw
-journal is in `docs/archive/` (French).
+back. The loop was run for 48 hours (58 promoted cycles, 74 staging chains) plus a cycle 59; its
+lessons are condensed here and in `CHALLENGES.md`; the raw (French) journal is kept privately by the
+maintainers.
 
 ## 1. Repository map
 
@@ -25,7 +26,7 @@ journal is in `docs/archive/` (French).
 | `e2e/` | the browser harness: `run.sh`, `harness-lib.cjs` (shared helpers), `harness-core.cjs`, `harness-offline.cjs`, `harness-smoke.cjs`, `steps-c*.cjs` modules, `probe-deploy-survives.cjs` with its `probe-ds1-*.cjs` wrappers, `probe-postdeploy.cjs`, `fixtures.json`, `check-harness-headers.cjs`, `chrome-image/`, `ux-audit/`, `perf-audit/`, `access-audit/` |
 | `ops/` | the loop: `stage-cycle.sh`, `finish-cycle.sh`, `promote.sh`, `smoke.sh`, `weekly.sh`, `monday.sh`, `journal.py`, `cleanup-harness-profiles.sh`, `library-lint.py`, `svelte-check.baseline`, `cron.weekly.example`, `env.sh` / `env.example` (host layout), `README.md` |
 | `docs/ARCHITECTURE.md`, `docs/OPERATIONS.md` | request flows; deploy, rollback, health, backups, cron, alerts |
-| `docs/archive/` | the program archive: `CYCLES.md`, `CHANGELOG.md`, `DECISIONS-PAUL.md`, `BACKLOG.md`, `RUNBOOK.md`, `LOOP.md`, audits, brainstorms, `WEEKLY.md`, `ALERT.md` (see `docs/archive/README.md`) |
+| `$YTM_PROGRAM_DIR` (not in the repository) | the program directory of a running loop: `CYCLES.md`, `CHANGELOG.md`, `DECISIONS.md`, `BACKLOG.md`, audits, brainstorms, `WEEKLY.md`, `ALERT.md` (section 4) |
 
 Branch model (production): `agents/integration` is the reference branch; a lane is a worktree on
 branch `agents/<lane>` created from integration; production runs the image built from an
@@ -40,7 +41,7 @@ Deployment and containers:
    compose file and the only path that saves the verified tarball, tags the previous image and
    prints the rollback lines. `ops/finish-cycle.sh` is the only way to end a cycle. No ad hoc
    `/tmp/*-finish.sh`.
-2. **Container operations by exact name only** (`ytm-beatbump`, `ytm-beatbump-staging`,
+2. **Container operations by exact name only** (`$YTM_PROD_CONTAINER`, `$YTM_STAGING_CONTAINER`,
    `ytm-harness-<ts>`). Never `docker ps --filter ancestor=`: production and staging share the same
    image after a promotion, and that filter deleted production once.
 3. **No image prune on a containerd image store.** Never `docker image prune`, `system prune`, or
@@ -98,8 +99,8 @@ cycle's log ends with `FINISH <N-1> DONE`, the host layout is loaded (`ops/env.s
 `ops/env.example`).
 
 1. **Pick 1 to 3 backlog items** with disjoint files (one lane = one item or one coherent lot on the
-   same files). Items come from `docs/archive/BACKLOG.md`, the latest `audit-*-vN.md` and the latest
-   `brainstorm-vN.md`. The lane that touches `e2e/` or `ops/` is the only one that may need the
+   same files). Items come from the program directory's `BACKLOG.md`, the latest `audit-*-vN.md` and
+   the latest `brainstorm-vN.md`. The lane that touches `e2e/` or `ops/` is the only one that may need the
    browser, after the running chain.
 2. **One worktree per lane**, from integration, with a guarded `cd`:
    ```sh
@@ -136,8 +137,8 @@ cycle's log ends with `FINISH <N-1> DONE`, the host layout is loaded (`ops/env.s
    `report.json`, add the scores and the `PROD = <sha>` line to `CYCLES.md`, move the items to
    "Clos" in `BACKLOG.md`, validate alone and un-gate the new steps for the next chain.
 8. **Queueing two cycles**: a small detached script waits for `FINISH <N-1> DONE` and for a marker
-   file `/tmp/ytm-c<N>-ready` that you `touch` only once the merge is done and verified (pattern in
-   `docs/archive/PAUL-10-MINUTES.md`, section 5). Without the marker nothing starts.
+   file `/tmp/ytm-c<N>-ready` that you `touch` only once the merge is done and verified. Without the
+   marker nothing starts.
 
 ## 4. Reading the outputs
 
@@ -161,7 +162,7 @@ Next to it: `NN-<step>.png` (one per step, `NN-FAIL_<step>.png` on failure), `pa
 `/tmp/ytm-stage-cycle<chain>.log`; read it with
 `grep -E "^(=== |PASS|FAIL|UPSTREAM|RETRY|Report|staging HTTP)"`.
 
-The journals (program directory from `ops/env.sh`; `docs/archive/` in this repository):
+The journals (program directory `YTM_PROGRAM_DIR` from `ops/env.sh`, outside the repository):
 
 - `CYCLES.md`: one line per event, prefixed by the box clock. Lanes launched and delivered, merges,
   chains with scores, promotions with image id and tarball, incidents and the lesson. The
@@ -179,7 +180,7 @@ The journals (program directory from `ops/env.sh`; `docs/archive/` in this repos
 ## 5. Recording decisions
 
 Anything that needs the owner's choice (language, product scope, a production component without
-staging, a cost, a port to open, a change to production data) goes to `DECISIONS-PAUL.md`, never
+staging, a cost, a port to open, a change to production data) goes to `DECISIONS.md` in the program directory, never
 into a lane. Pattern, kept since cycle 36:
 
 - a row in the table: `| # | Subject | What is blocked | Recommended default | Changes current behaviour? | Effort (0/XS/S/M/L) | Urgency |`;
@@ -193,12 +194,12 @@ recommended defaults; cycle 59 applied them. Keep the numbering (next is 23).
 
 ## 6. Audits and brainstorms
 
-Rotation (from `docs/archive/LOOP.md`): UX audit on even weeks (captures with
+Rotation: UX audit on even weeks (captures with
 `e2e/ux-audit/shots.cjs`, then read the images and `metrics.json`), logic audit on odd weeks (read
 the git range since the last audit: profile leaks through shared caches, pagination, offline,
 quota, acquisition rules, swallowed errors), perf audit monthly (`e2e/perf-audit/api-latency.sh`,
-`log-latency.py` over the access logs). One brainstorm per month from
-`docs/archive/TEMPLATE-brainstorm.md`: read-only mandate, sections 0 (state, with the exact
+`log-latency.py` over the access logs). One brainstorm per month with a
+read-only mandate and sections 0 (state, with the exact
 commands that produce it), 1 (review of the previous brainstorm with proof per idea), 2 (new ideas
 per journey, each with size, reusable code `file:line`, lane and a measurable verification), 3 (TOP
 of 3 lanes per cycle, two cycles max, with the six chain rules copied in), 4 (what to stop doing),
@@ -256,7 +257,7 @@ determinism lane (move the dependency to `e2e/fixtures.json`).
   before the promotion, never after).
 - `CHANGELOG.md` entry and `CYCLES.md` line written (`journal.py`), `PROD = <sha>` line with the
   production scores, backlog items moved to "Clos", new harness steps validated alone and
-  un-gated, decisions that this cycle raised written in `DECISIONS-PAUL.md`.
+  un-gated, decisions that this cycle raised written in `DECISIONS.md`.
 - `/tmp/ytm-finish-<cycle>.log` ends with `FINISH <cycle> DONE`.
 
 ## 9. Session hygiene (agent side)

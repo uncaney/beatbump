@@ -66,7 +66,7 @@ Design choices worth knowing:
   which makes a job die with `exitcode '2'` on this runner (section 6). The
   Go toolchain is fetched from `dl.google.com` with its `.sha256`; node comes
   from the container image.
-- No `actions/cache`: the `docker-host-ubuntu` runner has `cache.enabled: false`,
+- No `actions/cache`: the instance runner has `cache.enabled: false`,
   the action would only log a warning. If the cache is enabled one day, add
   `actions/cache@v4` on `~/go/pkg/mod` (key `go.sum`) and `~/.npm` (key
   `app/package-lock.json`).
@@ -120,7 +120,7 @@ package.
 
 Everything below is run by the coordinator with real tokens; nothing in the
 repository holds a secret. Replace `$FORGEJO_TOKEN` by the admin token
-(`FORGEJO_TOKEN=` value in `<admin token file>`, see memory) and
+(kept outside the repository by the maintainers) and
 `$GH_TOKEN` by a GitHub token that can create repositories.
 
 ### 3.1 Create `Ekaii/beatbump` on Forgejo
@@ -144,25 +144,25 @@ curl -fsS -X PATCH -H "$H" -H 'Content-Type: application/json' "$F/repos/Ekaii/b
 
 ### 3.2 Push `ship` as `main`
 
-From the box (the Forgejo container runs on docker-host and the public name
-hairpins through the SFR box, so go through docker0 with `host-gateway`):
+From the Docker host that runs Forgejo (its public name hairpins through an
+ISP router that does not route it back, so go through docker0 with
+`host-gateway`):
 
 ```sh
-cd /srv/beatbump/agents/ship
+cd /path/to/beatbump   # the checkout to publish
 docker run --rm --add-host forgejo.ekaii.fr:host-gateway \
   -v "$PWD:/src" -w /src -e GIT_TERMINAL_PROMPT=0 alpine/git:latest \
   -c safe.directory=/src -c http.extraHeader="Authorization: token $FORGEJO_TOKEN" \
   push https://forgejo.ekaii.fr/Ekaii/beatbump.git ship:main
 ```
 
-(or from the Mac: `git push https://admin_ekaii:$FORGEJO_TOKEN@forgejo.ekaii.fr/Ekaii/beatbump.git ship:main`,
+(or from a workstation: `git push https://<admin user>:$FORGEJO_TOKEN@forgejo.ekaii.fr/Ekaii/beatbump.git ship:main`,
 retry on a 504, the WAN path is sometimes slow for `git-receive-pack`).
-The worktree's `.git` is a file pointing at `beatbump-src/.git/worktrees/ship`;
-mount the main repository too if the container cannot resolve it
-(`-v /srv/beatbump/beatbump-src/.git:/srv/beatbump/beatbump-src/.git:ro`
-with the same absolute path).
+When the checkout is a git worktree, its `.git` is a file pointing at the main
+repository; mount the main repository's `.git` too, at the same absolute path,
+if the container cannot resolve it.
 
-Then on the box, point the worktree at the remote so `tag.sh --push` works:
+Then on the host, point the worktree at the remote so `tag.sh --push` works:
 `git remote add origin https://forgejo.ekaii.fr/Ekaii/beatbump.git` (credentials
 via `-c http.extraHeader=...` at push time, never stored).
 
@@ -173,7 +173,7 @@ Check the first CI run: `curl -fsS -H "$H" "$F/repos/Ekaii/beatbump/actions/runs
 
 Create two access tokens in Forgejo (user settings > Applications > Manage
 access tokens) for the account that will own the packages and releases
-(`admin_ekaii`, or a dedicated `ekaii-bot` user added to the org with write
+(the instance admin, or a dedicated bot user added to the org with write
 access; the registry push then shows that user as publisher):
 
 | Secret | Token scopes | Used by |
@@ -192,7 +192,7 @@ for s in REGISTRY_TOKEN RELEASE_TOKEN; do
     "$F/repos/Ekaii/beatbump/actions/secrets/$s" -d "{\"data\":\"$(cat /path/to/$s)\"}"
 done
 curl -fsS -X PUT -H "$H" -H 'Content-Type: application/json' \
-  "$F/repos/Ekaii/beatbump/actions/secrets/REGISTRY_USER" -d '{"data":"admin_ekaii"}'
+  "$F/repos/Ekaii/beatbump/actions/secrets/REGISTRY_USER" -d '{"data":"<token owner login>"}'
 curl -fsS -X PUT -H "$H" -H 'Content-Type: application/json' \
   "$F/repos/Ekaii/beatbump/actions/secrets/BUILDKIT_ADDR" -d '{"data":"tcp://buildkitd:1234"}'
 ```
@@ -270,7 +270,7 @@ on a re-run; the release body is updated in place.
 
 ## 5. Image builds: the runner cannot reach Docker
 
-`docker-host-ubuntu` (labels `ubuntu-latest`, `linux-x64`) is hardened:
+The instance runner (labels `ubuntu-latest`, `linux-x64`) is hardened:
 `container.valid_volumes: []` and the runner strips `--privileged`,
 `--pid=host`, `--network=host`, `--cap-add`, `--security-opt` and `--device`
 from job and service containers. A job therefore has **no Docker socket and
@@ -281,12 +281,12 @@ streamed from the job, and BuildKit pushes to the registry itself.
 
 Choose one of these setups (the coordinator does this once):
 
-### Option A (recommended): a BuildKit daemon on docker-host, on the CI network
+### Option A (recommended): a BuildKit daemon on the CI host, on the CI network
 
 ```sh
-# on docker-host; the job network is the egress-filtered `forgejo-ci-jobs` bridge
+# on the CI host; <ci-job-network> is the egress-filtered bridge the runner puts jobs on
 docker run -d --name buildkitd --restart unless-stopped \
-  --network forgejo-ci-jobs \
+  --network <ci-job-network> \
   --add-host forgejo.ekaii.fr:host-gateway \
   --privileged \
   -v buildkitd-cache:/var/lib/buildkit \
@@ -301,24 +301,24 @@ throwaway network, `build-images.sh` built the bridge image through `buildctl`
 from a `node:22-bookworm` client container (`PUSH=0`), the same tooling the
 `images` job installs. Notes:
 
-- Why not `moby/buildkit:v0.33.1-rootless`: docker-host runs Ubuntu 26.04 with
+- Why not `moby/buildkit:v0.33.1-rootless`: the CI host runs Ubuntu 26.04 with
   `kernel.apparmor_restrict_unprivileged_userns=1`, and rootlesskit dies with
   `fork/exec /proc/self/exe: permission denied` even with
   `--security-opt apparmor=unconfined` (tested). Rootless would need an
   AppArmor profile granting `userns` to the container, or
   `--cap-add SYS_ADMIN`; the privileged daemon with no host mounts is the
-  pragmatic choice on this box.
+  pragmatic choice on that host.
 
-- `--add-host forgejo.ekaii.fr:host-gateway` is the hairpin fix: from the box
-  the public name resolves to the WAN address, which the SFR box does not
-  route back; `host-gateway` reaches Traefik on docker0. If the BuildKit host
-  is another machine on the LAN, use the LAN address of docker-host instead
-  (`--add-host forgejo.ekaii.fr:<lan ip of docker-host>`), never hardcode it in
-  the workflow.
-- The egress filter of `forgejo-ci-jobs` allows the internet and the Forgejo
+- `--add-host forgejo.ekaii.fr:host-gateway` is the hairpin fix: from the host
+  the public name resolves to the WAN address, which the ISP router does not
+  route back; `host-gateway` reaches the reverse proxy on docker0. If the
+  BuildKit host is another machine on the LAN, use the LAN address of the
+  Forgejo host instead (`--add-host forgejo.ekaii.fr:<lan ip of the forge host>`),
+  never hardcode it in the workflow.
+- The egress filter of the CI job network allows the internet and the Forgejo
   instance; traffic to `buildkitd` stays on the same bridge. If the filter
-  rejects it, add an exception for the daemon's address in
-  `/usr/local/sbin/forgejo-ci-egress.sh`.
+  rejects it, add an exception for the daemon's address in the host's egress
+  firewall script.
 - Anyone who can run a job on the instance-wide runner can also use this
   daemon's CPU (they cannot push without credentials). Scope it if that
   matters: `--network` to a dedicated bridge plus a runner registered for the
@@ -348,11 +348,11 @@ to `runs-on: ekaii-docker` in `release.yml` and mount the socket in the
 `docker buildx build --push` instead of buildctl. Only trusted repositories
 may run on such a runner (a pull request from a fork would get the socket).
 
-### Option C: build by hand on docker-host
+### Option C: build by hand on the Docker host
 
 `REGISTRY=forgejo.ekaii.fr IMAGE_NS=ekaii/beatbump scripts/release/build-images.sh v1.0.0`
 after `docker login forgejo.ekaii.fr` (with `--add-host`-equivalent name
-resolution: an `/etc/hosts` line to `10.0.0.1` or the LAN address while
+resolution: an `/etc/hosts` line to the docker0 gateway or the LAN address while
 pushing). Then run `forgejo-release.sh` locally with `RELEASE_TOKEN` set, or
 let the `release` job do it after re-running the workflow with the images
 already present (the `images` job is idempotent).
@@ -361,10 +361,10 @@ already present (the `images` job is idempotent).
 
 Collected from earlier CI work on this instance; they shaped the workflows.
 
-- Runner `docker-host-ubuntu` (`code.forgejo.org/forgejo/runner:13.2.0`, on
-  docker-host): labels `ubuntu-latest:docker://node:20-bookworm` and
+- The instance runner (`code.forgejo.org/forgejo/runner:13.2.0`, on the
+  Forgejo host): labels `ubuntu-latest:docker://node:20-bookworm` and
   `linux-x64`; `capacity: 2`; `timeout: 40m` per job; `cache.enabled: false`;
-  job network `forgejo-ci-jobs` (egress filtered: internet and the Forgejo
+  a dedicated job network (egress filtered: internet and the Forgejo
   instance only, no LAN, no host, no other Docker networks); job containers
   get `--add-host forgejo.ekaii.fr:host-gateway`, which is why checkout,
   release API calls and registry logins work from a job.
@@ -380,15 +380,14 @@ Collected from earlier CI work on this instance; they shaped the workflows.
 - Long downloads inside a job get reset now and then: `fetch.sh` resumes and
   retries.
 - The `actions/tasks` API is stale; `actions/runs` is live. Job logs on the
-  host: `/srv/data/services/forgejo/data/gitea/actions_log/Ekaii/beatbump/<xx>/<task>.log.zst`.
+  host: `<forgejo data dir>/gitea/actions_log/Ekaii/beatbump/<xx>/<task>.log.zst`.
 - A new repository has `has_actions=false` until patched (section 3.1).
 - Fork pull requests from first-time contributors wait for approval before
   their workflow runs (good: secrets never reach them anyway, Forgejo does not
   expose secrets to `pull_request` runs from forks).
 - If every `ubuntu-latest` run sits in "Waiting", the runner container is gone
-  or wedged: `docker ps --filter name=forgejo-runner-ubuntu` on docker-host,
-  recreate it from `/home/docker-host/forgejo-runner-ubuntu` (registration
-  persists in `.runner`).
+  or wedged: `docker ps` on the runner host, recreate the runner container
+  from its configuration directory (registration persists in `.runner`).
 - Workflow YAML was validated with PyYAML before commit; Forgejo also rejects a
   syntactically wrong workflow at push time with a red run named after the file.
 

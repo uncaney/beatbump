@@ -2,7 +2,7 @@
 
 Each entry: symptom, cause, fix, how to detect. All of them happened during the 48-hour program
 (30 September to 2 October 2026) or cycle 59 (4 and 5 October); chain numbers and dates refer to
-`docs/archive/CYCLES.md`, where the full story is. They are grouped by layer: deployment, front
+the program's `CYCLES.md` journal (kept privately by the maintainers). They are grouped by layer: deployment, front
 end, harness, box, upstream, data.
 
 ## Deployment and rollback
@@ -10,7 +10,7 @@ end, harness, box, upstream, data.
 ### A. Scheduled Docker cleanup deletes the production image under the running container
 
 - **Symptom.** `docker image ls beatbump-ekaii` no longer shows `:local` nor the
-  `prod-backup-*` tags while `ytm-beatbump` keeps running on orphan layers. Consequences: no
+  `prod-backup-*` tags while the production container keeps running on orphan layers. Consequences: no
   rollback by tag, `docker compose up` fails for the service, the DS1 probe reports "same build
   served" (chain 76), tool images (golang, node, playwright) also vanish.
 - **Cause.** Docker 29 with the containerd image store (overlayfs snapshotter) does not protect
@@ -24,7 +24,7 @@ end, harness, box, upstream, data.
   that id when the tag is missing (with an `ALERT.md` block under `SMOKE_ALERT=1`); and the
   operator disables the forced cleanup or excludes `beatbump-ekaii*` (decision 3; an action in the
   Coolify UI). `finish-cycle.sh --ds1` falls back to the container's image when the tag is gone.
-- **Detect.** `docker inspect -f '{{.Image}}' ytm-beatbump` versus
+- **Detect.** `docker inspect -f '{{.Image}}' "$YTM_PROD_CONTAINER"` versus
   `docker image inspect -f '{{.Id}}' beatbump-ekaii:local`; `ops/smoke.sh` line `prod_image_tag`;
   `ls image-backups/`.
 
@@ -77,7 +77,7 @@ end, harness, box, upstream, data.
 
 ### E. `docker ... --filter ancestor=` deleted production (30 September, 22:47 UTC)
 
-- **Symptom.** `ytm-beatbump` gone one minute after a cleanup of an orphan container.
+- **Symptom.** The production container gone one minute after a cleanup of an orphan container.
 - **Cause.** Production and staging run the same image after a promotion; a filter by image
   matches both. The orphan came from `docker run beatbump-ekaii:staging sh -c` on an image without
   a shell.
@@ -256,7 +256,7 @@ end, harness, box, upstream, data.
   black page from step 1 (offline 9/17 on production, 17/17 twenty minutes before); or Chromium
   dies while closing a context and 33 steps fail "browser has been closed" (chain 79, load 32, no
   OOM). First sound at 19 s right after a deployment (cold start).
-- **Cause.** A box at 1-minute load 35 to 50 (two Java services, a torrent client, containerd,
+- **Cause.** A shared host at 1-minute load 35 to 50 (other unrelated services, containerd,
   a staging build in parallel).
 - **Fix.** `run.sh` waits for the build lock and for a load under 60 (15 min max), refuses a
   second browser; no production harness during a build; `FLAKY_KNOWN` gives one automatic rerun
@@ -282,11 +282,11 @@ end, harness, box, upstream, data.
 - **Fix.** `curl --resolve <host>:443:127.0.0.1 https://<host>/...` (Traefik listens on
   127.0.0.1:443); the harness runs with `--network host` and
   `--host-resolver-rules=MAP *.<domain> 127.0.0.1`; an internal source IP also bypasses the bot
-  wall's proof of work. Public names in Kuma monitors need `/etc/hosts` entries on the box.
+  wall's proof of work. Public names in uptime monitors running on the same host need `/etc/hosts` entries there.
 
 ### Y. Bridge start-up stat storm on a NAS (cycle 59, decision 16 window)
 
-- **Symptom.** `ytm-cache` recreated in 3 s but 502 on covers and player for 110 s.
+- **Symptom.** The bridge container recreated in 3 s but 502 on covers and player for 110 s.
 - **Cause.** `_load_last_access()` stats 2 436 paths on the NFS mount at start-up before aiohttp
   listens.
 - **Fix.** Done in this repository (`bridge/bridge.py`, `_load_last_access_bg`: the state file
@@ -312,14 +312,14 @@ end, harness, box, upstream, data.
 - **Cause.** yubal's base image pins yt-dlp (2026.6.9) and ships no JavaScript runtime for the EJS
   challenge solver; YouTube rotates its schemes.
 - **Fix.** `yubal/Dockerfile`: unpin yt-dlp to latest at build time (the Dockerfile comment notes a
-  runtime cron keeps it current on Camille's host; that cron is not in this repository), install
+  runtime cron keeps it current on the original production host; that cron is not in this repository), install
   deno (`DENO_DIR=/tmp/.deno`), install `bgutil-ytdlp-pot-provider` with `--no-deps`, and
   `sitecustomize.py` forces the egress proxy (`YTM_YTDLP_PROXY`, empty = direct) and the bgutil
   po-token provider (`YTM_POT_BASE_URL`) into every `YoutubeDL`. Rebuild the yubal image
   (`./up.sh build yubal`) whenever downloads start failing in bulk; pin the base with
   `--build-arg YUBAL_BASE=` if a yubal release regresses.
 - **Detect.** `weekly.sh` column (h): zero tracks downloaded with failures raises an `ALERT.md`
-  block; `docker logs --since 168h ytm-yubal | grep -c 'Downloaded:'`.
+  block; `docker logs --since 168h "$YTM_ACQ_CONTAINER" | grep -c 'Downloaded:'`.
 
 ### AB. `/vp` throttled to 18 KB/s (n-sig not transformed) and IP reputation
 

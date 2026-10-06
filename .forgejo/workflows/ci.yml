@@ -1,6 +1,6 @@
 # CI for the Forgejo repository (canonical: https://forgejo.ekaii.fr/Ekaii/beatbump).
 #
-# Runner: label `ubuntu-latest` (docker-host-ubuntu). Every job runs in a plain
+# Runner: label `ubuntu-latest` (the instance runner). Every job runs in a plain
 # node:22-bookworm container and installs what it needs itself, verified
 # against published checksums (scripts/release/ci-install-*.sh):
 #   - no actions/setup-* : they append to $GITHUB_PATH, which kills the job on
