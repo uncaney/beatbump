@@ -1,11 +1,11 @@
-// ytm-e2e-perf: Web Vitals reels + inventaire reseau de music.ekaii.fr (staging), navigateur reel.
-// Conventions de harness.cjs (--url, --out, --query, --resolver). Lance DEPUIS la box via
+// ytm-e2e-perf: Web Vitals reels + inventaire reseau de l'instance (staging), navigateur reel.
+// Conventions de harness.cjs (--url, --out, --query, --resolver). Lance DEPUIS l'hote via
 //   docker run --rm --network host -v $E2E:/e2e -w /e2e mcr.microsoft.com/playwright:v1.47.0-jammy \
-//     node perf-audit/harness-perf.cjs --url=https://staging-music.ekaii.fr --out=/e2e/perf-audit/out/<ts> \
-//     --resolver="MAP *.ekaii.fr 127.0.0.1" --repeat=3
+//     node perf-audit/harness-perf.cjs --url=https://staging.example.org --out=/e2e/perf-audit/out/<ts> \
+//     --resolver="MAP *.example.org 127.0.0.1" --repeat=3
 // Mesures: navigation timing (TTFB, DCL, load), LCP/FCP via PerformanceObserver, transfert total,
 // nb requetes par type, taille precache SW (cache ytm-shell-*), doublons d'API (player.json x N),
-// requetes tierces (analytics.example.org), temps recherche->premier son (audio.currentTime>0).
+// requetes tierces (analytics), temps recherche->premier son (audio.currentTime>0).
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
@@ -13,7 +13,7 @@ process.on("unhandledRejection", (e) => console.log("UNHANDLED", String((e && e.
 
 const arg = (k, d = "") =>
   (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split("=").slice(1).join("=");
-const URL = arg("url", "https://staging-music.ekaii.fr").replace(/\/$/, "");
+const URL = arg("url", "http://127.0.0.1:8080").replace(/\/$/, "");
 const OUT = arg("out", "/out");
 const QUERY = arg("query", "daft punk");
 const RESOLVER = arg("resolver", "");
@@ -41,7 +41,7 @@ async function launch() {
 }
 
 function classify(u, ct) {
-  if (/stats\.eternel\.eu|umami|plausible/.test(u)) return "third-party";
+  if (/umami|plausible|analytics/.test(u)) return "third-party";
   if (/\/api\/v1\//.test(u)) return "api";
   if (/\/(localf|vp|aud)\b/.test(u) || /googlevideo/.test(u)) return "audio";
   if (/\/cover\?|i\.ytimg|lh3\.googleusercontent|\.(png|jpe?g|webp|gif|svg)(\?|$)/.test(u) || /^image\//.test(ct || "")) return "image";

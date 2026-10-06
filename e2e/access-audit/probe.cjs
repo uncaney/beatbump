@@ -1,15 +1,15 @@
-// access-audit/probe.cjs — audit "acces et comportement" de music.ekaii.fr (lecture seule).
-// Lance DEPUIS la box via run-probe.sh (docker playwright --network host, resolver *.ekaii.fr -> 127.0.0.1,
-// IP source interne => nopasaran ALLOW : le gate PoW n'est PAS exerce ici, voir gate-tor.cjs).
+// access-audit/probe.cjs — audit "acces et comportement" de l'instance (lecture seule).
+// Lance DEPUIS l'hote via run-probe.sh (docker playwright --network host, resolver optionnel -> 127.0.0.1,
+// IP source interne => le mur anti-bots laisse passer (ALLOW) : le gate PoW n'est PAS exerce ici, voir gate-tor.cjs).
 // Mesure : boot (navigation timing), SW (ready, controller, precache shell taille/nb), manifest,
-// requetes externes (ytify/invidious/analytics.example.org), 404, API down (route abort), boot hors-ligne,
+// requetes externes (ytify/invidious/analytics), 404, API down (route abort), boot hors-ligne,
 // lecture puis coupure reseau, changement de morceau hors-ligne.
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 process.on("unhandledRejection", (e) => console.log("UNHANDLED", String((e && e.message) || e)));
 const arg = (k, d = "") => (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split("=").slice(1).join("=");
-const BASE = arg("url", "https://staging-music.ekaii.fr").replace(/\/$/, "");
+const BASE = arg("url", "http://127.0.0.1:8080").replace(/\/$/, "");
 const URL = BASE; // alias historique (les helpers utilisent global.URL via `new (require("url").URL)`)
 const NodeURL = require("url").URL;
 const OUT = arg("out", "/e2e/access-audit/out");
@@ -90,7 +90,7 @@ const visibleText = (page) => page.evaluate(() => (document.body.innerText || ""
   await step(page, "external_hosts", async () => {
     const origin = new NodeURL(BASE).host;
     const ext = {}; for (const r of reqs) { const h = new NodeURL(r.u).host; if (h !== origin) ext[h] = (ext[h] || 0) + 1; }
-    const legacy = reqs.filter((r) => /ytify\.ekaii|invidious\.ekaii|stats\.eternel|googlevideo/.test(r.u)).map((r) => `${r.s || "?"} ${r.u.slice(0, 120)}`);
+    const legacy = reqs.filter((r) => /\/\/(ytify|invidious)\.|googlevideo/.test(r.u)).map((r) => `${r.s || "?"} ${r.u.slice(0, 120)}`);
     const non200 = reqs.filter((r) => r.s && r.s >= 400).map((r) => `${r.s} ${r.u.replace(URL, "").slice(0, 120)}`);
     R.measures.external = { hosts: ext, legacy, non200, failed: failed.slice(0, 20), consoleErr: consoleErr.slice(0, 20) };
     return R.measures.external;

@@ -1,14 +1,14 @@
-// access-audit/gate-tor.cjs — mesure du gate PoW nopasaran vu d'un VRAI navigateur externe.
-// Chromium sort via le SOCKS Tor de la box (127.0.0.1:9055) => IP source = exit Tor (non interne)
+// access-audit/gate-tor.cjs — mesure du gate PoW (mur anti-bots) vu d'un VRAI navigateur externe.
+// Chromium sort via un SOCKS Tor local (--proxy, defaut 127.0.0.1:9050) => IP source = exit Tor (non interne)
 // => CHALLENGE, UA Chrome normal (HeadlessChrome est DENY). Lecture seule (GET).
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 process.on("unhandledRejection", (e) => console.log("UNHANDLED", String((e && e.message) || e)));
 const arg = (k, d = "") => (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split("=").slice(1).join("=");
-const URL = arg("url", "https://music.ekaii.fr").replace(/\/$/, "");
+const URL = arg("url", "https://music.example.org").replace(/\/$/, "");
 const OUT = arg("out", "/e2e/access-audit/out-tor");
-const PROXY = arg("proxy", "socks5://127.0.0.1:9055");
+const PROXY = arg("proxy", "socks5://127.0.0.1:9050");
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36";
 fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

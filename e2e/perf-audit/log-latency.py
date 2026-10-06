@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Mine Echo JSON access logs (docker logs <ctr> --since N) -> p50/p95/p99 latency per route.
-# usage: docker logs --since 168h ytm-beatbump 2>&1 | python3 log-latency.py [--all | --bots]
+# usage: docker logs --since 168h <app container> 2>&1 | python3 log-latency.py [--all | --bots]
 #
 # c50a (PF5-8): by default the lines that are not a human are left out and
 # counted per class on stderr:

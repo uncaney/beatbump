@@ -5,8 +5,8 @@
 //                                  (run.sh sets it from its own HARNESS_FIXTURES=<path>). Missing = {}.
 //   rawRequest(base, method, path, headers, timeoutMs)
 //                                  Node-side HTTP(S) request derived from the harness URL: the scheme, host and
-//                                  port come from <base>; with HARNESS_RESOLVE_IP set (Camille's box: 127.0.0.1,
-//                                  the hairpin NAT is broken) the socket goes to that IP with SNI + Host kept.
+//                                  port come from <base>; with HARNESS_RESOLVE_IP set (e.g. 127.0.0.1 on a
+//                                  host whose hairpin NAT is broken) the socket goes to that IP with SNI + Host kept.
 //                                  Self-signed certificates are accepted. Resolves { status, headers, body, ms }.
 //   servedStats(base)              parsed /api/v1/stats/library or null (never throws)
 //   servedVersion(base)            its "version" field or null

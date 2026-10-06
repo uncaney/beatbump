@@ -4,14 +4,16 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 const arg = (k, d = "") => (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split("=").slice(1).join("=");
-const BASE = arg("url", "https://staging-music.ekaii.fr").replace(/\/$/, "");
+const BASE = arg("url", "http://127.0.0.1:8080").replace(/\/$/, "");
+const RESOLVER = arg("resolver", process.env.HARNESS_RESOLVER || ""); // e.g. "MAP *.example.org 127.0.0.1"
+const BLOCK = arg("block", process.env.YTM_ANALYTICS_HOST ? new globalThis.URL(process.env.YTM_ANALYTICS_HOST).host : ""); // analytics host to abort (empty = none)
 const OUT = arg("out", path.join(__dirname, "out", new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z") + "-extra"));
 const ALBUM = arg("album", "/release?id=MPREb_7ltM34kr0mH"); // Daft Punk - Discovery
 fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const metrics = {};
 (async () => {
-  const browser = await chromium.launch({ headless: true, chromiumSandbox: false, args: ["--autoplay-policy=no-user-gesture-required", "--no-sandbox", "--disable-dev-shm-usage", "--host-resolver-rules=MAP *.ekaii.fr 127.0.0.1"] });
+  const browser = await chromium.launch({ headless: true, chromiumSandbox: false, args: ["--autoplay-policy=no-user-gesture-required", "--no-sandbox", "--disable-dev-shm-usage", ...(RESOLVER ? ["--host-resolver-rules=" + RESOLVER] : [])] });
   // PWA
   const c0 = await browser.newContext({ extraHTTPHeaders: { "X-Ytm-Harness": "1" } }); const p0 = await c0.newPage();
   const r = await p0.goto(BASE + "/manifest.json"); const man = await r.json();
@@ -24,7 +26,7 @@ const metrics = {};
   for (const vp of [{ name: "mobile", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }, { name: "desktop", viewport: { width: 1280, height: 900 } }]) {
     const ctx = await browser.newContext({ ...vp, extraHTTPHeaders: { "X-Ytm-Harness": "1" } }); const page = await ctx.newPage();
     await page.addInitScript(() => { const o = HTMLMediaElement.prototype.play; HTMLMediaElement.prototype.play = function () { window.__ytmMedia = this; return o.apply(this, arguments); }; });
-    await page.route("**/analytics.example.org/**", (r) => r.abort()).catch(() => {});
+    if (BLOCK) await page.route(`**/${BLOCK}/**`, (r) => r.abort()).catch(() => {});
     const shot = async (l, full) => { const f = `${vp.name}-x-${l}.png`; await page.screenshot({ path: path.join(OUT, f), fullPage: !!full }).catch(() => {}); console.log("SHOT", f); };
     await page.goto(BASE + ALBUM, { waitUntil: "networkidle", timeout: 45000 }).catch(() => {}); await sleep(2000);
     await shot("album"); await shot("album_full", true);

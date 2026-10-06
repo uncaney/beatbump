@@ -14,7 +14,7 @@
 // rows of "Tout", where YouTube shelves come first: a YouTube result's length decides whether its listen
 // counts within a step (a one-hour video never does, so nothing is kept or prefetched), its radio ids are
 // never listed again by a search, and without iv-vp its /vp downloads run at real-time speed. With
-// acquiredVideoId (Camille's library) nothing changes.
+// acquiredVideoId (a library with an acquired YouTube track) nothing changes.
 // Report (cycle 34 HD2/HD3): same fields as harness-core.cjs (version, startedAt, finishedAt, durationMs,
 // budgetMs, overBudget, upstream, skipped; per step durationMs, slow, upstream, rerun, firstDetail, skipped).
 const { chromium } = require("playwright");

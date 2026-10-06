@@ -1,18 +1,18 @@
 """
-ytm-cache — auto-cache bridge, residential audio proxy, and LOCAL-FIRST server.
+bridge — auto-cache bridge, residential audio proxy, and LOCAL-FIRST server.
 
 Local-first (cross-collection): at play time the bridge knows the track's
-title+artist; it asks Meilisearch (which indexes the whole local library:
-ytm/ytmusic/lidarr/soulseek) for a confident match and, if found, serves that
+title+artist; it asks Meilisearch (which indexes the whole local library,
+every collection under the library root) for a confident match and, if found, serves that
 file straight from disk (/localf?p=<relpath>). Otherwise it proxies the live
-stream through the residential gost and enqueues a Yubal download so next time
+stream through the egress proxy (GOST_PROXY, when set) and enqueues a Yubal download so next time
 it's local. Matching is strong (normalized title equality + artist overlap) to
 avoid playing the wrong version; misses just stream (safe).
 
 Endpoints:
   /localf?p=<rel>[&itag=]   -> serve a library file from disk (Range)
-  /vp?u=<enc gv url>        -> residential gost stream (Beatbump miss)
-  /iv/videoplayback?&host=  -> residential gost stream (ytify miss fallback)
+  /vp?u=<enc gv url>        -> proxied googlevideo stream (Beatbump miss)
+  /iv/videoplayback?&host=  -> proxied googlevideo stream (ytify miss fallback)
   /iv/api/v1/videos/<id>    -> match->rewrite audio to /localf?itag ; else passthrough ; sniff
   POST .../youtubei/v1/player-> match->rewrite audio to /localf ; else /vp ; sniff
   else                      -> transparent proxy
@@ -34,15 +34,15 @@ from aiohttp import web, ClientSession, ClientTimeout, TCPConnector
 #   GOST_PROXY         "" -> direct egress for /vp and /iv/videoplayback
 # Public bases default to RELATIVE paths (/vp, /localf, /aud): the Go backend reverse-proxies
 # them to this bridge and leaves relative URLs untouched (backend/api/audioproxy.go).
-# Camille's instance keeps its behaviour by setting the variables explicitly in its compose file.
+# An instance that relies on these integrations sets the variables explicitly in its compose file.
 COMPANION = os.environ.get("COMPANION_UPSTREAM", "http://companion:8282")
 # iv-vp = logged-in (metube) player/playback sidecar. Fallback when the anonymous companion is walled
 # (LOGIN_REQUIRED / no audio format). Returns a player response with a raw googlevideo audio-140 URL
-# minted via the SAME gost egress the bridge's /vp uses, so /vp streams it (matching IP-lock).
+# minted via the SAME egress proxy the bridge's /vp uses, so /vp streams it (matching IP-lock).
 IVVP = os.environ.get("IVVP_UPSTREAM", "").strip()
 INVIDIOUS = os.environ.get("INVIDIOUS_UPSTREAM", "").strip()
 YUBAL = os.environ.get("YUBAL_URL", "http://yubal:8000")
-# Egress proxy for googlevideo streams (residential IP in Camille's setup). Empty = direct.
+# Egress proxy for googlevideo streams (e.g. a residential egress proxy). Empty = direct.
 GOST = os.environ.get("GOST_PROXY", "").strip() or None
 MEILI_URL = os.environ.get("MEILI_URL", "http://meili:7700")
 MEILI_KEY = os.environ.get("MEILI_KEY", "")
@@ -50,7 +50,7 @@ LIBRARY = os.environ.get("LIBRARY_DIR", "/library")
 VP_PUBLIC = os.environ.get("VP_PUBLIC_BASE", "/vp")
 LOCALF_PUBLIC = os.environ.get("LOCALF_PUBLIC_BASE", "/localf")
 # iv-vp progressive-audio endpoint: iv-vp downloads via metube AND serves the bytes, so no IP-locked
-# googlevideo re-fetch (unlike /vp+gost, which races on egress IP). Used for the fallback path.
+# googlevideo re-fetch (unlike /vp through the proxy, which races on egress IP). Used for the fallback path.
 AUD_PUBLIC = os.environ.get("AUD_PUBLIC_BASE", "/aud")
 PORT = int(os.environ.get("PORT", "8789"))
 DEBOUNCE_TTL = int(os.environ.get("DEBOUNCE_TTL", str(6 * 3600)))

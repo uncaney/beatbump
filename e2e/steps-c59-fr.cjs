@@ -1,5 +1,5 @@
 // steps-c59-fr.cjs: cycle 59 harness addition for harness-core.cjs (lane c59a, decisions 1 + 5, 11 and 13 of
-// DECISIONS-PAUL.md: French everywhere, Video segment hidden, PWA named "Musique"). Spliced into harness-core.cjs
+// the program decisions log: French everywhere, Video segment hidden, PWA named "Musique"). Spliced into harness-core.cjs
 // after the c57 steps with:
 //   await require("./steps-c59-fr.cjs").run({ page, browser, ctx, URL, QUERY, step, pollUntil, sleep, media, loginAs, fixtures: FIX, newHarnessContext });
 // Loading this module has no side effect (no browser, no network): everything happens in run().

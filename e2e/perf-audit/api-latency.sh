@@ -1,8 +1,8 @@
 #!/bin/sh
-# Latence p50/p95 des endpoints API + audio de staging-music.ekaii.fr, DEPUIS la box
-# (Traefik 127.0.0.1:443, UA navigateur pour passer le gate). Sequentiel: une seule charge a la fois.
+# Latence p50/p95 des endpoints API + audio du staging, DEPUIS l'hote
+# (reverse proxy sur 127.0.0.1:443, UA navigateur pour passer le gate). Sequentiel: une seule charge a la fois.
 # usage: api-latency.sh [host] [iterations]
-H="${1:-staging-music.ekaii.fr}"; N="${2:-7}"
+H="${1:-staging.example.org}"; N="${2:-7}"
 UA="Mozilla/5.0 (Macintosh) Chrome/128"
 C="curl -sS --resolve $H:443:127.0.0.1 -A $UA -H Accept-Encoding:gzip,br --compressed"
 j() { curl -sS --resolve "$H:443:127.0.0.1" -A "$UA" --compressed "https://$H$1"; }

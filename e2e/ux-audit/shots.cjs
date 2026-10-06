@@ -1,4 +1,4 @@
-// ux-audit/shots.cjs — captures d'ecran des ecrans cles de music.ekaii.fr (staging) en mobile
+// ux-audit/shots.cjs — captures d'ecran des ecrans cles de l'instance (staging) en mobile
 // 390x844 et desktop 1280x900, + metriques UX brutes (zones tactiles < 44px, boutons sans nom
 // accessible, contrastes faibles, textes < 12px, lang, manifest, erreurs console).
 // Meme mecanique que e2e/harness-offline.cjs (Playwright dans l'image mcr playwright, --network host,
@@ -12,7 +12,7 @@
 //   failedUrls first 5 of them, "<status|errorText> <url>"
 //   lcpMs      largest-contentful-paint startTime of the current document (PerformanceObserver
 //              injected before navigation), null when unsupported or nothing painted
-// run: docker run --rm --network host -v /srv/beatbump/e2e:/e2e -w /e2e \
+// run: docker run --rm --network host -v "$PWD":/e2e -w /e2e \
 //        -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright mcr.microsoft.com/playwright:v1.47.0-jammy node ux-audit/shots.cjs
 const { chromium } = require("playwright");
 const fs = require("fs");
@@ -21,9 +21,10 @@ process.on("unhandledRejection", (e) => console.log("UNHANDLED", String((e && e.
 
 const arg = (k, d = "") =>
   (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split("=").slice(1).join("=");
-const URL = arg("url", "https://staging-music.ekaii.fr").replace(/\/$/, "");
+const URL = arg("url", "http://127.0.0.1:8080").replace(/\/$/, "");
 const QUERY = arg("query", "daft punk");
-const RESOLVER = arg("resolver", "MAP *.ekaii.fr 127.0.0.1");
+const RESOLVER = arg("resolver", process.env.HARNESS_RESOLVER || ""); // e.g. "MAP *.example.org 127.0.0.1"
+const BLOCK = arg("block", process.env.YTM_ANALYTICS_HOST ? new globalThis.URL(process.env.YTM_ANALYTICS_HOST).host : ""); // analytics host to abort (empty = none)
 const TS = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
 const OUT = arg("out", path.join(__dirname, "out", TS));
 const ONLY = arg("only", ""); // "mobile" | "desktop" | ""
@@ -41,7 +42,7 @@ const metrics = {};
 const consoleErrors = {};
 
 // ---- compteurs reseau par ecran (PF3-13) : remis a zero a chaque go() ------------------------
-const IGNORED_FAIL_RE = /stats\.eternel\.eu/; // aborted on purpose (page.route below)
+const IGNORED_FAIL_RE = BLOCK ? new RegExp(BLOCK.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) : /(?!)/; // aborted on purpose (page.route below)
 function instrument(page) {
   const st = { gen: 0, requests: 0, swServed: 0, bytes: 0, failed: 0, failedUrls: [], pending: new Set() };
   const genOf = new WeakMap();
@@ -185,7 +186,7 @@ async function runViewport(browser, vpdef) {
   });
   await page.addInitScript(lcpInitScript);
   instrument(page);
-  await page.route("**/analytics.example.org/**", (r) => r.abort()).catch(() => {});
+  if (BLOCK) await page.route(`**/${BLOCK}/**`, (r) => r.abort()).catch(() => {});
 
   // 1. accueil
   await go(page, "/home");

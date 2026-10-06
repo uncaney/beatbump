@@ -2,7 +2,7 @@
 # Yubal builds its yt-dlp options dict in-code and exposes no operator hook for
 # --proxy / --extractor-args, so we patch YoutubeDL.__init__ to force in:
 #   - egress through an HTTP proxy when YTM_YTDLP_PROXY is set (a residential
-#     proxy in Camille's setup); unset/empty = direct egress (the shipped default)
+#     proxy, for instance); unset/empty = direct egress (the shipped default)
 #   - po-tokens from the bgutil HTTP provider (YTM_POT_BASE_URL, default
 #     http://bgutil:4416, the `bgutil` service of deploy/compose.yml); empty
 #     disables the provider.
