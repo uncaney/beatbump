@@ -241,3 +241,47 @@ harness. Stop it with `cd /srv/beatbump/agents/ship-sandbox/beatbump && COMPOSE_
 - Camille's production compose must now set the bridge variables explicitly to keep its behaviour, since
   the bridge defaults are generic: `GOST_PROXY`, `IVVP_UPSTREAM`, `INVIDIOUS_UPSTREAM`,
   `VP_PUBLIC_BASE`, `LOCALF_PUBLIC_BASE`, `AUD_PUBLIC_BASE`; yubal needs `YTM_YTDLP_PROXY`.
+
+## Release verification: clean clone of the final code (2026-10-06)
+
+The 1.0.0 gate. A brand-new `git clone` of the release branch, nothing reused
+from earlier sandboxes (`./up.sh down -v` first), one command, then the full
+browser harness with the sample-library fixtures. Host: docker-host (32 cores,
+load 30 to 50 during the run).
+
+```sh
+git clone <repo> beatbump && cd beatbump
+BEATBUMP_PORT=18081 COMPOSE_PROJECT_NAME=bbship ./up.sh --sample-library
+cd e2e
+HARNESS_FIXTURES=fixtures.sample.json HARNESS_TIER=chain ./run.sh http://127.0.0.1:18081 "" harness-smoke.cjs
+HARNESS_FIXTURES=fixtures.sample.json HARNESS_TIER=chain ./run.sh http://127.0.0.1:18081 "" harness-core.cjs
+HARNESS_FIXTURES=fixtures.sample.json HARNESS_TIER=chain ./run.sh http://127.0.0.1:18081 "" harness-offline.cjs
+```
+
+| Check | Result |
+| --- | --- |
+| `./up.sh --sample-library` | exit 0 in 63 s with warm image layers (253 s on the first build of this host); 7 containers running, 6 healthy + indexer (no HTTP endpoint) |
+| First index pass | `{"tracks":45,"albums":19,"artists":9}` reported by `up.sh` before it prints the URL |
+| Smoke | `Report: 5 passed / 0 failed / 0 upstream / 0 skipped` |
+| Core (chain tier) | `Report: 93 passed / 0 failed / 0 upstream / 2 skipped` |
+| Offline | `Report: 20 passed / 0 failed / 0 upstream / 0 skipped` |
+
+Skips, both expected on a fresh install: `perf_api_caches` and
+`nonlocal_track_plays` need a YouTube track already acquired into the library
+(`acquiredVideoId` fixture). Three more steps are full-tier only
+(`buttons_readable`, `french_program_screens`, `pack_refresh_preview`) and are
+not counted in the chain tier.
+
+The same harness run against the original production instance (56k tracks,
+production fixtures, chain tier) on 2026-10-05: core 95 / 0 / 0 / 0, offline
+20 / 0 / 0 / 0: no step skipped there.
+
+What the clean-clone runs found and fixed before this result (a sandbox grown
+across fixes had hidden them):
+
+- an empty mix list cached at boot, served for minutes then STALE for a day
+  (`NoStoreHeader`, `d1cf0b6`);
+- `up.sh` declared the stack ready before the first index pass (`d1cf0b6`) and
+  printed counts before the derived albums landed (`b633e80`);
+- the first-pack step assumed the pack was still running when the Espace page
+  mounted; on a small library it is already done (`b633e80`).
