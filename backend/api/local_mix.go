@@ -710,7 +710,12 @@ func LocalMixesHandler(c echo.Context) error {
 	go func() { defer wg.Done(); genres = genreTrackCounts() }()
 	wg.Wait()
 	dc, gc := mixCards(decades, genres, genreAlbumCounts(genreCandidates(genres)))
+	yc := yearCards(years)
+	if len(dc) == 0 && len(gc) == 0 && len(yc) == 0 {
+		// Empty or still-indexing library: answer, but never cache "no card".
+		c.Response().Header().Set(NoStoreHeader, "1")
+	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"decades": dc, "genres": gc, "years": yearCards(years), "crossovers": crossoverCards(dc),
+		"decades": dc, "genres": gc, "years": yc, "crossovers": crossoverCards(dc),
 	})
 }

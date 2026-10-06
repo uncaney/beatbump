@@ -171,6 +171,26 @@ wait_healthy() {
     done
 }
 
+# Wait for the indexer's first pass when the music folder has audio, so the
+# summary (and the first visit) see the library, not an empty index. The
+# indexer logs "pass done" at the end of each pass. INDEX_TIMEOUT (default
+# 900 s) bounds the wait; a large library keeps indexing in the background.
+wait_indexed() {
+    local waited=0 step=5 timeout=${INDEX_TIMEOUT:-900} port stats
+    library_has_audio "$(music_dir)" || return 0
+    log "waiting for the first index pass (up to ${timeout}s)"
+    while ! compose logs --no-log-prefix indexer 2>/dev/null | grep -q 'pass done'; do
+        if [ "$waited" -ge "$timeout" ]; then
+            warn "indexer still on its first pass after ${timeout}s; it continues in the background (./up.sh logs indexer)"
+            return 0
+        fi
+        sleep "$step"; waited=$((waited + step))
+    done
+    port=$(env_get BEATBUMP_PORT); port=${port:-8080}
+    stats=$(curl -fsS --max-time 10 "http://127.0.0.1:$port/api/v1/stats/library" 2>/dev/null || true)
+    log "first index pass done after ${waited}s${stats:+: $stats}"
+}
+
 print_summary() {
     local port bind host token
     port=$(env_get BEATBUMP_PORT); port=${port:-8080}
@@ -211,6 +231,7 @@ cmd_up() {
     log "starting the stack (project $PROJECT)"
     compose up -d --remove-orphans
     wait_healthy || exit 1
+    wait_indexed
     print_summary
 }
 
@@ -242,5 +263,6 @@ case "$CMD" in
              build_images --pull
              compose up -d --remove-orphans
              wait_healthy || exit 1
+             wait_indexed
              print_summary ;;
 esac

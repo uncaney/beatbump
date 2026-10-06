@@ -424,7 +424,7 @@ func refreshInBackground(rc *responseCache, key string, c echo.Context, ttl, gra
 		c2.SetPath(path)
 		c2.SetParamNames(names...)
 		c2.SetParamValues(values...)
-		if err := next(c2); err != nil || bw.status != http.StatusOK || bw.buf.Len() == 0 {
+		if err := next(c2); err != nil || bw.status != http.StatusOK || bw.buf.Len() == 0 || bw.header.Get(NoStoreHeader) != "" {
 			return // keep serving the stale entry until its grace runs out
 		}
 		rc.setWithGrace(key, append([]byte(nil), bw.buf.Bytes()...), bw.header.Get(echo.HeaderContentType), ttl, grace)
@@ -456,9 +456,17 @@ func cacheResponseSWRWith(rc *responseCache, ttl, grace time.Duration, next echo
 		cw := &cachingWriter{ResponseWriter: c.Response().Writer}
 		c.Response().Writer = cw
 		err := next(c)
-		if err == nil && cw.status == http.StatusOK && cw.buf.Len() > 0 {
+		if err == nil && cw.status == http.StatusOK && cw.buf.Len() > 0 && c.Response().Header().Get(NoStoreHeader) == "" {
 			rc.setWithGrace(key, append([]byte(nil), cw.buf.Bytes()...), c.Response().Header().Get(echo.HeaderContentType), ttl, grace)
 		}
 		return err
 	}
 }
+
+// NoStoreHeader: a handler behind cacheResponseSWRWith sets it on an answer
+// that is correct now but must not be kept (for example local/mixes on a
+// library that is still being indexed: an empty card list primed at boot was
+// served for 5 minutes, then STALE for up to a day, so a fresh install showed
+// no mixes until the grace ran out). The answer is sent as is and the next
+// request asks the handler again; a stale entry being refreshed is kept.
+const NoStoreHeader = "X-Ytm-No-Store"
