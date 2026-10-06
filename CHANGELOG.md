@@ -337,6 +337,10 @@ production during the programme.
     it now listens at once and loads that state in the background;
   - `ops/library-lint.py` reported every album as having no year on a library
     smaller than one page.
+  - the home showed no mix card for the first minutes, then possibly for a
+    day: the mix list was cached at boot while the library was still being
+    indexed. An empty mix list is now never cached, and `up.sh` waits for the
+    first index pass before saying the stack is ready.
 - Playback: pressing next skipped two or three tracks (auto-advance only on a
   known duration); clicking the paused current track did nothing; shuffle off
   fell back to YouTube with local ids; the mini-bar artist link toggled the
