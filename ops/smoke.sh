@@ -139,7 +139,10 @@ else ko og_robot_card "no lid"; fi
 # 11. server cache: second call of local/mixes = HIT
 get mix1 /api/v1/local/mixes >/dev/null
 c=$(get mix2 /api/v1/local/mixes); X1=$(hdr mix1 x-ytm-cache); X2=$(hdr mix2 x-ytm-cache)
-if [ "$c" = 200 ] && [ "$X2" = HIT ]; then ok mixes_cache_hit "200 1st=$X1 2nd=$X2"; else ko mixes_cache_hit "http=$c 1st=${X1:-absent} 2nd=${X2:-absent}"; fi
+# A STALE answer starts the background refresh (about 0.1 s): two calls 20 ms apart can both be STALE,
+# so the check accepts STALE then a HIT one second later.
+if [ "$X2" = STALE ]; then sleep 1; get mix3 /api/v1/local/mixes >/dev/null; X2="STALE->$(hdr mix3 x-ytm-cache)"; fi
+if [ "$c" = 200 ] && { [ "$X2" = HIT ] || [ "$X2" = "STALE->HIT" ]; }; then ok mixes_cache_hit "200 1st=$X1 2nd=$X2"; else ko mixes_cache_hit "http=$c 1st=${X1:-absent} 2nd=${X2:-absent}"; fi
 
 DT=$(( $(date +%s) - T0 ))
 [ "$DT" -le 90 ] || ko duration "${DT} s > 90 s"
