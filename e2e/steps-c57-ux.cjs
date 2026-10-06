@@ -214,7 +214,26 @@ async function run(deps) {
         }
         return null;
       }, 10000, 500);
-      if (!line) throw new Error(`no "sur env. X" progress line on ${after.url} 2 to 12 s after the tap (card said ${tokenBefore}; errors ${JSON.stringify(errs.slice(-3))})`);
+      if (!line) {
+        // The Espace card shows the line only while the pack job runs when it mounts. On a small, fast library
+        // (the sample library on a clean install: short local tracks) the pack started from the home card is
+        // already done when /library/downloads-offline mounts, so the line never exists. Then the same promise is
+        // checked where it lives: the pack memo the Espace card reads (ytm-offline-pack-last) must carry the
+        // announced bytes and the planned tracks, and the home card must report a finished result.
+        const memo = await pollUntil(async () => {
+          const m = await mp.evaluate(() => {
+            let lp = null;
+            try { lp = JSON.parse(localStorage.getItem("ytm-offline-pack-last") || "null"); } catch (e) { lp = null; }
+            const f = window.__ytmFirstPack || {};
+            return { lp, result: f.result || null };
+          }).catch(() => null);
+          return m && m.result && m.lp ? m : null;
+        }, 15000, 500);
+        if (!memo) throw new Error(`no "sur env. X" progress line on ${after.url} 2 to 12 s after the tap and no finished pack either (card said ${tokenBefore}; errors ${JSON.stringify(errs.slice(-3))})`);
+        if (memo.lp.estimatedBytes !== before.est.bytes) throw new Error(`pack finished before the Espace card mounted, but its memo says env. ${memo.lp.estimatedBytes} bytes, the card announced ${before.est.bytes} (${tokenBefore})`);
+        if ((memo.lp.items || []).length !== after.count) throw new Error(`pack memo lists ${(memo.lp.items || []).length} tracks, the plan had ${after.count}`);
+        return `played ${played.title}; card "${before.txt}" (${before.est.count} tracks, ${Math.round(bps)} B/s); the pack (${after.count} tracks) finished before the Espace card mounted: memo env. ${memo.lp.estimatedBytes} B = announced, result ${JSON.stringify(memo.result).slice(0, 120)}`;
+      }
       if (line.token !== tokenBefore) throw new Error(`card announced ${tokenBefore}, the Espace line says env. ${line.token} (${line.txt})`);
       // Do not leave 1 h of FLAC downloading on staging: cancel the pack (best-effort).
       const cancel = mp.locator('[data-testid="offline-space"] button').filter({ hasText: /^Annuler/ }).first();

@@ -187,7 +187,15 @@ wait_indexed() {
         sleep "$step"; waited=$((waited + step))
     done
     port=$(env_get BEATBUMP_PORT); port=${port:-8080}
-    stats=$(curl -fsS --max-time 10 "http://127.0.0.1:$port/api/v1/stats/library" 2>/dev/null || true)
+    # Albums and artists are derived at the end of the pass and Meilisearch
+    # applies them asynchronously: give the counts up to 30 s to show up.
+    local tries=0
+    while :; do
+        stats=$(curl -fsS --max-time 10 "http://127.0.0.1:$port/api/v1/stats/library" 2>/dev/null || true)
+        case "$stats" in *'"albums":0,'*|"") ;; *) break ;; esac
+        [ "$tries" -ge 15 ] && break
+        sleep 2; tries=$((tries + 1))
+    done
     log "first index pass done after ${waited}s${stats:+: $stats}"
 }
 
