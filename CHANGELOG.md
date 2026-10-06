@@ -25,7 +25,7 @@ log is kept in `docs/archive/CHANGELOG.md`, with the final report in
 
 - Nothing yet.
 
-## [1.0.0] - 2026-10-05
+## [1.0.0] - 2026-10-06
 
 First public release of the fork. Compared with upstream Beatbump (a SvelteKit
 YouTube Music front end with a Go server), this release turns the app into a
@@ -318,6 +318,25 @@ production during the programme.
 
 ### Fixed
 
+- Fresh installs (found by running the full harness on a one-command install
+  with the sample library):
+  - the cold-start "For you" mix and the offline packs were empty on any
+    library smaller than about 40k tracks (sample windows were drawn in a
+    fixed range sized for a 54k-track library); they are now drawn inside the
+    real track count;
+  - every new profile logged a console 404 (`GET me/nowplaying` without a
+    resume state now answers 204);
+  - the app shipped a hard-coded third-party analytics script: page loads
+    waited up to 45 s when that host did not answer, and every install sent
+    page views to it. Analytics are now off by default and an optional build
+    value (`PUBLIC_ANALYTICS_*`);
+  - background "next track" lookups went through a host-specific proxy
+    container and failed silently elsewhere (`RESIDENTIAL_PROXY` empty now
+    means direct egress);
+  - the bridge stat-ed every library file before listening (110 s on a NAS);
+    it now listens at once and loads that state in the background;
+  - `ops/library-lint.py` reported every album as having no year on a library
+    smaller than one page.
 - Playback: pressing next skipped two or three tracks (auto-advance only on a
   known duration); clicking the paused current track did nothing; shuffle off
   fell back to YouTube with local ids; the mini-bar artist link toggled the
