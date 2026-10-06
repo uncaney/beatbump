@@ -11,12 +11,15 @@ few Python 3 stdlib helpers.
 Every script sources `ops/env.sh`, the one place the layout comes from. A variable keeps the value already in
 the environment, else the value of `$YTM_ENV` (default `ops/env.local`, git-ignored, `NAME=value` lines), else
 the default of `env.sh`, which matches the shipped layout (`deploy/compose.yml`, data under `deploy/data`, one
-checkout = the tree that is built). `ops/env.example` holds the values of the original production layout of
-music.ekaii.fr (one checkout per role, Traefik on 127.0.0.1:443 with a broken hairpin, image `beatbump-ekaii`):
+checkout = the tree that is built). `ops/env.example` is a coherent example of a production layout with one
+checkout per role, a reverse proxy on 127.0.0.1:443 with a broken hairpin and a dedicated image name.
+
+**Keep your real values in `ops/env.local`, never committed** (`ops/.gitignore` lists it; `env.sh` sources it on
+every run):
 
 ```
-set -a; . ops/env.example; set +a          # use it as a whole for one shell
-cp ops/env.example ops/env.local           # or copy it and edit (sourced by env.sh on every run)
+cp ops/env.example ops/env.local           # then edit it with the real paths, URLs and container names
+set -a; . ops/env.example; set +a          # or load the example as a whole for one shell
 ```
 
 | Variable | Default (shipped layout) | Meaning |
@@ -190,32 +193,33 @@ same-origin `/vp` audio. A production that relied on the old behaviour keeps it 
 (`YTM_COMPOSE_FILE`) sets, on the services below, the values it used to carry. `promote.sh` never strips them (it
 only adds or keeps the healthcheck block, wires the env_file and removes a clear-text `COMPANION_SECRET_KEY`
 line), so check them once, before the first promotion of an image built from this repository. The block is also
-in `ops/env.example` (comment at the end); these are compose environment values, NOT ops variables:
+in `ops/env.example` (comment at the end); these are compose environment values, NOT ops variables. The values
+below are examples of such a layout (service names on the compose network), not defaults:
 
-| Service | Variable | Production value | Empty / absent means |
+| Service | Variable | Example production value | Empty / absent means |
 |---|---|---|---|
-| bridge | `GOST_PROXY` | `http://gost:8888` | direct egress for `/vp` and `/iv/videoplayback` |
+| bridge | `GOST_PROXY` | `http://egress-proxy:8888` | direct egress for `/vp` and `/iv/videoplayback` |
 | bridge | `IVVP_UPSTREAM` | `http://iv-vp:5007` | no logged-in fallback |
-| bridge | `INVIDIOUS_UPSTREAM` | `http://invidious-app-t2s:3000` | `/iv/*` answers 502 |
-| bridge | `VP_PUBLIC_BASE` | `https://ytify.ekaii.fr/vp` | same-origin `/vp` |
-| bridge | `AUD_PUBLIC_BASE` | `https://invidious.ekaii.fr/aud` | same-origin `/aud` |
+| bridge | `INVIDIOUS_UPSTREAM` | `http://invidious:3000` | `/iv/*` answers 502 |
+| bridge | `VP_PUBLIC_BASE` | `https://ytify.example.org/vp` | same-origin `/vp` |
+| bridge | `AUD_PUBLIC_BASE` | `https://invidious.example.org/aud` | same-origin `/aud` |
 | bridge | `LOCALF_PUBLIC_BASE` | `/localf` | read by `bridge/bridge.py`; prod serves `/localf` same-origin |
-| yubal | `YTM_YTDLP_PROXY` | `http://gost:8888` | direct yt-dlp egress |
-| beatbump | `RESIDENTIAL_PROXY` | `http://gost:8888` | direct egress for the InnerTube `next` lookups |
+| yubal | `YTM_YTDLP_PROXY` | `http://egress-proxy:8888` | direct yt-dlp egress |
+| beatbump | `RESIDENTIAL_PROXY` | `http://egress-proxy:8888` | direct egress for the InnerTube `next` lookups |
 | beatbump | `YTM_PREFER_IVVP_AUDIO` | `1` | audio through `/aud/<id>` only when this is set and `IVVP_URL` is set |
 | beatbump | `IVVP_URL`, `LOCALF_BASE`, `COVER_BASE` | `http://iv-vp:5007`, `/localf`, `/cover` | already in the production compose |
 
 One more build-time value: the app ships WITHOUT any analytics script (it used to hard-code the production
 Umami script, so every install reported there and an unreachable analytics host held the page load). The
 production keeps its page views only when the build passes `PUBLIC_ANALYTICS_SRC`, `PUBLIC_ANALYTICS_WEBSITE_ID`
-and `PUBLIC_ANALYTICS_HOST`: `stage-cycle.sh` does it from `YTM_ANALYTICS_*`, set in `ops/env.example`. Check in
-the staging shell: `curl -s "$YTM_STAGING_URL/" | grep -c analytics.example.org` = 1 (the value sits in the inline
-loader, which adds the script after the load event).
+and `PUBLIC_ANALYTICS_HOST`: `stage-cycle.sh` does it from `YTM_ANALYTICS_*` (in `ops/env.local`). Check in
+the staging shell: `curl -s "$YTM_STAGING_URL/" | grep -cF "${YTM_ANALYTICS_HOST#*://}"` = 1 (the value
+sits in the inline loader, which adds the script after the load event).
 
 Then, for the original production layout:
 
-1. `set -a; . ops/env.example; set +a` (or an `ops/env.local` copy): `YTM_COMPOSE_OVERRIDE` and
-   `YTM_STAGING_OVERRIDE` are EMPTY there (the production compose names its image `beatbump-ekaii:local` and the
+1. `ops/env.local` filled from `ops/env.example`: `YTM_COMPOSE_OVERRIDE` and
+   `YTM_STAGING_OVERRIDE` are EMPTY there (the production compose names its image `<YTM_IMAGE>:local` and the
    staging has its own compose file), `YTM_ALLOW_SKIPS=0` (production plays every step);
 2. `docker compose -f "$YTM_COMPOSE_FILE" --env-file "$YTM_COMPOSE_ENV_FILE" config -q` and read the rendered
    environment of `bridge`, `yubal` and `beatbump` against the table;

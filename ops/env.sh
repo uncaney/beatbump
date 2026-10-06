@@ -4,7 +4,7 @@
 # Every variable keeps the value already in the environment, else the value of $YTM_ENV (default
 # ops/env.local, git-ignored, same NAME=value lines as env.example), else the default below, which matches
 # the shipped layout (deploy/compose.yml, data under deploy/data, one checkout = the tree that is built).
-# env.example reproduces Camille's production layout: `set -a; . ops/env.example; set +a` before a script.
+# env.example is an example production layout; keep the real values of a host in ops/env.local (never committed).
 #
 # Variables (all exported so that e2e/run.sh, python helpers and sub-scripts see them):
 #   YTM_ROOT              checkout directory (default: the parent of ops/)
@@ -107,7 +107,7 @@ YTM_LIBRARY_DIR=${YTM_LIBRARY_DIR:-}
 YTM_ACQ_CONTAINER=${YTM_ACQ_CONTAINER-${YTM_COMPOSE_PROJECT:-beatbump}-yubal-1}
 YTM_ACQ_MOUNT=${YTM_ACQ_MOUNT:-/app/data}
 YTM_DISK_PATHS=${YTM_DISK_PATHS:-$YTM_DATA_DIR}
-YTM_KUMA_CONTAINER=${YTM_KUMA_CONTAINER:-uptime-kuma}
+YTM_KUMA_CONTAINER=${YTM_KUMA_CONTAINER:-kuma}
 YTM_KUMA_MONITORS=${YTM_KUMA_MONITORS:-}
 YTM_KUMA_STATS_MONITOR=${YTM_KUMA_STATS_MONITOR:-}
 export OPS_DIR YTM_ROOT YTM_SRC_DIR YTM_PROD_URL YTM_STAGING_URL YTM_RESOLVE_IP YTM_PROD_CONTAINER YTM_STAGING_CONTAINER \
