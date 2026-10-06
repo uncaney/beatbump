@@ -14,3 +14,6 @@ beatbump.exe
 /deploy/.env
 /deploy/data/
 __pycache__/
+
+# stray Vite config bundles
+vite.config.ts.timestamp-*
