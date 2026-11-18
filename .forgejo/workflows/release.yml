@@ -6,15 +6,23 @@
 #   REGISTRY_TOKEN  Forgejo access token with write:package (registry push)
 #   REGISTRY_USER   optional, the owner of REGISTRY_TOKEN (default: the tag pusher)
 #   RELEASE_TOKEN   Forgejo access token with write:repository (release + assets)
-#   BUILDKIT_ADDR   tcp://<buildkitd>:1234, required on the hardened
-#                   `ubuntu-latest` runner where no Docker daemon is reachable
-#                   from a job; on a runner with a Docker socket it may be unset.
+#   BUILDKIT_ADDR   tcp://<buildkitd>:1234: the BuildKit daemon that sits on the
+#                   release runner's own network (no Docker daemon in jobs).
+# Runs on the repository-scoped `release-build` runner only (not on the shared
+# runner). Manual dispatch = dry run: builds the images without pushing and
+# without a release.
 # Only curl + the Forgejo REST API are used for the release (no third-party action).
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build only: no registry push, no release (always true for a dispatch)"
+        required: false
+        default: "true"
 
 concurrency:
   group: release-${{ github.ref }}
@@ -31,16 +39,18 @@ env:
 jobs:
   images:
     name: Build and push images
-    runs-on: ubuntu-latest
+    runs-on: release-build
     container:
       image: node:22-bookworm
     steps:
       - uses: actions/checkout@v4
       - name: Tag must equal VERSION and have a CHANGELOG section
+        if: github.event_name == 'push'
         run: scripts/release/check-version.sh "$GITHUB_REF_NAME"
       - name: Install docker CLI, buildx and buildctl (pinned)
         run: scripts/release/ci-install-tools.sh docker buildx buildctl
       - name: Log in to the registry
+        if: github.event_name == 'push'
         env:
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           REGISTRY_USER: ${{ secrets.REGISTRY_USER || github.actor }}
@@ -48,18 +58,27 @@ jobs:
           [ -n "$REGISTRY_TOKEN" ] || { echo "REGISTRY_TOKEN secret is not set"; exit 1; }
           printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
       - name: Build and push
+        if: github.event_name == 'push'
         env:
           BUILDKIT_ADDR: ${{ secrets.BUILDKIT_ADDR }}
           SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
         run: scripts/release/build-images.sh "$GITHUB_REF_NAME"
+      - name: Build only (dry run, no push)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          BUILDKIT_ADDR: ${{ secrets.BUILDKIT_ADDR }}
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+          PUSH: "0"
+        run: scripts/release/build-images.sh "v$(cat VERSION)"
       - name: Log out
-        if: always()
+        if: always() && github.event_name == 'push'
         run: docker logout "$REGISTRY" || true
 
   release:
     name: Forgejo release
     needs: images
-    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    runs-on: release-build
     container:
       image: node:22-bookworm
     steps:
