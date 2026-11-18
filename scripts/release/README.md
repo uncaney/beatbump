@@ -281,12 +281,14 @@ streamed from the job, and BuildKit pushes to the registry itself.
 
 Choose one of these setups (the coordinator does this once):
 
-### Option A (recommended): a BuildKit daemon on the CI host, on the CI network
+### Option A (recommended): a BuildKit daemon on a dedicated release network
 
 ```sh
-# on the CI host; <ci-job-network> is the egress-filtered bridge the runner puts jobs on
+# on the CI host; <release-network> is an egress-filtered bridge used ONLY by a
+# runner registered for this repository (label release-build), never the
+# network of the shared runner
 docker run -d --name buildkitd --restart unless-stopped \
-  --network <ci-job-network> \
+  --network <release-network> --ip <fixed buildkitd address> \
   --add-host forgejo.ekaii.fr:host-gateway \
   --privileged \
   -v buildkitd-cache:/var/lib/buildkit \
@@ -295,11 +297,12 @@ docker run -d --name buildkitd --restart unless-stopped \
 docker exec buildkitd buildctl --addr tcp://127.0.0.1:1234 debug workers   # sanity
 ```
 
-Then `BUILDKIT_ADDR=tcp://buildkitd:1234` (the container name resolves on
-the job network). Verified on 2026-10-05: with exactly this image on a
-throwaway network, `build-images.sh` built the bridge image through `buildctl`
-from a `node:22-bookworm` client container (`PUSH=0`), the same tooling the
-`images` job installs. Notes:
+Give the daemon a fixed address on that network and set the repository secret
+`BUILDKIT_ADDR=tcp://<fixed buildkitd address>:1234` (an address, not a container
+name another job could claim), and `runs-on: release-build` in `release.yml`. Keeping the
+daemon off the shared job network matters: a privileged BuildKit daemon must
+only be reachable by this repository's release jobs. A manual dispatch of
+`release.yml` builds the images without pushing (dry run). Notes:
 
 - Why not `moby/buildkit:v0.33.1-rootless`: the CI host runs Ubuntu 26.04 with
   `kernel.apparmor_restrict_unprivileged_userns=1`, and rootlesskit dies with
